@@ -42,6 +42,9 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState(0.38);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
 
+  // Performance settings (mirrored from engine)
+  const [perf, setPerf] = useState(null);
+
   const showToast = useCallback((msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
@@ -65,6 +68,7 @@ export default function App() {
         onInfiniteStats: setInfiniteStats,
         onQualityChange: setQualityPreset,
         onTimeOfDayChange: setTimeOfDay,
+        onPerfChange: setPerf,
       },
     });
     engineRef.current = engine;
@@ -102,6 +106,9 @@ export default function App() {
     engine().setBehindCameraCulling(enabled);
     setBehindCameraCulling(enabled);
   };
+
+  const handlePerfPreset = (key) => engine().setPerfPreset(key);
+  const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
   const isInfinite = worldMode === 'infinite';
 
@@ -193,6 +200,9 @@ export default function App() {
         params={params}
         onParam={onParam}
         onClose={() => setSettingsOpen(false)}
+        perf={perf}
+        onPerfPreset={handlePerfPreset}
+        onPerfSetting={handlePerfSetting}
       />
 
       <div id="toast" className={toast ? 'show' : ''}>{toast}</div>

@@ -71,6 +71,7 @@ export default function InfiniteHUD({
                 {QUALITY_PRESETS[key].label}
               </option>
             ))}
+            {quality === 'custom' && <option value="custom">Custom</option>}
           </select>
         </div>
 

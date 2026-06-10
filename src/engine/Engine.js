@@ -10,7 +10,10 @@ import { DEFAULT_PARAMS, applyPreset } from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
-import { getQualitySettings } from './render/QualitySettings.js';
+import {
+  applyPerfPreset, loadPerfSettings, savePerfSettings, sanitizePerfSettings,
+  resolveLodSegments, resolveLodDistances,
+} from './render/PerformanceSettings.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -77,17 +80,24 @@ export class Engine {
     // Infinite mode systems
     this.proceduralSky = null;
     this.fogManager = null;
-    this.qualityPreset = 'high';
     this.timeOfDay = 0.38;         // default: morning
+
+    // Centralized performance settings (persisted across sessions)
+    this.perf = loadPerfSettings();
+    this.qualityPreset = this.perf.preset;
+    this._autoScale = 1.0;         // automatic performance mode render scale
+    this._autoCheckAt = 0;
 
     this._initRenderer();
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
 
     this.applyAll({ force: true });
+    this._applyPerformance();
     this.controls.reset(this.boardSize);
     this.cb.onStatus('Ready', false);
     this.cb.onParams({ ...this.params });
+    if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
 
     this._resizeObserver = new ResizeObserver(() => this._onResize());
     this._resizeObserver.observe(canvas.parentElement);
@@ -210,6 +220,7 @@ export class Engine {
         chunkSize: p.chunkSize,
         maxHeight,
         skirtDepth: this._skirtDepth(),
+        lodSegments: resolveLodSegments(this.perf),
       });
       this.appliedChunkCount = p.chunkCount;
       this.appliedChunkSize = p.chunkSize;
@@ -297,8 +308,12 @@ export class Engine {
   }
 
   _applyPixelRatio() {
-    const p = this.params?.pixelRatio || 0;
-    this.renderer.setPixelRatio(p > 0 ? p : Math.min(window.devicePixelRatio, 2));
+    // base = legacy absolute override if set, otherwise device pixel ratio;
+    // then scaled by the performance render scale and the auto-perf scale.
+    const legacy = this.params?.pixelRatio || 0;
+    const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, 2);
+    const scale = (this.perf?.renderScale ?? 1) * this._autoScale;
+    this.renderer.setPixelRatio(Math.min(2, Math.max(0.3, base * scale)));
   }
 
   // ------------------------------------------------------------------ camera
@@ -346,24 +361,26 @@ export class Engine {
     this._studioFrequency = this.uniforms.uFrequency.value;
     this.uniforms.uFrequency.value = tileFreq;
 
-    // Get quality settings
-    const quality = getQualitySettings(this.qualityPreset);
-
-    // Create infinite world
+    // Create infinite world from the centralized performance settings
+    const perf = this.perf;
     this.infiniteWorld = new InfiniteWorld(
       this.scene,
       this._infiniteTerrainMat,
       this._infiniteWaterMat,
       {
         chunkSize: p.chunkSize,
-        viewRadius: quality.viewRadius,
+        viewRadius: perf.viewRadius,
         maxHeight: this._maxHeight(),
         skirtDepth: this._skirtDepth(),
         seaLevel: p.seaLevel,
+        lodSegments: resolveLodSegments(perf),
+        lodDistances: resolveLodDistances(perf),
+        waterDistance: perf.waterDistance,
       }
     );
-    this.infiniteWorld.setMaxCreatesPerFrame(quality.maxCreatesPerFrame);
-    this.infiniteWorld.setLodMultiplier(quality.lodMultiplier);
+    this.infiniteWorld.setMaxCreatesPerFrame(perf.maxCreatesPerFrame);
+    this.infiniteWorld.setTriangleBudget(perf.triangleBudget);
+    this.infiniteWorld.cullingAggressiveness = perf.cullingAggressiveness;
 
     // Create FPS controls
     this.fpsControls = new FPSControls(this.camera, this.canvas);
@@ -380,18 +397,15 @@ export class Engine {
 
     // Create fog manager
     this.fogManager = new FogManager(this.uniforms, this.scene);
-    this.fogManager.setDensityMultiplier(quality.fogDensityMultiplier);
-    this.fogManager.updateFromViewDistance(quality.viewRadius, p.chunkSize);
+    this.fogManager.setDistanceMultiplier(perf.fogDistance);
+    this.fogManager.updateFromViewDistance(perf.viewRadius, p.chunkSize);
 
     // Apply time of day
     this._applyTimeOfDay();
 
-    // Apply pixel ratio from quality
-    if (quality.pixelRatio > 0) {
-      this.renderer.setPixelRatio(quality.pixelRatio);
-    } else {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    }
+    // Apply render scale + water quality uniforms to the fresh materials
+    this._applyPixelRatio();
+    this._applyWaterPerf();
 
     this.cb.onStatus('Infinite World', false);
     if (this.cb.onQualityChange) this.cb.onQualityChange(this.qualityPreset);
@@ -454,36 +468,115 @@ export class Engine {
   // -------------------------------------------------------- infinite controls
 
   /**
-   * Set quality preset for infinite mode.
+   * Set quality preset (legacy entry point — HUD select). Delegates to the
+   * centralized performance settings.
    * @param {string} key — 'performance', 'balanced', 'high', 'ultra'
    */
   setQuality(key) {
-    this.qualityPreset = key;
-    const quality = getQualitySettings(key);
+    this.setPerfPreset(key);
+  }
+
+  // ---------------------------------------------------- performance settings
+
+  /**
+   * Apply a performance preset ('performance', 'balanced', 'high', 'ultra',
+   * or 'custom' which keeps current values).
+   */
+  setPerfPreset(key) {
+    this.perf = applyPerfPreset(this.perf, key);
+    this.qualityPreset = this.perf.preset;
+    this._applyPerformance();
+    this._notifyPerf();
+  }
+
+  /**
+   * Change one performance setting; switches the preset to 'custom'.
+   * Array settings (lodSegments / lodDistances) take a full replacement array.
+   */
+  setPerfSetting(key, value) {
+    if (!(key in this.perf)) return;
+    const next = { ...this.perf, [key]: value };
+    // autoPerf toggle alone doesn't make the preset custom
+    if (key !== 'autoPerf') next.preset = 'custom';
+    this.perf = sanitizePerfSettings(next);
+    if (key === 'autoPerf' && !this.perf.autoPerf) {
+      this._autoScale = 1.0;   // leaving auto mode restores full render scale
+    }
+    this.qualityPreset = this.perf.preset;
+    this._applyPerformance();
+    this._notifyPerf();
+  }
+
+  _notifyPerf() {
+    savePerfSettings(this.perf);
+    if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
+    if (this.cb.onQualityChange) this.cb.onQualityChange(this.qualityPreset);
+  }
+
+  /**
+   * Push the current performance settings into every subsystem. Idempotent
+   * and cheap: each setter no-ops when its value is unchanged, and LOD
+   * geometry changes rebuild gradually (one LOD level per frame).
+   */
+  _applyPerformance() {
+    const s = this.perf;
+    const segments = resolveLodSegments(s);
+    const distances = resolveLodDistances(s);
+
+    this._applyPixelRatio();
+    this._applyWaterPerf();
+
+    // Studio board: segment counts + master distance scale
+    this.board.setLodSegments(segments);
+    this.board.setLodDistanceScale(s.lodDistanceScale);
 
     if (this.infiniteWorld) {
-      this.infiniteWorld.setViewRadius(quality.viewRadius);
-      this.infiniteWorld.setMaxCreatesPerFrame(quality.maxCreatesPerFrame);
-      this.infiniteWorld.setLodMultiplier(quality.lodMultiplier);
+      this.infiniteWorld.setViewRadius(s.viewRadius);
+      this.infiniteWorld.setMaxCreatesPerFrame(s.maxCreatesPerFrame);
+      this.infiniteWorld.setLodSegments(segments);
+      this.infiniteWorld.setLodDistances(distances);
+      this.infiniteWorld.setWaterDistanceFactor(s.waterDistance);
+      this.infiniteWorld.setTriangleBudget(s.triangleBudget);
+      this.infiniteWorld.cullingAggressiveness = s.cullingAggressiveness;
     }
 
     if (this.fogManager) {
-      this.fogManager.setDensityMultiplier(quality.fogDensityMultiplier);
-      this.fogManager.updateFromViewDistance(quality.viewRadius, this.params.chunkSize);
-      // Re-apply time of day to update fog color
-      if (this.proceduralSky) {
-        this._applyTimeOfDay();
-      }
+      this.fogManager.setDistanceMultiplier(s.fogDistance);
+      this.fogManager.updateFromViewDistance(s.viewRadius, this.params.chunkSize);
+      if (this.proceduralSky) this._applyTimeOfDay();   // refresh fog color
     }
+  }
 
-    // Apply pixel ratio
-    if (quality.pixelRatio > 0) {
-      this.renderer.setPixelRatio(quality.pixelRatio);
-    } else {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  /** Water quality uniforms — per water material, never shared with terrain. */
+  _applyWaterPerf() {
+    const s = this.perf;
+    for (const mat of [this.waterMaterial, this._infiniteWaterMat]) {
+      if (!mat) continue;
+      mat.uniforms.uWaterQuality.value = s.waterQuality;
+      mat.uniforms.uWaterDetail.value = s.waterDetail;
+      mat.uniforms.uWaterReflection.value = s.waterReflection;
+      mat.uniforms.uWaveComplexity.value = s.waterWaves;
     }
+  }
 
-    if (this.cb.onQualityChange) this.cb.onQualityChange(key);
+  /**
+   * Automatic performance mode: nudges an internal render-scale factor when
+   * FPS stays low, and recovers it when there is headroom. Pixel-ratio only —
+   * never rebuilds geometry. Triangle pressure is handled separately by the
+   * InfiniteWorld triangle budget.
+   */
+  _autoPerfTick(now) {
+    if (!this.perf.autoPerf || now - this._autoCheckAt < 2000) return;
+    this._autoCheckAt = now;
+    if (this._fps <= 0) return;
+
+    if (this._fps < 42 && this._autoScale > 0.55) {
+      this._autoScale = Math.max(0.55, this._autoScale - 0.1);
+      this._applyPixelRatio();
+    } else if (this._fps > 70 && this._autoScale < 1.0) {
+      this._autoScale = Math.min(1.0, this._autoScale + 0.05);
+      this._applyPixelRatio();
+    }
   }
 
   /**
@@ -652,6 +745,8 @@ export class Engine {
     } else {
       this._tickStudio(dt, now);
     }
+
+    this._autoPerfTick(now);
   }
 
   _tickStudio(dt, now) {
@@ -702,6 +797,9 @@ export class Engine {
     this.renderer.render(this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
+
+    // Feed the triangle budget controller
+    if (this.infiniteWorld) this.infiniteWorld.notifyTriangles(triangles);
 
     // HUD updates at ~6 Hz
     this._frames++;

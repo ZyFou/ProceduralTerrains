@@ -27,9 +27,11 @@ const _camFwd = new THREE.Vector3();
  * @param {number} chunkSize — world units per chunk side
  * @param {number} maxHeight — max terrain height (for bounding sphere)
  * @param {boolean} behindCameraCulling — enable behind-camera culling pass
+ * @param {number} [aggressiveness=1] — 0..2; higher culls behind-camera
+ *        chunks sooner (smaller safety margin, tighter dot threshold)
  * @returns {{ visibleCount: number, culledCount: number }}
  */
-export function cullChunks(chunks, camera, chunkSize, maxHeight, behindCameraCulling) {
+export function cullChunks(chunks, camera, chunkSize, maxHeight, behindCameraCulling, aggressiveness = 1) {
   // Build the frustum from the camera's current projection × view matrices
   _projScreenMatrix.multiplyMatrices(
     camera.projectionMatrix,
@@ -45,9 +47,11 @@ export function cullChunks(chunks, camera, chunkSize, maxHeight, behindCameraCul
 
   // Safety margin for behind-camera culling: chunks within this distance
   // of the camera are never culled even if behind, preventing the ground
-  // under the player from disappearing.
-  const safetyDist = chunkSize * 1.5;
+  // under the player from disappearing. Aggressiveness shrinks the margin
+  // (never below 1 chunk) and tightens the facing threshold.
+  const safetyDist = chunkSize * Math.max(1.0, 2.0 - aggressiveness * 0.5);
   const safetyDist2 = safetyDist * safetyDist;
+  const dotThreshold = -0.3 + aggressiveness * 0.15;   // aggr 1 → -0.15 (legacy)
 
   let visibleCount = 0;
   let culledCount = 0;
@@ -83,7 +87,7 @@ export function cullChunks(chunks, camera, chunkSize, maxHeight, behindCameraCul
 
         // Chunk center is behind the camera (dot < threshold)
         // Use a small negative threshold to be slightly generous at edges
-        if (dot < -0.15) {
+        if (dot < dotThreshold) {
           mesh.visible = false;
           culledCount++;
           continue;

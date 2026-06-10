@@ -10,6 +10,7 @@ import { cullChunks } from './InfiniteTerrainCulling.js';
 // ============================================================================
 
 const LOD_RESOLUTIONS = [64, 32, 16, 8];
+const DEFAULT_LOD_DISTANCES = [4, 8, 14];   // × chunkSize
 const DEFAULT_MAX_CREATES = 6;
 
 export class InfiniteWorld {
@@ -23,6 +24,9 @@ export class InfiniteWorld {
    * @param {number} opts.maxHeight       — vertical ceiling for bounding boxes
    * @param {number} opts.skirtDepth      — skirt depth for geometry bounds
    * @param {number} opts.seaLevel        — water plane height
+   * @param {number[]} [opts.lodSegments]  — per-LOD quads per chunk side
+   * @param {number[]} [opts.lodDistances] — LOD thresholds (× chunkSize)
+   * @param {number} [opts.waterDistance]  — water extent as fraction of terrain
    */
   constructor(scene, terrainMaterial, waterMaterial, opts) {
     this.scene = scene;
@@ -35,9 +39,26 @@ export class InfiniteWorld {
     this.skirtDepth = opts.skirtDepth;
     this.seaLevel = opts.seaLevel ?? 42;
     this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
+    this.lodSegments = opts.lodSegments ? [...opts.lodSegments] : [...LOD_RESOLUTIONS];
 
     // Culling options
     this.behindCameraCulling = true;
+    this.cullingAggressiveness = 1.0;
+
+    // Triangle budget: when the rendered triangle count exceeds the budget,
+    // LOD thresholds are scaled down progressively (no geometry rebuild)
+    // until the scene fits; they recover when there is headroom.
+    this.triangleBudget = 0;        // 0 = unlimited
+    this._budgetScale = 1.0;
+    this._lastTriangles = 0;
+    this._budgetCheckAt = 0;
+
+    // Gradual LOD geometry rebuild queue (one LOD level per frame)
+    this._lodRebuildQueue = [];
+    this._targetSegments = null;
+
+    // Water render distance as a fraction of the terrain render distance
+    this._waterDistanceFactor = opts.waterDistance ?? 1.0;
 
     // group contains all terrain chunks
     this.group = new THREE.Group();
@@ -57,14 +78,16 @@ export class InfiniteWorld {
     this.scene.add(this.waterPlane);
 
     // shared geometries per LOD
-    this.geometries = LOD_RESOLUTIONS.map((res, lodIndex) => {
+    this.geometries = this.lodSegments.map((res, lodIndex) => {
       const geo = buildChunkGeometry(res, lodIndex);
       setChunkBounds(geo, this.chunkSize, this.maxHeight, this.skirtDepth);
       return geo;
     });
 
     // LOD distance thresholds (scale with chunk size and quality)
-    this._baseLodThresholds = [4, 8, 14]; // multiplied by chunkSize
+    this._baseLodThresholds = opts.lodDistances
+      ? [...opts.lodDistances]
+      : [...DEFAULT_LOD_DISTANCES];           // multiplied by chunkSize
     this._lodMultiplier = 1.0;
     this.lodThresholds = this._baseLodThresholds.map(m => m * this.chunkSize);
 
@@ -93,7 +116,7 @@ export class InfiniteWorld {
    * so it never renders beyond where terrain exists.
    */
   _updateWaterSize() {
-    const waterSize = this.chunkSize * (this.viewRadius * 2 + 1);
+    const waterSize = this.chunkSize * (this.viewRadius * 2 + 1) * this._waterDistanceFactor;
     this.waterPlane.scale.set(waterSize, 1, waterSize);
 
     // Update water fade distance uniforms (if available)
@@ -130,10 +153,18 @@ export class InfiniteWorld {
     this._recalcLodThresholds();
   }
 
-  /** Recompute LOD thresholds from base × chunkSize × multiplier. */
+  /**
+   * Change the base LOD distance thresholds (in chunk-size units).
+   */
+  setLodDistances(distances) {
+    this._baseLodThresholds = [...distances];
+    this._recalcLodThresholds();
+  }
+
+  /** Recompute LOD thresholds from base × chunkSize × multiplier × budget. */
   _recalcLodThresholds() {
     this.lodThresholds = this._baseLodThresholds.map(
-      m => m * this.chunkSize * this._lodMultiplier
+      m => m * this.chunkSize * this._lodMultiplier * this._budgetScale
     );
   }
 
@@ -142,6 +173,83 @@ export class InfiniteWorld {
    */
   setMaxCreatesPerFrame(n) {
     this.maxCreatesPerFrame = n;
+  }
+
+  /**
+   * Change per-LOD segment counts. Geometry is rebuilt GRADUALLY — one LOD
+   * level per frame in update() — so the app never freezes, and chunks keep
+   * their old shared geometry until the replacement is ready.
+   */
+  setLodSegments(segments) {
+    const same = segments.length === this.lodSegments.length
+      && segments.every((s, i) => s === this.lodSegments[i])
+      && !this._lodRebuildQueue.length;
+    if (same) return;
+    this._targetSegments = [...segments];
+    // Rebuild cheap (far) LODs first so streaming chunks pick them up early
+    this._lodRebuildQueue = [3, 2, 1, 0];
+  }
+
+  /** Build one queued LOD geometry and swap it on the chunks using it. */
+  _processLodRebuild() {
+    if (!this._lodRebuildQueue.length || !this._targetSegments) return;
+    const lod = this._lodRebuildQueue.shift();
+    const res = this._targetSegments[lod];
+    if (res === this.lodSegments[lod]) return;   // this level is unchanged
+
+    const geo = buildChunkGeometry(res, lod);
+    setChunkBounds(geo, this.chunkSize, this.maxHeight, this.skirtDepth);
+    const old = this.geometries[lod];
+    this.geometries[lod] = geo;
+    this.lodSegments[lod] = res;
+
+    for (const chunk of this.chunks.values()) {
+      if (chunk.lod === lod) chunk.mesh.geometry = geo;
+    }
+    old.dispose();
+  }
+
+  /**
+   * Set the maximum triangle budget (0 = unlimited). Enforced by scaling
+   * LOD thresholds down — cheap LOD swaps only, never a rebuild.
+   */
+  setTriangleBudget(n) {
+    this.triangleBudget = n;
+    if (!n) {
+      this._budgetScale = 1.0;
+      this._recalcLodThresholds();
+    }
+  }
+
+  /**
+   * Feed the renderer's triangle count (called from Engine after render).
+   * Adjusts the budget scale at most twice per second.
+   */
+  notifyTriangles(triangles) {
+    this._lastTriangles = triangles;
+    if (!this.triangleBudget) return;
+    const now = performance.now();
+    if (now - this._budgetCheckAt < 500) return;
+    this._budgetCheckAt = now;
+
+    if (triangles > this.triangleBudget && this._budgetScale > 0.35) {
+      this._budgetScale = Math.max(0.35, this._budgetScale * 0.9);
+      this._recalcLodThresholds();
+    } else if (triangles < this.triangleBudget * 0.7 && this._budgetScale < 1.0) {
+      this._budgetScale = Math.min(1.0, this._budgetScale * 1.05);
+      this._recalcLodThresholds();
+    }
+  }
+
+  /**
+   * Set water render distance as a fraction (0.25–1) of terrain distance.
+   * Only affects the water plane — terrain is untouched.
+   */
+  setWaterDistanceFactor(f) {
+    const clamped = Math.min(1, Math.max(0.25, f));
+    if (clamped === this._waterDistanceFactor) return;
+    this._waterDistanceFactor = clamped;
+    this._updateWaterSize();
   }
 
   /**
@@ -168,6 +276,9 @@ export class InfiniteWorld {
     // Create pending chunks (throttled)
     this._createPending();
 
+    // Process at most one gradual LOD geometry rebuild per frame
+    this._processLodRebuild();
+
     // Update LOD for all active chunks
     this._updateLOD(playerPos);
 
@@ -175,7 +286,8 @@ export class InfiniteWorld {
     if (camera) {
       const result = cullChunks(
         this.chunks, camera, this.chunkSize,
-        this.maxHeight, this.behindCameraCulling
+        this.maxHeight, this.behindCameraCulling,
+        this.cullingAggressiveness
       );
       this.visibleChunkCount = result.visibleCount;
       this.culledChunkCount = result.culledCount;
@@ -311,6 +423,7 @@ export class InfiniteWorld {
     }
     this.chunks.clear();
     this._pendingChunks = [];
+    this._lodRebuildQueue = [];
 
     for (const geo of this.geometries) {
       geo.dispose();

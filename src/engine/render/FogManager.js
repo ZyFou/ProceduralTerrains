@@ -17,6 +17,9 @@ export class FogManager {
 
     // Fog parameters
     this.baseDensityFactor = 1.8;  // tuning constant for distance-based density
+    this.distanceMultiplier = 1.0; // >1 = fog pushed further out (less fog)
+    this._lastViewRadius = 0;
+    this._lastChunkSize = 0;
     this._fogColor = new THREE.Color();
   }
 
@@ -28,9 +31,24 @@ export class FogManager {
    * @param {number} chunkSize  — world units per chunk
    */
   updateFromViewDistance(viewRadius, chunkSize) {
-    const maxDist = viewRadius * chunkSize;
+    this._lastViewRadius = viewRadius;
+    this._lastChunkSize = chunkSize;
+    const maxDist = viewRadius * chunkSize * this.distanceMultiplier;
     const density = this.baseDensityFactor / maxDist;
     this.uniforms.uFogDensity.value = density;
+  }
+
+  /**
+   * Scale the fog falloff distance (performance setting). Lower = fog closes
+   * in sooner, hiding distant chunks more cheaply. Re-applies density using
+   * the last known view distance.
+   * @param {number} m — 1.0 is default, <1 = nearer fog, >1 = farther fog
+   */
+  setDistanceMultiplier(m) {
+    this.distanceMultiplier = m;
+    if (this._lastViewRadius > 0) {
+      this.updateFromViewDistance(this._lastViewRadius, this._lastChunkSize);
+    }
   }
 
   /**
