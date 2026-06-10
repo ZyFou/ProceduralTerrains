@@ -124,12 +124,15 @@ float heightAt(vec2 xz) {
   h += pow(ridge, 1.35) * mountainMask * uRidge * 1.15;
   h *= uAmplitude;
 
+#ifndef INFINITE_MODE
   // layer 4: island/continent falloff toward board edges (square+radial blend)
+  // Skipped in infinite mode — terrain continues without boundaries.
   vec2 e = abs(xz) / uBoardHalf;
   float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
   float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
   float fall = t * t * (3.0 - 2.0 * t);
   h *= fall;
+#endif
 
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }

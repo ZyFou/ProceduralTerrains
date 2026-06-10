@@ -9,9 +9,9 @@ const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
 );
 
 export default function TopBar({
-  previewMode, onNew, onRandomize, onSave, onLoadJSON,
+  previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
   onExportScreenshot, onExportHeightmap, onTogglePreview,
-  onResetView, onToggleHelp, onOpenSettings,
+  onResetView, onToggleHelp, onOpenSettings, onToggleWorldMode,
 }) {
   const [exportOpen, setExportOpen] = useState(false);
   const fileRef = useRef(null);
@@ -83,6 +83,26 @@ export default function TopBar({
             <button onClick={onExportHeightmap}>Heightmap (PNG)</button>
           </div>
         </div>
+        <button
+          className={`tb-btn${worldMode === 'infinite' ? ' active' : ''}`}
+          onClick={onToggleWorldMode}
+          title={worldMode === 'infinite' ? 'Return to Terrain Studio' : 'Explore as infinite world'}
+        >
+          {worldMode === 'infinite' ? (
+            <svg viewBox="0 0 16 16">
+              <path d="M3 12 L6 5 L9 9 L11 6 L13 12 Z" stroke="currentColor" fill="none" strokeWidth="1.2" strokeLinejoin="round" />
+              <circle cx="12" cy="3.5" r="1.2" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16">
+              <circle cx="8" cy="8" r="5.8" stroke="currentColor" fill="none" strokeWidth="1.2" />
+              <ellipse cx="8" cy="8" rx="2.8" ry="5.8" stroke="currentColor" fill="none" strokeWidth="0.9" />
+              <line x1="2.2" y1="6" x2="13.8" y2="6" stroke="currentColor" strokeWidth="0.9" />
+              <line x1="2.2" y1="10" x2="13.8" y2="10" stroke="currentColor" strokeWidth="0.9" />
+            </svg>
+          )}
+          {worldMode === 'infinite' ? 'Studio' : 'Explore World'}
+        </button>
         <button className={`tb-btn${previewMode ? ' active' : ''}`} onClick={onTogglePreview} title="Hide panels for a clean preview">
           <svg viewBox="0 0 16 16">
             <path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" stroke="currentColor" fill="none" strokeWidth="1.2" />

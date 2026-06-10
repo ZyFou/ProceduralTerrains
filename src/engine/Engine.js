@@ -1,8 +1,10 @@
 import * as THREE from 'three';
-import { createTerrainUniforms, createTerrainMaterial } from './terrain/TerrainMaterial.js';
-import { createWaterMaterial } from './terrain/WaterMaterial.js';
+import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial } from './terrain/TerrainMaterial.js';
+import { createWaterMaterial, createInfiniteWaterMaterial } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
+import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { EditorControls } from './EditorControls.js';
+import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
 import { DEFAULT_PARAMS, applyPreset } from './presets.js';
 
@@ -56,6 +58,13 @@ export class Engine {
     this._fps = 0;
     this._clock = new THREE.Clock();
     this._disposed = false;
+
+    // World mode: 'studio' (single board) or 'infinite'
+    this.worldMode = 'studio';
+    this.infiniteWorld = null;
+    this.fpsControls = null;
+    this._infiniteTerrainMat = null;
+    this._infiniteWaterMat = null;
 
     this._initRenderer();
     this._initScene(minimapBase, minimapOverlay);
@@ -282,6 +291,111 @@ export class Engine {
     this.camera.updateProjectionMatrix();
   }
 
+  // -------------------------------------------------------------- world mode
+
+  setWorldMode(mode) {
+    if (mode === this.worldMode) return;
+    this.worldMode = mode;
+
+    if (mode === 'infinite') {
+      this._enterInfiniteMode();
+    } else {
+      this._exitInfiniteMode();
+    }
+  }
+
+  _enterInfiniteMode() {
+    // Hide studio objects
+    this.board.group.visible = false;
+    this.plinth.visible = false;
+    this.water.visible = false;
+
+    // Compute fixed frequency matching the current tile
+    const p = this.params;
+    const tileFreq = (p.noiseScale * 0.1) / this.boardSize;
+
+    // Create infinite materials (sharing the same uniform objects)
+    const oct = Math.round(p.octaves);
+    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct);
+    this._infiniteTerrainMat.wireframe = p.wireframe;
+    this._infiniteWaterMat = createInfiniteWaterMaterial(this.uniforms, oct);
+    this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
+
+    // Store the tile frequency for infinite mode
+    this._studioFrequency = this.uniforms.uFrequency.value;
+    this.uniforms.uFrequency.value = tileFreq;
+
+    // Create infinite world
+    this.infiniteWorld = new InfiniteWorld(
+      this.scene,
+      this._infiniteTerrainMat,
+      this._infiniteWaterMat,
+      {
+        chunkSize: p.chunkSize,
+        viewRadius: 12,
+        maxHeight: this._maxHeight(),
+        skirtDepth: this._skirtDepth(),
+        seaLevel: p.seaLevel,
+      }
+    );
+
+    // Create FPS controls
+    this.fpsControls = new FPSControls(this.camera, this.canvas);
+
+    // Position camera at world center, above terrain
+    this.camera.position.set(0, p.heightScale * 0.6 + 50, 0);
+    this.camera.fov = 75;
+    this.camera.near = 0.5;
+    this.camera.far = 80000;
+    this.camera.updateProjectionMatrix();
+
+    // Adjust fog for infinite world (lighter, further)
+    this.uniforms.uFogDensity.value = p.fogDensity * 0.00006;
+
+    this.cb.onStatus('Infinite World', false);
+  }
+
+  _exitInfiniteMode() {
+    // Dispose infinite world
+    if (this.infiniteWorld) {
+      this.infiniteWorld.dispose();
+      this.infiniteWorld = null;
+    }
+
+    // Dispose FPS controls
+    if (this.fpsControls) {
+      this.fpsControls.dispose();
+      this.fpsControls = null;
+    }
+
+    // Dispose infinite materials
+    if (this._infiniteTerrainMat) {
+      this._infiniteTerrainMat.dispose();
+      this._infiniteTerrainMat = null;
+    }
+    if (this._infiniteWaterMat) {
+      this._infiniteWaterMat.dispose();
+      this._infiniteWaterMat = null;
+    }
+
+    // Restore studio objects
+    this.board.group.visible = true;
+    this.plinth.visible = true;
+    this.water.visible = this.params.seaLevel > 0.5;
+
+    // Restore uniforms
+    this._applyUniforms();
+
+    // Reset camera
+    this.camera.fov = 45;
+    this.camera.near = 1;
+    this.camera.far = 50000;
+    this.camera.updateProjectionMatrix();
+    this.controls.reset(this.boardSize);
+
+    this.cb.onStatus('Ready', false);
+  }
+
   // ------------------------------------------------------------- save/load
 
   saveSeed() {
@@ -387,9 +501,17 @@ export class Engine {
   _tick() {
     const dt = Math.min(this._clock.getDelta(), 0.05);
     const now = performance.now();
-
-    this.controls.update(dt);
     this.uniforms.uTime.value += dt;
+
+    if (this.worldMode === 'infinite') {
+      this._tickInfinite(dt, now);
+    } else {
+      this._tickStudio(dt, now);
+    }
+  }
+
+  _tickStudio(dt, now) {
+    this.controls.update(dt);
 
     // LOD selection: throttled, distance-based, internal to the fixed board
     if (now - this._lastLodUpdate > 150) {
@@ -425,11 +547,50 @@ export class Engine {
     }
   }
 
+  _tickInfinite(dt, now) {
+    if (this.fpsControls) this.fpsControls.update(dt);
+
+    // Stream chunks around the camera
+    if (this.infiniteWorld) {
+      this.infiniteWorld.update(this.camera.position);
+    }
+
+    this.renderer.render(this.scene, this.camera);
+    const triangles = this.renderer.info.render.triangles;
+    const drawCalls = this.renderer.info.render.calls;
+
+    // HUD updates at ~6 Hz
+    this._frames++;
+    if (now - this._fpsTime >= 1000) {
+      this._fps = this._frames;
+      this._frames = 0;
+      this._fpsTime = now;
+    }
+    if (now - this._lastHudUpdate > 160) {
+      this._lastHudUpdate = now;
+
+      const pos = this.camera.position;
+      const fps = this.fpsControls;
+      if (this.cb.onInfiniteStats) {
+        this.cb.onInfiniteStats({
+          x: pos.x.toFixed(0),
+          y: pos.y.toFixed(0),
+          z: pos.z.toFixed(0),
+          speed: fps ? fps.moveSpeed.toFixed(0) : '0',
+          chunks: this.infiniteWorld ? this.infiniteWorld.activeChunkCount : 0,
+          lodCounts: this.infiniteWorld ? [...this.infiniteWorld.lodCounts] : [0,0,0,0],
+        });
+      }
+      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+    }
+  }
+
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
     this._resizeObserver.disconnect();
     this.renderer.setAnimationLoop(null);
+    if (this.worldMode === 'infinite') this._exitInfiniteMode();
     this.board.dispose();
     this.minimap.dispose();
     this.terrainMaterial.dispose();

@@ -216,3 +216,15 @@ export function createTerrainMaterial(uniforms, octaves = 7) {
     side: THREE.DoubleSide,
   });
 }
+
+// Infinite mode variant: same shader but with INFINITE_MODE defined,
+// which skips the island-edge falloff so terrain continues forever.
+export function createInfiniteTerrainMaterial(uniforms, octaves = 7) {
+  return new THREE.ShaderMaterial({
+    uniforms,
+    defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
+    vertexShader: VERTEX,
+    fragmentShader: FRAGMENT,
+    side: THREE.DoubleSide,
+  });
+}

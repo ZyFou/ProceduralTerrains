@@ -7,6 +7,7 @@ import { CameraPanel, LodPanel, MinimapPanel } from './components/RightPanels.js
 import BottomToolbar from './components/BottomToolbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
+import InfiniteHUD from './components/InfiniteHUD.jsx';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -32,6 +33,10 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // Infinite world mode
+  const [worldMode, setWorldMode] = useState('studio');
+  const [infiniteStats, setInfiniteStats] = useState(null);
+
   const showToast = useCallback((msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
@@ -52,6 +57,7 @@ export default function App() {
         onBoard: setBoardSize,
         onToast: showToast,
         onFirstInteract: () => setHelpVisible(false),
+        onInfiniteStats: setInfiniteStats,
       },
     });
     engineRef.current = engine;
@@ -63,10 +69,25 @@ export default function App() {
   const engine = () => engineRef.current;
   const onParam = (key, value) => engine().setParam(key, value);
 
+  const toggleWorldMode = () => {
+    const next = worldMode === 'studio' ? 'infinite' : 'studio';
+    engine().setWorldMode(next);
+    setWorldMode(next);
+    if (next === 'infinite') {
+      setHelpVisible(false);
+      showToast('Entered Infinite World — click to lock mouse');
+    } else {
+      showToast('Returned to Terrain Studio');
+    }
+  };
+
+  const isInfinite = worldMode === 'infinite';
+
   return (
-    <div id="app" className={previewMode ? 'preview-mode' : ''}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isInfinite ? 'infinite-mode' : ''}`}>
       <TopBar
         previewMode={previewMode}
+        worldMode={worldMode}
         onNew={() => engine().newProject()}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => engine().saveSeed()}
@@ -77,19 +98,20 @@ export default function App() {
         onResetView={() => engine().resetView()}
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onToggleWorldMode={toggleWorldMode}
       />
 
       <div id="main">
         <canvas id="viewport" ref={canvasRef} />
         <div id="vignette" />
 
-        <div id="help-card" className={helpVisible ? '' : 'hidden'}>
+        <div id="help-card" className={helpVisible && !isInfinite ? '' : 'hidden'}>
           <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
           <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
           <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
         </div>
 
-        {!previewMode && (
+        {!previewMode && !isInfinite && (
           <LeftPanel
             params={params}
             onParam={onParam}
@@ -99,7 +121,7 @@ export default function App() {
           />
         )}
 
-        <div id="right-stack" style={previewMode ? { display: 'none' } : undefined}>
+        <div id="right-stack" style={previewMode || isInfinite ? { display: 'none' } : undefined}>
           <CameraPanel
             camInfo={camInfo}
             camMode={camMode}
@@ -111,7 +133,7 @@ export default function App() {
           <MinimapPanel boardSize={boardSize} baseRef={minimapBaseRef} overlayRef={minimapOverlayRef} />
         </div>
 
-        {!previewMode && (
+        {!previewMode && !isInfinite && (
           <BottomToolbar
             camMode={camMode}
             onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
@@ -119,9 +141,17 @@ export default function App() {
             onResetCamera={() => engine().resetView()}
           />
         )}
+
+        {/* Infinite World HUD */}
+        {isInfinite && (
+          <InfiniteHUD
+            stats={infiniteStats}
+            onReturn={toggleWorldMode}
+          />
+        )}
       </div>
 
-      <StatusBar status={status} gpu={gpu} stats={stats} />
+      <StatusBar status={status} gpu={gpu} stats={stats} worldMode={worldMode} infiniteStats={infiniteStats} />
 
       <SettingsModal
         open={settingsOpen}

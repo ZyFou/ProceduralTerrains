@@ -93,3 +93,21 @@ export function createWaterMaterial(sharedUniforms, octaves = 7) {
   });
   return mat;
 }
+
+// Infinite mode variant: same shader with INFINITE_MODE define.
+export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7) {
+  const uniforms = {
+    ...sharedUniforms,
+    uWaterAnim: { value: 1.0 },
+  };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
+    vertexShader: VERTEX,
+    fragmentShader: FRAGMENT,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  return mat;
+}
