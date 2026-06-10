@@ -32,7 +32,7 @@ export const DEFAULT_PARAMS = {
   // render
   normalStrength: 1.25,
   aoStrength: 0.75,
-  chunkGrid: true,
+  chunkGrid: false,
 
   // world (rebuild required)
   chunkCount: 16,

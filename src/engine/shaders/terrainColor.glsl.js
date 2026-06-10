@@ -25,6 +25,7 @@ uniform float uPaletteSaturation;
 uniform float uPaletteContrast;
 uniform vec3  uPaletteTint;
 uniform vec3  uTerrainSunCol;
+uniform float uTerrainSunIntensity;
 uniform vec3  uTerrainSkyAmb;
 uniform vec3  uTerrainBounce;
 
@@ -126,7 +127,7 @@ vec3 terrainLighting(vec3 albedo, vec3 n, vec3 sunDir, float ao,
   float snow, float sandBand, float hRel, float flatness, float bwWetland,
   vec3 viewDir) {
   float diff = max(dot(n, sunDir), 0.0);
-  vec3 sunCol = uTerrainSunCol * 1.25;
+  vec3 sunCol = uTerrainSunCol * uTerrainSunIntensity;
   vec3 skyAmb = uTerrainSkyAmb * 0.50 * (n.y * 0.5 + 0.5);
   vec3 bounce = uTerrainBounce * 0.25 * (1.0 - n.y * 0.5);
   vec3 col = albedo * (sunCol * diff + skyAmb + bounce) * ao;

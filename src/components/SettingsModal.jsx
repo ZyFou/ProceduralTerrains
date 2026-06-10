@@ -5,13 +5,6 @@ import {
   resolveLodSegments, resolveLodDistances, estimateTriangles,
 } from '../engine/render/PerformanceSettings.js';
 
-const ENVIRONMENT_SCHEMA = [
-  { key: 'sunAzimuth', label: 'Sun Azimuth', min: 0, max: 360, step: 1, unit: '°' },
-  { key: 'sunElevation', label: 'Sun Elevation', min: 8, max: 85, step: 1, unit: '°' },
-  { key: 'fogDensity', label: 'Fog Density', min: 0, max: 2, step: 0.05, digits: 2 },
-  { key: 'waterAnim', label: 'Water Animation', type: 'toggle' },
-];
-
 // slider definition shorthand from PERF_LIMITS
 const lim = (key, label, step, opts = {}) => ({
   key, label, step, min: PERF_LIMITS[key].min, max: PERF_LIMITS[key].max, ...opts,
@@ -130,20 +123,6 @@ export default function SettingsModal({ open, params, onParam, onClose, perf, on
           <button onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
-          <SectionTitle>Environment</SectionTitle>
-          {ENVIRONMENT_SCHEMA.map((def) => {
-            if (def.type === 'toggle') {
-              return (
-                <ToggleRow key={def.key} label={def.label} value={params[def.key]}
-                  onChange={(v) => onParam(def.key, v)} />
-              );
-            }
-            return (
-              <SliderCtl key={def.key} def={def} value={params[def.key]}
-                onChange={(v) => onParam(def.key, v)} />
-            );
-          })}
-
           {perf && (
             <>
               <SectionTitle>Performance</SectionTitle>

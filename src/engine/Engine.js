@@ -219,8 +219,19 @@ export class Engine {
     this.cb.onParams({ ...this.params });
     this.planetStyle.applyToUniforms(this.uniforms);
     this._applyStudioFogFromStyle();
+    this._applyStudioSunFromStyle();
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
+  }
+
+  _applyStudioSunFromStyle() {
+    if (this.worldMode === 'infinite') return;
+    const style = this.planetStyle.getStyle();
+    const sunI = style.sunIntensity ?? 1.25;
+    if (style.sunColor) {
+      this.sunLight.color.setRGB(style.sunColor[0], style.sunColor[1], style.sunColor[2]);
+    }
+    this.sunLight.intensity = sunI * 1.28;
   }
 
   _applyStudioFogFromStyle() {
@@ -399,6 +410,7 @@ export class Engine {
       this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
 
       u.uFogDensity.value = p.fogDensity * 0.0001;
+      this._applyStudioSunFromStyle();
     }
 
     // octave count is a compile-time constant (keeps loop bounds static for

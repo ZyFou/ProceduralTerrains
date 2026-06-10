@@ -13,6 +13,7 @@ export const DEFAULT_PLANET_STYLE = {
   paletteContrast: 1.0,
   paletteTint: [1.0, 1.0, 1.0],
   sunColor: [1.0, 0.94, 0.82],
+  sunIntensity: 1.25,
   skyAmbient: [0.36, 0.46, 0.62],
   groundBounce: [0.20, 0.16, 0.11],
   fogTint: null,       // null = use engine default
@@ -37,5 +38,5 @@ export function clonePlanetStyle(src = DEFAULT_PLANET_STYLE) {
 export const STYLE_ONLY_KEYS = new Set([
   'planetPreset', 'palettePreset', 'noisePreset', 'palette',
   'paletteSaturation', 'paletteContrast', 'paletteTint',
-  'sunColor', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint', 'customEdits',
+  'sunColor', 'sunIntensity', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint', 'customEdits',
 ]);

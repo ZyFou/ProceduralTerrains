@@ -30,8 +30,9 @@ export function createPaletteUniforms() {
     uPaletteSaturation: { value: 1.0 },
     uPaletteContrast:   { value: 1.0 },
     uPaletteTint:       { value: new THREE.Vector3(1, 1, 1) },
-    uTerrainSunCol:     { value: new THREE.Vector3(1.0, 0.94, 0.82) },
-    uTerrainSkyAmb:     { value: new THREE.Vector3(0.36, 0.46, 0.62) },
+    uTerrainSunCol:        { value: new THREE.Vector3(1.0, 0.94, 0.82) },
+    uTerrainSunIntensity:  { value: 1.25 },
+    uTerrainSkyAmb:        { value: new THREE.Vector3(0.36, 0.46, 0.62) },
     uTerrainBounce:     { value: new THREE.Vector3(0.20, 0.16, 0.11) },
   };
   for (const key of PALETTE_KEYS) {
@@ -62,6 +63,9 @@ export function applyPlanetStyleToUniforms(uniforms, planetStyle) {
   }
   if (uniforms.uTerrainSunCol && planetStyle.sunColor) {
     uniforms.uTerrainSunCol.value.set(planetStyle.sunColor[0], planetStyle.sunColor[1], planetStyle.sunColor[2]);
+  }
+  if (uniforms.uTerrainSunIntensity) {
+    uniforms.uTerrainSunIntensity.value = planetStyle.sunIntensity ?? 1.25;
   }
   if (uniforms.uTerrainSkyAmb && planetStyle.skyAmbient) {
     uniforms.uTerrainSkyAmb.value.set(planetStyle.skyAmbient[0], planetStyle.skyAmbient[1], planetStyle.skyAmbient[2]);

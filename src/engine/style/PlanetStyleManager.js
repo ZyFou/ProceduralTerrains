@@ -33,7 +33,7 @@ export class PlanetStyleManager {
     for (const key of [
       'planetPreset', 'palettePreset', 'noisePreset',
       'paletteSaturation', 'paletteContrast', 'paletteTint',
-      'sunColor', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint', 'customEdits',
+      'sunColor', 'sunIntensity', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint', 'customEdits',
     ]) {
       if (key in partial) {
         const v = partial[key];
@@ -80,7 +80,7 @@ export class PlanetStyleManager {
     this.style.customEdits = false;
 
     const baseStyle = { ...DEFAULT_PLANET_STYLE, ...preset.style };
-    for (const k of ['paletteSaturation', 'paletteContrast', 'paletteTint', 'sunColor', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint']) {
+    for (const k of ['paletteSaturation', 'paletteContrast', 'paletteTint', 'sunColor', 'sunIntensity', 'skyAmbient', 'groundBounce', 'fogTint', 'skyTint']) {
       if (baseStyle[k] !== undefined) {
         this.style[k] = Array.isArray(baseStyle[k]) ? [...baseStyle[k]] : baseStyle[k];
       }

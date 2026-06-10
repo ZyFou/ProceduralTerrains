@@ -185,17 +185,6 @@ export default function LeftControlPanel({
         </ControlSection>
 
         <ControlSection
-          id="section-erosion"
-          title="EROSION"
-          defaultOpen={false}
-          icon={<SectionIcon><svg viewBox="0 0 16 16" fill="none"><path d="M3 12h10M5 9l2-3 2 2 2-4 2 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg></SectionIcon>}
-        >
-          <p className="section-hint">
-            Erosion is computed procedurally in the biome shader from continentalness and climate noise — no manual controls.
-          </p>
-        </ControlSection>
-
-        <ControlSection
           id="section-materials"
           title="MATERIALS / BIOMES"
           defaultOpen={false}
@@ -211,18 +200,6 @@ export default function LeftControlPanel({
           {RENDER_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
           ))}
-
-          <div className="subsection-label">World</div>
-          <SelectRow label="Chunk Count" value={params.chunkCount}
-            options={[8, 12, 16, 20, 24].map((v) => ({ value: v, label: `${v} × ${v}` }))}
-            onChange={(v) => onParam('chunkCount', parseFloat(v))} />
-          <SelectRow label="Chunk Size" value={params.chunkSize}
-            options={[64, 128, 192, 256].map((v) => ({ value: v, label: String(v) }))}
-            onChange={(v) => onParam('chunkSize', parseFloat(v))} />
-          <ToggleRow label="Chunk Grid" value={params.chunkGrid} onChange={(v) => onParam('chunkGrid', v)} />
-          <ToggleRow label="Wireframe" value={params.wireframe} onChange={(v) => onParam('wireframe', v)} />
-          <ToggleRow label="LOD Debug" value={params.lodDebug} onChange={(v) => onParam('lodDebug', v)} />
-          <ToggleRow label="Auto Update" value={params.autoUpdate} onChange={(v) => onParam('autoUpdate', v)} />
         </ControlSection>
       </div>
     </aside>

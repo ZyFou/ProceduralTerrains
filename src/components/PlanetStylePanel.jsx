@@ -3,7 +3,6 @@ import ColorPalettePanel from './ColorPalettePanel.jsx';
 import { colorToHex, parseColor } from '../engine/style/ColorPalette.js';
 
 const ATMOSPHERE_COLORS = [
-  { key: 'sunColor', label: 'Sun Light' },
   { key: 'skyAmbient', label: 'Sky Ambient' },
   { key: 'groundBounce', label: 'Ground Bounce' },
 ];

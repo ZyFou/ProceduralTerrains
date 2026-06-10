@@ -4,7 +4,6 @@ const SECTIONS = [
   { id: 'section-water', label: 'Water', title: 'Water' },
   { id: 'section-noise', label: 'Noise', title: 'Noise' },
   { id: 'section-planet-style', label: 'Style', title: 'Planet Style' },
-  { id: 'section-erosion', label: 'Erosion', title: 'Erosion' },
   { id: 'section-materials', label: 'Biomes', title: 'Materials / Biomes' },
 ];
 
@@ -34,11 +33,6 @@ const ICONS = {
     <svg viewBox="0 0 20 20" fill="none">
       <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" />
       <ellipse cx="10" cy="10" rx="3" ry="6.5" stroke="currentColor" strokeWidth="1" />
-    </svg>
-  ),
-  'section-erosion': (
-    <svg viewBox="0 0 20 20" fill="none">
-      <path d="M4 14h12M6 11l2-4 2 3 2-5 2 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   'section-materials': (

@@ -216,6 +216,8 @@ export default function App() {
             onMode={(mode) => { engine().setCameraMode(mode); setCamMode(mode); }}
             onFov={(fov) => engine().setFov(fov)}
             onFocusCenter={() => engine().focusCenter()}
+            onParam={onParam}
+            onStyleTuning={(key, v) => engine().setPlanetStyleTuning(key, v)}
             lodCounts={lodCounts}
             chunkCount={chunkCount}
             boardSize={boardSize}
