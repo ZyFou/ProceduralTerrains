@@ -1,11 +1,10 @@
-import { useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
 import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
   resolveLodSegments, resolveLodDistances, estimateTriangles,
 } from '../engine/render/PerformanceSettings.js';
 
-// slider definition shorthand from PERF_LIMITS
 const lim = (key, label, step, opts = {}) => ({
   key, label, step, min: PERF_LIMITS[key].min, max: PERF_LIMITS[key].max, ...opts,
 });
@@ -30,17 +29,14 @@ const WATER_QUALITY_OPTIONS = [
   { value: 2, label: 'High' },
 ];
 
-function SectionTitle({ children }) {
-  return <div className="settings-section-title">{children}</div>;
-}
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'lod', label: 'LOD' },
+  { id: 'streaming', label: 'Streaming' },
+  { id: 'water', label: 'Water' },
+  { id: 'fog', label: 'Fog' },
+];
 
-function SubTitle({ children }) {
-  return <div className="settings-subtitle">{children}</div>;
-}
-
-// One slider, four thumbs — one per LOD level. The 4 segment counts are
-// proportional, so dragging any thumb rescales the whole set by the same
-// factor. Positions use a log2 scale so 8/16/32/64 spread out evenly.
 function LodMultiSlider({ segments, onChange }) {
   const trackRef = useRef(null);
   const segmentsRef = useRef(segments);
@@ -79,8 +75,13 @@ function LodMultiSlider({ segments, onChange }) {
       </div>
       <div className="lod-multi-track" ref={trackRef}>
         {segments.map((seg, i) => (
-          <div key={i} className="lod-multi-thumb" style={{ left: `${toPos(seg)}%` }}
-            onPointerDown={(e) => startDrag(e, i)} title={`LOD${i}: ${seg} segments`}>
+          <div
+            key={i}
+            className="lod-multi-thumb"
+            style={{ left: `${toPos(seg)}%` }}
+            onPointerDown={(e) => startDrag(e, i)}
+            title={`LOD${i}: ${seg} segments`}
+          >
             <span className="lod-multi-tag">L{i}</span>
           </div>
         ))}
@@ -92,22 +93,47 @@ function LodMultiSlider({ segments, onChange }) {
 function PerfSlider({ perf, id, onPerfSetting }) {
   const def = PERF_SLIDERS[id];
   return (
-    <SliderCtl def={def} value={perf[def.key]}
-      onChange={(v) => onPerfSetting(def.key, v)} />
+    <SliderCtl def={def} value={perf[def.key]} onChange={(v) => onPerfSetting(def.key, v)} />
   );
 }
 
-export default function SettingsModal({ open, params, onParam, onClose, perf, onPerfPreset, onPerfSetting, onPerfReset }) {
-  if (!open) return null;
+function SettingGroup({ tab, label, keywords, search, activeTab, children }) {
+  const haystack = `${label} ${keywords} ${tab}`.toLowerCase();
+  const q = search.trim().toLowerCase();
+  const visible = q ? haystack.includes(q) : tab === activeTab;
+  if (!visible) return null;
 
-  const presetOptions = [
+  return (
+    <div className="settings-field" data-setting-tab={tab} data-setting-label={label}>
+      {q && <span className="settings-field-tab">{TABS.find((t) => t.id === tab)?.label}</span>}
+      {children}
+    </div>
+  );
+}
+
+function SettingNote({ tab, text, search, activeTab }) {
+  const q = search.trim().toLowerCase();
+  if (q || tab !== activeTab) return null;
+  return <p className="settings-note">{text}</p>;
+}
+
+export default function SettingsModal({
+  open, onClose, perf, onPerfPreset, onPerfSetting, onPerfReset,
+}) {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [search, setSearch] = useState('');
+
+  const presetOptions = useMemo(() => [
     ...getPerfPresetKeys().map((k) => ({ value: k, label: PERF_PRESETS[k].label })),
     { value: 'custom', label: 'Custom' },
-  ];
+  ], []);
+
+  if (!open) return null;
 
   const segments = perf ? resolveLodSegments(perf) : [];
   const distances = perf ? resolveLodDistances(perf) : [];
   const estTris = perf ? estimateTriangles(perf) : 0;
+  const isSearching = search.trim().length > 0;
 
   const setLodDistance = (i, v) => {
     const next = [...perf.lodDistances];
@@ -115,75 +141,194 @@ export default function SettingsModal({ open, params, onParam, onClose, perf, on
     onPerfSetting('lodDistances', next);
   };
 
+  const groupProps = { search, activeTab };
+
   return (
-    <div className="modal" onClick={(e) => e.target.classList.contains('modal') && onClose()}>
-      <div className="modal-card">
-        <div className="modal-header">
-          <span>Project Settings</span>
-          <button onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body">
-          {perf && (
-            <>
-              <SectionTitle>Performance</SectionTitle>
-              <SelectRow label="Preset" value={perf.preset} options={presetOptions}
-                onChange={(v) => onPerfPreset(v)} />
-              <ToggleRow label="Auto Performance Mode" value={perf.autoPerf}
-                onChange={(v) => onPerfSetting('autoPerf', v)} />
-              <PerfSlider perf={perf} id="renderScale" onPerfSetting={onPerfSetting} />
+    <div className="modal settings-modal" onClick={(e) => e.target.classList.contains('modal') && onClose()}>
+      <div className="settings-modal-card" onClick={(e) => e.stopPropagation()}>
+        <header className="settings-modal-header">
+          <div className="settings-modal-title">
+            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" aria-hidden>
+              <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+            <span>Project Settings</span>
+          </div>
+          <button type="button" className="settings-modal-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
 
-              <SubTitle>Terrain LOD</SubTitle>
-              <PerfSlider perf={perf} id="resolutionScale" onPerfSetting={onPerfSetting} />
-              <PerfSlider perf={perf} id="lodDistanceScale" onPerfSetting={onPerfSetting} />
-              <LodMultiSlider segments={perf.lodSegments}
-                onChange={(next) => onPerfSetting('lodSegments', next)} />
-              <div className="perf-note">
-                Effective: {segments.join(' / ')} segments
-              </div>
-              {perf.lodDistances.map((d, i) => (
-                <SliderCtl key={`dist${i}`}
-                  def={{
-                    label: `LOD${i}→${i + 1} Distance`, min: PERF_LIMITS.lodDistance.min,
-                    max: PERF_LIMITS.lodDistance.max, step: 0.5, digits: 1, unit: '× chunk',
-                  }}
-                  value={d} onChange={(v) => setLodDistance(i, v)} />
-              ))}
-              <div className="perf-note">
-                Effective: {distances.map((d) => d.toFixed(1)).join(' / ')} × chunk size
-              </div>
-
-              <SubTitle>Streaming &amp; Culling</SubTitle>
-              <PerfSlider perf={perf} id="viewRadius" onPerfSetting={onPerfSetting} />
-              <PerfSlider perf={perf} id="maxCreatesPerFrame" onPerfSetting={onPerfSetting} />
-              <SliderCtl
-                def={{ label: 'Triangle Budget', min: 0.1, max: 3, step: 0.1, digits: 1, unit: 'M' }}
-                value={perf.triangleBudget / 1e6}
-                onChange={(v) => onPerfSetting('triangleBudget', Math.round(v * 1e6))} />
-              <PerfSlider perf={perf} id="cullingAggressiveness" onPerfSetting={onPerfSetting} />
-
-              <SubTitle>Water</SubTitle>
-              <SelectRow label="Water Quality" value={perf.waterQuality}
-                options={WATER_QUALITY_OPTIONS}
-                onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))} />
-              <PerfSlider perf={perf} id="waterReflection" onPerfSetting={onPerfSetting} />
-              <PerfSlider perf={perf} id="waterDetail" onPerfSetting={onPerfSetting} />
-              <PerfSlider perf={perf} id="waterWaves" onPerfSetting={onPerfSetting} />
-              <PerfSlider perf={perf} id="waterDistance" onPerfSetting={onPerfSetting} />
-
-              <SubTitle>Fog</SubTitle>
-              <PerfSlider perf={perf} id="fogDistance" onPerfSetting={onPerfSetting} />
-
-              <div className="perf-estimate">
-                Worst-case visible triangles: ~{(estTris / 1e6).toFixed(2)}M
-              </div>
-
-              <button type="button" className="perf-reset-btn" onClick={onPerfReset}>
-                Reset Performance Settings
+        <div className="settings-modal-toolbar">
+          <div className="settings-search-wrap">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            <input
+              type="search"
+              className="settings-search-input"
+              placeholder="Search settings…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button type="button" className="settings-search-clear" onClick={() => setSearch('')} aria-label="Clear search">
+                ✕
               </button>
-            </>
+            )}
+          </div>
+        </div>
+
+        {!isSearching && (
+          <nav className="settings-tabs" aria-label="Settings categories">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`settings-tab${activeTab === tab.id ? ' active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        )}
+
+        <div className="settings-modal-body">
+          {!perf ? (
+            <p className="settings-empty">Performance settings are loading…</p>
+          ) : isSearching ? (
+            <div className="settings-search-results">
+              <p className="settings-search-hint">Search results</p>
+              {renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps })}
+            </div>
+          ) : (
+            <div className="settings-tab-panel">
+              {renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps })}
+            </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function renderSettings({
+  perf, presetOptions, segments, distances, estTris,
+  setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps,
+}) {
+  return (
+    <>
+      <SettingGroup tab="overview" label="Performance Preset" keywords="preset quality profile" {...groupProps}>
+        <SelectRow label="Preset" value={perf.preset} options={presetOptions} onChange={onPerfPreset} />
+      </SettingGroup>
+
+      <SettingGroup tab="overview" label="Auto Performance Mode" keywords="automatic dynamic fps" {...groupProps}>
+        <ToggleRow label="Auto Performance Mode" value={perf.autoPerf} onChange={(v) => onPerfSetting('autoPerf', v)} />
+      </SettingGroup>
+
+      <SettingGroup tab="overview" label="Render Scale" keywords="resolution pixel dpr scale" {...groupProps}>
+        <PerfSlider perf={perf} id="renderScale" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingNote tab="overview" text={`Worst-case visible triangles: ~${(estTris / 1e6).toFixed(2)}M`} {...groupProps} />
+
+      <SettingGroup tab="overview" label="Reset Performance" keywords="restore defaults" {...groupProps}>
+        <button type="button" className="action-btn perf-reset-btn" onClick={onPerfReset}>
+          Reset Performance Settings
+        </button>
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="Terrain Resolution" keywords="mesh detail segments" {...groupProps}>
+        <PerfSlider perf={perf} id="resolutionScale" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="LOD Distance Scale" keywords="level detail distance" {...groupProps}>
+        <PerfSlider perf={perf} id="lodDistanceScale" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="LOD Resolutions" keywords="segments mesh lod0 lod1 lod2 lod3" {...groupProps}>
+        <LodMultiSlider segments={perf.lodSegments} onChange={(next) => onPerfSetting('lodSegments', next)} />
+      </SettingGroup>
+
+      <SettingNote tab="lod" text={`Effective segments: ${segments.join(' / ')}`} {...groupProps} />
+
+      {perf.lodDistances.map((d, i) => (
+        <SettingGroup
+          key={`lod-dist-${i}`}
+          tab="lod"
+          label={`LOD ${i} → ${i + 1} Distance`}
+          keywords={`lod distance threshold chunk level ${i}`}
+          {...groupProps}
+        >
+          <SliderCtl
+            def={{
+              label: `LOD${i}→${i + 1} Distance`,
+              min: PERF_LIMITS.lodDistance.min,
+              max: PERF_LIMITS.lodDistance.max,
+              step: 0.5,
+              digits: 1,
+              unit: '× chunk',
+            }}
+            value={d}
+            onChange={(v) => setLodDistance(i, v)}
+          />
+        </SettingGroup>
+      ))}
+
+      <SettingNote tab="lod" text={`Effective distances: ${distances.map((d) => d.toFixed(1)).join(' / ')} × chunk size`} {...groupProps} />
+
+      <SettingGroup tab="streaming" label="Chunk Load Radius" keywords="view radius streaming load" {...groupProps}>
+        <PerfSlider perf={perf} id="viewRadius" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="streaming" label="Chunk Builds Per Frame" keywords="create spawn streaming budget" {...groupProps}>
+        <PerfSlider perf={perf} id="maxCreatesPerFrame" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="streaming" label="Triangle Budget" keywords="triangles limit budget mesh" {...groupProps}>
+        <SliderCtl
+          def={{ label: 'Triangle Budget', min: 0.1, max: 3, step: 0.1, digits: 1, unit: 'M' }}
+          value={perf.triangleBudget / 1e6}
+          onChange={(v) => onPerfSetting('triangleBudget', Math.round(v * 1e6))}
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="streaming" label="Culling Aggressiveness" keywords="frustum behind camera cull" {...groupProps}>
+        <PerfSlider perf={perf} id="cullingAggressiveness" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="water" label="Water Quality" keywords="shader reflection detail waves" {...groupProps}>
+        <SelectRow
+          label="Water Quality"
+          value={perf.waterQuality}
+          options={WATER_QUALITY_OPTIONS}
+          onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))}
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="water" label="Water Reflection" keywords="specular glint sun" {...groupProps}>
+        <PerfSlider perf={perf} id="waterReflection" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="water" label="Water Detail" keywords="ripple octave shader" {...groupProps}>
+        <PerfSlider perf={perf} id="waterDetail" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="water" label="Wave Complexity" keywords="waves animation ocean" {...groupProps}>
+        <PerfSlider perf={perf} id="waterWaves" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="water" label="Water Distance" keywords="extent range fade" {...groupProps}>
+        <PerfSlider perf={perf} id="waterDistance" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+
+      <SettingGroup tab="fog" label="Fog Distance" keywords="horizon haze atmosphere visibility" {...groupProps}>
+        <PerfSlider perf={perf} id="fogDistance" onPerfSetting={onPerfSetting} />
+      </SettingGroup>
+    </>
   );
 }

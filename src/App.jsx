@@ -240,8 +240,6 @@ export default function App() {
 
       <SettingsModal
         open={settingsOpen}
-        params={params}
-        onParam={onParam}
         onClose={() => setSettingsOpen(false)}
         perf={perf}
         onPerfPreset={handlePerfPreset}
