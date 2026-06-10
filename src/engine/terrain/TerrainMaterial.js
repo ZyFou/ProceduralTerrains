@@ -36,11 +36,20 @@ varying float vSkirt;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   float h = heightAt(wp.xz);
-  wp.y = h - aSkirt * uSkirtDepth;
+
+  float skirt = aSkirt;
+  #ifndef INFINITE_MODE
+    float bx = abs(wp.x);
+    float bz = abs(wp.z);
+    float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
+    skirt *= 1.0 - step(0.5, onOuter);
+  #endif
+
+  wp.y = h - skirt * uSkirtDepth;
 
   vWorldPos = wp.xyz;
   vLod = aLod;
-  vSkirt = aSkirt;
+  vSkirt = skirt;
 
   gl_Position = projectionMatrix * viewMatrix * wp;
 }

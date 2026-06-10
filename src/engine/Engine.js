@@ -15,6 +15,7 @@ import {
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
 } from './render/PerformanceSettings.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
+import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 
@@ -146,11 +147,12 @@ export class Engine {
     this.water.frustumCulled = false;
     this.scene.add(this.water);
 
-    // dark plinth under the board so it reads as a single solid slab
+    // clean diorama base: perimeter walls + flat bottom (no z-fight with chunk skirts)
     this.plinth = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: 0x231e19, roughness: 0.95, metalness: 0 })
+      buildBoardPlinthGeometry(1, 40),
+      createBoardPlinthMaterial()
     );
+    this.plinth.renderOrder = 5;
     this.scene.add(this.plinth);
 
     // lights only affect the plinth (terrain/water have custom shaders)
@@ -351,8 +353,7 @@ export class Engine {
 
       const size = this.boardSize;
       this.water.scale.set(size, 1, size);
-      this.plinth.scale.set(size, 160, size);
-      this.plinth.position.y = -80.5;
+      this._updatePlinth();
       this.controls.setBoardSize(size);
       this.minimap.setBoard(size, maxHeight);
       this.cb.onBoard(size);
@@ -366,6 +367,17 @@ export class Engine {
 
   _maxHeight() { return this.params.heightScale * 1.35 + 2; }
   _skirtDepth() { return Math.max(24, this.params.heightScale * 0.08); }
+
+  _updatePlinth() {
+    const size = this.boardSize;
+    if (!size) return;
+    const skirtDepth = this._skirtDepth();
+    const sea = this.params.seaLevel;
+    const topY = sea > 0.5 ? sea : 0;
+    const geo = buildBoardPlinthGeometry(size, skirtDepth, topY);
+    this.plinth.geometry.dispose();
+    this.plinth.geometry = geo;
+  }
 
   _applyUniforms() {
     const p = this.params;
@@ -429,6 +441,7 @@ export class Engine {
     this.water.visible = p.seaLevel > 0.5;
 
     this.board.updateBounds(this._maxHeight(), this._skirtDepth());
+    this._updatePlinth();
     this.planetStyle.applyToUniforms(u);
     this._applyStudioFogFromStyle();
     this._applyPixelRatio();
