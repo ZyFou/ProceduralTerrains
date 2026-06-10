@@ -111,11 +111,42 @@ body {
 .panel-body { padding: 10px 12px; }
 .panel-body.collapsed { display: none; }
 
-#left-panel {
+#left-stack {
   position: absolute; top: 14px; left: 14px; bottom: 14px; width: 248px; z-index: 10;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; gap: 10px;
 }
-#left-panel .panel-body { overflow-y: auto; flex: 1; }
+#left-panel, #planet-style-panel {
+  display: flex; flex-direction: column; min-height: 0; width: 100%;
+}
+#left-panel { flex: 1 1 52%; }
+#planet-style-panel { flex: 1 1 48%; }
+#left-panel .panel-body, #planet-style-panel .panel-body { overflow-y: auto; flex: 1; }
+
+.palette-swatches {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;
+  margin: 10px 0;
+}
+.palette-swatch {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: var(--text-dim); cursor: pointer;
+}
+.palette-swatch input[type="color"] {
+  width: 22px; height: 18px; padding: 0; border: 1px solid var(--input-border);
+  border-radius: 3px; background: none; cursor: pointer;
+}
+.palette-io { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.planet-preset-block { margin-bottom: 4px; }
+.planet-preset-block .wide-btn { margin-top: 6px; }
+
+.fps-planet-actions {
+  display: flex; gap: 6px; margin: 4px 0 8px;
+}
+.fps-mini-btn {
+  flex: 1; height: 24px; font-size: 10px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px; color: var(--text-dim); cursor: pointer;
+}
+.fps-mini-btn:hover { color: var(--text); border-color: rgba(56,189,248,0.35); }
 
 #right-stack {
   position: absolute; top: 14px; right: 14px; bottom: 14px; width: 248px; z-index: 10;
@@ -375,13 +406,16 @@ input[type="range"]::-moz-range-thumb {
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ============ PREVIEW MODE ============ */
+body.preview-mode #left-stack,
 body.preview-mode #left-panel,
 body.preview-mode #right-stack,
 body.preview-mode #help-card,
 body.preview-mode #bottom-toolbar { display: none; }
 
 /* ============ INFINITE WORLD MODE ============ */
+.infinite-mode #left-stack,
 .infinite-mode #left-panel,
+.infinite-mode #planet-style-panel,
 .infinite-mode #right-stack,
 .infinite-mode #help-card,
 .infinite-mode #bottom-toolbar { display: none !important; }

@@ -48,6 +48,11 @@ export const DEFAULT_PARAMS = {
   fogDensity: 0.45,
   waterAnim: true,
   pixelRatio: 0,           // 0 = auto (device)
+
+  // planet style (color layer — live shader updates, no rebuild)
+  planetPreset: 'earth',
+  palettePreset: 'earth',
+  noisePreset: 'default',
 };
 
 export const PRESETS = {

@@ -4,6 +4,10 @@ import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { zipSync } from 'fflate';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
+import {
+  PALETTE_UNIFORMS_GLSL,
+  TERRAIN_COLOR_FUNCTIONS_GLSL,
+} from '../shaders/terrainColor.glsl.js';
 
 // Quad shaders for baking
 const BAKE_VERTEX = /* glsl */ `
@@ -21,10 +25,11 @@ const BAKE_FRAGMENT = /* glsl */ `
   ${NOISE_GLSL}
   ${BIOME_GLSL}
   ${HEIGHT_GLSL}
+  ${PALETTE_UNIFORMS_GLSL}
+  ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
   uniform float uAO;
   uniform float uNormalStrength;
-  uniform float uSnowLine;
   uniform float uEps;
   uniform float uBoardSize;
   uniform int uBakeMode;       // 0 = heightmap, 1 = normalmap, 2 = color, 3 = biome splat
@@ -42,23 +47,6 @@ const BAKE_FRAGMENT = /* glsl */ `
     float b = floor(value);
     return vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
   }
-
-  // Whittaker biome colors (copied from TerrainMaterial.js)
-  const vec3 C_DEEP     = vec3(0.012, 0.075, 0.140);
-  const vec3 C_SHALLOW  = vec3(0.060, 0.290, 0.330);
-  const vec3 C_SAND     = vec3(0.560, 0.470, 0.300);
-  const vec3 C_DUNE     = vec3(0.620, 0.490, 0.290);
-  const vec3 C_DRYGRASS = vec3(0.380, 0.330, 0.150);
-  const vec3 C_GRASS    = vec3(0.130, 0.260, 0.085);
-  const vec3 C_FOREST   = vec3(0.052, 0.140, 0.055);
-  const vec3 C_JUNGLE   = vec3(0.035, 0.125, 0.045);
-  const vec3 C_SWAMP    = vec3(0.090, 0.130, 0.070);
-  const vec3 C_TUNDRA   = vec3(0.300, 0.290, 0.240);
-  const vec3 C_REDROCK  = vec3(0.420, 0.235, 0.140);
-  const vec3 C_REDROCK2 = vec3(0.560, 0.370, 0.210);
-  const vec3 C_ROCK     = vec3(0.260, 0.235, 0.215);
-  const vec3 C_ROCK_HI  = vec3(0.380, 0.365, 0.355);
-  const vec3 C_SNOW     = vec3(0.870, 0.890, 0.930);
 
   void main() {
     // Map UV back to world coordinates centered on board
@@ -88,82 +76,29 @@ const BAKE_FRAGMENT = /* glsl */ `
       return;
     }
 
-    // Colors matching fragment shader
     float slope = 1.0 - nGeo.y;
     float hRel = hC - uSeaLevel;
     float h01 = hC / max(uHeightScale, 1e-3);
-    float tempEff = clamp(cl.temp - h01 * 0.55, 0.0, 1.0);
-
     float jitter = (cl.region - 0.5) * 0.8 + (vnoise(xz * 0.045 + uSeedOffset) - 0.5) * 0.6;
     float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
-    float veg = vegetationDensity(cl, h01, slope);
 
-    vec3 hotBand = mix(C_DUNE,
-      mix(C_DRYGRASS, C_JUNGLE, smoothstep(0.45, 0.75, cl.moist)),
-      smoothstep(0.20, 0.50, cl.moist));
-    vec3 midBand = mix(C_DRYGRASS,
-      mix(C_GRASS, C_FOREST, veg * (0.5 + 0.5 * smoothstep(0.35, 0.65, detail))),
-      smoothstep(0.22, 0.52, cl.moist));
-    vec3 coldBand = mix(C_TUNDRA, mix(C_TUNDRA, C_FOREST * 0.85, veg),
-      smoothstep(0.30, 0.60, cl.moist));
-
-    float jt = jitter * 0.06;
-    vec3 lowland = mix(coldBand, midBand, smoothstep(0.20, 0.38, tempEff + jt));
-    lowland = mix(lowland, hotBand, smoothstep(0.55, 0.72, tempEff + jt));
-    lowland = mix(lowland, C_SWAMP, bw.wetland * 0.8);
-
-    float sandBand = (mix(3.0, 9.0, smoothstep(0.30, 0.70, tempEff)) + jitter * 4.0) * (1.0 - bw.wetland * 0.85);
-    vec3 albedo = mix(C_SAND, lowland, smoothstep(sandBand * 0.4, max(sandBand, 0.3), hRel));
-
-    float band = fract(h01 * 14.0 + detail * 0.15);
-    vec3 canyonCol = mix(C_REDROCK, C_REDROCK2, smoothstep(0.25, 0.75, band));
-    albedo = mix(albedo, canyonCol, bw.canyon * smoothstep(1.0, 6.0, hRel));
-
-    float highBlend = smoothstep(0.30, 0.62, h01 + jitter * 0.08);
-    albedo = mix(albedo, C_ROCK_HI, highBlend * 0.65 * (1.0 - bw.desert * 0.7));
-
-    float rockBlend = smoothstep(0.42, 0.72, slope + jitter * 0.06);
-    vec3 slopeRock = mix(mix(C_ROCK, C_ROCK_HI, detail), C_REDROCK, bw.canyon * 0.8);
-    albedo = mix(albedo, slopeRock, rockBlend);
-
-    float snowLine01 = uSnowLine * (0.40 + 1.20 * cl.temp);
-    float flatness = smoothstep(0.62, 0.30, slope);
-    float snow = smoothstep(snowLine01 - 0.03, snowLine01 + 0.05, h01 + jitter * 0.04) * flatness;
-    snow = max(snow, smoothstep(0.10, 0.02, tempEff) * smoothstep(0.50, 0.25, slope));
-    snow *= 1.0 - bw.desert;
-    albedo = mix(albedo, C_SNOW, snow);
-
-    if (hRel < 0.0) {
-      float depth = clamp(-hRel / 55.0, 0.0, 1.0);
-      vec3 floorCol = mix(mix(C_SAND, C_SWAMP, bw.wetland * 0.7) * 0.65, C_DEEP, depth);
-      albedo = mix(albedo, floorCol, 0.92);
-    }
-
-    float micro = mix(0.20, 0.06, max(bw.desert * (1.0 - rockBlend), bw.wetland * 0.8));
-    micro = mix(micro, 0.30, max(rockBlend * 0.6, bw.canyon * 0.4));
-    albedo *= (1.0 - micro * 0.5) + micro * vnoise(xz * 0.9);
+    TerrainColorResult tc = computeTerrainAlbedo(xz, cl, bw, hC, hRel, h01, slope, detail, jitter);
 
     if (uBakeMode == 2) {
       if (uBakeLighting) {
         float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
         float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
         float ao = 1.0 - uAO * (concave * 0.45 + valley * 0.22);
-
-        float diff = max(dot(n, uSunDir), 0.0);
-        vec3 sunCol = vec3(1.00, 0.94, 0.82) * 1.25;
-        vec3 skyAmb = vec3(0.36, 0.46, 0.62) * 0.50 * (n.y * 0.5 + 0.5);
-        vec3 bounce = vec3(0.20, 0.16, 0.11) * 0.25 * (1.0 - n.y * 0.5);
-        vec3 col = albedo * (sunCol * diff + skyAmb + bounce) * ao;
-
-        vec3 viewDir = vec3(0.0, 1.0, 0.0); // Top-down
-        float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 32.0);
-        float shoreSheen = 1.0 - smoothstep(0.0, max(sandBand, 0.5), abs(hRel));
-        col += spec * (snow * 0.30 + shoreSheen * 0.10 + bw.wetland * flatness * 0.15);
-
+        vec3 viewDir = vec3(0.0, 1.0, 0.0);
+        vec3 col = terrainLighting(
+          tc.albedo, n, uSunDir, ao,
+          tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
+          viewDir
+        );
         col = pow(col, vec3(1.0 / 2.2));
         gl_FragColor = vec4(col, 1.0);
       } else {
-        gl_FragColor = vec4(pow(albedo, vec3(1.0 / 2.2)), 1.0);
+        gl_FragColor = vec4(pow(tc.albedo, vec3(1.0 / 2.2)), 1.0);
       }
       return;
     }

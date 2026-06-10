@@ -15,6 +15,8 @@ import {
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
 } from './render/PerformanceSettings.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
+import { PlanetStyleManager } from './style/PlanetStyleManager.js';
+import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -70,6 +72,7 @@ export class Engine {
     this._fps = 0;
     this._clock = new THREE.Clock();
     this._disposed = false;
+    this.planetStyle = new PlanetStyleManager();
 
     // World mode: 'studio' (single board) or 'infinite'
     this.worldMode = 'studio';
@@ -96,6 +99,7 @@ export class Engine {
     this.applyAll({ force: true });
     this._applyPerformance();
     this.controls.reset(this.boardSize);
+    this._syncPlanetStyleToParams();
     this.cb.onStatus('Ready', false);
     this.cb.onParams({ ...this.params });
     if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
@@ -192,10 +196,118 @@ export class Engine {
 
   newProject() {
     this.params = { ...DEFAULT_PARAMS };
+    this.planetStyle.reset();
+    this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
     this.controls.reset(this.boardSize);
     this.cb.onToast('New project');
+  }
+
+  // ---------------------------------------------------------- planet style
+
+  _syncPlanetStyleToParams() {
+    const s = this.planetStyle.getStyle();
+    this.params.planetPreset = s.planetPreset;
+    this.params.palettePreset = s.palettePreset;
+    this.params.noisePreset = s.noisePreset;
+    this.params.planetStyle = s;
+  }
+
+  _notifyPlanetStyle() {
+    this._syncPlanetStyleToParams();
+    this.cb.onParams({ ...this.params });
+    this.planetStyle.applyToUniforms(this.uniforms);
+    this._applyStudioFogFromStyle();
+    this._minimapDirtyAt = performance.now();
+    this.minimap.requestRedraw();
+  }
+
+  _applyStudioFogFromStyle() {
+    if (this.worldMode === 'infinite') return;
+    const tint = this.planetStyle.getFogTint();
+    if (tint) {
+      this.uniforms.uFogColor.value.setRGB(tint[0], tint[1], tint[2]);
+    }
+    const sky = this.planetStyle.getStyle().skyTint;
+    if (sky) {
+      this.scene.background.setRGB(sky[0], sky[1], sky[2]);
+    }
+  }
+
+  applyPlanetPresetByKey(key) {
+    const { style, params } = this.planetStyle.applyPlanetPreset(key);
+    for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    this.params.planetPreset = style.planetPreset;
+    this.params.palettePreset = style.palettePreset;
+    this.params.noisePreset = style.noisePreset;
+    this.params.planetStyle = style;
+    this.cb.onParams({ ...this.params });
+    this._afterParamChange(Object.keys(params).some((k) => REBUILD_KEYS.has(k)));
+    this.planetStyle.applyToUniforms(this.uniforms);
+    this._applyStudioFogFromStyle();
+    this.cb.onToast(`Planet: ${key}`);
+  }
+
+  applyPalettePresetByKey(key) {
+    const style = this.planetStyle.applyPalettePreset(key);
+    this._notifyPlanetStyle();
+    this.cb.onToast(`Palette: ${key}`);
+    return style;
+  }
+
+  applyNoisePresetByKey(key) {
+    const { params } = this.planetStyle.applyNoisePreset(key);
+    this.params.noisePreset = key;
+    for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    this.cb.onParams({ ...this.params });
+    this._afterParamChange(false);
+    this.cb.onToast(`Noise: ${key}`);
+  }
+
+  generatePalette() {
+    this.planetStyle.generatePalette(this.params.seed);
+    this._notifyPlanetStyle();
+    this.cb.onToast('Palette generated');
+  }
+
+  randomizePlanetPreset() {
+    const { style, params } = this.planetStyle.randomizePlanetPreset();
+    for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    this.params.planetPreset = style.planetPreset;
+    this.params.palettePreset = style.palettePreset;
+    this.params.noisePreset = style.noisePreset;
+    this.params.planetStyle = style;
+    this.cb.onParams({ ...this.params });
+    this._afterParamChange(false);
+    this.planetStyle.applyToUniforms(this.uniforms);
+    this._applyStudioFogFromStyle();
+    this.cb.onToast(`Random planet: ${style.planetPreset}`);
+  }
+
+  setPlanetStyleColor(key, rgb) {
+    this.planetStyle.setPaletteColor(key, rgb);
+    this._notifyPlanetStyle();
+  }
+
+  setPlanetStyleTuning(key, value) {
+    this.planetStyle.setStyle({ [key]: value, customEdits: true });
+    this._notifyPlanetStyle();
+  }
+
+  exportPlanetStyle() {
+    downloadPlanetStyleJSON(this.planetStyle.getStyle());
+    this.cb.onToast('Planet style exported');
+  }
+
+  importPlanetStyleJSON(json) {
+    const parsed = parsePlanetStyleJSON(json);
+    if (!parsed || !this.planetStyle.importJSON({ planetStyle: parsed })) {
+      this.cb.onToast('Invalid planet style file');
+      return;
+    }
+    this._notifyPlanetStyle();
+    this.cb.onToast('Planet style imported');
   }
 
   _afterParamChange(needsRebuild) {
@@ -305,6 +417,8 @@ export class Engine {
     this.water.visible = p.seaLevel > 0.5;
 
     this.board.updateBounds(this._maxHeight(), this._skirtDepth());
+    this.planetStyle.applyToUniforms(u);
+    this._applyStudioFogFromStyle();
     this._applyPixelRatio();
   }
 
@@ -647,6 +761,7 @@ export class Engine {
   // ------------------------------------------------------------- save/load
 
   saveSeed() {
+    this._syncPlanetStyleToParams();
     const data = {
       app: 'terrain-studio',
       version: 1,
@@ -669,6 +784,9 @@ export class Engine {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
     }
     this.params = next;
+    if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
+    else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
+    this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
     this.cb.onToast(`Loaded seed ${this.params.seed}`);

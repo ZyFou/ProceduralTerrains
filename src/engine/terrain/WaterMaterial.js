@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, HEIGHT_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
+import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 
 // ============================================================================
 // Sea-level water plane. Shares the terrain uniforms + height function so
@@ -25,6 +26,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${HEIGHT_GLSL}
+${PALETTE_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;   // distance from camera where fade begins
@@ -67,11 +69,10 @@ void main() {
   float nStr = 1.6 * uWaveComplexity;
   vec3 n = normalize(vec3(-(rX - r0) * nStr, 1.0, -(rZ - r0) * nStr));
 
-  // depth-graded color
-  vec3 shallowCol = vec3(0.085, 0.330, 0.360);
-  vec3 deepCol    = vec3(0.010, 0.075, 0.150);
   float dGrade = clamp(depth / 55.0, 0.0, 1.0);
-  vec3 col = mix(shallowCol, deepCol, dGrade);
+  vec3 col = mix(uColShallow, uColDeep, dGrade);
+  col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
+  col *= uPaletteTint;
 
   // lighting: soft diffuse + sun glints
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
@@ -91,7 +92,7 @@ void main() {
     foamNoise = vnoise(xz * 0.22 + vec2(t * 1.4, -t * 1.1));
   }
   float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
-  col = mix(col, vec3(0.82, 0.90, 0.94), foam * 0.75);
+  col = mix(col, uColFoam, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 

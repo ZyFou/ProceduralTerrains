@@ -6,12 +6,14 @@
 
 import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
 import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';
+import { PLANET_PRESETS } from '../engine/style/PlanetPresets.js';
 
 export default function InfiniteHUD({
   stats, onReturn,
   quality, onQualityChange,
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
+  planetPreset, onPlanetPreset, onGeneratePalette, onRandomPlanet,
 }) {
   if (!stats) return null;
 
@@ -91,6 +93,28 @@ export default function InfiniteHUD({
           style={{ '--fill': `${timeOfDay * 100}%` }}
           onChange={(e) => onTimeOfDay(parseFloat(e.target.value))}
         />
+
+        {/* Planet style (compact) */}
+        <div className="fps-setting-row">
+          <span className="fps-setting-label">Planet</span>
+          <select
+            className="fps-select"
+            value={planetPreset ?? 'earth'}
+            onChange={(e) => onPlanetPreset?.(e.target.value)}
+          >
+            {Object.entries(PLANET_PRESETS).map(([key, p]) => (
+              <option key={key} value={key}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="fps-planet-actions">
+          <button type="button" className="fps-mini-btn" onClick={() => onGeneratePalette?.()}>
+            Gen Palette
+          </button>
+          <button type="button" className="fps-mini-btn" onClick={() => onRandomPlanet?.()}>
+            Random
+          </button>
+        </div>
 
         {/* Behind-camera culling toggle */}
         <div className="fps-setting-row">

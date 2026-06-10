@@ -3,6 +3,7 @@ import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import TopBar from './components/TopBar.jsx';
 import LeftPanel from './components/LeftPanel.jsx';
+import PlanetStylePanel from './components/PlanetStylePanel.jsx';
 import { CameraPanel, LodPanel, MinimapPanel } from './components/RightPanels.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
@@ -144,13 +145,30 @@ export default function App() {
         </div>
 
         {!previewMode && !isInfinite && (
-          <LeftPanel
-            params={params}
-            onParam={onParam}
-            onPreset={(key) => engine().applyPresetByKey(key)}
-            onRandomizeSeed={() => engine().randomizeSeed()}
-            onRegenerate={() => engine().regenerate()}
-          />
+          <div id="left-stack">
+            <LeftPanel
+              params={params}
+              onParam={onParam}
+              onPreset={(key) => engine().applyPresetByKey(key)}
+              onRandomizeSeed={() => engine().randomizeSeed()}
+              onRegenerate={() => engine().regenerate()}
+            />
+            <PlanetStylePanel
+              planetStyle={params.planetStyle}
+              planetPreset={params.planetPreset ?? 'earth'}
+              palettePreset={params.palettePreset ?? 'earth'}
+              noisePreset={params.noisePreset ?? 'default'}
+              onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
+              onRandomPlanet={() => engine().randomizePlanetPreset()}
+              onPalettePreset={(key) => engine().applyPalettePresetByKey(key)}
+              onGeneratePalette={() => engine().generatePalette()}
+              onColorChange={(key, rgb) => engine().setPlanetStyleColor(key, rgb)}
+              onTuning={(key, v) => engine().setPlanetStyleTuning(key, v)}
+              onNoisePreset={(key) => engine().applyNoisePresetByKey(key)}
+              onExportStyle={() => engine().exportPlanetStyle()}
+              onImportStyle={(json) => json && engine().importPlanetStyleJSON(json)}
+            />
+          </div>
         )}
 
         <div id="right-stack" style={previewMode || isInfinite ? { display: 'none' } : undefined}>
@@ -185,6 +203,10 @@ export default function App() {
             onTimeOfDay={handleTimeOfDay}
             behindCameraCulling={behindCameraCulling}
             onBehindCameraCulling={handleBehindCameraCulling}
+            planetPreset={params.planetPreset}
+            onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
+            onGeneratePalette={() => engine().generatePalette()}
+            onRandomPlanet={() => engine().randomizePlanetPreset()}
           />
         )}
       </div>
