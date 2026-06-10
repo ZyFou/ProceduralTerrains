@@ -216,9 +216,21 @@ export class Engine {
     this.params.planetStyle = s;
   }
 
+  /** Fresh params object for React — avoids shared nested references. */
+  _paramsSnapshot() {
+    const style = this.planetStyle.getStyle();
+    return {
+      ...this.params,
+      planetPreset: style.planetPreset,
+      palettePreset: style.palettePreset,
+      noisePreset: style.noisePreset,
+      planetStyle: style,
+    };
+  }
+
   _notifyPlanetStyle() {
     this._syncPlanetStyleToParams();
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     this.planetStyle.applyToUniforms(this.uniforms);
     this._applyStudioFogFromStyle();
     this._applyStudioSunFromStyle();

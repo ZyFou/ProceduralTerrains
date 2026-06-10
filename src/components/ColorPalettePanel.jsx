@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { COLOR_PALETTE_PRESETS } from '../engine/style/ColorPalettePresets.js';
 import { PLANET_GEN_TYPES } from '../engine/style/ColorPaletteGenerator.js';
 import { PALETTE_KEYS, colorToHex, parseColor } from '../engine/style/ColorPalette.js';
@@ -63,6 +63,7 @@ function PaletteSwatch({ colorKey, rgb, onChange }) {
       <span className="palette-color-chip" style={{ background: hex }} />
       <span className="palette-color-name">{COLOR_LABELS[colorKey]}</span>
       <input
+        key={hex}
         type="color"
         className="palette-color-input"
         value={hex}
@@ -120,13 +121,17 @@ export default function ColorPalettePanel({
   onImport,
 }) {
   const palette = planetStyle?.palette ?? {};
+  const paletteGenRev = planetStyle?.paletteGenRev ?? 0;
+  const seedInputRef = useRef(null);
   const [genType, setGenType] = useState('random');
   const [genSeed, setGenSeed] = useState(() => String(terrainSeed ?? Date.now()));
   const [openGroups, setOpenGroups] = useState({ water: true, vegetation: true });
 
-  useEffect(() => {
-    if (terrainSeed != null) setGenSeed(String(terrainSeed));
-  }, [terrainSeed]);
+  const readSeed = () => {
+    const raw = seedInputRef.current?.value ?? genSeed;
+    const parsed = parseInt(String(raw).trim(), 10);
+    return Number.isFinite(parsed) ? parsed >>> 0 : Date.now();
+  };
 
   const previewGradient = PALETTE_KEYS
     .map((key) => colorToHex(palette[key] ?? [0.5, 0.5, 0.5]))
@@ -137,13 +142,14 @@ export default function ColorPalettePanel({
   };
 
   const randomizeSeed = () => {
-    setGenSeed(String((Math.random() * 0xFFFFFFFF) >>> 0));
+    const next = (Math.random() * 0xFFFFFFFF) >>> 0;
+    setGenSeed(String(next));
   };
 
   const handleGenerate = () => {
-    const parsed = parseInt(genSeed, 10);
-    const seed = Number.isFinite(parsed) ? parsed >>> 0 : Date.now();
+    const seed = readSeed();
     onGenerate?.({ seed, type: genType });
+    setGenSeed(String((seed + 1) >>> 0));
   };
 
   const handleImport = () => {
@@ -167,7 +173,7 @@ export default function ColorPalettePanel({
   };
 
   return (
-    <div className="palette-block">
+    <div className="palette-block" data-palette-rev={paletteGenRev}>
       {/* Preview strip */}
       <div className="palette-preview-wrap">
         <div className="palette-preview" style={{ background: `linear-gradient(90deg, ${previewGradient})` }} />
@@ -191,6 +197,7 @@ export default function ColorPalettePanel({
           <label>Seed</label>
           <div className="seed-input-wrap">
             <input
+              ref={seedInputRef}
               type="text"
               value={genSeed}
               onChange={(e) => setGenSeed(e.target.value)}

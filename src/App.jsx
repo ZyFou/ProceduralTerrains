@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
+import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
 import TopBar from './components/TopBar.jsx';
 import IconRail from './components/ui/IconRail.jsx';
 import LeftControlPanel from './components/ui/LeftControlPanel.jsx';
@@ -56,7 +57,12 @@ export default function App() {
       minimapBase: minimapBaseRef.current,
       minimapOverlay: minimapOverlayRef.current,
       callbacks: {
-        onParams: setParams,
+        onParams: (next) => {
+          setParams({
+            ...next,
+            planetStyle: next.planetStyle ? clonePlanetStyle(next.planetStyle) : next.planetStyle,
+          });
+        },
         onStatus: (text, busy) => setStatus({ text, busy }),
         onStats: setStats,
         onLod: (counts, count) => { setLodCounts(counts); setChunkCount(count); },

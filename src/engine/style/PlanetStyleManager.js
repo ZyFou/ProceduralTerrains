@@ -1,6 +1,6 @@
 import { clonePalette, PALETTE_KEYS } from './ColorPalette.js';
 import { getPalettePreset } from './ColorPalettePresets.js';
-import { generatePaletteFromTerrainSeed, generateProceduralPlanet } from './ColorPaletteGenerator.js';
+import { generateProceduralPlanet } from './ColorPaletteGenerator.js';
 import { getNoisePreset } from './NoisePresets.js';
 import { getPlanetPreset, PLANET_PRESET_KEYS } from './PlanetPresets.js';
 import { clonePlanetStyle, DEFAULT_PLANET_STYLE } from './PlanetStyleConfig.js';
@@ -101,17 +101,19 @@ export class PlanetStyleManager {
   }
 
   generatePalette(terrainSeed, options = {}) {
-    const { type = 'random', seed } = options;
-    const useSeed = seed ?? terrainSeed ?? Date.now();
-    const result = seed != null
-      ? generateProceduralPlanet(useSeed >>> 0, type)
-      : generatePaletteFromTerrainSeed(useSeed, type);
+    const { type = 'random' } = options;
+    const useSeed = ('seed' in options && Number.isFinite(options.seed))
+      ? (options.seed >>> 0)
+      : ((terrainSeed ?? Date.now()) >>> 0);
+    const result = generateProceduralPlanet(useSeed, type);
     this.style.palette = clonePalette(result.palette);
     this.style.skyAmbient = [...result.skyAmbient];
     this.style.groundBounce = [...result.groundBounce];
     this.style.palettePreset = 'custom';
     this.style.planetPreset = 'custom';
     this.style.customEdits = true;
+    this.style.paletteGenRev = (this.style.paletteGenRev ?? 0) + 1;
+    this.style.lastPaletteSeed = useSeed;
     return { style: this.getStyle(), meta: result };
   }
 
