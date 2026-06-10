@@ -70,7 +70,7 @@ export default function ColorPalettePanel({
         </select>
       </div>
 
-      <button type="button" className="wide-btn primary" onClick={onGenerate}>
+      <button type="button" className="action-btn primary" onClick={onGenerate}>
         Generate Palette
       </button>
 
@@ -97,8 +97,8 @@ export default function ColorPalettePanel({
       ))}
 
       <div className="palette-io">
-        <button type="button" className="wide-btn" onClick={onExport}>Export Palette</button>
-        <button type="button" className="wide-btn" onClick={handleImport}>Import Palette</button>
+        <button type="button" className="action-btn" onClick={onExport}>Export Palette</button>
+        <button type="button" className="action-btn" onClick={handleImport}>Import Palette</button>
       </div>
     </div>
   );

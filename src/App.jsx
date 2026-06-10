@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import TopBar from './components/TopBar.jsx';
-import LeftPanel from './components/LeftPanel.jsx';
-import PlanetStylePanel from './components/PlanetStylePanel.jsx';
-import { CameraPanel, LodPanel, MinimapPanel } from './components/RightPanels.jsx';
+import IconRail from './components/ui/IconRail.jsx';
+import LeftControlPanel from './components/ui/LeftControlPanel.jsx';
+import RightInspectorPanel from './components/ui/RightInspectorPanel.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
@@ -15,10 +15,10 @@ export default function App() {
   const canvasRef = useRef(null);
   const minimapBaseRef = useRef(null);
   const minimapOverlayRef = useRef(null);
+  const leftScrollRef = useRef(null);
   const engineRef = useRef(null);
   const toastTimer = useRef(null);
 
-  // mirrored engine state
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
   const [stats, setStats] = useState({ fps: 0, triangles: 0, drawCalls: 0 });
@@ -28,24 +28,20 @@ export default function App() {
   const [camInfo, setCamInfo] = useState({ angle: '–', distance: '–' });
   const [gpu, setGpu] = useState('–');
 
-  // pure UI state
   const [camMode, setCamMode] = useState('orbit');
   const [helpVisible, setHelpVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [toast, setToast] = useState(null);
+  const [activeSection, setActiveSection] = useState('section-generate');
 
-  // Infinite world mode
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
 
-  // Infinite mode controls
   const [qualityPreset, setQualityPreset] = useState('high');
   const [timeOfDay, setTimeOfDay] = useState(0.38);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
-
-  // Performance settings (mirrored from engine)
   const [perf, setPerf] = useState(null);
 
   const showToast = useCallback((msg) => {
@@ -76,12 +72,35 @@ export default function App() {
     });
     engineRef.current = engine;
     setGpu(engine.gpuName);
-    if (import.meta.env.DEV) window.terrainStudio = engine;  // dev/debug handle
+    if (import.meta.env.DEV) window.terrainStudio = engine;
     return () => engine.dispose();
   }, [showToast]);
 
   const engine = () => engineRef.current;
   const onParam = (key, value) => engine().setParam(key, value);
+
+  const scrollToSection = (sectionId) => {
+    const el = leftScrollRef.current?.querySelector(`[data-section="${sectionId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSection(sectionId);
+    }
+  };
+
+  const planetStyleProps = {
+    planetStyle: params.planetStyle,
+    planetPreset: params.planetPreset ?? 'earth',
+    palettePreset: params.palettePreset ?? 'earth',
+    onPlanetPreset: (key) => engine().applyPlanetPresetByKey(key),
+    onRandomPlanet: () => engine().randomizePlanetPreset(),
+    onPalettePreset: (key) => engine().applyPalettePresetByKey(key),
+    onGeneratePalette: () => engine().generatePalette(),
+    onColorChange: (key, rgb) => engine().setPlanetStyleColor(key, rgb),
+    onTuning: (key, v) => engine().setPlanetStyleTuning(key, v),
+    onNoisePreset: (key) => engine().applyNoisePresetByKey(key),
+    onExportStyle: () => engine().exportPlanetStyle(),
+    onImportStyle: (json) => json && engine().importPlanetStyleJSON(json),
+  };
 
   const toggleWorldMode = () => {
     const next = worldMode === 'studio' ? 'infinite' : 'studio';
@@ -114,6 +133,7 @@ export default function App() {
   const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
   const isInfinite = worldMode === 'infinite';
+  const showStudioUI = !previewMode && !isInfinite;
 
   return (
     <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isInfinite ? 'infinite-mode' : ''}`}>
@@ -134,79 +154,75 @@ export default function App() {
         onToggleWorldMode={toggleWorldMode}
       />
 
-      <div id="main">
-        <canvas id="viewport" ref={canvasRef} />
-        <div id="vignette" />
-
-        <div id="help-card" className={helpVisible && !isInfinite ? '' : 'hidden'}>
-          <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
-          <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
-          <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
-        </div>
-
-        {!previewMode && !isInfinite && (
-          <div id="left-stack">
-            <LeftPanel
-              params={params}
-              onParam={onParam}
-              onPreset={(key) => engine().applyPresetByKey(key)}
-              onRandomizeSeed={() => engine().randomizeSeed()}
-              onRegenerate={() => engine().regenerate()}
-            />
-            <PlanetStylePanel
-              planetStyle={params.planetStyle}
-              planetPreset={params.planetPreset ?? 'earth'}
-              palettePreset={params.palettePreset ?? 'earth'}
-              noisePreset={params.noisePreset ?? 'default'}
-              onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
-              onRandomPlanet={() => engine().randomizePlanetPreset()}
-              onPalettePreset={(key) => engine().applyPalettePresetByKey(key)}
-              onGeneratePalette={() => engine().generatePalette()}
-              onColorChange={(key, rgb) => engine().setPlanetStyleColor(key, rgb)}
-              onTuning={(key, v) => engine().setPlanetStyleTuning(key, v)}
-              onNoisePreset={(key) => engine().applyNoisePresetByKey(key)}
-              onExportStyle={() => engine().exportPlanetStyle()}
-              onImportStyle={(json) => json && engine().importPlanetStyleJSON(json)}
-            />
-          </div>
+      <div id="main" className="app-shell">
+        {showStudioUI && (
+          <IconRail activeId={activeSection} onSelect={scrollToSection} />
         )}
 
-        <div id="right-stack" style={previewMode || isInfinite ? { display: 'none' } : undefined}>
-          <CameraPanel
+        {showStudioUI && (
+          <LeftControlPanel
+            params={params}
+            onParam={onParam}
+            onPreset={(key) => engine().applyPresetByKey(key)}
+            onRandomizeSeed={() => engine().randomizeSeed()}
+            onRegenerate={() => engine().regenerate()}
+            planetStyleProps={planetStyleProps}
+            scrollContainerRef={leftScrollRef}
+            onSectionVisible={setActiveSection}
+          />
+        )}
+
+        <div className="viewport-area">
+          <canvas id="viewport" ref={canvasRef} />
+
+          <div id="help-card" className={helpVisible && !isInfinite ? '' : 'hidden'}>
+            <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
+            <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
+            <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
+          </div>
+
+          {showStudioUI && (
+            <BottomToolbar
+              camMode={camMode}
+              onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
+              onAngled={() => { engine().setCameraView('angled'); setCamMode('orbit'); }}
+              onResetCamera={() => engine().resetView()}
+            />
+          )}
+
+          {isInfinite && (
+            <InfiniteHUD
+              stats={infiniteStats}
+              onReturn={toggleWorldMode}
+              quality={qualityPreset}
+              onQualityChange={handleQualityChange}
+              timeOfDay={timeOfDay}
+              onTimeOfDay={handleTimeOfDay}
+              behindCameraCulling={behindCameraCulling}
+              onBehindCameraCulling={handleBehindCameraCulling}
+              planetPreset={params.planetPreset}
+              onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
+              onGeneratePalette={() => engine().generatePalette()}
+              onRandomPlanet={() => engine().randomizePlanetPreset()}
+            />
+          )}
+        </div>
+
+        {showStudioUI && (
+          <RightInspectorPanel
+            params={params}
             camInfo={camInfo}
             camMode={camMode}
             onMode={(mode) => { engine().setCameraMode(mode); setCamMode(mode); }}
             onFov={(fov) => engine().setFov(fov)}
             onFocusCenter={() => engine().focusCenter()}
-          />
-          <LodPanel lodCounts={lodCounts} chunkCount={chunkCount} />
-          <MinimapPanel boardSize={boardSize} baseRef={minimapBaseRef} overlayRef={minimapOverlayRef} />
-        </div>
-
-        {!previewMode && !isInfinite && (
-          <BottomToolbar
-            camMode={camMode}
-            onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
-            onAngled={() => { engine().setCameraView('angled'); setCamMode('orbit'); }}
-            onResetCamera={() => engine().resetView()}
-          />
-        )}
-
-        {/* Infinite World HUD */}
-        {isInfinite && (
-          <InfiniteHUD
-            stats={infiniteStats}
-            onReturn={toggleWorldMode}
-            quality={qualityPreset}
-            onQualityChange={handleQualityChange}
-            timeOfDay={timeOfDay}
-            onTimeOfDay={handleTimeOfDay}
-            behindCameraCulling={behindCameraCulling}
-            onBehindCameraCulling={handleBehindCameraCulling}
-            planetPreset={params.planetPreset}
-            onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
-            onGeneratePalette={() => engine().generatePalette()}
-            onRandomPlanet={() => engine().randomizePlanetPreset()}
+            lodCounts={lodCounts}
+            chunkCount={chunkCount}
+            boardSize={boardSize}
+            baseRef={minimapBaseRef}
+            overlayRef={minimapOverlayRef}
+            stats={stats}
+            gpu={gpu}
           />
         )}
       </div>

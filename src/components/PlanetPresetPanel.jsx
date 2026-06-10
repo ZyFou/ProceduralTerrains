@@ -12,7 +12,7 @@ export default function PlanetPresetPanel({ planetPreset, onSelect, onRandomize 
           {planetPreset === 'custom' && <option value="custom">Custom</option>}
         </select>
       </div>
-      <button type="button" className="wide-btn" onClick={onRandomize}>
+      <button type="button" className="action-btn" onClick={onRandomize}>
         Random Planet
       </button>
     </div>

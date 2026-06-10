@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
 
-// Reusable editor controls. They keep the exact CSS classes from the original
-// stylesheet, so styles.css works unchanged.
-
 export function fmt(def, v) {
   const digits = def.digits ?? 0;
   return Number(v).toFixed(digits) + (def.unit ? ` ${def.unit}` : '');
@@ -33,15 +30,19 @@ export function SliderCtl({ def, value, onChange }) {
           onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
         />
       </div>
-      <input
-        type="range"
-        min={def.min}
-        max={def.max}
-        step={def.step}
-        value={value}
-        style={{ '--fill': `${fill}%` }}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-      />
+      <div className="slider-track-wrap">
+        <div className="slider-track-bg" />
+        <div className="slider-track-fill" style={{ width: `${fill}%` }} />
+        <input
+          type="range"
+          className="slider-input"
+          min={def.min}
+          max={def.max}
+          step={def.step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+        />
+      </div>
     </div>
   );
 }
@@ -81,7 +82,7 @@ export function Panel({ id, title, className = '', children }) {
     <section className={`panel ${className}`} id={id}>
       <div className="panel-header">
         <span>{title}</span>
-        <button className="collapse-btn" onClick={() => setOpen(!open)}>
+        <button type="button" className="collapse-btn" onClick={() => setOpen(!open)}>
           {open ? '‹' : '›'}
         </button>
       </div>
