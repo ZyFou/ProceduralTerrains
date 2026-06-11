@@ -21,6 +21,12 @@ export default function RightInspectorPanel({
   overlayRef,
   stats,
   gpu,
+  visibleChunks,
+  culledChunks,
+  cullingEnabled,
+  behindCameraCulling,
+  onCullingEnabled,
+  onBehindCameraCulling,
 }) {
   const [tooltip, setTooltip] = useState(null);
 
@@ -84,7 +90,17 @@ export default function RightInspectorPanel({
           onFocusCenter={onFocusCenter}
           embedded
         />
-        <LodPanel lodCounts={lodCounts} chunkCount={chunkCount} embedded />
+        <LodPanel
+          lodCounts={lodCounts}
+          chunkCount={chunkCount}
+          visibleChunks={visibleChunks}
+          culledChunks={culledChunks}
+          cullingEnabled={cullingEnabled}
+          behindCameraCulling={behindCameraCulling}
+          onCullingEnabled={onCullingEnabled}
+          onBehindCameraCulling={onBehindCameraCulling}
+          embedded
+        />
         <PerformancePanel stats={stats} gpu={gpu} />
         <PlanetSummaryCard params={params} />
       </div>

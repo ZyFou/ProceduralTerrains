@@ -56,7 +56,8 @@ export function cullChunks(chunks, camera, chunkSize, maxHeight, behindCameraCul
   let visibleCount = 0;
   let culledCount = 0;
 
-  for (const chunk of chunks.values()) {
+  const values = chunks.values ? chunks.values() : chunks;
+  for (const chunk of values) {
     const mesh = chunk.mesh;
 
     // Build a world-space bounding sphere for this chunk

@@ -916,6 +916,7 @@ export class Engine {
     // Studio board: segment counts + master distance scale
     this.board.setLodSegments(segments);
     this.board.setLodDistanceScale(s.lodDistanceScale);
+    this.board.cullingAggressiveness = s.cullingAggressiveness;
 
     if (this.infiniteWorld) {
       this.infiniteWorld.setViewRadius(s.viewRadius);
@@ -979,12 +980,23 @@ export class Engine {
   }
 
   /**
-   * Toggle behind-camera culling for infinite mode.
+   * Toggle frustum culling globally.
+   */
+  setCullingEnabled(enabled) {
+    this.board.cullingEnabled = enabled;
+    if (this.infiniteWorld) {
+      this.infiniteWorld.cullingEnabled = enabled;
+    }
+  }
+
+  /**
+   * Toggle behind-camera culling globally.
    */
   setBehindCameraCulling(enabled) {
     if (this.infiniteWorld) {
       this.infiniteWorld.behindCameraCulling = enabled;
     }
+    this.board.behindCameraCulling = enabled;
   }
 
   /**
@@ -1194,11 +1206,19 @@ export class Engine {
       this.controls.update(dt);
     }
 
+    // Cull invisible chunks based on current camera frustum and facing
+    this.board.cull(this.camera);
+
     // LOD selection: throttled, distance-based, internal to the fixed board
     if (now - this._lastLodUpdate > 150) {
       this._lastLodUpdate = now;
       this.board.updateLOD(this.camera.position);
-      this.cb.onLod([...this.board.lodCounts], this.params.chunkCount);
+      this.cb.onLod(
+        [...this.board.lodCounts],
+        this.params.chunkCount,
+        this.board.visibleChunkCount,
+        this.board.culledChunkCount
+      );
     }
 
     this.underwater.render(this.renderer, this.scene, this.camera);

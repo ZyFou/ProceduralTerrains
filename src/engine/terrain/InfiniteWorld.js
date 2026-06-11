@@ -42,6 +42,7 @@ export class InfiniteWorld {
     this.lodSegments = opts.lodSegments ? [...opts.lodSegments] : [...LOD_RESOLUTIONS];
 
     // Culling options
+    this.cullingEnabled = true;
     this.behindCameraCulling = true;
     this.cullingAggressiveness = 1.0;
 
@@ -284,13 +285,25 @@ export class InfiniteWorld {
 
     // Cull invisible chunks (frustum + behind-camera)
     if (camera) {
-      const result = cullChunks(
-        this.chunks, camera, this.chunkSize,
-        this.maxHeight, this.behindCameraCulling,
-        this.cullingAggressiveness
-      );
-      this.visibleChunkCount = result.visibleCount;
-      this.culledChunkCount = result.culledCount;
+      if (!this.cullingEnabled) {
+        let visibleCount = 0;
+        for (const chunk of this.chunks.values()) {
+          if (!chunk.mesh.visible) {
+            chunk.mesh.visible = true;
+          }
+          visibleCount++;
+        }
+        this.visibleChunkCount = visibleCount;
+        this.culledChunkCount = 0;
+      } else {
+        const result = cullChunks(
+          this.chunks, camera, this.chunkSize,
+          this.maxHeight, this.behindCameraCulling,
+          this.cullingAggressiveness
+        );
+        this.visibleChunkCount = result.visibleCount;
+        this.culledChunkCount = result.culledCount;
+      }
     }
   }
 

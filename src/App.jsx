@@ -45,7 +45,10 @@ export default function App() {
 
   const [qualityPreset, setQualityPreset] = useState('high');
   const [timeOfDay, setTimeOfDay] = useState(0.38);
+  const [cullingEnabled, setCullingEnabled] = useState(true);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
+  const [visibleChunks, setVisibleChunks] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkCount);
+  const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
 
   const showToast = useCallback((msg) => {
@@ -68,7 +71,12 @@ export default function App() {
         },
         onStatus: (text, busy) => setStatus({ text, busy }),
         onStats: setStats,
-        onLod: (counts, count) => { setLodCounts(counts); setChunkCount(count); },
+        onLod: (counts, count, visible, culled) => {
+          setLodCounts(counts);
+          setChunkCount(count);
+          setVisibleChunks(visible !== undefined ? visible : count * count);
+          setCulledChunks(culled !== undefined ? culled : 0);
+        },
         onCamera: setCamInfo,
         onBoard: setBoardSize,
         onToast: showToast,
@@ -81,10 +89,13 @@ export default function App() {
         onPerfChange: setPerf,
       },
     });
+    engine.setCullingEnabled(cullingEnabled);
+    engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
     setGpu(engine.gpuName);
     if (import.meta.env.DEV) window.terrainStudio = engine;
     return () => engine.dispose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast]);
 
   const engine = () => engineRef.current;
@@ -143,6 +154,11 @@ export default function App() {
   const handleBehindCameraCulling = (enabled) => {
     engine().setBehindCameraCulling(enabled);
     setBehindCameraCulling(enabled);
+  };
+
+  const handleCullingEnabled = (enabled) => {
+    engine().setCullingEnabled(enabled);
+    setCullingEnabled(enabled);
   };
 
   const handlePerfPreset = (key) => engine().setPerfPreset(key);
@@ -253,6 +269,12 @@ export default function App() {
             overlayRef={minimapOverlayRef}
             stats={stats}
             gpu={gpu}
+            visibleChunks={visibleChunks}
+            culledChunks={culledChunks}
+            cullingEnabled={cullingEnabled}
+            behindCameraCulling={behindCameraCulling}
+            onCullingEnabled={handleCullingEnabled}
+            onBehindCameraCulling={handleBehindCameraCulling}
           />
         )}
       </div>

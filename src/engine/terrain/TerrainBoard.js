@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
+import { cullChunks } from './InfiniteTerrainCulling.js';
 
 // ============================================================================
 // ONE fixed terrain board. The board never moves, never streams, and is
@@ -36,6 +37,12 @@ export class TerrainBoard {
     // Gradual LOD geometry rebuild (one level per updateLOD call)
     this._lodRebuildQueue = [];
     this._targetSegments = null;
+
+    this.cullingEnabled = true;
+    this.behindCameraCulling = true;
+    this.cullingAggressiveness = 1.0;
+    this.visibleChunkCount = 0;
+    this.culledChunkCount = 0;
 
     this._tmp = new THREE.Vector3();
   }
@@ -150,6 +157,33 @@ export class TerrainBoard {
       counts[lod]++;
     }
     this.lodCounts = counts;
+  }
+
+  // Cull invisible chunks based on the camera frustum and facing direction.
+  cull(camera) {
+    if (!this.cullingEnabled) {
+      let visibleCount = 0;
+      for (const chunk of this.chunks) {
+        if (!chunk.mesh.visible) {
+          chunk.mesh.visible = true;
+        }
+        visibleCount++;
+      }
+      this.visibleChunkCount = visibleCount;
+      this.culledChunkCount = 0;
+      return;
+    }
+
+    const result = cullChunks(
+      this.chunks,
+      camera,
+      this.chunkSize,
+      this._maxHeight,
+      this.behindCameraCulling,
+      this.cullingAggressiveness
+    );
+    this.visibleChunkCount = result.visibleCount;
+    this.culledChunkCount = result.culledCount;
   }
 
   dispose() {

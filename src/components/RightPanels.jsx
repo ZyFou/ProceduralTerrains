@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import ControlSection from './ui/ControlSection.jsx';
+import { ToggleRow } from './controls.jsx';
 
 const LOD_LEVELS = [
   { name: 'LOD 0 High', color: '#e5484d' },
@@ -169,7 +170,17 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
   );
 }
 
-export function LodPanel({ lodCounts, chunkCount, embedded }) {
+export function LodPanel({
+  lodCounts,
+  chunkCount,
+  visibleChunks = 0,
+  culledChunks = 0,
+  cullingEnabled = true,
+  behindCameraCulling = true,
+  onCullingEnabled,
+  onBehindCameraCulling,
+  embedded
+}) {
   const total = lodCounts.reduce((a, b) => a + b, 0);
 
   const body = (
@@ -181,16 +192,28 @@ export function LodPanel({ lodCounts, chunkCount, embedded }) {
           <span className="lod-count">{lodLabel(lodCounts[i])}</span>
         </div>
       ))}
-      <div className="stat-row" data-tooltip="Number of distinct draw commands sent to the GPU (lower is better for performance)">
+      <div className="stat-row" data-tooltip="Number of chunks currently visible inside the camera view">
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
-              <path d="M3 13.5h10M4 10.5V5a3 3 0 0 1 6 0v5.5H4z" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.2" />
+              <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Draw Calls</span>
+          <span className="setting-label">Visible Chunks</span>
         </div>
-        <span className="stat-value stat-mono">{total}</span>
+        <span className="stat-value stat-mono">{visibleChunks} / {total}</span>
+      </div>
+      <div className="stat-row" data-tooltip="Number of chunks culled (hidden) because they are outside the camera view or behind the camera">
+        <div className="label-with-icon">
+          <span className="setting-icon">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M2.5 13.5l11-11M1.5 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          </span>
+          <span className="setting-label">Culled Chunks</span>
+        </div>
+        <span className={`stat-value stat-mono${culledChunks > 0 ? ' fps-info-culled' : ''}`}>{culledChunks}</span>
       </div>
       <div className="stat-row" data-tooltip="Current size of the rendered chunk grid">
         <div className="label-with-icon">
@@ -199,7 +222,7 @@ export function LodPanel({ lodCounts, chunkCount, embedded }) {
               <path d="M2 2h4v4H2zM10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4z" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Active LOD</span>
+          <span className="setting-label">Active Grid</span>
         </div>
         <span className="stat-value stat-mono">{chunkCount} × {chunkCount}</span>
       </div>
@@ -212,6 +235,20 @@ export function LodPanel({ lodCounts, chunkCount, embedded }) {
             <span className="lod-grid-label">({chunkCount} × {chunkCount})</span>
           </div>
         </div>
+      </div>
+      <div className="culling-controls" style={{ marginTop: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <ToggleRow
+          label="Frustum Culling"
+          value={cullingEnabled}
+          onChange={onCullingEnabled}
+          info="Hide chunks outside the camera's field of view to save performance"
+        />
+        <ToggleRow
+          label="Back Culling"
+          value={behindCameraCulling}
+          onChange={onBehindCameraCulling}
+          info="Hide chunks behind the camera view to boost performance"
+        />
       </div>
     </>
   );
