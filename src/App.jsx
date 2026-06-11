@@ -11,6 +11,7 @@ import StatusBar from './components/StatusBar.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
 import ExportModal from './components/ExportModal.jsx';
+import MinimapOverlay from './components/MinimapOverlay.jsx';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -187,6 +188,14 @@ export default function App() {
             <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
             <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
           </div>
+
+          {showStudioUI && (
+            <MinimapOverlay
+              boardSize={boardSize}
+              baseRef={minimapBaseRef}
+              overlayRef={minimapOverlayRef}
+            />
+          )}
 
           {showStudioUI && (
             <BottomToolbar

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CameraPanel, LodPanel, MinimapPanel } from '../RightPanels.jsx';
+import { CameraPanel, LodPanel } from '../RightPanels.jsx';
 import PerformancePanel from './PerformancePanel.jsx';
 import PlanetSummaryCard from './PlanetSummaryCard.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
@@ -75,6 +75,7 @@ export default function RightInspectorPanel({
           onParam={onParam}
           onTuning={onStyleTuning}
         />
+        <WorldPanel params={params} onParam={onParam} />
         <CameraPanel
           camInfo={camInfo}
           camMode={camMode}
@@ -84,9 +85,7 @@ export default function RightInspectorPanel({
           embedded
         />
         <LodPanel lodCounts={lodCounts} chunkCount={chunkCount} embedded />
-        <MinimapPanel boardSize={boardSize} baseRef={baseRef} overlayRef={overlayRef} embedded />
         <PerformancePanel stats={stats} gpu={gpu} />
-        <WorldPanel params={params} onParam={onParam} />
         <PlanetSummaryCard params={params} />
       </div>
 

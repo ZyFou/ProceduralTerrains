@@ -413,6 +413,25 @@ export default function LeftControlPanel({
         </ControlSection>
 
         <ControlSection
+          id="section-noise"
+          title="NOISE"
+          defaultOpen
+          icon={<SectionIcon><svg viewBox="0 0 16 16" fill="none"><path d="M1 10c2-3 3-3 5 0s3 3 5 0 3-3 5 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg></SectionIcon>}
+        >
+          <SelectRow
+            label="Noise Preset"
+            value={params.noisePreset ?? 'default'}
+            options={Object.entries(NOISE_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
+            onChange={planetStyleProps.onNoisePreset}
+            info="Select a baseline noise shape configuration (e.g. Dunes, Alien, Rugged)"
+            icon={<svg viewBox="0 0 16 16" fill="none"><path d="M1 9c2.5-3 3.5-3 5 0s2.5 3 5 0 2.5-3 4 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>}
+          />
+          {NOISE_SLIDERS.map((def) => (
+            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
+          ))}
+        </ControlSection>
+
+        <ControlSection
           id="section-planet-style"
           title="PLANET STYLE"
           defaultOpen
@@ -456,25 +475,6 @@ export default function LeftControlPanel({
                 onChange={(e) => planetStyleProps.onColorChange(key, parseColor(e.target.value))}
               />
             </div>
-          ))}
-        </ControlSection>
-
-        <ControlSection
-          id="section-noise"
-          title="NOISE"
-          defaultOpen
-          icon={<SectionIcon><svg viewBox="0 0 16 16" fill="none"><path d="M1 10c2-3 3-3 5 0s3 3 5 0 3-3 5 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg></SectionIcon>}
-        >
-          <SelectRow
-            label="Noise Preset"
-            value={params.noisePreset ?? 'default'}
-            options={Object.entries(NOISE_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
-            onChange={planetStyleProps.onNoisePreset}
-            info="Select a baseline noise shape configuration (e.g. Dunes, Alien, Rugged)"
-            icon={<svg viewBox="0 0 16 16" fill="none"><path d="M1 9c2.5-3 3.5-3 5 0s2.5 3 5 0 2.5-3 4 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>}
-          />
-          {NOISE_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} />
           ))}
         </ControlSection>
 

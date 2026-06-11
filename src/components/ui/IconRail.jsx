@@ -1,9 +1,9 @@
 const SECTIONS = [
   { id: 'section-generate', label: 'Generate', title: 'Generate' },
   { id: 'section-terrain', label: 'Terrain', title: 'Height / Terrain' },
+  { id: 'section-noise', label: 'Noise', title: 'Noise' },
   { id: 'section-planet-style', label: 'Style', title: 'Planet Style' },
   { id: 'section-water', label: 'Water', title: 'Water' },
-  { id: 'section-noise', label: 'Noise', title: 'Noise' },
   { id: 'section-materials', label: 'Biomes', title: 'Materials / Biomes' },
 ];
 
