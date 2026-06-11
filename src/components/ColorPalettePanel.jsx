@@ -52,8 +52,36 @@ const COLOR_LABELS = {
 };
 
 const TUNING_SCHEMA = [
-  { key: 'paletteSaturation', label: 'Saturation', min: 0, max: 2, step: 0.05, digits: 2 },
-  { key: 'paletteContrast', label: 'Contrast', min: 0.5, max: 1.8, step: 0.05, digits: 2 },
+  {
+    key: 'paletteSaturation',
+    label: 'Saturation',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    digits: 2,
+    info: 'Increase or decrease color saturation across all biomes',
+    icon: (
+      <svg viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+        <path d="M8 2v12A6 6 0 0 0 8 2" fill="currentColor" />
+      </svg>
+    )
+  },
+  {
+    key: 'paletteContrast',
+    label: 'Contrast',
+    min: 0.5,
+    max: 1.8,
+    step: 0.05,
+    digits: 2,
+    info: 'Adjust contrast between color transitions',
+    icon: (
+      <svg viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+        <path d="M8 2c-3.3 0-6 2.7-6 6s2.7 6 6 6V2" fill="currentColor" />
+      </svg>
+    )
+  },
 ];
 
 function PaletteSwatch({ colorKey, rgb, onChange }) {
@@ -186,7 +214,21 @@ export default function ColorPalettePanel({
           <span className="palette-generator-title">Procedural Generator</span>
         </div>
         <div className="row">
-          <label>Planet Type</label>
+          <div className="label-with-icon" data-tooltip="The style guidelines used by the procedural color generator (e.g. Desert, Lush, Toxic)">
+            <span className="setting-icon">
+              <svg viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2" />
+                <ellipse cx="8" cy="8" rx="2.5" ry="5.5" stroke="currentColor" strokeWidth="0.9" />
+              </svg>
+            </span>
+            <span className="setting-label">Color Theme</span>
+            <span className="info-icon-trigger">
+              <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          </div>
           <select value={genType} onChange={(e) => setGenType(e.target.value)}>
             {PLANET_GEN_TYPES.map(({ key, label }) => (
               <option key={key} value={key}>{label}</option>
@@ -194,7 +236,21 @@ export default function ColorPalettePanel({
           </select>
         </div>
         <div className="seed-row">
-          <label>Seed</label>
+          <div className="label-with-icon" data-tooltip="Input seed value for unique procedural color generation variations">
+            <span className="setting-icon">
+              <svg viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="3" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            </span>
+            <span className="setting-label">Color Seed</span>
+            <span className="info-icon-trigger">
+              <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          </div>
           <div className="seed-input-wrap">
             <input
               ref={seedInputRef}
@@ -215,18 +271,34 @@ export default function ColorPalettePanel({
             </button>
           </div>
         </div>
-        <button type="button" className="action-btn primary palette-generate-btn" onClick={handleGenerate}>
+        <button type="button" className="action-btn primary palette-generate-btn" onClick={handleGenerate} data-tooltip="Procedurally create a new color scheme for all height bands based on the seed and theme">
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" />
           </svg>
-          Generate Planet
+          Generate Custom Palette
         </button>
       </div>
 
       {/* Preset selector */}
       <div className="row palette-preset-row">
-        <label>Preset</label>
+        <div className="label-with-icon" data-tooltip="Select from pre-defined artist-designed color schemes">
+          <span className="setting-icon">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M8 2a6 6 0 1 0 6 6c0-.8-.7-1.5-1.5-1.5h-1a1.5 1.5 0 0 1-1.5-1.5v-1A1.5 1.5 0 0 0 8 2z" stroke="currentColor" strokeWidth="1.2" />
+              <circle cx="5.5" cy="5.5" r="1.1" fill="currentColor" />
+              <circle cx="5.5" cy="9.5" r="1.1" fill="currentColor" />
+              <circle cx="9.5" cy="9.5" r="1.1" fill="currentColor" />
+            </svg>
+          </span>
+          <span className="setting-label">Color Palette Preset</span>
+          <span className="info-icon-trigger">
+            <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </span>
+        </div>
         <select value={palettePreset} onChange={(e) => onPalettePreset(e.target.value)}>
           {Object.entries(COLOR_PALETTE_PRESETS).map(([key, p]) => (
             <option key={key} value={key}>{p.label}</option>
@@ -263,14 +335,14 @@ export default function ColorPalettePanel({
 
       {/* Import / Export */}
       <div className="palette-io">
-        <button type="button" className="action-btn" onClick={onExport}>
+        <button type="button" className="action-btn" onClick={onExport} data-tooltip="Save the current custom planet styling to a JSON file">
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M3 13h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
           </svg>
           Export
         </button>
-        <button type="button" className="action-btn" onClick={handleImport}>
+        <button type="button" className="action-btn" onClick={handleImport} data-tooltip="Load a planet styling configuration from a JSON file">
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 14V6M5 9l3-3 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M3 3h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />

@@ -5,7 +5,7 @@ export function fmt(def, v) {
   return Number(v).toFixed(digits) + (def.unit ? ` ${def.unit}` : '');
 }
 
-export function SliderCtl({ def, value, onChange }) {
+export function SliderCtl({ def, value, onChange, icon, info }) {
   const [text, setText] = useState(fmt(def, value));
   useEffect(() => { setText(fmt(def, value)); }, [value, def]);
 
@@ -16,11 +16,24 @@ export function SliderCtl({ def, value, onChange }) {
   };
 
   const fill = ((value - def.min) / (def.max - def.min)) * 100;
+  const tooltipText = info ?? def.info;
+  const itemIcon = icon ?? def.icon;
 
   return (
     <div className="ctl">
       <div className="ctl-top">
-        <label>{def.label}</label>
+        <div className="label-with-icon" data-tooltip={tooltipText}>
+          {itemIcon && <span className="setting-icon">{itemIcon}</span>}
+          <span className="setting-label">{def.label}</span>
+          {tooltipText && (
+            <span className="info-icon-trigger">
+              <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          )}
+        </div>
         <input
           className="ctl-val"
           type="text"
@@ -47,10 +60,21 @@ export function SliderCtl({ def, value, onChange }) {
   );
 }
 
-export function ToggleRow({ label, value, onChange }) {
+export function ToggleRow({ label, value, onChange, icon, info }) {
   return (
     <div className="toggle-row">
-      <label>{label}</label>
+      <div className="label-with-icon" data-tooltip={info}>
+        {icon && <span className="setting-icon">{icon}</span>}
+        <span className="setting-label">{label}</span>
+        {info && (
+          <span className="info-icon-trigger">
+            <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </span>
+        )}
+      </div>
       <button
         type="button"
         className={`toggle${value ? ' on' : ''}`}
@@ -61,10 +85,21 @@ export function ToggleRow({ label, value, onChange }) {
   );
 }
 
-export function SelectRow({ label, value, options, format, onChange }) {
+export function SelectRow({ label, value, options, format, onChange, icon, info }) {
   return (
     <div className="row">
-      <label>{label}</label>
+      <div className="label-with-icon" data-tooltip={info}>
+        {icon && <span className="setting-icon">{icon}</span>}
+        <span className="setting-label">{label}</span>
+        {info && (
+          <span className="info-icon-trigger">
+            <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </span>
+        )}
+      </div>
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => (
           <option key={String(opt.value ?? opt)} value={opt.value ?? opt}>

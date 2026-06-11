@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { CameraPanel, LodPanel, MinimapPanel } from '../RightPanels.jsx';
 import PerformancePanel from './PerformancePanel.jsx';
 import PlanetSummaryCard from './PlanetSummaryCard.jsx';
@@ -21,6 +22,50 @@ export default function RightInspectorPanel({
   stats,
   gpu,
 }) {
+  const [tooltip, setTooltip] = useState(null);
+
+  useEffect(() => {
+    const handleMouseOver = (e) => {
+      const target = e.target.closest('[data-tooltip]');
+      if (target) {
+        const text = target.getAttribute('data-tooltip');
+        if (text) {
+          const rect = target.getBoundingClientRect();
+          setTooltip({ text, rect });
+        }
+      }
+    };
+
+    const handleMouseOut = (e) => {
+      const target = e.target.closest('[data-tooltip]');
+      if (target) {
+        setTooltip(null);
+      }
+    };
+
+    const handleScroll = () => {
+      setTooltip(null);
+    };
+
+    document.addEventListener('mouseover', handleMouseOver);
+    document.addEventListener('mouseout', handleMouseOut);
+    window.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      document.removeEventListener('mouseover', handleMouseOver);
+      document.removeEventListener('mouseout', handleMouseOut);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const popLeft = tooltip && (tooltip.rect.left > window.innerWidth / 2);
+  const tooltipStyle = tooltip ? {
+    position: 'fixed',
+    top: tooltip.rect.top + tooltip.rect.height / 2,
+    left: popLeft ? tooltip.rect.left - 8 : tooltip.rect.left + tooltip.rect.width + 8,
+    transform: popLeft ? 'translate(-100%, -50%)' : 'translate(0, -50%)',
+  } : null;
+
   return (
     <aside className="right-inspector-panel">
       <div className="right-inspector-scroll">
@@ -44,6 +89,22 @@ export default function RightInspectorPanel({
         <WorldPanel params={params} onParam={onParam} />
         <PlanetSummaryCard params={params} />
       </div>
+
+      {tooltip && (
+        <div className="global-tooltip" style={tooltipStyle}>
+          {popLeft ? (
+            <>
+              <div className="global-tooltip-content">{tooltip.text}</div>
+              <div className="global-tooltip-arrow right" />
+            </>
+          ) : (
+            <>
+              <div className="global-tooltip-arrow left" />
+              <div className="global-tooltip-content">{tooltip.text}</div>
+            </>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

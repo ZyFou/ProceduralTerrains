@@ -1568,3 +1568,87 @@ body {
   .right-inspector-scroll { padding: 8px; }
   .left-control-scroll { padding: 8px; }
 }
+
+/* ============ SETTING ICONS & TOOLTIPS ============ */
+.label-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: help;
+  user-select: none;
+}
+.label-with-icon:hover {
+  color: var(--text-main);
+}
+.setting-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.setting-icon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+.setting-label {
+  font-weight: 500;
+}
+.info-icon-trigger {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  opacity: 0.6;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.label-with-icon:hover .info-icon-trigger {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* Global Fixed Viewport Tooltip */
+.global-tooltip {
+  pointer-events: none;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.45));
+  animation: tooltip-fade-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tooltip-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.global-tooltip-content {
+  background: rgba(18, 22, 31, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--accent);
+  color: var(--text-main);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.45;
+  max-width: 220px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  font-family: var(--font);
+}
+
+.global-tooltip-arrow {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.global-tooltip-arrow.right {
+  border-left: 6px solid var(--accent);
+  margin-left: -1px;
+}
+.global-tooltip-arrow.left {
+  border-right: 6px solid var(--accent);
+  margin-right: -1px;
+}
