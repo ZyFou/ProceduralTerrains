@@ -54,7 +54,7 @@ export default function PaintPanel({ paintState, onSetting, onClear, onExit }) {
         <SliderCtl def={defs.brushSize} value={state.brushSize ?? 90} onChange={set('brushSize')} />
         <SliderCtl def={defs.strength} value={state.strength ?? 0.35} onChange={set('strength')} />
         <SliderCtl def={defs.falloff} value={state.falloff ?? 0.75} onChange={set('falloff')} />
-        <p className="section-hint">Hold <b>Shift</b> and scroll over the viewport to resize the brush without zooming the page.</p>
+        <p className="section-hint">Hold <b>Shift</b> and scroll to resize the brush. Right-click drag still orbits the Studio camera.</p>
       </div>
 
       <div className="paint-section">

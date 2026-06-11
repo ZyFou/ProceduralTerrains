@@ -116,25 +116,23 @@ export class PaintLayerManager {
           const desiredOffset = targetHeight - base;
           nextOffset = currentOffset + (desiredOffset - currentOffset) * alpha;
         } else if (tool === 'smooth') {
+          // Keep smoothing responsive by blurring the editable height-offset
+          // layer directly. Sampling procedural noise for every neighbor in a
+          // large brush can require tens of thousands of CPU FBM evaluations
+          // per stamp, which causes visible stalls. The procedural base remains
+          // intact; this smooths the non-destructive override layer.
+          const k = Math.max(1, Math.round(pixelRadius * 0.08));
           let sum = 0;
           let count = 0;
-          for (let oy = -2; oy <= 2; oy++) {
-            for (let ox = -2; ox <= 2; ox++) {
-              const sx = clamp(px + ox, 0, this.resolution - 1);
-              const sy = clamp(py + oy, 0, this.resolution - 1);
-              const ni = (sy * this.resolution + sx) * 4;
-              const nOffset = (this.heightData[ni] / 255 - 0.5) * 2 * this.heightRange;
-              const wx = (sx / (this.resolution - 1) - 0.5) * this.boardSize;
-              const wz = (sy / (this.resolution - 1) - 0.5) * this.boardSize;
-              sum += (baseHeightAt ? baseHeightAt(wx, wz) : 0) + nOffset;
+          for (let oy = -1; oy <= 1; oy++) {
+            for (let ox = -1; ox <= 1; ox++) {
+              const sx = clamp(px + ox * k, 0, this.resolution - 1);
+              const sy = clamp(py + oy * k, 0, this.resolution - 1);
+              sum += (this.heightData[(sy * this.resolution + sx) * 4] / 255 - 0.5) * 2 * this.heightRange;
               count++;
             }
           }
-          const wx = (px / (this.resolution - 1) - 0.5) * this.boardSize;
-          const wz = (py / (this.resolution - 1) - 0.5) * this.boardSize;
-          const base = baseHeightAt ? baseHeightAt(wx, wz) : 0;
-          const desiredOffset = sum / count - base;
-          nextOffset = currentOffset + (desiredOffset - currentOffset) * alpha;
+          nextOffset = currentOffset + (sum / count - currentOffset) * alpha;
         }
         const encoded = clamp((nextOffset / this.heightRange / 2 + 0.5) * 255, 0, 255);
         this.heightData[i] = Math.round(encoded);

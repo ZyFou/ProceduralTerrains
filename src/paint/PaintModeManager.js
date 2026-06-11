@@ -51,9 +51,11 @@ export class PaintModeManager {
   enable() {
     if (this.state.enabled) return;
     this.state.enabled = true;
-    this.controls.enabled = false;
+    this._previousControlInputMode = this.controls.inputMode ?? 'all';
+    this.controls.enabled = true;
+    this.controls.inputMode = 'orbitOnly';
     this._syncUniforms();
-    this.onToast?.('Paint Mode — left drag paints · Shift + wheel changes brush size');
+    this.onToast?.('Paint Mode — left drag paints · right drag orbits · Shift + wheel changes brush size');
     this._emit();
   }
 
@@ -62,6 +64,7 @@ export class PaintModeManager {
     this.state.enabled = false;
     this.isPainting = false;
     this.controls.enabled = true;
+    this.controls.inputMode = this._previousControlInputMode ?? 'all';
     this.cursor.setVisible(false);
     this._syncUniforms();
     this.onToast?.('Exited Paint Mode');
@@ -175,7 +178,8 @@ export class PaintModeManager {
   _stamp(force = false) {
     if (!this.hit) return;
     const now = performance.now();
-    if (!force && now - this._lastStamp < 24) return;
+    const minStampMs = this.state.tool === 'smooth' ? 80 : 24;
+    if (!force && now - this._lastStamp < minStampMs) return;
     this._lastStamp = now;
     this.layers.stamp({
       x: this.hit.x,

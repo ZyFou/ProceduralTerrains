@@ -729,6 +729,10 @@ export class Engine {
   }
 
   _enterInfiniteMode() {
+    // Infinite exploration stays fully procedural; Studio paint layers are
+    // board-local overrides and are restored when returning to Studio mode.
+    this.uniforms.uPaintEnabled.value = 0;
+
     // Hide studio objects
     this.board.group.visible = false;
     this.plinth.visible = false;
@@ -870,6 +874,7 @@ export class Engine {
 
     // Restore uniforms
     this._applyUniforms();
+    this.uniforms.uPaintEnabled.value = 1;
 
     // Restore scene background
     this.scene.background = new THREE.Color(0x0b0e14);

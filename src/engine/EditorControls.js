@@ -33,6 +33,7 @@ export class EditorControls {
 
     this.onFirstInteract = null;
     this.enabled = true;           // false while the studio player walks
+    this.inputMode = 'all';        // 'all' or 'orbitOnly' while paint mode owns left drag
     this._interacted = false;
     this._drag = null;             // { button, x, y }
 
@@ -89,6 +90,7 @@ export class EditorControls {
   _onDown(e) {
     if (!this.enabled) return;
     if (e.button !== 0 && e.button !== 2) return;
+    if (this.inputMode === 'orbitOnly' && e.button !== 2) return;
     this._markInteract();
     this._drag = { button: e.button, x: e.clientX, y: e.clientY };
     this.dom.setPointerCapture(e.pointerId);
