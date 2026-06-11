@@ -32,6 +32,7 @@ export class EditorControls {
     this.panLimit = 1024;          // set from board size
 
     this.onFirstInteract = null;
+    this.enabled = true;           // false while the studio player walks
     this._interacted = false;
     this._drag = null;             // { button, x, y }
 
@@ -86,6 +87,7 @@ export class EditorControls {
   }
 
   _onDown(e) {
+    if (!this.enabled) return;
     if (e.button !== 0 && e.button !== 2) return;
     this._markInteract();
     this._drag = { button: e.button, x: e.clientX, y: e.clientY };
@@ -128,6 +130,7 @@ export class EditorControls {
   }
 
   _onWheel(e) {
+    if (!this.enabled) return;
     e.preventDefault();
     this._markInteract();
     this.goalRadius = Math.min(

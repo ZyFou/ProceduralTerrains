@@ -1,4 +1,4 @@
-export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera }) {
+export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, playerMode, onTogglePlayer }) {
   return (
     <div className="viewport-camera-bar" role="toolbar" aria-label="Camera views">
       <button
@@ -29,6 +29,19 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
           <circle cx="8" cy="8" r="1.6" fill="currentColor" />
         </svg>
         Reset Camera
+      </button>
+      <button
+        type="button"
+        className={`camera-bar-btn${playerMode ? ' active' : ''}`}
+        onClick={onTogglePlayer}
+        title="Walk on the terrain: gravity, jumping, swimming (click viewport to lock mouse)"
+      >
+        <svg viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="3.2" r="1.6" fill="currentColor" />
+          <path d="M8 5v4M8 9l-2.5 4M8 9l2.5 4M5.5 6.6 8 6l2.5.6"
+            stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        {playerMode ? 'Exit Walk' : 'Walk'}
       </button>
     </div>
   );

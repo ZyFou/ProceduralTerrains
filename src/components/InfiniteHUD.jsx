@@ -8,8 +8,16 @@ import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
 import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';
 import { PLANET_PRESETS } from '../engine/style/PlanetPresets.js';
 
+const PLAYER_STATE_LABELS = {
+  grounded: 'Grounded',
+  falling: 'Falling',
+  swimming: 'Swimming',
+  underwater: 'Underwater',
+};
+
 export default function InfiniteHUD({
   stats, onReturn,
+  playerMode, onPlayerMode,
   quality, onQualityChange,
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
@@ -49,6 +57,14 @@ export default function InfiniteHUD({
             <span className="fps-info-dim"> / {stats.chunks}</span>
           </span>
         </div>
+        {playerMode && stats.playerState && (
+          <div className="fps-info-row">
+            <span className="fps-info-label">STATE</span>
+            <span className={`fps-info-val player-state player-state-${stats.playerState}`}>
+              {PLAYER_STATE_LABELS[stats.playerState] ?? stats.playerState}
+            </span>
+          </div>
+        )}
         {stats.culledChunks > 0 && (
           <div className="fps-info-row">
             <span className="fps-info-label">CULLED</span>
@@ -59,6 +75,18 @@ export default function InfiniteHUD({
 
       {/* Top-right controls panel */}
       <div id="fps-settings-panel">
+        {/* Player physics toggle */}
+        <div className="fps-setting-row">
+          <span className="fps-setting-label">Walk mode</span>
+          <button
+            type="button"
+            className={`toggle${playerMode ? ' on' : ''}`}
+            onClick={onPlayerMode}
+            aria-pressed={!!playerMode}
+            title="Player physics: gravity, walking, jumping, swimming"
+          />
+        </div>
+
         {/* Quality selector */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Quality</span>
@@ -140,11 +168,25 @@ export default function InfiniteHUD({
 
       {/* Controls hint */}
       <div id="fps-controls-hint">
-        <span>ZQSD</span> Move &nbsp;·&nbsp;
-        <span>Mouse</span> Look &nbsp;·&nbsp;
-        <span>Scroll</span> Speed &nbsp;·&nbsp;
-        <span>Space/Shift</span> Up/Down &nbsp;·&nbsp;
-        Click to lock mouse
+        {playerMode ? (
+          <>
+            <span>ZQSD</span> Move &nbsp;·&nbsp;
+            <span>Mouse</span> Look &nbsp;·&nbsp;
+            <span>Shift</span> Run &nbsp;·&nbsp;
+            <span>Space</span> Jump/Swim up &nbsp;·&nbsp;
+            <span>Ctrl/C</span> Swim down &nbsp;·&nbsp;
+            <span>Scroll</span> Speed &nbsp;·&nbsp;
+            Click to lock mouse
+          </>
+        ) : (
+          <>
+            <span>ZQSD</span> Move &nbsp;·&nbsp;
+            <span>Mouse</span> Look &nbsp;·&nbsp;
+            <span>Scroll</span> Speed &nbsp;·&nbsp;
+            <span>Space/Shift</span> Up/Down &nbsp;·&nbsp;
+            Click to lock mouse
+          </>
+        )}
       </div>
 
       {/* Return button */}

@@ -18,6 +18,9 @@ import {
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
+import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
+import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
+import { PlayerController } from './player/PlayerController.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 
 // ============================================================================
@@ -86,6 +89,12 @@ export class Engine {
     this.worldMode = 'studio';
     this.infiniteWorld = null;
     this.fpsControls = null;
+
+    // First-person player physics (optional, both modes)
+    this.player = null;
+    this.playerMode = false;
+    this.heightSampler = null;
+    this._terrainGen = 0;   // bumped whenever the height field changes
     this._infiniteTerrainMat = null;
     this._infiniteWaterMat = null;
 
@@ -410,6 +419,7 @@ export class Engine {
   }
 
   _applyUniforms() {
+    this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
     const u = this.uniforms;
     const size = this.boardSize;
@@ -585,11 +595,88 @@ export class Engine {
     this.camera.updateProjectionMatrix();
   }
 
+  // ------------------------------------------------------------- player mode
+
+  _getHeightSampler() {
+    if (!this.heightSampler) {
+      const cpu = new TerrainHeightSampler(this.uniforms, () => ({
+        octaves: Math.round(this.params.octaves),
+        infinite: this.worldMode === 'infinite',
+      }));
+      this.heightSampler = new GpuHeightSampler({
+        renderer: this.renderer,
+        scene: this.scene,
+        uniforms: this.uniforms,
+        cpuSampler: cpu,
+        isTerrainMaterial: (m) => m === this.terrainMaterial || m === this._infiniteTerrainMat,
+        getGeneration: () => this._terrainGen,
+        getMaxHeight: () => this._maxHeight(),
+      });
+    }
+    return this.heightSampler;
+  }
+
+  _waterLevel() {
+    return this.params.seaLevel > 0.5 ? this.params.seaLevel : null;
+  }
+
+  /**
+   * Toggle Player Physics Mode (gravity / walking / jumping / swimming).
+   * Works in Infinite World and in Studio mode (walking on the board).
+   * Free camera behavior is fully restored on disable.
+   */
+  setPlayerMode(enabled) {
+    enabled = !!enabled;
+    if (enabled === this.playerMode) return;
+    this.playerMode = enabled;
+
+    if (enabled) {
+      if (this.worldMode === 'studio') {
+        // Studio: editor controls sleep, an FPS look controller takes over
+        this.controls.enabled = false;
+        if (!this.fpsControls) {
+          this.fpsControls = new FPSControls(this.camera, this.canvas);
+        }
+        // spawn at board center, facing north
+        this.camera.position.set(0, this._maxHeight(), 0);
+        this.fpsControls.yaw = 0;
+        this.fpsControls.pitch = 0;
+      }
+      this.player = new PlayerController({
+        controls: this.fpsControls,
+        camera: this.camera,
+        sampler: this._getHeightSampler(),
+        getWaterLevel: () => this._waterLevel(),
+      });
+      this.cb.onToast('Player mode — click to lock mouse · Space jump · Shift run');
+    } else {
+      if (this.player) {
+        this.player.dispose();
+        this.player = null;
+      }
+      if (this.worldMode === 'studio') {
+        // restore the editor camera
+        if (this.fpsControls) {
+          this.fpsControls.dispose();
+          this.fpsControls = null;
+        }
+        this.controls.enabled = true;
+        this.controls.reset(this.boardSize);
+      }
+      this.cb.onToast('Free camera');
+    }
+
+    if (this.cb.onPlayerMode) this.cb.onPlayerMode(this.playerMode);
+  }
+
   // -------------------------------------------------------------- world mode
 
   setWorldMode(mode) {
     if (mode === this.worldMode) return;
+    // player physics is per-mode — always leave it cleanly before switching
+    this.setPlayerMode(false);
     this.worldMode = mode;
+    this._terrainGen++;   // uFrequency / falloff change with the mode
 
     if (mode === 'infinite') {
       this._enterInfiniteMode();
@@ -1074,8 +1161,12 @@ export class Engine {
     // shaders still compiling in the background: keep input responsive but
     // don't render — that would force a blocking program link
     if (this._compiling) {
-      if (this.fpsControls) this.fpsControls.update(dt);
-      else this.controls.update(dt);
+      if (this.fpsControls) {
+        this.fpsControls.update(dt);
+        if (this.player) this.player.update(dt);
+      } else {
+        this.controls.update(dt);
+      }
       return;
     }
 
@@ -1096,7 +1187,12 @@ export class Engine {
   }
 
   _tickStudio(dt, now) {
-    this.controls.update(dt);
+    if (this.playerMode && this.player) {
+      this.fpsControls.update(dt);   // mouse look
+      this.player.update(dt);        // body physics
+    } else {
+      this.controls.update(dt);
+    }
 
     // LOD selection: throttled, distance-based, internal to the fixed board
     if (now - this._lastLodUpdate > 150) {
@@ -1129,11 +1225,15 @@ export class Engine {
         distance: this.controls.distance.toFixed(0),
       });
       this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      if (this.cb.onPlayerState) {
+        this.cb.onPlayerState(this.player ? this.player.state : null);
+      }
     }
   }
 
   _tickInfinite(dt, now) {
     if (this.fpsControls) this.fpsControls.update(dt);
+    if (this.playerMode && this.player) this.player.update(dt);
 
     // Stream chunks around the camera (with culling)
     if (this.infiniteWorld) {
@@ -1164,7 +1264,10 @@ export class Engine {
           x: pos.x.toFixed(0),
           y: pos.y.toFixed(0),
           z: pos.z.toFixed(0),
-          speed: fps ? fps.moveSpeed.toFixed(0) : '0',
+          speed: this.player
+            ? Math.hypot(this.player.vel.x, this.player.vel.y, this.player.vel.z).toFixed(1)
+            : (fps ? fps.moveSpeed.toFixed(0) : '0'),
+          playerState: this.player ? this.player.state : null,
           chunks: this.infiniteWorld ? this.infiniteWorld.activeChunkCount : 0,
           visibleChunks: this.infiniteWorld ? this.infiniteWorld.visibleChunkCount : 0,
           culledChunks: this.infiniteWorld ? this.infiniteWorld.culledChunkCount : 0,
@@ -1180,7 +1283,10 @@ export class Engine {
     this._disposed = true;
     this._resizeObserver.disconnect();
     this.renderer.setAnimationLoop(null);
+    if (this.player) { this.player.dispose(); this.player = null; }
+    if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
     if (this.worldMode === 'infinite') this._exitInfiniteMode();
+    else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();

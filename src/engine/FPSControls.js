@@ -27,6 +27,12 @@ export class FPSControls {
     this._keys = new Set();
     this._locked = false;
 
+    // When a PlayerController drives the body, FPSControls only applies
+    // mouse-look orientation; movement keys are read by the controller.
+    this.externalMove = false;
+    // Optional wheel hook: receives the speed factor instead of moveSpeed.
+    this.onSpeedWheel = null;
+
     // event handlers (bound so we can remove them)
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onWheel = this._onWheel.bind(this);
@@ -86,6 +92,10 @@ export class FPSControls {
     e.preventDefault();
     // logarithmic speed scaling
     const factor = Math.exp(-e.deltaY * 0.0015);
+    if (this.onSpeedWheel) {
+      this.onSpeedWheel(factor);
+      return;
+    }
     this.moveSpeed = Math.max(this.minSpeed, Math.min(this.maxSpeed, this.moveSpeed * factor));
   }
 
@@ -101,6 +111,11 @@ export class FPSControls {
   // ---- update ----
 
   update(dt) {
+    if (this.externalMove) {
+      // PlayerController moves the body — only apply look orientation here
+      this._applyOrientation();
+      return;
+    }
     if (!this._locked) {
       // still apply camera orientation even when unlocked
       this._applyOrientation();
@@ -150,6 +165,7 @@ export class FPSControls {
   }
 
   // For the status bar / HUD
+  get keys() { return this._keys; }
   get position() { return this.camera.position; }
   get yawDeg() { return ((this.yaw / DEG) % 360 + 360) % 360; }
   get pitchDeg() { return this.pitch / DEG; }

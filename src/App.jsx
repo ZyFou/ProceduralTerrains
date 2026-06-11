@@ -40,6 +40,8 @@ export default function App() {
 
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
+  const [playerMode, setPlayerMode] = useState(false);
+  const [playerState, setPlayerState] = useState(null);
 
   const [qualityPreset, setQualityPreset] = useState('high');
   const [timeOfDay, setTimeOfDay] = useState(0.38);
@@ -72,6 +74,8 @@ export default function App() {
         onToast: showToast,
         onFirstInteract: () => setHelpVisible(false),
         onInfiniteStats: setInfiniteStats,
+        onPlayerMode: setPlayerMode,
+        onPlayerState: setPlayerState,
         onQualityChange: setQualityPreset,
         onTimeOfDayChange: setTimeOfDay,
         onPerfChange: setPerf,
@@ -120,6 +124,10 @@ export default function App() {
     } else {
       showToast('Returned to Terrain Studio');
     }
+  };
+
+  const togglePlayerMode = () => {
+    engine().setPlayerMode(!playerMode);
   };
 
   const handleQualityChange = (key) => {
@@ -203,6 +211,8 @@ export default function App() {
               onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
               onAngled={() => { engine().setCameraView('angled'); setCamMode('orbit'); }}
               onResetCamera={() => engine().resetView()}
+              playerMode={playerMode}
+              onTogglePlayer={togglePlayerMode}
             />
           )}
 
@@ -210,6 +220,8 @@ export default function App() {
             <InfiniteHUD
               stats={infiniteStats}
               onReturn={toggleWorldMode}
+              playerMode={playerMode}
+              onPlayerMode={togglePlayerMode}
               quality={qualityPreset}
               onQualityChange={handleQualityChange}
               timeOfDay={timeOfDay}
@@ -252,6 +264,8 @@ export default function App() {
         worldMode={worldMode}
         infiniteStats={infiniteStats}
         qualityPreset={isInfinite ? qualityPreset : null}
+        playerMode={playerMode}
+        playerState={isInfinite ? infiniteStats?.playerState : playerState}
       />
 
       <SettingsModal

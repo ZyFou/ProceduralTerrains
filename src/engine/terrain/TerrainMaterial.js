@@ -95,7 +95,16 @@ void main() {
   float hZ = shapeHeight(xz + vec2(0.0, eps), cl);
 
   if (uColorMode > 0.5) {
-    gl_FragColor = vec4(vec3(clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0)), 1.0);
+    float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
+    if (uColorMode > 1.5) {
+      // mode 2: 16-bit height packed into RG (player collision tile)
+      float hi = floor(h01 * 255.0) / 255.0;
+      float lo = fract(h01 * 255.0);
+      gl_FragColor = vec4(hi, lo, 0.0, 1.0);
+    } else {
+      // mode 1: 8-bit grayscale (heightmap export)
+      gl_FragColor = vec4(vec3(h01), 1.0);
+    }
     return;
   }
 

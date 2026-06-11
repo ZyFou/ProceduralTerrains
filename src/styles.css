@@ -1721,3 +1721,15 @@ body {
 .minimap-overlay-container.collapsed .minimap-overlay-header {
   border-bottom: none;
 }
+
+/* ---- player physics state badge (status bar + infinite HUD) ---- */
+.player-state {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.player-state-grounded { color: #7dd87d; }
+.player-state-falling { color: #f0c560; }
+.player-state-swimming { color: #6db8f0; }
+.player-state-underwater { color: #4d8fd6; }

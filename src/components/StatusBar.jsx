@@ -2,7 +2,14 @@ function fmtTris(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(0)}K`;
 }
 
-export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset }) {
+const PLAYER_STATE_LABELS = {
+  grounded: 'Grounded',
+  falling: 'Falling',
+  swimming: 'Swimming',
+  underwater: 'Underwater',
+};
+
+export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset, playerMode, playerState }) {
   return (
     <footer id="statusbar">
       <div className="sb-group">
@@ -10,6 +17,14 @@ export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats
         <span>{status.text}</span>
         <span className="sb-sep" />
         <span>GPU: {gpu}</span>
+        {playerMode && playerState && (
+          <>
+            <span className="sb-sep" />
+            <span className={`player-state player-state-${playerState}`}>
+              {PLAYER_STATE_LABELS[playerState] ?? playerState}
+            </span>
+          </>
+        )}
         {worldMode === 'infinite' && infiniteStats && (
           <>
             <span className="sb-sep" />
