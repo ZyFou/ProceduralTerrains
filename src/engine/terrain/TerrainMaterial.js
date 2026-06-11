@@ -88,11 +88,16 @@ void main() {
 
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
   BiomeWeights bw = biomeWeightsAt(cl);
+  vec4 paintedBiome = paintBiomeAt(xz);
+  bw.desert = clamp(max(bw.desert, paintedBiome.r), 0.0, 1.0);
+  bw.canyon = clamp(max(bw.canyon, paintedBiome.g), 0.0, 1.0);
+  bw.wetland = clamp(max(bw.wetland, paintedBiome.b), 0.0, 1.0);
+  bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
 
   float eps = uEps;
-  float hC = shapeHeight(xz, cl);
-  float hX = shapeHeight(xz + vec2(eps, 0.0), cl);
-  float hZ = shapeHeight(xz + vec2(0.0, eps), cl);
+  float hC = heightAt(xz);
+  float hX = heightAt(xz + vec2(eps, 0.0));
+  float hZ = heightAt(xz + vec2(0.0, eps));
 
   if (uColorMode > 0.5) {
     float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
@@ -200,6 +205,13 @@ export function createTerrainUniforms() {
     uFogColor:       { value: new THREE.Color(0x0b0e14) },
     uFogDensity:     { value: 0.000045 },
     uTime:           { value: 0 },
+    uPaintEnabled:   { value: 0 },
+    uPaintOpacity:   { value: 1 },
+    uPaintBoardSize: { value: 1024 },
+    uPaintResolution:{ value: 512 },
+    uPaintHeightRange: { value: 180 },
+    uPaintHeightTexture: { value: null },
+    uPaintBiomeTexture: { value: null },
     ...paletteUniforms,
   };
 }

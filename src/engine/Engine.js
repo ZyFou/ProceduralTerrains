@@ -22,6 +22,7 @@ import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
+import { PaintModeManager } from '../paint/PaintModeManager.js';
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -84,6 +85,8 @@ export class Engine {
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._warmGeo = new THREE.PlaneGeometry(1, 1);
     this.planetStyle = new PlanetStyleManager();
+    this.paintMode = null;
+    this.paintState = null;
 
     // World mode: 'studio' (single board) or 'infinite'
     this.worldMode = 'studio';
@@ -112,6 +115,7 @@ export class Engine {
     this._initRenderer();
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
+    this._initPaintMode();
 
     this.applyAll({ force: true });
     this._applyPerformance();
@@ -190,6 +194,24 @@ export class Engine {
   _initControls() {
     this.controls = new EditorControls(this.camera, this.canvas);
     this.controls.onFirstInteract = () => this.cb.onFirstInteract();
+  }
+
+  _initPaintMode() {
+    this.paintMode = new PaintModeManager({
+      scene: this.scene,
+      camera: this.camera,
+      domElement: this.canvas,
+      uniforms: this.uniforms,
+      controls: this.controls,
+      getBoardSize: () => this.boardSize,
+      getParams: () => this.params,
+      onChange: (state) => {
+        this.paintState = state;
+        if (this.cb.onPaintState) this.cb.onPaintState(state);
+      },
+      onToast: (msg) => this.cb.onToast(msg),
+    });
+    this.paintState = { ...this.paintMode.state };
   }
 
   // ------------------------------------------------------------ parameters
@@ -627,6 +649,7 @@ export class Engine {
    */
   setPlayerMode(enabled) {
     enabled = !!enabled;
+    if (enabled && this.paintMode?.state.enabled) this.setPaintMode(false);
     if (enabled === this.playerMode) return;
     this.playerMode = enabled;
 
@@ -669,10 +692,30 @@ export class Engine {
     if (this.cb.onPlayerMode) this.cb.onPlayerMode(this.playerMode);
   }
 
+  // -------------------------------------------------------------- paint mode
+
+  setPaintMode(enabled) {
+    if (enabled && this.playerMode) this.setPlayerMode(false);
+    if (enabled && this.worldMode !== 'studio') {
+      this.cb.onToast('Paint Mode is currently available in Studio mode');
+      return;
+    }
+    this.paintMode?.setEnabled(enabled);
+  }
+
+  setPaintSetting(key, value) {
+    this.paintMode?.setState({ [key]: value });
+  }
+
+  clearPaintLayers() {
+    this.paintMode?.clear();
+  }
+
   // -------------------------------------------------------------- world mode
 
   setWorldMode(mode) {
     if (mode === this.worldMode) return;
+    if (this.paintMode?.state.enabled) this.setPaintMode(false);
     // player physics is per-mode — always leave it cleanly before switching
     this.setPlayerMode(false);
     this.worldMode = mode;
@@ -1041,6 +1084,7 @@ export class Engine {
       version: 1,
       savedAt: new Date().toISOString(),
       params: this.params,
+      paint: this.paintMode?.serialize(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     this._download(URL.createObjectURL(blob), `terrain-seed-${this.params.seed}.json`);
@@ -1063,6 +1107,7 @@ export class Engine {
     this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
+    if (json?.paint) this.paintMode?.load(json.paint);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
 
@@ -1189,6 +1234,8 @@ export class Engine {
       dt, this.uniforms.uTime.value, this.camera.position.y, waterLevel, this.uniforms
     );
 
+    this.paintMode?.update(dt);
+
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
     } else {
@@ -1303,6 +1350,7 @@ export class Engine {
     this._disposed = true;
     this._resizeObserver.disconnect();
     this.renderer.setAnimationLoop(null);
+    if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
     if (this.worldMode === 'infinite') this._exitInfiniteMode();

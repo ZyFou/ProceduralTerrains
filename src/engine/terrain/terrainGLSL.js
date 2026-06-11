@@ -21,6 +21,13 @@ uniform vec3  uSunDir;         // normalized, pointing FROM surface TO sun
 uniform vec3  uFogColor;
 uniform float uFogDensity;
 uniform float uTime;
+uniform float uPaintEnabled;
+uniform float uPaintOpacity;
+uniform float uPaintBoardSize;
+uniform float uPaintResolution;
+uniform float uPaintHeightRange;
+uniform sampler2D uPaintHeightTexture;
+uniform sampler2D uPaintBiomeTexture;
 `;
 
 export const NOISE_GLSL = /* glsl */ `
@@ -171,8 +178,27 @@ float shapeHeight(vec2 xz, Climate c) {
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }
 
+vec2 paintUvAt(vec2 xz) {
+  return xz / max(uPaintBoardSize, 1.0) + vec2(0.5);
+}
+
+float paintHeightOffsetAt(vec2 xz) {
+  if (uPaintEnabled < 0.5) return 0.0;
+  vec2 uv = paintUvAt(xz);
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
+  float encoded = texture2D(uPaintHeightTexture, uv).r;
+  return (encoded - 0.5) * 2.0 * uPaintHeightRange * uPaintOpacity;
+}
+
+vec4 paintBiomeAt(vec2 xz) {
+  if (uPaintEnabled < 0.5) return vec4(0.0);
+  vec2 uv = paintUvAt(xz);
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
+  return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+}
+
 float heightAt(vec2 xz) {
-  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset));
+  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) + paintHeightOffsetAt(xz);
 }
 
 // Moisture field for biome blending — now sourced from the climate system.

@@ -1733,3 +1733,64 @@ body {
 .player-state-falling { color: #f0c560; }
 .player-state-swimming { color: #6db8f0; }
 .player-state-underwater { color: #4d8fd6; }
+
+/* ============ PAINT MODE ============ */
+.paint-panel {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 300px;
+  max-height: calc(100% - 28px);
+  overflow-y: auto;
+  padding: 12px;
+  background: rgba(18, 22, 31, 0.96);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  z-index: 20;
+  backdrop-filter: blur(10px);
+}
+.paint-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.paint-kicker {
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.paint-panel h2 {
+  margin-top: 2px;
+  color: #e8eef8;
+  font-size: 16px;
+}
+.paint-exit {
+  height: 28px;
+  padding: 0 10px;
+  color: var(--text-main);
+  background: var(--bg-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.paint-exit:hover { border-color: var(--border-active); color: var(--accent); }
+.paint-section {
+  padding: 8px 0 4px;
+  border-bottom: 1px solid rgba(120, 150, 190, 0.08);
+}
+.paint-section:last-child { border-bottom: 0; }
+.wide-btn.danger {
+  border-color: rgba(229, 72, 77, 0.35);
+  color: #ffb4b4;
+}
+.wide-btn.danger:hover {
+  background: rgba(229, 72, 77, 0.12);
+  border-color: rgba(229, 72, 77, 0.6);
+}
+#viewport { touch-action: none; }

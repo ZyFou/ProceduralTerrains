@@ -12,6 +12,7 @@ export default function TopBar({
   previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
   onExportScreenshot, onExportHeightmap, onTogglePreview,
   onResetView, onToggleHelp, onOpenSettings, onOpenExport, onToggleWorldMode,
+  paintMode, onTogglePaintMode,
 }) {
   const [exportOpen, setExportOpen] = useState(false);
   const fileRef = useRef(null);
@@ -84,6 +85,14 @@ export default function TopBar({
             <button onClick={onExportHeightmap}>Heightmap (PNG)</button>
           </div>
         </div>
+        <button
+          className={`tb-btn${paintMode ? ' active' : ''}`}
+          onClick={onTogglePaintMode}
+          title="Paint terrain height, biomes, and masks"
+        >
+          <svg viewBox="0 0 16 16"><path d="M3 12c2-4 5-7 10-9-2 5-5 8-9 10z" stroke="currentColor" fill="none" strokeWidth="1.2"/><path d="M4 13c-1 .5-1.5 1-2 1 0-.7.4-1.5 1-2" stroke="currentColor" fill="none" strokeWidth="1.2"/></svg>
+          Paint Mode
+        </button>
         <button
           className={`tb-btn${worldMode === 'infinite' ? ' active' : ''}`}
           onClick={onToggleWorldMode}

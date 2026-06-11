@@ -12,6 +12,7 @@ import SettingsModal from './components/SettingsModal.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
 import ExportModal from './components/ExportModal.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
+import PaintPanel from './components/paint/PaintPanel.jsx';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -37,6 +38,7 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false);
   const [toast, setToast] = useState(null);
   const [activeSection, setActiveSection] = useState('section-generate');
+  const [paintState, setPaintState] = useState({ enabled: false });
 
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
@@ -87,6 +89,7 @@ export default function App() {
         onQualityChange: setQualityPreset,
         onTimeOfDayChange: setTimeOfDay,
         onPerfChange: setPerf,
+        onPaintState: setPaintState,
       },
     });
     engine.setCullingEnabled(cullingEnabled);
@@ -165,7 +168,8 @@ export default function App() {
   const handlePerfSetting = (key, value) => engine().setPerfSetting(key, value);
 
   const isInfinite = worldMode === 'infinite';
-  const showStudioUI = !previewMode && !isInfinite;
+  const paintMode = !!paintState?.enabled;
+  const showStudioUI = !previewMode && !isInfinite && !paintMode;
 
   return (
     <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${isInfinite ? 'infinite-mode' : ''}`}>
@@ -184,6 +188,8 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenExport={() => setExportModalOpen(true)}
         onToggleWorldMode={toggleWorldMode}
+        paintMode={paintMode}
+        onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
       />
 
       <div id="main" className="app-shell">
@@ -218,6 +224,15 @@ export default function App() {
               boardSize={boardSize}
               baseRef={minimapBaseRef}
               overlayRef={minimapOverlayRef}
+            />
+          )}
+
+          {paintMode && (
+            <PaintPanel
+              paintState={paintState}
+              onSetting={(key, value) => engine().setPaintSetting(key, value)}
+              onClear={() => engine().clearPaintLayers()}
+              onExit={() => engine().setPaintMode(false)}
             />
           )}
 
