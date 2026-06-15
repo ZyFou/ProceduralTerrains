@@ -193,7 +193,11 @@ export class PlanetExporter {
       for (let j = 0; j < meshRes; j++) {
         for (let i = 0; i < meshRes; i++) {
           const a = j * vps + i, b = a + 1, c = a + vps, d = c + 1;
-          indices.push(a, c, b, b, c, d);
+          // CCW as seen from OUTSIDE (each face's U×V points outward), so
+          // computeVertexNormals produces outward normals and the exported
+          // GLB renders front faces outward — not inside-out. The live planet
+          // uses DoubleSide so it never depended on this winding.
+          indices.push(a, b, c, b, d, c);
         }
       }
       const geo = new THREE.BufferGeometry();
