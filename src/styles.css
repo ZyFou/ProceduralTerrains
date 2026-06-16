@@ -256,6 +256,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .side-drawer.open {
   transform: translateX(0);
@@ -266,8 +267,9 @@ body {
 .side-panel {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   min-height: 0;
-  height: 100%;
+  overflow: hidden;
 }
 .side-panel-header {
   display: flex;
@@ -306,15 +308,24 @@ body {
 }
 .side-panel-close:hover { color: var(--text-main); border-color: var(--border-active); }
 .side-panel-content {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
+.side-panel-content > * + * { margin-top: 4px; }
 .side-panel-content::-webkit-scrollbar { width: 7px; }
-.side-panel-content::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.side-panel-content::-webkit-scrollbar-track { background: transparent; }
+.side-panel-content::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+  min-height: 32px;
+}
+.side-panel-content::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 .side-panel-footer {
   flex-shrink: 0;
   padding: 12px 16px;
