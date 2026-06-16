@@ -156,8 +156,13 @@ export default function App() {
   };
 
   // ---- mode switching: blocking overlay + transition lock ----
+  // The heavy part is the ASYNC shader compile the engine kicks off after the
+  // synchronous geometry build (FXC can take ~15-20s on this GPU), during which
+  // the engine skips rendering. We keep the loader up until `engine._compiling`
+  // drops back to 0 so the user always sees what's happening.
   const modeLockRef = useRef(false);
   const [modeLocked, setModeLocked] = useState(false);
+  const BUILD_STEP = { studio: 'Building terrain board…', infinite: 'Streaming world chunks…', planet: 'Building spherical mesh…' };
   const selectWorldMode = (next) => {
     if (next === worldMode || modeLockRef.current) return;
     modeLockRef.current = true;
@@ -165,15 +170,33 @@ export default function App() {
     const label = MODE_LABEL[next] ?? next;
     if (!panelAvailable(activePanel, next)) setActivePanel(null);
 
-    loading.run('mode', { blocking: true, label: `Switching to ${label}…`, detail: 'Preparing scene…' }, async (update) => {
+    loading.run('mode', { blocking: true, label: `Switching to ${label} mode…`, detail: 'Preparing scene…' }, async (update) => {
       blockingUpdateRef.current = update;
-      update({ detail: 'Disposing current scene…' });
-      engine().setWorldMode(next);      // heavy, synchronous
+      update({ detail: BUILD_STEP[next] ?? 'Building scene…' });
+      // yield so the overlay paints the build message before the sync build
+      await new Promise((r) => setTimeout(r, 30));
+      engine().setWorldMode(next);      // sync build; kicks off async shader compile
       setWorldMode(next);
-      update({ detail: 'Finalizing…' });
-      await new Promise((r) => setTimeout(r, 60));
+
+      // wait for the engine to finish compiling shaders (it raises onStatus
+      // 'Compiling … shaders…' which feeds this task's detail line)
+      await new Promise((resolve) => {
+        const startT = performance.now();
+        const tick = () => {
+          const e = engineRef.current;
+          if (!e || e._disposed) return resolve();
+          const elapsed = performance.now() - startT;
+          if (!e._compiling && elapsed > 160) { update({ detail: 'Finalizing…' }); return resolve(); }
+          // long compiles get a reassuring message; hard cap so it never hangs forever
+          if (e._compiling && elapsed > 6000) update({ detail: 'Compiling shaders… (this can take a while on first use)' });
+          if (elapsed > 60000) return resolve();   // safety net
+          setTimeout(tick, 120);
+        };
+        setTimeout(tick, 120);
+      });
+      await new Promise((r) => setTimeout(r, 80));
     }).then(() => {
-      showToast(`Switched to ${label}`, 'success');
+      showToast(`Switched to ${label} mode`, 'success');
       if (next === 'infinite') { setHelpVisible(false); showToast('Click to lock mouse', 'info'); }
       else if (next === 'planet') { setHelpVisible(false); }
     }).catch((e) => {
