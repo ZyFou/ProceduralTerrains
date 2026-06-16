@@ -125,6 +125,7 @@ export function createCloudMaterial(steps = 64, lightSteps = 6, octaves = 5, det
       uCloudTime:            { value: 0.0 },
       uCloudSelfShadow:      { value: 1.0 },
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
+      uCloudNoiseVariant:    { value: 0.0 },
     },
     defines: {
       CLOUD_STEPS: Math.max(8, Math.round(steps)),

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createCloudSlabMaterial } from './CloudSlabShader.js';
-import { resolveCloudQuality } from './CloudSettings.js';
+import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 
 // ============================================================================
 // CloudSlabLayer: studio/flat-board manager for the planar volumetric cloud
@@ -22,8 +22,6 @@ export class CloudSlabLayer {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this._compile = opts.compile || null;
-    this._terrainUniforms = opts.terrainUniforms || {};
-    this._terrainOctaves = Math.max(1, Math.round(opts.terrainOctaves || 7));
 
     this._steps = 64;
     this._lightSteps = 6;
@@ -39,15 +37,19 @@ export class CloudSlabLayer {
     this._rotation = 0;
     this._wind = new THREE.Vector3();
     this._boardSize = 2048;
+    this._depthTarget = null;
+    this._depthTexture = null;
+    this._depthSize = new THREE.Vector2();
+    this._prevClearColor = new THREE.Color();
+    this._compileToken = 0;
+    this._pendingCompile = null;
 
     this.material = createCloudSlabMaterial(
       this._steps,
       this._lightSteps,
       this._octaves,
       this._detailOctaves,
-      this._useErosion,
-      this._terrainUniforms,
-      this._terrainOctaves
+      this._useErosion
     );
 
     // a unit plane rotated flat (XZ); scaled to cover the board + sky margin
@@ -82,7 +84,6 @@ export class CloudSlabLayer {
     const config = perf ? { ...params, ...perf } : params;
     const q = resolveCloudQuality(config);
     this._enabled = !!params.cloudsEnabled && !q.disabled;
-    const terrainOctaves = Math.max(1, Math.round(params.octaves || this._terrainOctaves));
 
     const maxDistMult = config.cloudMaxDistance ?? 6;
     this._maxDistance = maxDistMult * this._boardSize;
@@ -123,6 +124,7 @@ export class CloudSlabLayer {
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
+    u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -136,54 +138,90 @@ export class CloudSlabLayer {
 
     // recompile if the step counts or noise settings changed (quality / fallback)
     // We check and rebuild at the end so _rebuildMaterial can copy the fully updated uniforms to the new material.
-    if (q.steps !== this._steps ||
+    const needsRebuild = q.steps !== this._steps ||
         q.lightSteps !== this._lightSteps ||
         q.octaves !== this._octaves ||
         q.detailOctaves !== this._detailOctaves ||
-        q.useErosion !== this._useErosion ||
-        terrainOctaves !== this._terrainOctaves) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, terrainOctaves);
+        q.useErosion !== this._useErosion;
+    if (needsRebuild) {
+      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion);
     }
 
     // warm the program in the background on first enable (no first-frame hang)
     if (this._enabled && !this._ready && !this._warming && this._compile) {
-      this._warming = true;
-      this._compile([this.material])
-        .then(() => { this._ready = true; this._warming = false; })
-        .catch(() => { this._ready = true; this._warming = false; });
+      this._compileCurrentMaterial();
     }
   }
 
-  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, terrainOctaves = this._terrainOctaves) {
+  _compileCurrentMaterial() {
+    if (!this._compile) {
+      this._ready = true;
+      this._warming = false;
+      return Promise.resolve();
+    }
+
+    const material = this.material;
+    const token = ++this._compileToken;
+    this._ready = false;
+    this._warming = true;
+
+    let promise;
+    try {
+      promise = Promise.resolve(this._compile([material]));
+    } catch (e) {
+      promise = Promise.reject(e);
+    }
+
+    const done = promise.catch(() => {});
+    this._pendingCompile = { material, promise: done };
+
+    done.then(() => {
+      if (token === this._compileToken && this.material === material) {
+        this._ready = true;
+        this._warming = false;
+      }
+    }).finally(() => {
+      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    });
+
+    return done;
+  }
+
+  _disposeWhenSafe(material, pending) {
+    if (!material) return;
+    if (pending) pending.finally(() => material.dispose());
+    else material.dispose();
+  }
+
+  _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
     this._steps = steps;
     this._lightSteps = lightSteps;
     this._octaves = octaves;
     this._detailOctaves = detailOctaves;
     this._useErosion = useErosion;
-    this._terrainOctaves = Math.max(1, Math.round(terrainOctaves));
+    const previous = this.material;
+    const pendingPrevious = this._pendingCompile?.material === previous
+      ? this._pendingCompile.promise
+      : null;
     const next = createCloudSlabMaterial(
       steps,
       lightSteps,
       octaves,
       detailOctaves,
-      useErosion,
-      this._terrainUniforms,
-      this._terrainOctaves
+      useErosion
     );
-    const a = this.material.uniforms, b = next.uniforms;
+    const a = previous.uniforms, b = next.uniforms;
     for (const k in b) {
       if (!(k in a)) continue;
       const av = a[k].value, bv = b[k].value;
-      if (av && av.copy) bv.copy(av);
+      if (av && av.copy && bv && bv.copy) bv.copy(av);
       else b[k].value = a[k].value;
     }
-    const swap = () => {
-      this.mesh.material = next;
-      this.material.dispose();
-      this.material = next;
-    };
-    if (this._compile) this._compile([next]).then(swap).catch(swap);
-    else swap();
+    this.mesh.material = next;
+    this.material = next;
+    this.mesh.visible = false;
+    this._disposeWhenSafe(previous, pendingPrevious);
+    this._compileCurrentMaterial();
   }
 
   update(dt, cameraPos, sunDir) {
@@ -203,7 +241,62 @@ export class CloudSlabLayer {
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
   }
 
+  renderDepthPrepass(renderer, camera) {
+    if (!this.active) return false;
+
+    this._ensureDepthTarget(renderer);
+
+    const wasVisible = this.mesh.visible;
+    const prevTarget = renderer.getRenderTarget();
+    const prevClearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this._prevClearColor);
+
+    try {
+      this.mesh.visible = false;
+      renderer.setRenderTarget(this._depthTarget);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear(true, true, true);
+      renderer.render(this.scene, camera);
+    } finally {
+      this.mesh.visible = wasVisible;
+      renderer.setRenderTarget(prevTarget);
+      renderer.setClearColor(this._prevClearColor, prevClearAlpha);
+    }
+
+    const u = this.material.uniforms;
+    u.tSceneDepth.value = this._depthTexture;
+    u.uDepthResolution.value.set(this._depthTarget.width, this._depthTarget.height);
+    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    return true;
+  }
+
+  _ensureDepthTarget(renderer) {
+    const size = renderer.getDrawingBufferSize(this._depthSize);
+    const w = Math.max(1, Math.round(size.x));
+    const h = Math.max(1, Math.round(size.y));
+    if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;
+
+    if (this._depthTarget) this._depthTarget.dispose();
+    this._depthTexture = new THREE.DepthTexture(w, h);
+    this._depthTexture.type = THREE.UnsignedInt248Type;
+    this._depthTexture.format = THREE.DepthStencilFormat;
+    this._depthTarget = new THREE.WebGLRenderTarget(w, h, {
+      depthTexture: this._depthTexture,
+      depthBuffer: true,
+      stencilBuffer: true,
+    });
+    this._depthTarget.texture.minFilter = THREE.NearestFilter;
+    this._depthTarget.texture.magFilter = THREE.NearestFilter;
+    this._depthTarget.texture.generateMipmaps = false;
+  }
+
   dispose() {
+    if (this._depthTarget) {
+      this._depthTarget.dispose();
+      this._depthTarget = null;
+      this._depthTexture = null;
+    }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();

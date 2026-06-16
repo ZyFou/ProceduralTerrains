@@ -214,8 +214,6 @@ export class Engine {
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
     this.studioCloud = new CloudSlabLayer(this.scene, {
       compile: (mats) => this._compileMaterialVariants(mats),
-      terrainUniforms: this.uniforms,
-      terrainOctaves: Math.round(this.params.octaves),
     });
   }
 
@@ -598,18 +596,31 @@ export class Engine {
     await pending;
   }
 
+  async _withStudioCloudDetached(task) {
+    const mesh = this.studioCloud?.mesh;
+    const parent = mesh?.parent || null;
+    if (parent) parent.remove(mesh);
+    try {
+      return await task();
+    } finally {
+      if (parent && mesh && !mesh.parent) parent.add(mesh);
+    }
+  }
+
   /** Initial warmup: everything in the studio scene + the underwater pass. */
   async _warmupInitialShaders() {
     this._compiling++;
     this.cb.onStatus('Compiling shaders…', true);
     try {
-      await this.renderer.compileAsync(this.scene, this.camera);
+      await this._withStudioCloudDetached(async () => {
+        await this.renderer.compileAsync(this.scene, this.camera);
 
-      this.underwater._ensureTarget(this.renderer);
-      this.renderer.setRenderTarget(this.underwater._rt);
-      const pending = this.renderer.compileAsync(this.scene, this.camera);
-      this.renderer.setRenderTarget(null);
-      await pending;
+        this.underwater._ensureTarget(this.renderer);
+        this.renderer.setRenderTarget(this.underwater._rt);
+        const pending = this.renderer.compileAsync(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+        await pending;
+      });
 
       // underwater fullscreen compositing shader
       await this.renderer.compileAsync(
@@ -939,12 +950,14 @@ export class Engine {
     try {
       await this._compileMaterialVariants(warm);
       // sky dome material (already in the scene) — both output variants
-      await this.renderer.compileAsync(this.scene, this.camera);
-      this.underwater._ensureTarget(this.renderer);
-      this.renderer.setRenderTarget(this.underwater._rt);
-      const pending = this.renderer.compileAsync(this.scene, this.camera);
-      this.renderer.setRenderTarget(null);
-      await pending;
+      await this._withStudioCloudDetached(async () => {
+        await this.renderer.compileAsync(this.scene, this.camera);
+        this.underwater._ensureTarget(this.renderer);
+        this.renderer.setRenderTarget(this.underwater._rt);
+        const pending = this.renderer.compileAsync(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+        await pending;
+      });
     } catch (e) {
       console.warn('Infinite shader warmup failed', e);
     }
@@ -1084,7 +1097,7 @@ export class Engine {
     });
     this._applyCloudSettings();
     // warm the cloud program in the background so first enable doesn't hang
-    this._compileMaterialVariants([this.planetCloudLayer.material], { canvasOnly: true })
+    this.planetCloudLayer.warmup()
       .catch((e) => console.warn('Cloud shader warmup failed', e));
 
     // open-space backdrop (procedural sky is added in a later pass)
@@ -1605,6 +1618,10 @@ export class Engine {
         this.board.visibleChunkCount,
         this.board.culledChunkCount
       );
+    }
+
+    if (this.studioCloud) {
+      this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
     }
 
     this.underwater.render(this.renderer, this.scene, this.camera);

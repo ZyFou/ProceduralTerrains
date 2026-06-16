@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
-import { resolveCloudQuality } from './CloudSettings.js';
+import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 
 // ============================================================================
 // PlanetCloudLayer: planet-side manager for the volumetric cloud shell. Owns
@@ -41,6 +41,8 @@ export class PlanetCloudLayer {
     this._rotation = 0;
     this._wind = new THREE.Vector3();
     this._lastParams = null;
+    this._compileToken = 0;
+    this._pendingCompile = null;
 
     this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion);
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
@@ -104,6 +106,7 @@ export class PlanetCloudLayer {
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
+    u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -127,6 +130,41 @@ export class PlanetCloudLayer {
     }
   }
 
+  _compileMaterial(material) {
+    const token = ++this._compileToken;
+    if (!this._compile) return { token, promise: Promise.resolve() };
+
+    let promise;
+    try {
+      promise = Promise.resolve(this._compile([material]));
+    } catch (e) {
+      promise = Promise.reject(e);
+    }
+
+    const done = promise.catch(() => {});
+    this._pendingCompile = { material, promise: done };
+
+    done.finally(() => {
+      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    });
+
+    return { token, promise: done };
+  }
+
+  _compileCurrentMaterial() {
+    return this._compileMaterial(this.material).promise;
+  }
+
+  warmup() {
+    return this._compileCurrentMaterial();
+  }
+
+  _disposeWhenSafe(material, pending) {
+    if (!material) return;
+    if (pending) pending.finally(() => material.dispose());
+    else material.dispose();
+  }
+
   /** Swap the cloud material for a new step count (compile-time #define). */
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion) {
     this._steps = steps;
@@ -134,25 +172,29 @@ export class PlanetCloudLayer {
     this._octaves = octaves;
     this._detailOctaves = detailOctaves;
     this._useErosion = useErosion;
+    const previous = this.material;
+    const pendingPrevious = this._pendingCompile?.material === previous
+      ? this._pendingCompile.promise
+      : null;
     const next = createCloudMaterial(steps, lightSteps, octaves, detailOctaves, useErosion);
     // carry over current uniform values
-    const a = this.material.uniforms, b = next.uniforms;
+    const a = previous.uniforms, b = next.uniforms;
     for (const k in b) {
       if (!(k in a)) continue;
       const av = a[k].value, bv = b[k].value;
-      if (av && av.copy) bv.copy(av);
+      if (av && av.copy && bv && bv.copy) bv.copy(av);
       else b[k].value = a[k].value;
     }
-    const swap = () => {
+    const { token, promise } = this._compileMaterial(next);
+    promise.then(() => {
+      if (token !== this._compileToken || this.material !== previous) {
+        next.dispose();
+        return;
+      }
       this.mesh.material = next;
-      this.material.dispose();
       this.material = next;
-    };
-    if (this._compile) {
-      this._compile([next]).then(swap).catch(swap);
-    } else {
-      swap();
-    }
+      this._disposeWhenSafe(previous, pendingPrevious);
+    });
   }
 
   /** Per-frame: advance animation, refresh sun + camera-distance culling. */

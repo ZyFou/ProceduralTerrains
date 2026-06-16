@@ -123,6 +123,7 @@ uniform float uCloudRotation;      // domain rotation angle (radians)
 uniform float uCloudTime;
 uniform float uCloudSelfShadow;    // 0/1 toggle
 uniform vec3  uCloudSunDir;        // normalized, surface -> sun
+uniform float uCloudNoiseVariant;  // 0 soft, 1 billowy, 2 wispy, 3 cellular
 
 // rotate the sample domain slowly around the up (Y) axis (seamless — no UVs)
 vec3 cl_domain(vec3 P) {
@@ -134,7 +135,24 @@ vec3 cl_domain(vec3 P) {
 // (BEFORE altitude falloff — each shader applies its own).
 float cloudShape(vec3 q) {
   vec3 drift = uCloudWind * uCloudTime;
-  float base = cl_fbm_base(q * uCloudScale + drift);
+  vec3 baseP = q * uCloudScale + drift;
+  float base = cl_fbm_base(baseP);
+  float variant = floor(uCloudNoiseVariant + 0.5);
+
+  if (variant > 0.5 && variant < 1.5) {
+    float billow = 1.0 - abs(base * 2.0 - 1.0);
+    base = mix(base, pow(clamp(billow, 0.0, 1.0), 0.65), 0.85);
+  } else if (variant > 1.5 && variant < 2.5) {
+    vec3 streakP = vec3(q.x * 0.42 + q.z * 0.18, q.y * 0.72, q.z * 2.65) * uCloudScale + drift;
+    float streak = cl_fbm_base(streakP);
+    float shear = cl_fbm_base((q + vec3(streak * 36.0, 0.0, -streak * 18.0)) * uCloudScale * 0.72 + drift * 1.35);
+    base = mix(streak, shear, 0.45);
+  } else if (variant > 2.5) {
+    float cell = 1.0 - cl_worley(baseP * 1.55);
+    float filler = cl_fbm_base(baseP * 0.72 + vec3(19.7, 4.1, 31.3));
+    base = mix(filler, clamp(cell, 0.0, 1.0), 0.72);
+  }
+
   float n = base;
   #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
   float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7);
@@ -198,14 +216,8 @@ uniform float uCloudTop;          // slab top world Y
 uniform float uCloudRadius;       // horizontal fade radius
 uniform float uCloudFar;          // clamp marched distance (horizon bound)
 uniform vec3  uCloudCenter;       // board center (xz used)
-#ifdef CLOUD_TERRAIN_OCCLUSION
-uniform float uCloudTerrainClearance;
-#endif
 
 float cloudDensity(vec3 P) {
-#ifdef CLOUD_TERRAIN_OCCLUSION
-  if (P.y <= heightAt(P.xz) + uCloudTerrainClearance) return 0.0;
-#endif
   float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);
   if (hf <= 0.0 || hf >= 1.0) return 0.0;
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);

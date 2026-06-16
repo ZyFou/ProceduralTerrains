@@ -45,20 +45,6 @@ export default function TopBar({
         <span className="app-name">{APP_NAME}</span>
       </div>
 
-      <div className="tb-segment" role="group" aria-label="World mode">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            className={`tb-mode${worldMode === m.id ? ' active' : ''}`}
-            onClick={() => onSetWorldMode(m.id)}
-            disabled={modeLocked}
-            aria-pressed={worldMode === m.id}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-
       <div className="tb-group tb-actions">
         <button className="tb-btn" onClick={onNew} title="Reset to default project">
           <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> <span className="tb-text">New</span>
@@ -90,6 +76,20 @@ export default function TopBar({
           <svg viewBox="0 0 16 16"><path d="M3 12c2-4 5-7 10-9-2 5-5 8-9 10z" stroke="currentColor" fill="none" strokeWidth="1.2"/><path d="M4 13c-1 .5-1.5 1-2 1 0-.7.4-1.5 1-2" stroke="currentColor" fill="none" strokeWidth="1.2"/></svg>
           <span className="tb-text">Paint</span>
         </button>
+      </div>
+
+      <div className="tb-segment" role="group" aria-label="World mode">
+        {MODES.map((m) => (
+          <button
+            key={m.id}
+            className={`tb-mode${worldMode === m.id ? ' active' : ''}`}
+            onClick={() => onSetWorldMode(m.id)}
+            disabled={modeLocked}
+            aria-pressed={worldMode === m.id}
+          >
+            {m.label}
+          </button>
+        ))}
       </div>
 
       <div className="tb-group tb-right">

@@ -19,6 +19,7 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudCoverage: 0.50,        // 0..1 — fraction of sky covered (higher = more)
   cloudDensity: 1.0,          // overall opacity / optical thickness multiplier
   cloudSoftness: 0.16,        // edge softness of the coverage threshold
+  cloudNoiseVariant: 'soft',  // soft | billowy | wispy | cellular
 
   // shell geometry (world units, relative to the planet radius)
   cloudAltitude: 240,         // height of the inner shell above the surface
@@ -49,6 +50,17 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudMaxDistance: 6.0,      // hide clouds past this × planetRadius
   cloudFallback: 'none',      // none | lite | off (safe modes for weak GPUs)
 };
+
+export const CLOUD_NOISE_VARIANTS = [
+  { value: 'soft', label: 'Soft', index: 0 },
+  { value: 'billowy', label: 'Billowy', index: 1 },
+  { value: 'wispy', label: 'Wispy', index: 2 },
+  { value: 'cellular', label: 'Cellular', index: 3 },
+];
+
+export function resolveCloudNoiseVariant(value) {
+  return CLOUD_NOISE_VARIANTS.find((v) => v.value === value)?.index ?? 0;
+}
 
 // Raymarch step counts per quality preset. Step counts are compile-time
 // #defines in the shader (dynamic loop bounds hang the ANGLE/D3D11 compiler),

@@ -1,7 +1,7 @@
 import ControlSection from './ControlSection.jsx';
 import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
-import { CLOUD_DEFAULT_PARAMS } from '../../engine/sky/CloudSettings.js';
+import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_VARIANTS } from '../../engine/sky/CloudSettings.js';
 
 // Slider definitions grouped into labelled subsections. Keys map 1:1 to the
 // cloud* params in DEFAULT_PARAMS.
@@ -101,6 +101,13 @@ export default function CloudPanel({ params, onParam, worldMode, id = 'inspector
           ))}
 
           <div className="subsection-label">Noise</div>
+          <SelectRow
+            label="Noise Variant"
+            value={val(params, 'cloudNoiseVariant')}
+            options={CLOUD_NOISE_VARIANTS}
+            onChange={(v) => onParam('cloudNoiseVariant', v)}
+            info="Changes the cloud density field shape without changing raymarch quality."
+          />
           {NOISE_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} />
           ))}
