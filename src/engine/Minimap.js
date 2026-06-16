@@ -13,10 +13,11 @@ export class Minimap {
     this.renderer = renderer;
     this.scene = scene;
 
-    this.baseCanvas = baseCanvas;
-    this.overlayCanvas = overlayCanvas;
-    this.baseCtx = this.baseCanvas.getContext('2d');
-    this.overlayCtx = this.overlayCanvas.getContext('2d');
+    this.baseCanvas = null;
+    this.overlayCanvas = null;
+    this.baseCtx = null;
+    this.overlayCtx = null;
+    this.setCanvases(baseCanvas, overlayCanvas);
 
     this.target = new THREE.WebGLRenderTarget(SIZE, SIZE);
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
@@ -25,6 +26,16 @@ export class Minimap {
     this._pixels = new Uint8Array(SIZE * SIZE * 4);
     this._dirty = true;
     this._timer = 0;
+  }
+
+  setCanvases(baseCanvas, overlayCanvas) {
+    if (!baseCanvas || !overlayCanvas) return;
+    if (this.baseCanvas === baseCanvas && this.overlayCanvas === overlayCanvas) return;
+    this.baseCanvas = baseCanvas;
+    this.overlayCanvas = overlayCanvas;
+    this.baseCtx = this.baseCanvas.getContext('2d');
+    this.overlayCtx = this.overlayCanvas.getContext('2d');
+    this.requestRedraw({ force: true });
   }
 
   setBoard(boardSize, maxHeight) {
@@ -44,7 +55,7 @@ export class Minimap {
 
   // Re-render the base map (debounced by the caller via requestRedraw).
   renderBase() {
-    if (!this._dirty) return;
+    if (!this._dirty || !this.baseCtx) return;
     this._dirty = false;
 
     const prevTarget = this.renderer.getRenderTarget();
@@ -54,6 +65,18 @@ export class Minimap {
     this.renderer.render(this.scene, this.camera);
     this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
     this.renderer.setRenderTarget(prevTarget);
+
+    let contentPixels = 0;
+    for (let i = 0; i < this._pixels.length; i += 4) {
+      if (Math.abs(this._pixels[i] - 11) > 4 || Math.abs(this._pixels[i + 1] - 14) > 4 || Math.abs(this._pixels[i + 2] - 20) > 4) {
+        contentPixels++;
+        if (contentPixels >= 64) break;
+      }
+    }
+    if (contentPixels < 64) {
+      this._dirty = true;
+      return;
+    }
 
     // flip Y while copying into ImageData
     const img = this.baseCtx.createImageData(SIZE, SIZE);
@@ -67,6 +90,7 @@ export class Minimap {
   // Camera marker: target cross + view direction wedge. Cheap, every frame.
   drawOverlay(controls) {
     const ctx = this.overlayCtx;
+    if (!ctx) return;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
     const half = this.boardSize / 2;

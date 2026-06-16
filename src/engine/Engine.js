@@ -678,6 +678,13 @@ export class Engine {
   // ------------------------------------------------------------------ camera
 
   resetView() { this.controls.reset(this.boardSize); }
+
+  setMinimapCanvases(baseCanvas, overlayCanvas) {
+    this.minimap.setCanvases(baseCanvas, overlayCanvas);
+    this._minimapDirtyAt = 0;
+    this.minimap.renderBase();
+  }
+
   focusCenter() { this.controls.focusCenter(); }
   setCameraMode(mode) { this.controls.setMode(mode); }
   setCameraView(view) { this.controls.setView(view); }
@@ -993,6 +1000,10 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.controls.enabled = true;
     this.controls.reset(this.boardSize);
+
+    this._minimapDirtyAt = 0;
+    this.minimap.requestRedraw();
+    this.minimap.renderBase();
 
     this.cb.onStatus('Ready', false);
   }

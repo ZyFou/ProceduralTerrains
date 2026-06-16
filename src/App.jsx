@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
@@ -255,6 +255,11 @@ export default function App() {
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
 
+  useLayoutEffect(() => {
+    if (!showStudioUI || !isStudio || !engineRef.current) return;
+    engineRef.current.setMinimapCanvases(minimapBaseRef.current, minimapOverlayRef.current);
+  }, [showStudioUI, isStudio, effectivePanel]);
+
   const ctx = {
     params, worldMode, onParam,
     onPreset: (key) => engine().applyPresetByKey(key),
@@ -317,6 +322,7 @@ export default function App() {
               boardSize={boardSize}
               baseRef={minimapBaseRef}
               overlayRef={minimapOverlayRef}
+              drawerOpen={!!effectivePanel}
             />
           )}
 

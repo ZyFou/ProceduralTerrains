@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
-export default function MinimapOverlay({ boardSize, baseRef, overlayRef }) {
+export default function MinimapOverlay({ boardSize, baseRef, overlayRef, drawerOpen = false }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}`}>
+    <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}`}>
       <div className="minimap-overlay-header">
         <span className="minimap-title">
           <svg viewBox="0 0 16 16" fill="none" width="12" height="12" style={{ marginRight: '6px', color: 'var(--accent)' }}>
