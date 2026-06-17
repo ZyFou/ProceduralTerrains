@@ -33,6 +33,9 @@ uniform vec3 uSkySunColor;    // sun disc tint
 uniform vec3 uSkyFogColor;    // fog/haze at the very bottom
 uniform vec3 uSkySunDir;      // sun direction (shared with terrain)
 uniform float uSkyLightIntensity;  // overall brightness scale
+uniform float uSkyBrightness; // user brightness multiplier (Skybox tab)
+uniform float uSkyHaze;       // horizon haze band strength (Skybox tab)
+uniform float uSkyStars;      // 0/1 — render the night star field
 
 varying vec3 vDirection;
 
@@ -47,7 +50,7 @@ void main() {
 
   // Horizon haze band: blend toward fog color near y ≈ 0
   float hazeBand = exp(-abs(y) * 8.0);
-  skyCol = mix(skyCol, uSkyFogColor, hazeBand * 0.55);
+  skyCol = mix(skyCol, uSkyFogColor, hazeBand * uSkyHaze);
 
   // Below horizon: fade to fog color
   if (y < 0.0) {
@@ -79,7 +82,7 @@ void main() {
   skyCol += uSkySunColor * horizonWarmth * uSkyLightIntensity;
 
   // ---- Night: add stars when sun is below horizon ----
-  float nightFactor = smoothstep(0.15, -0.1, uSkySunDir.y);
+  float nightFactor = smoothstep(0.15, -0.1, uSkySunDir.y) * uSkyStars;
   if (nightFactor > 0.01 && y > 0.0) {
     // Simple pseudo-random stars from direction.
     // Hash keeps intermediate values small so it stays stable on all GPUs
@@ -93,6 +96,9 @@ void main() {
     float twinkle = 0.7 + 0.3 * sin(starHash * 6283.0 + starGrid.x * 0.5);
     skyCol += vec3(0.8, 0.85, 1.0) * star * twinkle * nightFactor * 0.6;
   }
+
+  // ---- User brightness ----
+  skyCol *= uSkyBrightness;
 
   // ---- Gamma correction ----
   skyCol = pow(max(skyCol, vec3(0.0)), vec3(1.0 / 2.2));
@@ -116,6 +122,9 @@ export class ProceduralSky {
       uSkyFogColor:       { value: new THREE.Color(0.55, 0.62, 0.75) },
       uSkySunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },
       uSkyLightIntensity: { value: 1.0 },
+      uSkyBrightness:     { value: 1.0 },
+      uSkyHaze:           { value: 0.55 },
+      uSkyStars:          { value: 1.0 },
     };
 
     // Large inverted sphere
@@ -145,6 +154,19 @@ export class ProceduralSky {
     this.uniforms.uSkySunColor.value.setRGB(tod.sunColor[0], tod.sunColor[1], tod.sunColor[2]);
     this.uniforms.uSkyFogColor.value.setRGB(tod.fogColor[0], tod.fogColor[1], tod.fogColor[2]);
     this.uniforms.uSkyLightIntensity.value = tod.lightIntensity;
+  }
+
+  /**
+   * Apply the user-facing skybox appearance params (Skybox tab). Pure uniform
+   * updates — never recompiles. Missing keys fall back to the defaults so this
+   * is safe to call with a partial / legacy params object.
+   * @param {Object} params — the engine params object
+   */
+  applyParams(params) {
+    if (!params) return;
+    this.uniforms.uSkyBrightness.value = params.skyboxBrightness ?? 1.0;
+    this.uniforms.uSkyHaze.value = params.skyboxHaze ?? 0.55;
+    this.uniforms.uSkyStars.value = params.skyboxStars === false ? 0.0 : 1.0;
   }
 
   /**

@@ -271,6 +271,13 @@ export class Engine {
     this.studioCloud = new CloudSlabLayer(this.scene, {
       compile: (mats) => this._compileMaterialVariants(mats),
     });
+
+    // Procedural sky dome. Persistent + shared by studio (Tile) and infinite
+    // world so both modes show the exact same configured sky (driven by the
+    // shared timeOfDay + skybox* params). Visibility is toggled per world mode
+    // by _applySkyboxSettings(); planet mode hides it (open-space backdrop).
+    this.proceduralSky = new ProceduralSky(this.scene);
+    this.proceduralSky.setVisible(false);
   }
 
   _initControls() {
@@ -313,6 +320,15 @@ export class Engine {
     // never mix into terrain generation)
     if (key.startsWith('cloud')) {
       this._applyCloudSettings();
+      return;
+    }
+
+    // skybox params: live sky-dome updates only (never rebuild terrain). The
+    // master toggle flips the sky/sun/fog driver, so re-run the uniform pass;
+    // appearance knobs are pure uniform writes.
+    if (key.startsWith('skybox')) {
+      if (key === 'skyboxEnabled') this._applyUniforms();
+      else this._applySkyboxSettings();
       return;
     }
 
@@ -399,8 +415,21 @@ export class Engine {
     this.sunLight.intensity = sunI * 1.28;
   }
 
+  /** Render the top-down minimap base with the sky dome hidden so the map stays
+   *  a clean terrain view (the dome would otherwise fill its background). */
+  _renderMinimapBase() {
+    const sky = this.proceduralSky;
+    const wasVisible = !!sky && sky.mesh.visible;
+    if (wasVisible) sky.setVisible(false);
+    this.minimap.renderBase();
+    if (wasVisible) sky.setVisible(true);
+  }
+
   _applyStudioFogFromStyle() {
     if (this.worldMode === 'infinite') return;
+    // When the procedural sky is active it owns the fog colour + backdrop
+    // (driven by timeOfDay); the dome covers the flat background anyway.
+    if (this._skyActive()) return;
     const tint = this.planetStyle.getFogTint();
     if (tint) {
       this.uniforms.uFogColor.value.setRGB(tint[0], tint[1], tint[2]);
@@ -595,17 +624,25 @@ export class Engine {
     // In infinite mode, fog and sun are managed by FogManager + TimeOfDay.
     // Only apply studio fog settings when NOT in infinite mode.
     if (this.worldMode !== 'infinite') {
-      const az = p.sunAzimuth * Math.PI / 180;
-      const el = p.sunElevation * Math.PI / 180;
-      u.uSunDir.value.set(
-        Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)
-      ).normalize();
-      this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
+      if (this._skyActive()) {
+        // Procedural sky is active: the shared timeOfDay owns the sun direction,
+        // sky/fog colours and light. (studio Tile mode shares this with the
+        // infinite world so both look identical.)
+        this._applyTimeOfDay();
+      } else {
+        // Manual Lighting sun angles (planet, or studio with the sky disabled).
+        const az = p.sunAzimuth * Math.PI / 180;
+        const el = p.sunElevation * Math.PI / 180;
+        u.uSunDir.value.set(
+          Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)
+        ).normalize();
+        this.sunLight.position.copy(u.uSunDir.value).multiplyScalar(2000);
+        this._applyStudioSunFromStyle();
+      }
 
       // planet is viewed in open space — exp distance fog would swallow the
       // whole globe, so it is disabled there.
       u.uFogDensity.value = this.worldMode === 'planet' ? 0.0 : p.fogDensity * 0.0001;
-      this._applyStudioSunFromStyle();
     }
 
     // octave count is a compile-time constant (keeps loop bounds static for
@@ -633,6 +670,7 @@ export class Engine {
     this.planetStyle.applyToUniforms(u);
     this._applyStudioFogFromStyle();
     this._applyCloudSettings();   // slab altitude/scale track board height + size
+    this._applySkyboxSettings();  // sky dome params + per-mode visibility
     this._applyPixelRatio();
   }
 
@@ -815,7 +853,7 @@ export class Engine {
   setMinimapCanvases(baseCanvas, overlayCanvas) {
     this.minimap.setCanvases(baseCanvas, overlayCanvas);
     this._minimapDirtyAt = 0;
-    this.minimap.renderBase();
+    this._renderMinimapBase();
   }
 
   focusCenter() { this.controls.focusCenter(); }
@@ -1035,8 +1073,9 @@ export class Engine {
     this.camera.far = 80000;
     this.camera.updateProjectionMatrix();
 
-    // Create procedural sky
-    this.proceduralSky = new ProceduralSky(this.scene);
+    // Procedural sky is persistent (created in _initScene + shared with the
+    // studio view). Just sync its params + visibility for infinite mode.
+    this._applySkyboxSettings();
 
     // Create fog manager
     this.fogManager = new FogManager(this.uniforms, this.scene);
@@ -1098,10 +1137,8 @@ export class Engine {
       this.fpsControls.dispose();
       this.fpsControls = null;
     }
-    if (this.proceduralSky) {
-      this.proceduralSky.dispose();
-      this.proceduralSky = null;
-    }
+    // proceduralSky is persistent (shared with studio) — do not dispose here.
+    if (this.proceduralSky) this.proceduralSky.setVisible(false);
     this.fogManager = null;
     if (this._infiniteTerrainMat) {
       this._infiniteTerrainMat.dispose();
@@ -1138,7 +1175,7 @@ export class Engine {
 
     this._minimapDirtyAt = 0;
     this.minimap.requestRedraw();
-    this.minimap.renderBase();
+    this._renderMinimapBase();
 
     this.cb.onStatus('Ready', false);
   }
@@ -1528,7 +1565,10 @@ export class Engine {
    */
   setTimeOfDay(value) {
     this.timeOfDay = Math.max(0, Math.min(1, value));
-    if (this.worldMode === 'infinite') {
+    // timeOfDay drives the sky in infinite world (always) and in studio (Tile)
+    // whenever the procedural sky is the active driver. Planet keeps its manual
+    // Lighting sun angles, so it ignores the time slider.
+    if (this.worldMode === 'infinite' || this._skyActive()) {
       this._applyTimeOfDay();
     }
     if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
@@ -1555,16 +1595,39 @@ export class Engine {
   }
 
   /**
-   * Apply time-of-day to sky, fog, and terrain lighting.
+   * True when the procedural sky dome is the active sky driver. In that state
+   * the shared `timeOfDay` owns the sky colours, sun direction and fog colour
+   * in BOTH studio (Tile) and infinite world. Planet mode is excluded — it uses
+   * its own open-space backdrop + the manual Lighting sun angles.
+   */
+  _skyActive() {
+    return this.worldMode !== 'planet' && this.params.skyboxEnabled !== false;
+  }
+
+  /**
+   * Sync the skybox appearance params + dome visibility for the current mode.
+   * Pure uniform/visibility updates — never rebuilds or recompiles.
+   */
+  _applySkyboxSettings() {
+    if (!this.proceduralSky) return;
+    this.proceduralSky.applyParams(this.params);
+    this.proceduralSky.setVisible(this._skyActive());
+    this._needsRender = true;
+  }
+
+  /**
+   * Apply time-of-day to sky, fog, and lighting. Shared by studio (Tile) and
+   * infinite world so both modes stay in lock-step with the single timeOfDay
+   * value. In studio there is no FogManager, so the terrain fog colour is set
+   * directly from the time-of-day palette.
    */
   _applyTimeOfDay() {
     const tod = evaluateTimeOfDay(this.timeOfDay);
 
-    // Update sky dome
+    // Update sky dome + sun direction (shared with terrain via uSunDir)
     if (this.proceduralSky) {
       this.proceduralSky.updateFromTimeOfDay(tod);
 
-      // Compute sun direction from time-of-day angles
       const az = tod.sunAzimuth * Math.PI / 180;
       const el = tod.sunElevation * Math.PI / 180;
       const sunDir = this.uniforms.uSunDir.value;
@@ -1577,14 +1640,18 @@ export class Engine {
       this.sunLight.position.copy(sunDir).multiplyScalar(2000);
     }
 
-    // Update fog
+    // Update fog: infinite uses the FogManager; studio sets the fog colour
+    // uniform directly from the time-of-day palette.
     if (this.fogManager) {
       this.fogManager.updateFromTimeOfDay(tod);
+    } else {
+      this.uniforms.uFogColor.value.setRGB(tod.fogColor[0], tod.fogColor[1], tod.fogColor[2]);
     }
 
-    // Update terrain sun light intensity and color
+    // Update directional sun light intensity and color
     this.sunLight.intensity = tod.lightIntensity;
     this.sunLight.color.setRGB(tod.sunColor[0], tod.sunColor[1], tod.sunColor[2]);
+    this._needsRender = true;
   }
 
   // ------------------------------------------------------------- save/load
@@ -1894,7 +1961,7 @@ export class Engine {
       this._lastDraws = this.renderer.info.render.calls;
 
       // minimap: re-render base only after params settle, marker every frame
-      if (minimapDirty) this.minimap.renderBase();
+      if (minimapDirty) this._renderMinimapBase();
       this.minimap.drawOverlay(this.controls);
     }
 
@@ -2030,6 +2097,7 @@ export class Engine {
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
+    if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();

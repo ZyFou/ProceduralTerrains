@@ -36,6 +36,7 @@ export const PANEL_META = {
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: ic(<path d="M10 4c-2 3-5 5-5 8a5 5 0 0 0 10 0c0-3-3-5-5-8z" stroke="currentColor" strokeWidth="1.4" />) },
   props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: ic(<path d="M5 16c.2-5 1.2-9 3-13M10 16c-.1-4.8.4-8.6 1.5-12M14 16c-.4-4.2-1.2-7.4-2.4-9.6" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />) },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: ic(<path d="M5 14a3 3 0 0 1 .5-5.95A4.2 4.2 0 0 1 14 8.3a3 3 0 0 1-.4 5.7H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
+  skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: ic(<><path d="M2 13h16" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /><circle cx="6.5" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.3" /><path d="M11 13a3.2 3.2 0 0 1 .3-6 4 4 0 0 1 6.4 1.1" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></>) },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: ic(<><circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8" stroke="currentColor" strokeWidth="1.3" /></>) },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: ic(<><path d="M10 3v9M10 3 7 6M10 3l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 12v4h12v-4" stroke="currentColor" strokeWidth="1.4" /></>) },
   performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: ic(<path d="M3 15h14M5 11l3-5 3 4 4-7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />) },
@@ -43,7 +44,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'props', 'clouds', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -252,27 +253,71 @@ function CloudsPanel({ ctx }) {
   );
 }
 
-function LightingPanel({ ctx }) {
-  const { params } = ctx;
+// Shared time-of-day control. `timeOfDay` is a single engine-owned value used
+// by the Skybox tab here, the Lighting system and the infinite HUD — never
+// duplicated. Owned (surfaced) by the Skybox tab.
+function TimeOfDayControl({ timeOfDay, onTimeOfDay }) {
   return (
-    <SidePanel title="Lighting" description="Sun, atmosphere and fog." onClose={ctx.onClose}>
+    <div className="ctl">
+      <div className="ctl-top">
+        <span className="setting-label">Time</span>
+        <span className="ctl-val" style={{ pointerEvents: 'none' }}>{formatTimeOfDay(timeOfDay)}</span>
+      </div>
+      <div className="slider-track-wrap">
+        <div className="slider-track-bg" />
+        <div className="slider-track-fill" style={{ width: `${timeOfDay * 100}%` }} />
+        <input type="range" className="slider-input" min="0" max="1" step="0.005"
+          value={timeOfDay} onChange={(e) => onTimeOfDay(parseFloat(e.target.value))} />
+      </div>
+    </div>
+  );
+}
+
+const SKYBOX_SLIDERS = {
+  skyboxBrightness: { key: 'skyboxBrightness', label: 'Sky Brightness', min: 0.2, max: 2.5, step: 0.05, digits: 2, info: 'Overall brightness of the sky dome and sun glow.' },
+  skyboxHaze: { key: 'skyboxHaze', label: 'Horizon Haze', min: 0, max: 1.2, step: 0.05, digits: 2, info: 'Strength of the atmospheric haze band blended around the horizon.' },
+};
+
+function SkyboxPanel({ ctx }) {
+  const { params, onParam } = ctx;
+  const enabled = params.skyboxEnabled !== false;
+  return (
+    <SidePanel title="Skybox" description="Sky environment, time of day and atmosphere." onClose={ctx.onClose}>
+      <ToggleRow label="Procedural Sky" value={enabled} onChange={(v) => onParam('skyboxEnabled', v)}
+        info="Surround the scene with the procedural sky dome (Tile + Infinite World). When off, a flat backdrop and the manual Lighting sun angles are used." />
+
       <div className="panel-group">
         <div className="panel-group-header"><span className="panel-group-title">TIME OF DAY</span></div>
         <div className="panel-group-body">
-          <div className="ctl">
-            <div className="ctl-top">
-              <span className="setting-label">Time</span>
-              <span className="ctl-val" style={{ pointerEvents: 'none' }}>{formatTimeOfDay(ctx.timeOfDay)}</span>
-            </div>
-            <div className="slider-track-wrap">
-              <div className="slider-track-bg" />
-              <div className="slider-track-fill" style={{ width: `${ctx.timeOfDay * 100}%` }} />
-              <input type="range" className="slider-input" min="0" max="1" step="0.005"
-                value={ctx.timeOfDay} onChange={(e) => ctx.onTimeOfDay(parseFloat(e.target.value))} />
-            </div>
-          </div>
+          <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} />
+          <p className="section-hint">Drives the sky colours, sun position and atmosphere. Shared across the Tile view and the Infinite World.</p>
         </div>
       </div>
+
+      {enabled && (
+        <>
+          <div className="subsection-label">Appearance</div>
+          <SliderCtl def={SKYBOX_SLIDERS.skyboxBrightness} value={params.skyboxBrightness ?? 1}
+            onChange={(v) => onParam('skyboxBrightness', v)} />
+          <SliderCtl def={SKYBOX_SLIDERS.skyboxHaze} value={params.skyboxHaze ?? 0.55}
+            onChange={(v) => onParam('skyboxHaze', v)} />
+          <ToggleRow label="Night Stars" value={params.skyboxStars !== false}
+            onChange={(v) => onParam('skyboxStars', v)}
+            info="Show the procedural star field when the sun is below the horizon." />
+        </>
+      )}
+    </SidePanel>
+  );
+}
+
+function LightingPanel({ ctx }) {
+  const { params } = ctx;
+  const skyOn = params.skyboxEnabled !== false;
+  return (
+    <SidePanel title="Lighting" description="Sun, atmosphere and fog." onClose={ctx.onClose}>
+      {skyOn && (
+        <p className="section-hint">Time of day and the sky environment are configured in the <strong>Skybox</strong> tab. While the procedural sky is on, it drives the sun direction and atmosphere; the manual sun angles below apply when the sky is disabled.</p>
+      )}
       <EnvironmentPanelInner params={params} planetStyle={params.planetStyle}
         onParam={ctx.onParam} onTuning={ctx.onStyleTuning} />
     </SidePanel>
@@ -405,7 +450,7 @@ function ExportPanel({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
-  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, lighting: LightingPanel, export: ExportPanel,
+  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };
 
