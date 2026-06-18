@@ -74,10 +74,16 @@ const BAKE_FRAGMENT = /* glsl */ `
     float slope = 1.0 - up;
     float hRel = hC - uSeaLevel;
     float h01 = hC / max(uHeightScale, 1e-3);
-    vec2 colXZ = pC.xz + pC.y * vec2(0.37, -0.21);
-    float jitter = (cl.region-0.5)*0.8 + (vnoise(colXZ*0.045+uSeedOffset)-0.5)*0.6;
-    float detail = vnoise(colXZ*0.35 + uSeedOffset.yx);
-    TerrainColorResult tc = computeTerrainAlbedo(colXZ, cl, bw, hC, hRel, h01, slope, detail, jitter);
+    // triplanar color-detail (matches PlanetMaterial's live shader so baked
+    // textures line up): avoids the sphere xz-projection stretching
+    vec3 colP = pC;
+    vec3 colBlend = abs(dir);
+    colBlend /= max(colBlend.x + colBlend.y + colBlend.z, 1e-4);
+    vec3 colSeed = vec3(uSeedOffset, uSeedOffset.x - uSeedOffset.y);
+    float jitter = (cl.region-0.5)*0.8 + (vnoiseTri(colP*0.045+colSeed, colBlend)-0.5)*0.6;
+    float detail = vnoiseTri(colP*0.35 + colSeed.yzx, colBlend);
+    float microN = vnoiseTri(colP*0.9, colBlend);
+    TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, microN);
 
     vec3 col = tc.albedo;
     if (uBakeLighting) {

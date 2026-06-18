@@ -47,6 +47,15 @@ float vnoise3(vec3 p) {
   );
 }
 
+// Triplanar 2D-value-noise sampling for sphere surfaces. A single flat xz
+// projection of the globe stretches badly toward the poles / vertical faces
+// (the streaking the planet water used to show); blending the three axis-
+// aligned planes by the surface-normal weights keeps the grain uniform
+// everywhere. blend must be normalized (its components sum to 1).
+float vnoiseTri(vec3 p, vec3 blend) {
+  return vnoise(p.yz) * blend.x + vnoise(p.zx) * blend.y + vnoise(p.xy) * blend.z;
+}
+
 // orthonormal rotation to decorrelate FBM octaves in 3D
 const mat3 ROT3 = mat3(
    0.00,  0.80,  0.60,

@@ -52,9 +52,12 @@ struct TerrainColorResult {
   float rockBlend;
 };
 
+// microN is the high-frequency albedo grain noise, supplied by the caller so
+// the same function serves both the flat board (a plain xz value noise) and the
+// planet (triplanar, to avoid sphere stretching) without forking.
 TerrainColorResult computeTerrainAlbedo(
-  vec2 xz, Climate cl, BiomeWeights bw,
-  float hC, float hRel, float h01, float slope, float detail, float jitter
+  Climate cl, BiomeWeights bw,
+  float hC, float hRel, float h01, float slope, float detail, float jitter, float microN
 ) {
   TerrainColorResult res;
   float tempEff = clamp(cl.temp - h01 * 0.55, 0.0, 1.0);
@@ -104,7 +107,7 @@ TerrainColorResult computeTerrainAlbedo(
 
   float micro = mix(0.20, 0.06, max(bw.desert * (1.0 - rockBlend), bw.wetland * 0.8));
   micro = mix(micro, 0.30, max(rockBlend * 0.6, bw.canyon * 0.4));
-  albedo *= (1.0 - micro * 0.5) + micro * vnoise(xz * 0.9);
+  albedo *= (1.0 - micro * 0.5) + micro * microN;
 
   res.albedo = applyPalettePost(albedo);
   res.snow = snow;

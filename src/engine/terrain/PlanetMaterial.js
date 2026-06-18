@@ -138,9 +138,6 @@ void main() {
   float hRel = hC - uSeaLevel;
   float h01 = hC / max(uHeightScale, 1e-3);
 
-  // a stable-ish 2D coordinate for the color micro-detail noise
-  vec2 colXZ = vWorldPos.xz + vWorldPos.y * vec2(0.37, -0.21);
-
   if (uBiomeDebug > 0.5) {
     vec3 dbg = terrainBiomeDebugColor(bw, h01);
     float shade = 0.55 + 0.45 * max(dot(n, uSunDir), 0.0);
@@ -148,10 +145,19 @@ void main() {
     return;
   }
 
-  float jitter = (cl.region - 0.5) * 0.8 + (vnoise(colXZ * 0.045 + uSeedOffset) - 0.5) * 0.6;
-  float detail = vnoise(colXZ * 0.35 + uSeedOffset.yx);
+  // Triplanar color-detail sampling: a flat vWorldPos.xz projection of the
+  // sphere stretches toward the poles / vertical faces (same streaking the
+  // water had); blend three axis planes by the normal so the grain is uniform.
+  vec3 colP = vWorldPos;
+  vec3 colBlend = abs(dir);
+  colBlend /= max(colBlend.x + colBlend.y + colBlend.z, 1e-4);
+  vec3 colSeed = vec3(uSeedOffset, uSeedOffset.x - uSeedOffset.y);
 
-  TerrainColorResult tc = computeTerrainAlbedo(colXZ, cl, bw, hC, hRel, h01, slope, detail, jitter);
+  float jitter = (cl.region - 0.5) * 0.8 + (vnoiseTri(colP * 0.045 + colSeed, colBlend) - 0.5) * 0.6;
+  float detail = vnoiseTri(colP * 0.35 + colSeed.yzx, colBlend);
+  float microN = vnoiseTri(colP * 0.9, colBlend);
+
+  TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, microN);
 
   // ambient occlusion from local concavity + low-altitude valleys
   float concave = clamp(((hA + hB) * 0.5 - hC) / (uHeightScale * 0.02 + 1.0), 0.0, 1.0);

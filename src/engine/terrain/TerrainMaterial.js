@@ -130,7 +130,7 @@ void main() {
   float jitter = (cl.region - 0.5) * 0.8 + (vnoise(xz * 0.045 + uSeedOffset) - 0.5) * 0.6;
   float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
-  TerrainColorResult tc = computeTerrainAlbedo(xz, cl, bw, hC, hRel, h01, slope, detail, jitter);
+  TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
 
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
