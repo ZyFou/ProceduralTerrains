@@ -27,6 +27,8 @@ export class PlanetOrbitControls {
     this.onFirstInteract = null;
     this._interacted = false;
     this._drag = null;
+    this._touches = new Map();
+    this._pinch = null;
 
     this._onDown = this._onDown.bind(this);
     this._onMove = this._onMove.bind(this);
@@ -70,21 +72,61 @@ export class PlanetOrbitControls {
   _onDown(e) {
     if (!this.enabled) return;
     this._markInteract();
-    this._drag = { x: e.clientX, y: e.clientY };
+    if (e.pointerType === 'touch') {
+      this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this._pinch = this._getPinchState();
+    } else {
+      this._drag = { x: e.clientX, y: e.clientY };
+    }
     this.dom.setPointerCapture(e.pointerId);
   }
 
+  _orbitByPixels(dx, dy) {
+    this.goalTheta -= dx * 0.005;
+    this.goalPhi = Math.min(Math.max(this.goalPhi - dy * 0.004, this.minPhi), this.maxPhi);
+  }
+
+  _getPinchState() {
+    const pts = Array.from(this._touches.values());
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, dist: Math.hypot(dx, dy) || 1, zoom: this.goalDist };
+  }
+
   _onMove(e) {
+    if (e.pointerType === 'touch' && this._touches.has(e.pointerId)) {
+      const prev = this._touches.get(e.pointerId);
+      this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = Array.from(this._touches.values());
+      if (pts.length >= 2) {
+        const next = this._getPinchState();
+        if (this._pinch && next) {
+          this._orbitByPixels(next.x - this._pinch.x, next.y - this._pinch.y);
+          this.goalDist = Math.min(Math.max(this._pinch.zoom * (this._pinch.dist / next.dist), this.minDist), this.maxDist);
+          this._pinch.x = next.x;
+          this._pinch.y = next.y;
+        }
+        return;
+      }
+      if (pts.length === 1 && this._pinch === null && prev) this._orbitByPixels(e.clientX - prev.x, e.clientY - prev.y);
+      return;
+    }
     if (!this._drag) return;
     const dx = e.clientX - this._drag.x;
     const dy = e.clientY - this._drag.y;
     this._drag.x = e.clientX;
     this._drag.y = e.clientY;
-    this.goalTheta -= dx * 0.005;
-    this.goalPhi = Math.min(Math.max(this.goalPhi - dy * 0.004, this.minPhi), this.maxPhi);
+    this._orbitByPixels(dx, dy);
   }
 
   _onUp(e) {
+    if (e.pointerType === 'touch') {
+      this._touches.delete(e.pointerId);
+      this._pinch = this._getPinchState();
+      try { this.dom.releasePointerCapture(e.pointerId); } catch { /* ok */ }
+      return;
+    }
     if (this._drag) {
       this._drag = null;
       try { this.dom.releasePointerCapture(e.pointerId); } catch { /* ok */ }

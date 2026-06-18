@@ -356,7 +356,7 @@ export default function App() {
 
           <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
-            <div className="help-row"><span className="help-ic">🖱</span> Scroll to zoom</div>
+            <div className="help-row"><span className="help-ic">🤏</span> Pinch to zoom • move two fingers to pan</div>
             <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
           </div>
 
