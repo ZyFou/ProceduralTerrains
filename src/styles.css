@@ -2297,12 +2297,16 @@ input[type="color"].palette-color-input {
   justify-content: center;
 }
 .nl-add-menu {
-  position: fixed;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border-active);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
-  max-height: 340px;
+  max-height: 280px;
   overflow-y: auto;
   z-index: 9999;
   padding: 4px;

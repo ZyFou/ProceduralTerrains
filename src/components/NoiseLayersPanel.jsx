@@ -77,8 +77,14 @@ function NoiseLayerItem({
   return (
     <div
       className={`nl-item${expanded ? ' expanded' : ''}${!layer.enabled ? ' disabled' : ''}${isSolo ? ' solo' : ''}`}
-      draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(index); }}
+      draggable={!expanded}
+      onDragStart={(e) => {
+        // Only allow drag from the header row (grip area); cancel if the user
+        // is interacting with sliders / inputs / buttons inside the body.
+        if (e.target.closest('.nl-body')) { e.preventDefault(); return; }
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart(index);
+      }}
       onDragEnter={() => onDragEnter(index)}
       onDragOver={(e) => e.preventDefault()}
       onDragEnd={onDragEnd}
@@ -244,16 +250,9 @@ function MaskItem({ mask, onRemove, onToggle, onInvert, onParam }) {
 }
 
 // ---- add-layer flyout menu --------------------------------------------------
-function AddLayerMenu({ onAdd, onClose, anchorRef }) {
-  const menuStyle = {};
-  if (anchorRef?.current) {
-    const rect = anchorRef.current.getBoundingClientRect();
-    menuStyle.top = rect.bottom + 6;
-    menuStyle.left = rect.left;
-    menuStyle.width = rect.width;
-  }
+function AddLayerMenu({ onAdd, onClose }) {
   return (
-    <div className="nl-add-menu" style={menuStyle}>
+    <div className="nl-add-menu">
       {TYPE_GROUPS.map((g) => (
         <div key={g.label}>
           <div className="nl-add-group">{g.label}</div>
@@ -401,7 +400,7 @@ export default function NoiseLayersPanel({ ctx }) {
         {addOpen && (
           <>
             <div className="nl-add-backdrop" onClick={() => setAddOpen(false)} />
-            <AddLayerMenu onAdd={handleAdd} onClose={() => setAddOpen(false)} anchorRef={addBtnRef} />
+            <AddLayerMenu onAdd={handleAdd} onClose={() => setAddOpen(false)} />
           </>
         )}
       </div>

@@ -166,7 +166,7 @@ export class TerrainHeightSampler {
 
     let h = (this.stack && !isLegacyStack(this.stack))
       ? evalStack2D(this.stack, x, z, this._ctx())
-      : this._legacyShape2D(x, z);
+      : f(this._legacyShape2D(x, z) * f(u.uAmplitude.value));
 
     // island falloff (studio board only) + clamp + world height scale
     if (!env.infinite) {
@@ -217,8 +217,6 @@ export class TerrainHeightSampler {
       * f(1 - f(bw.desert * 0.85)))
       * f(1 - bw.wetland));
     h = f(h + f(f(f(Math.pow(ridge, 1.35)) * mountains) * f(f(u.uRidge.value) * 1.15)));
-
-    h = f(h * f(u.uAmplitude.value));
 
     // layer 5: wetlands settle just above sea level
     const sea01 = f(f(u.uSeaLevel.value) / Math.max(f(u.uHeightScale.value), 1));

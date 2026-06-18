@@ -129,7 +129,8 @@ export function evalStack2D(stack, x, z, ctx) {
     const m = evalMaskJs(layer, { h, ctx });
     h = blendJs(layer.blendMode, h, val * eff * m);
   }
-  return h;
+  // Apply global amplitude (Noise Strength) as a master multiplier
+  return h * (u.uAmplitude?.value ?? 1);
 }
 
 export function evalStack3D(stack, dx, dy, dz, ctx) {
@@ -156,5 +157,6 @@ export function evalStack3D(stack, dx, dy, dz, ctx) {
     const m = evalMaskJs(layer, { h, ctx });
     h = blendJs(layer.blendMode, h, val * eff * m);
   }
-  return h;
+  // Apply global amplitude (Noise Strength) as a master multiplier
+  return h * (u.uAmplitude?.value ?? 1);
 }

@@ -186,8 +186,6 @@ float legacyShape3D(vec3 dir) {
                   * (1.0 - bw.wetland);
   h += pow(ridge, 1.35) * mountains * uRidge * 1.15;
 
-  h *= uAmplitude;
-
   // layer 5: wetlands settle just above sea level
   float sea01 = uSeaLevel / max(uHeightScale, 1.0);
   h = mix(h, sea01 + 0.012 + base * 0.03, bw.wetland * 0.85);
@@ -200,11 +198,12 @@ float legacyShape3D(vec3 dir) {
 
 // Codegen-injected noise stack on the sphere; pw is the (domain-warped) 3D
 // noise coordinate shared by all layers.
+// uAmplitude acts as a master strength multiplier for the entire stack.
 float stackHeight3D(vec3 dir) {
   vec3 pw = planetDomain(dir);
   float h = 0.0;
 ${stackBody3D}
-  return h;
+  return h * uAmplitude;
 }
 
 // Radial terrain height (world units) for a unit direction — no board falloff

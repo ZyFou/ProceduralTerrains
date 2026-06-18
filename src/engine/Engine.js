@@ -919,17 +919,17 @@ export class Engine {
     this.cb.onStatus('Compiling shaders…', true);
 
     const warm = [
-      createTerrainMaterial(this.uniforms, oct),
-      createWaterMaterial(this.uniforms, oct),
+      createTerrainMaterial(this.uniforms, oct, this._stackGLSL),
+      createWaterMaterial(this.uniforms, oct, this._stackGLSL),
     ];
     if (this.worldMode === 'infinite') {
-      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct));
-      warm.push(createInfiniteWaterMaterial(this.uniforms, oct));
+      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL));
+      warm.push(createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
     const planetMode = this.worldMode === 'planet';
     if (planetMode) {
-      warm.push(createPlanetMaterial(this.uniforms, oct));
-      warm.push(createPlanetWaterMaterial(this.uniforms, oct));
+      warm.push(createPlanetMaterial(this.uniforms, oct, this._stackGLSL));
+      warm.push(createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
 
     try {
@@ -1158,9 +1158,9 @@ export class Engine {
 
     // Create infinite materials (sharing the same uniform objects)
     const oct = Math.round(p.octaves);
-    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct);
+    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this._infiniteTerrainMat.wireframe = p.wireframe;
-    this._infiniteWaterMat = createInfiniteWaterMaterial(this.uniforms, oct);
+    this._infiniteWaterMat = createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL);
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
 
     // Store the tile frequency for infinite mode
@@ -1287,6 +1287,7 @@ export class Engine {
 
     this._applyUniforms();
     this.uniforms.uPaintEnabled.value = 1;
+    this._rebuildStackMaterialsAsync();
 
     this.scene.background = new THREE.Color(0x0b0e14);
     this._applyStudioFogFromStyle();
@@ -1329,7 +1330,7 @@ export class Engine {
     // per-chunk cube-face mapping uniforms
     this.planetWorld = new PlanetWorld(
       this.scene,
-      () => createPlanetMaterial(this.uniforms, oct),
+      () => createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
       {
         radius: this._planetRadius(),
         maxHeight: this._maxHeight(),
@@ -1344,7 +1345,7 @@ export class Engine {
 
     // water shell: a sphere at radius (planetRadius + seaLevel); the shader
     // discards over land so only basins fill. One mesh, one shared material.
-    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct);
+    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL);
     this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), this.planetWaterMat);
     this.planetWater.frustumCulled = false;
@@ -1371,7 +1372,7 @@ export class Engine {
       this._bakedTerrainGen = -1;
     }
     if (this._bakedTerrainGen === this._terrainGen) return;
-    this.planetHeightBaker.bake(Math.round(this.params.octaves));
+    this.planetHeightBaker.bake(Math.round(this.params.octaves), this._stackGLSL);
     this.uniforms.uPlanetHeightTex.value = this.planetHeightBaker.texture;
     this.uniforms.uUsePlanetHeightTex.value = 1.0;
     this._bakedTerrainGen = this._terrainGen;
@@ -1517,8 +1518,8 @@ export class Engine {
     // planet never uses the underwater pass → compile only the canvas variant
     // (skips the second, render-target colour-space program: ~half the work)
     const warm = [
-      createPlanetMaterial(this.uniforms, oct),
-      createPlanetWaterMaterial(this.uniforms, oct),
+      createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
+      createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
     ];
     try {
       await this._compileMaterialVariants(warm, { canvasOnly: true });

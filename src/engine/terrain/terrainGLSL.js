@@ -180,8 +180,6 @@ float legacyShape2D(vec2 xz, Climate c) {
                   * (1.0 - bw.wetland);
   h += pow(ridge, 1.35) * mountains * uRidge * 1.15;
 
-  h *= uAmplitude;
-
   // layer 5: wetlands settle just above sea level (after amplitude so they
   // land at the true water line)
   float sea01 = uSeaLevel / max(uHeightScale, 1.0);
@@ -195,11 +193,12 @@ float legacyShape2D(vec2 xz, Climate c) {
 
 // Codegen-injected noise stack. Accumulates h from the ordered layers; pw is
 // the (possibly domain-warped) noise-domain coordinate shared by all layers.
+// uAmplitude acts as a master strength multiplier for the entire stack.
 float stackHeight2D(vec2 xz, Climate c) {
   vec2 pw = xz * uFrequency + uSeedOffset;
   float h = 0.0;
 ${stackBody2D}
-  return h;
+  return h * uAmplitude;
 }
 
 // Finalize: island falloff (studio board only) + clamp + world height scale.

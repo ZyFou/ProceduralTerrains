@@ -178,7 +178,7 @@ export class PlanetHeightSampler {
     const u = this.u;
     const h = (this.stack && !isLegacyStack(this.stack))
       ? evalStack3D(this.stack, dx, dy, dz, this._ctx())
-      : this._legacyShape3D(dx, dy, dz);
+      : f(this._legacyShape3D(dx, dy, dz) * f(u.uAmplitude.value));
     return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
   }
 
@@ -216,8 +216,6 @@ export class PlanetHeightSampler {
     const chain = smoothstep32(0.34, 0.66, this._fbm3D4(f(f(qx * 0.35) + 5.1), f(f(qy * 0.35) + 17.7), f(f(qz * 0.35) + 9.4)));
     const mountains = f(f(f(chain * mix32(0.35, 1.0, bw.mountains)) * f(1 - f(bw.desert * 0.85))) * f(1 - bw.wetland));
     h = f(h + f(f(f(Math.pow(ridge, 1.35)) * mountains) * f(f(u.uRidge.value) * 1.15)));
-
-    h = f(h * f(u.uAmplitude.value));
 
     // layer 5: wetlands settle just above sea level
     const sea01 = f(f(u.uSeaLevel.value) / Math.max(f(u.uHeightScale.value), 1));
