@@ -26,6 +26,8 @@ export class FPSControls {
 
     this._keys = new Set();
     this._locked = false;
+    this.touch = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+    this.touchActive = false;
 
     // When a PlayerController drives the body, FPSControls only applies
     // mouse-look orientation; movement keys are read by the controller.
@@ -67,6 +69,15 @@ export class FPSControls {
   }
 
   get isLocked() { return this._locked; }
+
+  setTouchInput({ moveX = 0, moveY = 0, lookX = 0, lookY = 0 } = {}) {
+    this.touch.moveX = moveX;
+    this.touch.moveY = moveY;
+    this.touch.lookX = lookX;
+    this.touch.lookY = lookY;
+    this.touchActive = Math.hypot(moveX, moveY) > 0.02
+      || Math.hypot(lookX, lookY) > 0.02;
+  }
 
   // ---- event handlers ----
 
@@ -110,38 +121,50 @@ export class FPSControls {
 
   // ---- update ----
 
+  _applyTouchLook(dt) {
+    const { lookX, lookY } = this.touch;
+    if (Math.abs(lookX) < 0.02 && Math.abs(lookY) < 0.02) return;
+    const rate = this.mouseSensitivity * 220 * (dt || 0.016);
+    this.yaw -= lookX * rate;
+    this.pitch -= lookY * rate;
+    this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
+  }
+
   update(dt) {
+    this._applyTouchLook(dt);
+
     if (this.externalMove) {
-      // PlayerController moves the body — only apply look orientation here
       this._applyOrientation();
       return;
     }
-    if (!this._locked) {
-      // still apply camera orientation even when unlocked
+
+    const canMove = this._locked || this.touchActive;
+    if (!canMove) {
       this._applyOrientation();
       return;
     }
 
     const speed = this.moveSpeed * dt;
-
-    // forward/backward direction (horizontal, ignoring pitch)
     const fwdX = -Math.sin(this.yaw);
     const fwdZ = -Math.cos(this.yaw);
-    // strafe direction
     const rightX = Math.cos(this.yaw);
     const rightZ = -Math.sin(this.yaw);
 
     let dx = 0, dy = 0, dz = 0;
 
-    // ZQSD layout
-    if (this._keys.has('KeyW') || this._keys.has('KeyZ')) { dx += fwdX; dz += fwdZ; }  // forward
-    if (this._keys.has('KeyS'))                           { dx -= fwdX; dz -= fwdZ; }  // backward
-    if (this._keys.has('KeyA') || this._keys.has('KeyQ')) { dx -= rightX; dz -= rightZ; } // strafe left
-    if (this._keys.has('KeyD'))                           { dx += rightX; dz += rightZ; } // strafe right
-    if (this._keys.has('Space'))                          { dy += 1; }  // ascend
-    if (this._keys.has('ShiftLeft') || this._keys.has('ShiftRight')) { dy -= 1; } // descend
+    if (this._keys.has('KeyW') || this._keys.has('KeyZ')) { dx += fwdX; dz += fwdZ; }
+    if (this._keys.has('KeyS')) { dx -= fwdX; dz -= fwdZ; }
+    if (this._keys.has('KeyA') || this._keys.has('KeyQ')) { dx -= rightX; dz -= rightZ; }
+    if (this._keys.has('KeyD')) { dx += rightX; dz += rightZ; }
+    if (this._keys.has('Space')) { dy += 1; }
+    if (this._keys.has('ShiftLeft') || this._keys.has('ShiftRight')) { dy -= 1; }
 
-    // normalize horizontal movement so diagonal isn't faster
+    if (this.touchActive) {
+      const { moveX, moveY } = this.touch;
+      dx += fwdX * moveY + rightX * moveX;
+      dz += fwdZ * moveY + rightZ * moveX;
+    }
+
     const hLen = Math.hypot(dx, dz);
     if (hLen > 1e-6) {
       dx = dx / hLen * speed;

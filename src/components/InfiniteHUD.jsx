@@ -18,6 +18,18 @@ const PLAYER_STATE_LABELS = {
   underwater: 'Underwater',
 };
 
+const DockBtn = ({ active, onClick, title, children }) => (
+  <button
+    type="button"
+    className={`fps-dock-btn camera-bar-btn${active ? ' active' : ''}`}
+    onClick={onClick}
+    title={title}
+    aria-pressed={active}
+  >
+    {children}
+  </button>
+);
+
 export default function InfiniteHUD({
   stats, onReturn, isPlanet,
   playerMode, onPlayerMode,
@@ -31,10 +43,10 @@ export default function InfiniteHUD({
   if (!stats) return null;
 
   const qualityKeys = getQualityKeys();
+  const togglePerf = () => setPerfOpen((v) => !v);
 
   return (
     <>
-      {/* Crosshair */}
       <div id="fps-crosshair">
         <svg width="24" height="24" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="2" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="1.2" />
@@ -45,7 +57,6 @@ export default function InfiniteHUD({
         </svg>
       </div>
 
-      {/* Top-left info */}
       <div id="fps-info">
         <div className="fps-info-row">
           <span className="fps-info-label">POS</span>
@@ -78,9 +89,7 @@ export default function InfiniteHUD({
         )}
       </div>
 
-      {/* Top-right controls panel */}
       <div id="fps-settings-panel">
-        {/* Player physics toggle */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Walk mode</span>
           <button
@@ -91,8 +100,6 @@ export default function InfiniteHUD({
             title="Player physics: gravity, walking, jumping, swimming"
           />
         </div>
-
-        {/* Quality selector */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Quality</span>
           <select
@@ -109,8 +116,6 @@ export default function InfiniteHUD({
             {quality === 'custom' && <option value="custom">Custom</option>}
           </select>
         </div>
-
-        {/* Time of day slider */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Time</span>
           <span className="fps-setting-value">{formatTimeOfDay(timeOfDay)}</span>
@@ -126,8 +131,6 @@ export default function InfiniteHUD({
           style={{ '--fill': `${timeOfDay * 100}%` }}
           onChange={(e) => onTimeOfDay(parseFloat(e.target.value))}
         />
-
-        {/* Planet style (compact) */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Planet</span>
           <select
@@ -148,8 +151,6 @@ export default function InfiniteHUD({
             Random
           </button>
         </div>
-
-        {/* Behind-camera culling toggle */}
         <div className="fps-setting-row">
           <span className="fps-setting-label">Back culling</span>
           <button
@@ -161,7 +162,6 @@ export default function InfiniteHUD({
         </div>
       </div>
 
-      {/* Bottom center speed bar */}
       <div id="fps-speed-bar">
         <svg viewBox="0 0 16 16" width="14" height="14">
           <path d="M8 2v8M4 6l4-4 4 4" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinejoin="round" />
@@ -171,13 +171,23 @@ export default function InfiniteHUD({
         <span className="fps-speed-hint">Scroll to adjust</span>
       </div>
 
-      {/* Collapsible performance window (bottom) */}
+      {perf && (
+        <div className="fps-mobile-dock">
+          <DockBtn active={perfOpen} onClick={togglePerf} title="Performance">
+            <svg viewBox="0 0 16 16" fill="none" width="14" height="14" aria-hidden>
+              <path d="M2 12h12M4 9l2.5-4 2.5 3.2L13 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </DockBtn>
+          <span className="fps-dock-speed">{stats.speed} u/s</span>
+        </div>
+      )}
+
       {perf && (
         <div id="fps-perf-window" className={perfOpen ? 'open' : ''}>
           <button
             type="button"
-            className="fps-perf-header"
-            onClick={() => setPerfOpen((v) => !v)}
+            className="fps-perf-header fps-perf-header-desktop"
+            onClick={togglePerf}
             aria-expanded={perfOpen}
           >
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden>
@@ -202,7 +212,6 @@ export default function InfiniteHUD({
         </div>
       )}
 
-      {/* Controls hint */}
       <div id="fps-controls-hint">
         {playerMode ? (
           <>
@@ -224,15 +233,6 @@ export default function InfiniteHUD({
           </>
         )}
       </div>
-
-      {/* Return button */}
-      {/* <button id="fps-return-btn" onClick={onReturn} title="Return to Terrain Studio">
-        <svg viewBox="0 0 16 16" width="14" height="14">
-          <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" fill="none" strokeWidth="1.3" />
-          <path d="M13.7 1.8v2.8h-2.8" stroke="currentColor" fill="none" strokeWidth="1.3" />
-        </svg>
-        Terrain Studio
-      </button> */}
     </>
   );
 }

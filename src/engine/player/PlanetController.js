@@ -60,6 +60,8 @@ export class PlanetController {
 
     this._keys = new Set();
     this._locked = false;
+    this.touch = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+    this.touchActive = false;
     this.mouseSensitivity = 0.0018;
 
     this._onClick = () => { if (!this._locked) this.dom.requestPointerLock(); };
@@ -102,6 +104,15 @@ export class PlanetController {
 
   get isLocked() { return this._locked; }
   get keys() { return this._keys; }
+
+  setTouchInput({ moveX = 0, moveY = 0, lookX = 0, lookY = 0 } = {}) {
+    this.touch.moveX = moveX;
+    this.touch.moveY = moveY;
+    this.touch.lookX = lookX;
+    this.touch.lookY = lookY;
+    this.touchActive = Math.hypot(moveX, moveY) > 0.02
+      || Math.hypot(lookX, lookY) > 0.02;
+  }
 
   /**
    * Facet-aware ground radius along a (near-unit) direction. The planet mesh is
@@ -160,9 +171,22 @@ export class PlanetController {
     this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
   }
 
+  _applyTouchLook(dt) {
+    const { lookX, lookY } = this.touch;
+    if (Math.abs(lookX) < 0.02 && Math.abs(lookY) < 0.02) return;
+    const rate = this.mouseSensitivity * 220 * (dt || 0.016);
+    this.up.copy(this.pos).normalize();
+    this._q.setFromAxisAngle(this.up, -lookX * rate);
+    this.forward.applyQuaternion(this._q).normalize();
+    this.pitch -= lookY * rate;
+    this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
+  }
+
   update(dt) {
+    this._applyTouchLook(dt);
     const cfg = this.cfg;
     const keys = this._keys;
+    const canInput = this._locked || this.touchActive;
 
     // local frame
     this.up.copy(this.pos).normalize();
@@ -174,17 +198,23 @@ export class PlanetController {
 
     // --- wish direction (tangent) ---
     let wx = 0, wy = 0, wz = 0;
-    if (this._locked) {
+    if (canInput) {
       if (keys.has('KeyW') || keys.has('KeyZ')) { wx += this.forward.x; wy += this.forward.y; wz += this.forward.z; }
       if (keys.has('KeyS')) { wx -= this.forward.x; wy -= this.forward.y; wz -= this.forward.z; }
       if (keys.has('KeyD')) { wx += right.x; wy += right.y; wz += right.z; }
       if (keys.has('KeyA') || keys.has('KeyQ')) { wx -= right.x; wy -= right.y; wz -= right.z; }
+      if (this.touchActive) {
+        const { moveX, moveY } = this.touch;
+        wx += this.forward.x * moveY + right.x * moveX;
+        wy += this.forward.y * moveY + right.y * moveX;
+        wz += this.forward.z * moveY + right.z * moveX;
+      }
     }
     const wl = Math.hypot(wx, wy, wz);
     if (wl > 1e-6) { wx /= wl; wy /= wl; wz /= wl; }
 
-    const running = this._locked && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
-    const jumpKey = this._locked && keys.has('Space');
+    const running = canInput && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
+    const jumpKey = canInput && keys.has('Space');
     if (jumpKey && !this._jumpHeld) this._jumpBuf = cfg.jumpBufferTime;
     else this._jumpBuf = Math.max(0, this._jumpBuf - dt);
     this._jumpHeld = jumpKey;

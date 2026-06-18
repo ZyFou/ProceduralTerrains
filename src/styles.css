@@ -53,7 +53,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-#app { display: flex; flex-direction: column; height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; position: relative; }
 
 /* ============ TOP BAR ============ */
 #topbar {
@@ -252,7 +252,7 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
-  z-index: 18;
+  z-index: 12;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1579,7 +1579,7 @@ input[type="color"].palette-color-input {
   position: absolute;
   top: 18px;
   left: 18px;
-  z-index: 15;
+  z-index: 12;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -1689,7 +1689,7 @@ input[type="color"].palette-color-input {
   position: absolute;
   top: 18px;
   right: 18px;
-  z-index: 15;
+  z-index: 12;
   display: none;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
@@ -1796,7 +1796,7 @@ input[type="color"].palette-color-input {
   position: absolute;
   right: 18px;
   bottom: 18px;
-  z-index: 16;
+  z-index: 12;
   display: none;
   flex-direction: column;
   width: 320px;
@@ -1835,6 +1835,88 @@ input[type="color"].palette-color-input {
   padding: 12px;
   max-height: min(60vh, 520px);
   overflow-y: auto;
+}
+
+/* Infinite mode mobile dock + touch controls */
+.fps-mobile-dock {
+  display: none;
+  position: absolute;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 14;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  box-shadow: var(--shadow-panel);
+}
+.fps-dock-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0 !important;
+  justify-content: center;
+  gap: 0 !important;
+}
+.fps-dock-speed {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 10px 0 4px;
+  white-space: nowrap;
+}
+
+.touch-controls {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  pointer-events: none;
+}
+.touch-joystick {
+  position: absolute;
+  width: 118px;
+  height: 118px;
+  pointer-events: auto;
+  touch-action: none;
+  border-radius: 50%;
+  background: rgba(13, 13, 13, 0.42);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-panel);
+}
+.touch-joystick-move {
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(58px + env(safe-area-inset-bottom));
+}
+.touch-joystick-look {
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(58px + env(safe-area-inset-bottom));
+}
+.touch-joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-active);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.touch-joystick-label {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .sb-quality {
@@ -2044,11 +2126,12 @@ input[type="color"].palette-color-input {
 /* Floating world-mode switcher (mobile canvas overlay) */
 .viewport-mode-bar {
   display: none;
-  position: absolute;
-  top: calc(10px + env(safe-area-inset-top));
+  position: fixed;
+  top: calc(54px + env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 22;
+  z-index: 28;
+  pointer-events: auto;
   max-width: calc(100vw - 20px);
   gap: 2px;
   padding: 4px;
@@ -2435,7 +2518,7 @@ input[type="color"].palette-color-input {
   .app-name { display: none; }
   .app-version { display: none; }
   .tb-group, .tb-segment { flex: 0 0 auto; gap: 2px; }
-  .tb-right { margin-left: 0; }
+  .tb-right { margin-left: auto; flex-shrink: 0; }
   #topbar .tb-segment { display: none; }
   .viewport-mode-bar { display: flex; }
   .tb-btn {
@@ -2540,14 +2623,44 @@ input[type="color"].palette-color-input {
     font-size: 10.5px;
   }
 
+  /* Infinite world mobile — perf dock only; hide stats/settings panels */
+  .fps-explore-mode .touch-controls { display: block; }
+  .fps-explore-mode #fps-info,
+  .fps-explore-mode #fps-settings-panel {
+    display: none !important;
+  }
+  .fps-explore-mode .fps-mobile-dock { display: flex; }
+  .fps-explore-mode #fps-perf-window {
+    display: none;
+  }
+  .fps-explore-mode #fps-perf-window.open {
+    display: flex;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(58px + env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    border-radius: 12px;
+  }
+  .fps-explore-mode #fps-speed-bar { display: none !important; }
+  .fps-explore-mode #fps-controls-hint { display: none !important; }
+  .fps-explore-mode .fps-perf-header-desktop { display: none; }
+
   .side-drawer {
     top: 0;
     right: 0;
     bottom: 0;
     width: min(430px, 100vw);
     max-width: 100vw;
+    z-index: 20;
   }
-  .side-panel-header { padding: 12px 14px 10px; }
+  #app.side-drawer-open .viewport-mode-bar {
+    display: none !important;
+  }
+  .side-panel-header {
+    padding: 12px 14px 10px;
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
   .side-panel-content { padding: 10px 14px calc(18px + env(safe-area-inset-bottom)); }
   .side-panel-close, .panel-tab, .action-btn, .camera-bar-btn { min-height: 40px; }
   .row input[type="number"], .row input[type="text"], .row select, .ctl-val { min-height: 34px; }
@@ -2609,10 +2722,14 @@ input[type="color"].palette-color-input {
   }
   .viewport-area { height: 100%; }
   #statusbar { display: none; }
-  .side-drawer { bottom: 58px; }
+  .side-drawer { bottom: 58px; z-index: 20; }
   .viewport-camera-bar { bottom: 72px; }
   .minimap-overlay-container { bottom: 72px; }
   .minimap-overlay-container:not(.collapsed) { bottom: 72px; }
+  .touch-joystick-move,
+  .touch-joystick-look { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .fps-mobile-dock { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .fps-explore-mode #fps-perf-window.open { bottom: calc(58px + env(safe-area-inset-bottom)); }
   #help-card { max-width: 360px; right: auto; }
 }
 

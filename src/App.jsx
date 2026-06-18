@@ -11,6 +11,7 @@ import BottomToolbar from './components/BottomToolbar.jsx';
 import WorldModeBar from './components/WorldModeBar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
+import TouchControls from './components/TouchControls.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
@@ -327,7 +328,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${fpsView ? 'infinite-mode' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''} ${fpsView ? 'infinite-mode fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -354,15 +355,6 @@ export default function App() {
 
         <div className="viewport-area">
           <canvas id="viewport" ref={canvasRef} />
-
-          {!previewMode && (
-            <WorldModeBar
-              floating
-              worldMode={worldMode}
-              onSetWorldMode={selectWorldMode}
-              modeLocked={modeLocked}
-            />
-          )}
 
           <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
@@ -400,29 +392,32 @@ export default function App() {
           )}
 
           {fpsView && (
-            <InfiniteHUD
-              stats={infiniteStats}
-              isPlanet={isPlanet}
-              onReturn={() => selectWorldMode('studio')}
-              playerMode={playerMode}
-              onPlayerMode={togglePlayerMode}
-              quality={qualityPreset}
-              onQualityChange={handleQualityChange}
-              timeOfDay={timeOfDay}
-              onTimeOfDay={handleTimeOfDay}
-              behindCameraCulling={behindCameraCulling}
-              onBehindCameraCulling={handleBehindCameraCulling}
-              planetPreset={params.planetPreset}
-              onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
-              onGeneratePalette={() => engine().generatePalette()}
-              onRandomPlanet={() => engine().randomizePlanetPreset()}
-              perf={perf}
-              gpu={gpu}
-              perfStats={stats}
-              onPerfPreset={(key) => engine().setPerfPreset(key)}
-              onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
-              onPerfReset={() => engine().resetPerfSettings()}
-            />
+            <>
+              <InfiniteHUD
+                stats={infiniteStats}
+                isPlanet={isPlanet}
+                onReturn={() => selectWorldMode('studio')}
+                playerMode={playerMode}
+                onPlayerMode={togglePlayerMode}
+                quality={qualityPreset}
+                onQualityChange={handleQualityChange}
+                timeOfDay={timeOfDay}
+                onTimeOfDay={handleTimeOfDay}
+                behindCameraCulling={behindCameraCulling}
+                onBehindCameraCulling={handleBehindCameraCulling}
+                planetPreset={params.planetPreset}
+                onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
+                onGeneratePalette={() => engine().generatePalette()}
+                onRandomPlanet={() => engine().randomizePlanetPreset()}
+                perf={perf}
+                gpu={gpu}
+                perfStats={stats}
+                onPerfPreset={(key) => engine().setPerfPreset(key)}
+                onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
+                onPerfReset={() => engine().resetPerfSettings()}
+              />
+              <TouchControls onInput={(input) => engine().setTouchInput(input)} />
+            </>
           )}
 
           {block && <LoadingOverlay task={block} />}
@@ -432,6 +427,15 @@ export default function App() {
           <SideDrawer activePanel={effectivePanel} ctx={ctx} onClose={() => setActivePanel(null)} />
         )}
       </div>
+
+      {!previewMode && (
+        <WorldModeBar
+          floating
+          worldMode={worldMode}
+          onSetWorldMode={selectWorldMode}
+          modeLocked={modeLocked}
+        />
+      )}
 
       <StatusBar
         status={status}

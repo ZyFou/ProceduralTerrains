@@ -87,6 +87,7 @@ export class PlayerController {
     const cfg = this.cfg;
     const keys = this.controls.keys;
     const locked = this.controls.isLocked;
+    const touch = this.controls.touchActive;
 
     // --- input -> wish direction (camera-yaw relative, horizontal) ---
     const yaw = this.controls.yaw;
@@ -94,18 +95,23 @@ export class PlayerController {
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
 
     let ix = 0, iz = 0;
-    if (locked) {
+    if (locked || touch) {
       if (keys.has('KeyW') || keys.has('KeyZ')) { ix += fwdX; iz += fwdZ; }
       if (keys.has('KeyS')) { ix -= fwdX; iz -= fwdZ; }
       if (keys.has('KeyA') || keys.has('KeyQ')) { ix -= rightX; iz -= rightZ; }
       if (keys.has('KeyD')) { ix += rightX; iz += rightZ; }
+      if (touch) {
+        const t = this.controls.touch;
+        ix += fwdX * t.moveY + rightX * t.moveX;
+        iz += fwdZ * t.moveY + rightZ * t.moveX;
+      }
     }
     const iLen = Math.hypot(ix, iz);
     if (iLen > 1e-6) { ix /= iLen; iz /= iLen; }
 
-    const running = locked && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
-    const jumpKey = locked && keys.has('Space');
-    const downKey = locked && (keys.has('ControlLeft') || keys.has('KeyC'));
+    const running = (locked || touch) && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
+    const jumpKey = (locked || touch) && keys.has('Space');
+    const downKey = (locked || touch) && (keys.has('ControlLeft') || keys.has('KeyC'));
 
     // jump buffering (so a press just before landing still jumps)
     if (jumpKey && !this._jumpHeld) this._jumpBuffer = cfg.jumpBufferTime;

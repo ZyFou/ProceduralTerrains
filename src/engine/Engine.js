@@ -1038,6 +1038,11 @@ export class Engine {
     this.camera.updateProjectionMatrix();
   }
 
+  setTouchInput(input) {
+    if (this.fpsControls) this.fpsControls.setTouchInput(input);
+    if (this.player?.setTouchInput) this.player.setTouchInput(input);
+  }
+
   // ------------------------------------------------------------- player mode
 
   _getHeightSampler() {
