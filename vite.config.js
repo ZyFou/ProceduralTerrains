@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 6061,
-    strictPort: true,   // fail loudly instead of silently moving to another port
+    strictPort: false,  // allow port shifting if 6061 is in use
     host: true,         // listen on all interfaces -> reachable on the network
   },
   build: {

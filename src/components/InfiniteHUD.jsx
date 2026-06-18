@@ -4,9 +4,12 @@
 // time-of-day slider, and a return button.
 // ============================================================================
 
+import { useState } from 'react';
 import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
 import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';
 import { PLANET_PRESETS } from '../engine/style/PlanetPresets.js';
+import PerfSettings from './panels/PerfSettings.jsx';
+import PerformanceStats from './ui/PerformancePanel.jsx';
 
 const PLAYER_STATE_LABELS = {
   grounded: 'Grounded',
@@ -22,7 +25,9 @@ export default function InfiniteHUD({
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
   planetPreset, onPlanetPreset, onGeneratePalette, onRandomPlanet,
+  perf, gpu, perfStats, onPerfPreset, onPerfSetting, onPerfReset,
 }) {
+  const [perfOpen, setPerfOpen] = useState(false);
   if (!stats) return null;
 
   const qualityKeys = getQualityKeys();
@@ -165,6 +170,37 @@ export default function InfiniteHUD({
         <span>{stats.speed} u/s</span>
         <span className="fps-speed-hint">Scroll to adjust</span>
       </div>
+
+      {/* Collapsible performance window (bottom) */}
+      {perf && (
+        <div id="fps-perf-window" className={perfOpen ? 'open' : ''}>
+          <button
+            type="button"
+            className="fps-perf-header"
+            onClick={() => setPerfOpen((v) => !v)}
+            aria-expanded={perfOpen}
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden>
+              <path d="M2 12h12M4 9l2.5-4 2.5 3.2L13 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="fps-perf-title">Performance</span>
+            <svg className="fps-perf-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden>
+              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {perfOpen && (
+            <div className="fps-perf-body">
+              <PerformanceStats stats={perfStats} gpu={gpu} />
+              <PerfSettings
+                perf={perf}
+                onPerfPreset={onPerfPreset}
+                onPerfSetting={onPerfSetting}
+                onPerfReset={onPerfReset}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Controls hint */}
       <div id="fps-controls-hint">

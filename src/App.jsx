@@ -403,6 +403,12 @@ export default function App() {
               onPlanetPreset={(key) => engine().applyPlanetPresetByKey(key)}
               onGeneratePalette={() => engine().generatePalette()}
               onRandomPlanet={() => engine().randomizePlanetPreset()}
+              perf={perf}
+              gpu={gpu}
+              perfStats={stats}
+              onPerfPreset={(key) => engine().setPerfPreset(key)}
+              onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
+              onPerfReset={() => engine().resetPerfSettings()}
             />
           )}
 

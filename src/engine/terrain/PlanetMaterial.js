@@ -231,10 +231,21 @@ uniform float uWaveComplexity;
 varying vec3 vDir;
 varying vec3 vWorldPos;
 
-float rippleAt(vec2 p, float t) {
-  float h = vnoise(p + vec2(t * 0.6, t * 0.45));
+// Triplanar value-noise ripple. Sampling by the 3D surface position and
+// blending the three axis planes by the surface normal keeps the wavelet
+// roughly uniform everywhere on the sphere — a single flat xz projection
+// stretches badly toward the poles and the "vertical" faces of the globe.
+float rippleTri(vec3 p, vec3 blend, float t) {
+  vec2 oa = vec2(t * 0.6, t * 0.45);
+  float h = vnoise(p.yz + oa) * blend.x
+          + vnoise(p.zx + oa) * blend.y
+          + vnoise(p.xy + oa) * blend.z;
   if (uWaterQuality > 0.5) {
-    h += 0.5 * uWaterDetail * vnoise(p * 2.7 - vec2(t * 0.8, t * 0.3));
+    vec2 ob = vec2(t * 0.8, t * 0.3);
+    h += 0.5 * uWaterDetail * (
+        vnoise(p.yz * 2.7 - ob) * blend.x
+      + vnoise(p.zx * 2.7 - ob) * blend.y
+      + vnoise(p.xy * 2.7 - ob) * blend.z);
   }
   return h;
 }
@@ -254,13 +265,17 @@ void main() {
   vec3 t1 = normalize(cross(ref, up));
   vec3 t2 = cross(up, t1);
 
-  // a stable 2D coordinate for the ripple noise
-  vec2 rp = (vWorldPos.xz + vWorldPos.y * vec2(0.31, -0.19)) * 0.055;
+  // triplanar blend weights from the surface normal (= local up)
+  vec3 blend = abs(up);
+  blend /= max(blend.x + blend.y + blend.z, 1e-4);
+
   float t = uTime * uWaterAnim;
-  float e = 1.6 * 0.055;
-  float r0 = rippleAt(rp, t);
-  float rX = rippleAt(rp + vec2(e, 0.0), t);
-  float rZ = rippleAt(rp + vec2(0.0, e), t);
+  float scale = 0.055;
+  vec3 wp = vWorldPos * scale;
+  float e = 1.6 * scale;
+  float r0 = rippleTri(wp, blend, t);
+  float rX = rippleTri(wp + t1 * e, blend, t);
+  float rZ = rippleTri(wp + t2 * e, blend, t);
   float nStr = 0.03 * uWaveComplexity;
   vec3 n = normalize(up - t1 * ((rX - r0) * nStr * 30.0) - t2 * ((rZ - r0) * nStr * 30.0));
 
@@ -281,7 +296,11 @@ void main() {
 
   float foamNoise = 0.0;
   if (uWaterQuality > 0.5) {
-    foamNoise = vnoise(vWorldPos.xz * 0.22 + vec2(t * 1.4, -t * 1.1));
+    vec3 fp = vWorldPos * 0.22;
+    vec2 fo = vec2(t * 1.4, -t * 1.1);
+    foamNoise = vnoise(fp.yz + fo) * blend.x
+              + vnoise(fp.zx + fo) * blend.y
+              + vnoise(fp.xy + fo) * blend.z;
   }
   float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
   col = mix(col, uColFoam, foam * 0.75);
@@ -314,6 +333,8 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7) {
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
-    side: THREE.DoubleSide,
+    // Outer shell only: cull the inner (back) faces so the far hemisphere of
+    // the ocean sphere isn't drawn behind the planet, and overdraw is halved.
+    side: THREE.FrontSide,
   });
 }

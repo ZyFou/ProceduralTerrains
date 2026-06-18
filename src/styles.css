@@ -1789,6 +1789,52 @@ input[type="color"].palette-color-input {
 .fps-info-dim { color: var(--text-dim); font-size: 10px; }
 .fps-info-culled { color: var(--warning); }
 
+/* Collapsible performance window (bottom-right of the infinite/planet HUD) */
+#fps-perf-window {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 16;
+  display: none;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 36px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.infinite-mode #fps-perf-window { display: flex; }
+
+.fps-perf-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.fps-perf-header:hover { color: var(--text-main); }
+.fps-perf-title { flex: 1; text-align: left; }
+.fps-perf-chevron { transition: transform 0.15s ease; opacity: 0.7; }
+#fps-perf-window.open .fps-perf-chevron { transform: rotate(180deg); }
+
+.fps-perf-body {
+  border-top: 1px solid var(--border-subtle);
+  padding: 12px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
 .sb-quality {
   padding: 1px 8px;
   border-radius: 4px;
