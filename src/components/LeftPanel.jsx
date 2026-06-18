@@ -50,6 +50,9 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
     else setSeedText(String(params.seed));
   };
 
+  const hasLegacy = !params.noiseStack || (params.noiseStack.layers && params.noiseStack.layers.some((l) => l.type === 'legacy' && l.enabled));
+  const LEGACY_ONLY_KEYS = new Set(['octaves', 'persistence', 'lacunarity', 'ridge', 'warp']);
+
   return (
     <aside id="left-panel" className="panel">
       <div className="panel-header">
@@ -89,23 +92,59 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
         </button>
 
         {CONTROL_SCHEMA.map((def, i) => {
-          if (def.section) return <div key={i} className="section-title">{def.section}</div>;
+          if (def.section) {
+            return (
+              <div key={i}>
+                <div className="section-title">{def.section}</div>
+                {def.section === 'NOISE' && !hasLegacy && (
+                  <div className="section-hint info" style={{
+                    margin: '6px 12px 10px',
+                    padding: '8px 10px',
+                    borderRadius: '4px',
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    fontSize: '10.5px',
+                    lineHeight: '1.4',
+                    color: '#3b82f6',
+                    display: 'flex',
+                    gap: '6px',
+                    alignItems: 'center'
+                  }}>
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" style={{ flexShrink: 0 }}>
+                      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                      <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                    <span>Global parameters (Warp, Ridge, FBM) will automatically add or update layers in your custom Noise Stack.</span>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          const isLegacyOnly = LEGACY_ONLY_KEYS.has(def.key);
+          const infoTooltip = isLegacyOnly && !hasLegacy
+            ? "Adjusting this will automatically add or update a suitable layer in your active Noise Stack."
+            : def.info;
+
           if (def.type === 'toggle') {
             return (
               <ToggleRow key={def.key} label={def.label} value={params[def.key]}
-                onChange={(v) => onParam(def.key, v)} />
+                onChange={(v) => onParam(def.key, v)}
+                info={infoTooltip} />
             );
           }
           if (def.type === 'select') {
             return (
               <SelectRow key={def.key} label={def.label} value={params[def.key]}
                 options={def.options} format={def.format}
-                onChange={(v) => onParam(def.key, parseFloat(v))} />
+                onChange={(v) => onParam(def.key, parseFloat(v))}
+                info={infoTooltip} />
             );
           }
           return (
             <SliderCtl key={def.key} def={def} value={params[def.key]}
-              onChange={(v) => onParam(def.key, v)} />
+              onChange={(v) => onParam(def.key, v)}
+              info={infoTooltip} />
           );
         })}
       </div>

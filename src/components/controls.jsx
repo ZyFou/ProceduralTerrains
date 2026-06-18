@@ -5,7 +5,7 @@ export function fmt(def, v) {
   return Number(v).toFixed(digits) + (def.unit ? ` ${def.unit}` : '');
 }
 
-export function SliderCtl({ def, value, onChange, icon, info }) {
+export function SliderCtl({ def, value, onChange, icon, info, disabled, disabledTooltip }) {
   const [text, setText] = useState(fmt(def, value));
   useEffect(() => { setText(fmt(def, value)); }, [value, def]);
 
@@ -20,9 +20,9 @@ export function SliderCtl({ def, value, onChange, icon, info }) {
   const itemIcon = icon ?? def.icon;
 
   return (
-    <div className="ctl">
+    <div className={`ctl${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
       <div className="ctl-top">
-        <div className="label-with-icon" data-tooltip={tooltipText}>
+        <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : tooltipText}>
           {itemIcon && <span className="setting-icon">{itemIcon}</span>}
           <span className="setting-label">{def.label}</span>
           {tooltipText && (
@@ -60,13 +60,13 @@ export function SliderCtl({ def, value, onChange, icon, info }) {
   );
 }
 
-export function ToggleRow({ label, value, onChange, icon, info }) {
+export function ToggleRow({ label, value, onChange, icon, info, disabled, disabledTooltip }) {
   return (
-    <div className="toggle-row">
-      <div className="label-with-icon" data-tooltip={info}>
+    <div className={`toggle-row${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
+      <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
         {icon && <span className="setting-icon">{icon}</span>}
         <span className="setting-label">{label}</span>
-        {info && (
+        {(info || disabledTooltip) && (
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -85,13 +85,13 @@ export function ToggleRow({ label, value, onChange, icon, info }) {
   );
 }
 
-export function SelectRow({ label, value, options, format, onChange, icon, info }) {
+export function SelectRow({ label, value, options, format, onChange, icon, info, disabled, disabledTooltip }) {
   return (
-    <div className="row">
-      <div className="label-with-icon" data-tooltip={info}>
+    <div className={`row${disabled ? ' disabled' : ''}`} style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}>
+      <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
         {icon && <span className="setting-icon">{icon}</span>}
         <span className="setting-label">{label}</span>
-        {info && (
+        {(info || disabledTooltip) && (
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />

@@ -76,6 +76,11 @@ export class EditorControls {
     this.goalRadius = boardSize * 1.4;
     this.goalTheta = 45 * DEG;
     this.goalPhi = this.mode === 'topdown' ? 0.5 * DEG : 55 * DEG;
+
+    this.target.copy(this.goalTarget);
+    this.radius = this.goalRadius;
+    this.theta = this.goalTheta;
+    this.phi = this.goalPhi;
   }
 
   focusCenter() { this.goalTarget.set(0, 0, 0); }

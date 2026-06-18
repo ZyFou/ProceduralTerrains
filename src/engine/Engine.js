@@ -33,7 +33,7 @@ import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
-import { migrateStack } from './terrain/noise/NoiseStack.js';
+import { migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
@@ -329,6 +329,57 @@ export class Engine {
     this.cb.onParams({ ...this.params });
     this._needsRender = true;   // any param change → redraw (on-demand studio)
 
+    // Dynamic Noise Modifier Addition:
+    // If the active noise stack doesn't have any enabled legacy layer, intercept adjustments
+    // to classic sliders and inject/update appropriate modifier/height layers.
+    const hasLegacy = this.noiseStack && this.noiseStack.layers.some((l) => l.type === 'legacy' && l.enabled);
+    const legacyOnlyKeys = new Set(['warp', 'ridge', 'persistence', 'lacunarity', 'octaves']);
+
+    if (!hasLegacy && legacyOnlyKeys.has(key)) {
+      const defaultStack = cloneStack(this.noiseStack);
+      let updated = false;
+
+      if (key === 'warp') {
+        const layer = defaultStack.layers.find(x => x.type === 'domainWarp');
+        if (layer) {
+          layer.strength = value;
+          updated = true;
+        } else if (value > 0.05) {
+          const newLayer = makeLayer('domainWarp', { name: 'Domain Warp (Auto)', strength: value });
+          defaultStack.layers.unshift(newLayer); // insert at top to affect subsequent layers
+          this.cb.onToast('Domain Warp layer added to stack');
+          updated = true;
+        }
+      } else if (key === 'ridge') {
+        const layer = defaultStack.layers.find(x => x.type === 'ridged');
+        if (layer) {
+          layer.strength = value;
+          updated = true;
+        } else if (value > 0.05) {
+          const newLayer = makeLayer('ridged', { name: 'Ridged Mountains (Auto)', strength: value });
+          defaultStack.layers.push(newLayer);
+          this.cb.onToast('Ridged Mountains layer added to stack');
+          updated = true;
+        }
+      } else if (key === 'persistence' || key === 'lacunarity' || key === 'octaves') {
+        let layer = defaultStack.layers.find(x => x.params && key in x.params);
+        if (layer) {
+          layer.params[key] = value;
+          updated = true;
+        } else {
+          const newLayer = makeLayer('fbm', { name: 'FBM Detail (Auto)' });
+          newLayer.params[key] = value;
+          defaultStack.layers.push(newLayer);
+          this.cb.onToast('FBM Detail layer added to stack');
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        this.setNoiseStack(defaultStack);
+      }
+    }
+
     // cloud params: live shader updates only (never rebuild terrain/planet,
     // never mix into terrain generation)
     if (key.startsWith('cloud')) {
@@ -364,6 +415,8 @@ export class Engine {
 
   applyPresetByKey(presetKey) {
     this.params = applyPreset(this.params, presetKey);
+    const defaultStack = migrateStack(undefined);
+    this.setNoiseStack(defaultStack);
     this.cb.onParams({ ...this.params });
     this._afterParamChange(true);
   }
@@ -379,8 +432,11 @@ export class Engine {
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
-    this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
+
+    const defaultStack = migrateStack(undefined);
+    this.setNoiseStack(defaultStack);
+
     this.controls.reset(this.boardSize);
     this.cb.onToast('New project');
   }
