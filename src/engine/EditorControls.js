@@ -125,6 +125,13 @@ export class EditorControls {
     this._clampTarget();
   }
 
+  _orbitByPixels(dx, dy) {
+    this.goalTheta -= dx * 0.005;
+    if (this.mode !== 'topdown') {
+      this.goalPhi = Math.min(Math.max(this.goalPhi - dy * 0.004, this.minPhi), this.maxPhi);
+    }
+  }
+
   _getPinchState() {
     const pts = Array.from(this._touches.values());
     if (pts.length < 2) return null;
@@ -149,7 +156,7 @@ export class EditorControls {
         return;
       }
       if (pts.length === 1 && this._pinch === null && prevTouch) {
-        this._panByPixels(e.clientX - prevTouch.x, e.clientY - prevTouch.y);
+        this._orbitByPixels(e.clientX - prevTouch.x, e.clientY - prevTouch.y);
       }
       return;
     }
@@ -160,11 +167,7 @@ export class EditorControls {
     this._drag.y = e.clientY;
 
     if (this._drag.button === 0) this._panByPixels(dx, dy);
-    else {
-      // orbit
-      this.goalTheta -= dx * 0.005;
-      if (this.mode !== 'topdown') this.goalPhi = Math.min(Math.max(this.goalPhi - dy * 0.004, this.minPhi), this.maxPhi);
-    }
+    else this._orbitByPixels(dx, dy);
   }
 
   _onUp(e) {

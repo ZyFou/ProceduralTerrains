@@ -32,15 +32,8 @@ function useJoystick(onChange) {
     onChange(0, 0);
   }, [onChange]);
 
-  const onPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    activeRef.current = e.pointerId;
-    baseRef.current?.setPointerCapture(e.pointerId);
-  }, []);
-
-  const onPointerMove = useCallback((e) => {
-    if (activeRef.current !== e.pointerId || !baseRef.current || !knobRef.current) return;
+  const updateFromPointer = useCallback((e) => {
+    if (!baseRef.current || !knobRef.current) return;
     const rect = baseRef.current.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -49,6 +42,21 @@ function useJoystick(onChange) {
     knobRef.current.style.transform = `translate(calc(-50% + ${raw.x}px), calc(-50% + ${raw.y}px))`;
     onChange(n.x, n.y);
   }, [onChange]);
+
+  const onPointerDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    activeRef.current = e.pointerId;
+    baseRef.current?.setPointerCapture(e.pointerId);
+    updateFromPointer(e);
+  }, [updateFromPointer]);
+
+  const onPointerMove = useCallback((e) => {
+    if (activeRef.current !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    updateFromPointer(e);
+  }, [updateFromPointer]);
 
   const onPointerUp = useCallback((e) => {
     if (activeRef.current !== e.pointerId) return;

@@ -2062,6 +2062,7 @@ input[type="color"].palette-color-input {
 .minimap-title {
   display: flex;
   align-items: center;
+  gap: 8px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1.2px;
@@ -2087,6 +2088,9 @@ input[type="color"].palette-color-input {
 }
 .minimap-toggle-btn svg {
   display: block;
+}
+.minimap-title svg {
+  flex: 0 0 auto;
 }
 .minimap-overlay-body {
   padding: 10px;

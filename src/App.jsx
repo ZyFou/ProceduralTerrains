@@ -357,9 +357,9 @@ export default function App() {
           <canvas id="viewport" ref={canvasRef} />
 
           <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
-            <div className="help-row"><span className="help-ic">🖐</span> Drag to pan</div>
+            <div className="help-row"><span className="help-ic">↻</span> Drag to orbit camera</div>
             <div className="help-row"><span className="help-ic">🤏</span> Pinch to zoom • move two fingers to pan</div>
-            <div className="help-row"><span className="help-ic">↻</span> Right-click + drag to orbit</div>
+            <div className="help-row"><span className="help-ic">🖱</span> Mouse: left pan • right orbit</div>
           </div>
 
           {showStudioUI && isStudio && (
