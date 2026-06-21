@@ -254,6 +254,9 @@ export default function App() {
   const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
   const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); };
   const handleCullingEnabled = (enabled) => { engine().setCullingEnabled(enabled); setCullingEnabled(enabled); };
+  const handleTouchInput = useCallback((input) => {
+    engineRef.current?.setTouchInput(input);
+  }, []);
 
   // ---- export: blocking overlay, button disabled via panel busy state ----
   const onExport = (options) => {
@@ -416,7 +419,7 @@ export default function App() {
                 onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
                 onPerfReset={() => engine().resetPerfSettings()}
               />
-              <TouchControls onInput={(input) => engine().setTouchInput(input)} />
+              <TouchControls onInput={handleTouchInput} />
             </>
           )}
 

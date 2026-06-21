@@ -23,14 +23,16 @@ function useJoystick(onChange) {
   const baseRef = useRef(null);
   const knobRef = useRef(null);
   const activeRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const reset = useCallback(() => {
     activeRef.current = null;
     if (knobRef.current) {
       knobRef.current.style.transform = 'translate(-50%, -50%)';
     }
-    onChange(0, 0);
-  }, [onChange]);
+    onChangeRef.current(0, 0);
+  }, []);
 
   const updateFromPointer = useCallback((e) => {
     if (!baseRef.current || !knobRef.current) return;
@@ -40,8 +42,16 @@ function useJoystick(onChange) {
     const raw = clampKnob(e.clientX - cx, e.clientY - cy, RADIUS);
     const n = norm(raw.x, raw.y, RADIUS);
     knobRef.current.style.transform = `translate(calc(-50% + ${raw.x}px), calc(-50% + ${raw.y}px))`;
-    onChange(n.x, n.y);
-  }, [onChange]);
+    onChangeRef.current(n.x, n.y);
+  }, []);
+
+  const endDrag = useCallback((e) => {
+    if (activeRef.current !== e.pointerId) return;
+    if (baseRef.current?.hasPointerCapture(e.pointerId)) {
+      baseRef.current.releasePointerCapture(e.pointerId);
+    }
+    reset();
+  }, [reset]);
 
   const onPointerDown = useCallback((e) => {
     e.preventDefault();
@@ -59,24 +69,22 @@ function useJoystick(onChange) {
   }, [updateFromPointer]);
 
   const onPointerUp = useCallback((e) => {
-    if (activeRef.current !== e.pointerId) return;
-    if (baseRef.current?.hasPointerCapture(e.pointerId)) {
-      baseRef.current.releasePointerCapture(e.pointerId);
-    }
-    reset();
-  }, [reset]);
+    endDrag(e);
+  }, [endDrag]);
 
-  useEffect(() => () => reset(), [reset]);
+  useEffect(() => () => reset(), []);
 
   return { baseRef, knobRef, onPointerDown, onPointerMove, onPointerUp };
 }
 
 export default function TouchControls({ onInput }) {
   const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 });
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
 
   const sync = useCallback(() => {
-    onInput?.({ ...stateRef.current });
-  }, [onInput]);
+    onInputRef.current?.({ ...stateRef.current });
+  }, []);
 
   const onMove = useCallback((x, y) => {
     stateRef.current.moveX = x;
@@ -93,7 +101,9 @@ export default function TouchControls({ onInput }) {
   const move = useJoystick(onMove);
   const look = useJoystick(onLook);
 
-  useEffect(() => () => onInput?.({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 }), [onInput]);
+  useEffect(() => () => {
+    onInputRef.current?.({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 });
+  }, []);
 
   return (
     <div className="touch-controls">
