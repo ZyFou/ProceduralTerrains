@@ -10,6 +10,7 @@ import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettin
 import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
 import { PlanetHeightBaker } from './terrain/PlanetHeightBaker.js';
+import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
 import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
@@ -113,6 +114,9 @@ export class Engine {
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
     this._compiling = 0;
+    // The underwater render-target program variants are deferred from boot and
+    // warmed lazily on first approach to water (see _warmUnderwaterShaders).
+    this._underwaterWarmed = false;
     this._octToken = 0;
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._warmGeo = new THREE.PlaneGeometry(1, 1);
@@ -138,6 +142,12 @@ export class Engine {
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
+
+    // Studio (flat board) height/normal bake: replaces the per-pixel height
+    // field in the studio terrain + water shaders with a single texture fetch.
+    this.terrainHeightBaker = null;
+    this._bakedStudioGen = -1;       // terrain generation the studio texture was baked at
+    this._paintWasEnabled = false;   // detect paint→idle transition to refresh the bake
     this.planetFaceGrid = 8;
     this._compiledKeys = new Set();   // mode:octave shader sets already compiled
 
@@ -908,20 +918,15 @@ export class Engine {
     this._compiling++;
     this.cb.onStatus('Compiling shaders…', true);
     try {
+      // Boot compiles ONLY the canvas-variant programs. The underwater
+      // render-target variants (a second distinct program — linear output color
+      // space — for every heavy terrain/water/sky material) are deferred and
+      // warmed lazily when the camera first approaches water. Most sessions
+      // never submerge, so this roughly halves the cold-boot compile burst that
+      // otherwise saturates Chrome's shared GPU process and stalls other tabs.
       await this._withStudioCloudDetached(async () => {
         await this.renderer.compileAsync(this.scene, this.camera);
-
-        this.underwater._ensureTarget(this.renderer);
-        this.renderer.setRenderTarget(this.underwater._rt);
-        const pending = this.renderer.compileAsync(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
-        await pending;
       });
-
-      // underwater fullscreen compositing shader
-      await this.renderer.compileAsync(
-        this.underwater._quadScene, this.underwater._quadCam
-      );
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
@@ -934,6 +939,42 @@ export class Engine {
       // (info toasts are suppressed while a blocking overlay is up).
       if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
     }
+  }
+
+  /**
+   * Lazily compile the underwater render-target program variants that were
+   * deferred from boot. Runs WITHOUT bumping _compiling, so the scene keeps
+   * rendering normally (the canvas programs are already linked) while the driver
+   * builds the RT variants on its own threads. Kicked off when the camera nears
+   * the surface so the programs are cached before the first submerged frame —
+   * no dive hitch, and zero cost for sessions that never touch water.
+   */
+  async _warmUnderwaterShaders() {
+    if (this._underwaterWarmed || this._disposed) return;
+    this._underwaterWarmed = true;
+    try {
+      await this._withStudioCloudDetached(async () => {
+        this.underwater._ensureTarget(this.renderer);
+        this.renderer.setRenderTarget(this.underwater._rt);
+        const pending = this.renderer.compileAsync(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+        await pending;
+      });
+      await this.renderer.compileAsync(
+        this.underwater._quadScene, this.underwater._quadCam
+      );
+    } catch (e) {
+      this._underwaterWarmed = false;   // allow a later retry
+      console.warn('Underwater shader warmup failed', e);
+    }
+  }
+
+  /** Trigger the deferred underwater compile once the camera approaches water. */
+  _maybeWarmUnderwater() {
+    if (this._underwaterWarmed || this._bootPending || !this.underwater?.enabled) return;
+    const wl = this._waterLevel();
+    if (wl == null) return;
+    if (this.camera.position.y - wl < 120) this._warmUnderwaterShaders();
   }
 
   _renderInitialStudioFrame() {
@@ -1179,6 +1220,8 @@ export class Engine {
 
   clearPaintLayers() {
     this.paintMode?.clear();
+    this._bakedStudioGen = -1;   // paint changed the height field → refresh the bake
+    this._needsRender = true;
   }
 
   // -------------------------------------------------------------- world mode
@@ -1196,6 +1239,10 @@ export class Engine {
 
     this.worldMode = mode;
     this._terrainGen++;   // uFrequency / falloff change with the mode
+    // The new mode's materials need their own underwater RT-variant programs;
+    // re-arm the lazy warm so they compile on first approach to water (three's
+    // program cache makes the recompile instant if already built this session).
+    this._underwaterWarmed = false;
 
     if (mode === 'infinite') this._enterInfiniteMode();
     else if (mode === 'planet') this._enterPlanetMode();
@@ -1206,6 +1253,7 @@ export class Engine {
     // Infinite exploration stays fully procedural; Studio paint layers are
     // board-local overrides and are restored when returning to Studio mode.
     this.uniforms.uPaintEnabled.value = 0;
+    this.uniforms.uUseTerrainHeightTex.value = 0.0;   // unbounded world — no fixed bake
     if (this.studioCloud) this.studioCloud.setInScene(false);
 
     // Hide studio objects
@@ -1287,21 +1335,19 @@ export class Engine {
   async _warmupInfiniteShaders(oct) {
     this._compiling++;
     this.cb.onStatus('Compiling world shaders…', true);
-    // warm clones (not the live materials) so mode exits mid-compile are safe
+    // warm clones (not the live materials) so mode exits mid-compile are safe.
+    // Canvas-variant only — the underwater render-target variants are deferred
+    // and warmed lazily on first approach to water (see _warmUnderwaterShaders),
+    // halving the compile burst that otherwise stalls other tabs on mode switch.
     const warm = [
       createInfiniteTerrainMaterial(this.uniforms, oct),
       createInfiniteWaterMaterial(this.uniforms, oct),
     ];
     try {
-      await this._compileMaterialVariants(warm);
-      // sky dome material (already in the scene) — both output variants
+      await this._compileMaterialVariants(warm, { canvasOnly: true });
+      // sky dome material (already in the scene) — canvas variant only
       await this._withStudioCloudDetached(async () => {
         await this.renderer.compileAsync(this.scene, this.camera);
-        this.underwater._ensureTarget(this.renderer);
-        this.renderer.setRenderTarget(this.underwater._rt);
-        const pending = this.renderer.compileAsync(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
-        await pending;
       });
     } catch (e) {
       console.warn('Infinite shader warmup failed', e);
@@ -1439,10 +1485,44 @@ export class Engine {
     this._bakedTerrainGen = this._terrainGen;
   }
 
+  /**
+   * Ensure the studio height/normal texture is baked and current. Re-bakes only
+   * when the terrain generation counter has advanced (seed / shape / biome
+   * edits), so a steady camera costs nothing. While painting, the height field
+   * changes continuously — sample the live field and refresh the bake once the
+   * stroke ends. Until the first bake completes, uUseTerrainHeightTex stays 0
+   * and the shaders fall back to the live field.
+   */
+  _ensureTerrainHeightTex() {
+    if (this.worldMode !== 'studio') return;
+    if (this.paintState?.enabled) {
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this._paintWasEnabled = true;
+      return;
+    }
+    if (this._paintWasEnabled) {      // just left paint mode — capture the edits
+      this._bakedStudioGen = -1;
+      this._paintWasEnabled = false;
+    }
+    if (!this.terrainHeightBaker) {
+      this.terrainHeightBaker = new TerrainHeightBaker({
+        renderer: this.renderer,
+        uniforms: this.uniforms,
+      });
+      this._bakedStudioGen = -1;
+    }
+    if (this._bakedStudioGen === this._terrainGen) return;
+    this.terrainHeightBaker.bake(Math.round(this.params.octaves), this._stackGLSL);
+    this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
+    this.uniforms.uUseTerrainHeightTex.value = 1.0;
+    this._bakedStudioGen = this._terrainGen;
+  }
+
   _enterPlanetMode() {
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
     this.uniforms.uPaintEnabled.value = 0;
+    this.uniforms.uUseTerrainHeightTex.value = 0.0;   // studio-only bake
     if (this.studioCloud) this.studioCloud.setInScene(false);
 
     // hide studio objects + sleep the editor camera
@@ -2172,6 +2252,12 @@ export class Engine {
         this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
       }
 
+      // refresh the baked height/normal texture if the field changed (no-op on a
+      // steady frame); the studio terrain + water shaders then sample it per
+      // pixel instead of re-evaluating the full height field.
+      this._ensureTerrainHeightTex();
+
+      this._maybeWarmUnderwater();
       this.underwater.render(this.renderer, this.scene, this.camera);
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
@@ -2204,6 +2290,7 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
     }
 
+    this._maybeWarmUnderwater();
     this.underwater.render(this.renderer, this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
@@ -2317,6 +2404,7 @@ export class Engine {
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
+    if (this.terrainHeightBaker) { this.terrainHeightBaker.dispose(); this.terrainHeightBaker = null; }
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
     this.board.dispose();
     this.minimap.dispose();

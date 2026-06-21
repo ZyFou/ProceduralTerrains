@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
@@ -30,6 +30,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
+${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
@@ -59,7 +60,12 @@ void main() {
   vec2 xz = vWorldPos.xz;
 
   // depth of the sea floor below this fragment (same height field as terrain)
-  float floorH = heightAt(xz);
+  float floorH;
+#ifndef INFINITE_MODE
+  if (uUseTerrainHeightTex > 0.5) floorH = bakedHeightAt(xz);
+  else
+#endif
+  floorH = heightAt(xz);
   float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
 

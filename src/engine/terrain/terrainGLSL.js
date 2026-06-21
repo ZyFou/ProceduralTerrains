@@ -46,6 +46,22 @@ uniform vec4  uLayerMaskB[MAX_NOISE_LAYERS];    // noise mask (scale,threshold,s
 uniform float uNoiseDebug;                      // debug view selector (0 = off)
 `;
 
+// Baked studio height/normal texture sampling. Studio terrain + water fragment
+// shaders include this so they can replace the per-pixel ~46-octave height
+// field with a single texture2D fetch when the engine's bake is active. Gated
+// to non-infinite materials (the infinite world is unbounded — no fixed bake).
+// The board spans world XZ in [-uBoardHalf, uBoardHalf]; map XZ → UV to match.
+export const TERRAIN_HEIGHT_TEX_GLSL = /* glsl */ `
+#ifndef INFINITE_MODE
+uniform sampler2D uTerrainHeightTex;
+uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
+vec2 bakedUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + 0.5; }
+float bakedHeightAt(vec2 xz) {
+  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
+}
+#endif
+`;
+
 export const NOISE_GLSL = /* glsl */ `
 // --- hash without sine precision issues (Dave Hoskins) -----------------------
 float hash12(vec2 p) {

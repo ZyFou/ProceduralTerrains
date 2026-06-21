@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack, MAX_LAYERS } from './noise/NoiseStack.js';
@@ -64,6 +64,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
+${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 
@@ -97,9 +98,28 @@ void main() {
   bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
 
   float eps = uEps;
-  float hC = heightAt(xz);
-  float hX = heightAt(xz + vec2(eps, 0.0));
-  float hZ = heightAt(xz + vec2(0.0, eps));
+  float hC, hX, hZ;
+  vec3 nGeo;
+#ifndef INFINITE_MODE
+  if (uUseTerrainHeightTex > 0.5) {
+    // Baked path: one fetch covers height + geometric normal, two more cover
+    // the neighbour heights used by the concavity AO term — versus three full
+    // ~46-octave evaluations. Branch is on a uniform, so it stays warp-coherent.
+    vec2 uv = bakedUvAt(xz);
+    float du = uEps / (2.0 * uBoardHalf);
+    vec4 hT = texture2D(uTerrainHeightTex, uv);
+    hC = hT.a * uHeightScale;
+    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+    hX = texture2D(uTerrainHeightTex, uv + vec2(du, 0.0)).a * uHeightScale;
+    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, du)).a * uHeightScale;
+  } else
+#endif
+  {
+    hC = heightAt(xz);
+    hX = heightAt(xz + vec2(eps, 0.0));
+    hZ = heightAt(xz + vec2(0.0, eps));
+    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  }
 
   if (uColorMode > 0.5) {
     float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
@@ -115,7 +135,6 @@ void main() {
     return;
   }
 
-  vec3 nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
   vec3 n = normalize(vec3(nGeo.x * uNormalStrength, 1.0, nGeo.z * uNormalStrength));
 
   float slope = 1.0 - nGeo.y;
@@ -222,6 +241,13 @@ export function createTerrainUniforms() {
     // Ignored by the studio/infinite materials, which never declare them.
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
+
+    // Studio-mode baked height/normal texture (shared by the studio terrain +
+    // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
+    // 2D texture instead of re-evaluating the height field per pixel. Declared
+    // only by the non-infinite materials (TERRAIN_HEIGHT_TEX_GLSL).
+    uTerrainHeightTex:    { value: null },
+    uUseTerrainHeightTex: { value: 0.0 },
 
     // Noise Stack per-layer continuous params (shared by every height material).
     // Packed each param change by Engine from the live NoiseStack; the GLSL
