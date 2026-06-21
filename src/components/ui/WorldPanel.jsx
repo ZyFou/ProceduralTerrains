@@ -86,41 +86,7 @@ export default function WorldPanel({ params, worldMode, onParam }) {
           />
         </>
       )}
-      <ToggleRow
-        label="Wireframe"
-        value={params.wireframe}
-        onChange={(v) => onParam('wireframe', v)}
-        info="Display terrain using wire mesh lines instead of solid surface triangles"
-        icon={(
-          <svg viewBox="0 0 16 16" fill="none">
-            <path d="M1.5 12.5l5.5-10 7.5 10-13 0zm5.5-10v10M1.5 12.5l11-5.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-          </svg>
-        )}
-      />
-      <ToggleRow
-        label="LOD Debug"
-        value={params.lodDebug}
-        onChange={(v) => onParam('lodDebug', v)}
-        info="Color-code chunks based on their active level of detail (LOD) level"
-        icon={(
-          <svg viewBox="0 0 16 16" fill="none">
-            <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" />
-          </svg>
-        )}
-      />
-      <ToggleRow
-        label="Auto Update"
-        value={params.autoUpdate}
-        onChange={(v) => onParam('autoUpdate', v)}
-        info="Dynamically rebuild mesh chunks as noise or terrain settings change"
-        icon={(
-          <svg viewBox="0 0 16 16" fill="none">
-            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M13.5 2v3h-3" stroke="currentColor" strokeWidth="1.2" />
-          </svg>
-        )}
-      />
+      <p className="section-hint">Wireframe, LOD Debug and Auto Update have moved to the <strong>Debug</strong> panel.</p>
     </ControlSection>
   );
 }

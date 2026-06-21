@@ -350,16 +350,80 @@ function DebugPanel({ ctx }) {
       )}
       <CameraPanel camInfo={ctx.camInfo} camMode={ctx.camMode} onMode={ctx.onMode}
         onFov={ctx.onFov} onFocusCenter={ctx.onFocusCenter} embedded />
+
+      <DebugOptions ctx={ctx} />
+
       <div className="panel-group">
         <div className="panel-group-header"><span className="panel-group-title">SESSION</span></div>
         <div className="panel-group-body">
           <div className="stat-row"><span className="stat-label">World Mode</span><span className="stat-value">{ctx.worldMode}</span></div>
           <div className="stat-row"><span className="stat-label">Seed</span><span className="stat-value stat-mono">{ctx.params.seed}</span></div>
           <div className="stat-row"><span className="stat-label">Board</span><span className="stat-value stat-mono">{ctx.boardSize} u</span></div>
+          {ctx.worldMode === 'studio' && (
+            <div className="stat-row"><span className="stat-label">Height Bake</span>
+              <span className="stat-value">{ctx.debugFlags?.disableHeightBake ? 'Off (live field)' : 'Active'}</span></div>
+          )}
           <div className="stat-row"><span className="stat-label">Version</span><span className="stat-value stat-mono">v{APP_VERSION}</span></div>
         </div>
       </div>
     </SidePanel>
+  );
+}
+
+// Consolidated developer debug toggles. Visualization + generation toggles are
+// terrain params (onParam); the freeze / render / bake switches are transient
+// engine flags (debugFlags / onDebugFlag) that never persist to saved projects.
+function DebugOptions({ ctx }) {
+  const { params, onParam, worldMode } = ctx;
+  const flags = ctx.debugFlags ?? {};
+  const setFlag = ctx.onDebugFlag ?? (() => {});
+  const isStudio = worldMode === 'studio';
+  return (
+    <>
+      <div className="panel-group">
+        <div className="panel-group-header"><span className="panel-group-title">VISUALIZATION</span></div>
+        <div className="panel-group-body">
+          <ToggleRow label="Wireframe" value={params.wireframe} onChange={(v) => onParam('wireframe', v)}
+            info="Draw the terrain as wire mesh lines instead of solid triangles." />
+          <ToggleRow label="LOD Debug" value={params.lodDebug} onChange={(v) => onParam('lodDebug', v)}
+            info="Tint chunks by their active level-of-detail (red = highest detail → blue = lowest)." />
+          {!isStudio ? null : (
+            <ToggleRow label="Chunk Grid" value={params.chunkGrid} onChange={(v) => onParam('chunkGrid', v)}
+              info="Overlay borders along chunk boundaries." />
+          )}
+          <ToggleRow label="Biome Debug" value={params.biomeDebug} onChange={(v) => onParam('biomeDebug', v)}
+            info="Color-code biomes directly on the terrain surface for inspection." />
+        </div>
+      </div>
+
+      <div className="panel-group">
+        <div className="panel-group-header"><span className="panel-group-title">GENERATION</span></div>
+        <div className="panel-group-body">
+          <ToggleRow label="Auto Update" value={params.autoUpdate} onChange={(v) => onParam('autoUpdate', v)}
+            info="Rebuild the terrain live as shape settings change. When off, edits are deferred until you press Regenerate." />
+        </div>
+      </div>
+
+      <div className="panel-group">
+        <div className="panel-group-header"><span className="panel-group-title">DIAGNOSTICS</span></div>
+        <div className="panel-group-body">
+          {isStudio ? (
+            <>
+              <ToggleRow label="Freeze Culling" value={!!flags.freezeCulling} onChange={(v) => setFlag('freezeCulling', v)}
+                info="Stop recomputing chunk visibility. Freeze, then orbit out to inspect the culling frustum from outside." />
+              <ToggleRow label="Freeze LOD" value={!!flags.freezeLod} onChange={(v) => setFlag('freezeLod', v)}
+                info="Stop recomputing per-chunk level of detail — hold the current LOD layout while you move." />
+              <ToggleRow label="Force Render" value={!!flags.forceRender} onChange={(v) => setFlag('forceRender', v)}
+                info="Bypass on-demand rendering and draw every frame (use to read true sustained FPS)." />
+              <ToggleRow label="Disable Height Bake" value={!!flags.disableHeightBake} onChange={(v) => setFlag('disableHeightBake', v)}
+                info="Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization." />
+            </>
+          ) : (
+            <p className="section-hint">Freeze / render diagnostics apply to Tile mode.</p>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -53,6 +53,9 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState(0.38);
   const [cullingEnabled, setCullingEnabled] = useState(true);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
+  const [debugFlags, setDebugFlags] = useState({
+    freezeCulling: false, freezeLod: false, forceRender: false, disableHeightBake: false,
+  });
   const [visibleChunks, setVisibleChunks] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkCount);
   const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
@@ -254,6 +257,10 @@ export default function App() {
   const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
   const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); };
   const handleCullingEnabled = (enabled) => { engine().setCullingEnabled(enabled); setCullingEnabled(enabled); };
+  const handleDebugFlag = (key, value) => {
+    engine().setDebugFlag(key, value);
+    setDebugFlags((f) => ({ ...f, [key]: value }));
+  };
   const handleTouchInput = useCallback((input) => {
     engineRef.current?.setTouchInput(input);
   }, []);
@@ -318,6 +325,7 @@ export default function App() {
     lodCounts, chunkCount, boardSize, visibleChunks, culledChunks,
     cullingEnabled, behindCameraCulling,
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
+    debugFlags, onDebugFlag: handleDebugFlag,
     stats, gpu, perf,
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),

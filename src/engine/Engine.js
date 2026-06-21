@@ -173,6 +173,15 @@ export class Engine {
     this._autoScale = 1.0;         // automatic performance mode render scale
     this._autoCheckAt = 0;
 
+    // Developer debug switches (Debug panel). None of these persist — they are
+    // pure inspection aids that never touch saved projects or perf settings.
+    this._debug = {
+      freezeCulling: false,   // stop recomputing chunk visibility (fly out to inspect the frustum)
+      freezeLod: false,       // stop recomputing per-chunk LOD
+      forceRender: false,     // bypass the on-demand gate — draw every frame
+      disableHeightBake: false, // force the live per-pixel height field (studio bake off)
+    };
+
     this._initRenderer();
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
     this._initScene(minimapBase, minimapOverlay);
@@ -1084,6 +1093,21 @@ export class Engine {
     if (this.player?.setTouchInput) this.player.setTouchInput(input);
   }
 
+  // ---------------------------------------------------------------- debug
+  getDebugFlags() { return { ...this._debug }; }
+
+  /** Toggle a developer debug switch (see this._debug). */
+  setDebugFlag(key, value) {
+    if (!(key in this._debug)) return;
+    this._debug[key] = !!value;
+    this._needsRender = true;
+    if (key === 'disableHeightBake') {
+      // off → drop to the live field immediately; on → force a fresh bake next tick
+      if (this._debug.disableHeightBake) this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this._bakedStudioGen = -1;
+    }
+  }
+
   // ------------------------------------------------------------- player mode
 
   _getHeightSampler() {
@@ -1495,6 +1519,10 @@ export class Engine {
    */
   _ensureTerrainHeightTex() {
     if (this.worldMode !== 'studio') return;
+    if (this._debug.disableHeightBake) {   // debug: force the live per-pixel field
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      return;
+    }
     if (this.paintState?.enabled) {
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       this._paintWasEnabled = true;
@@ -2219,7 +2247,7 @@ export class Engine {
     // Heartbeat safety net: redraw at least ~1 Hz so any state change that
     // forgot to invalidate self-heals within a second (cheap insurance).
     const heartbeat = now - this._lastRenderAt > 1000;
-    const shouldRender = !this.perf.onDemandStudio
+    const shouldRender = !this.perf.onDemandStudio || this._debug.forceRender
       || this._needsRender || moved || animating || minimapDirty || heartbeat;
 
     if (shouldRender) {
@@ -2233,11 +2261,13 @@ export class Engine {
       }
 
       // Cull invisible chunks based on current camera frustum and facing
+      // (Debug "Freeze Culling" holds the last computed visibility so you can
+      // fly the camera out and inspect the frozen frustum from outside).
       this.camera.updateMatrixWorld(true);
-      this.board.cull(this.camera);
+      if (!this._debug.freezeCulling) this.board.cull(this.camera);
 
       // LOD selection: throttled, distance-based, internal to the fixed board
-      if (now - this._lastLodUpdate > 150) {
+      if (now - this._lastLodUpdate > 150 && !this._debug.freezeLod) {
         this._lastLodUpdate = now;
         this.board.updateLOD(this.camera.position);
         this.cb.onLod(
