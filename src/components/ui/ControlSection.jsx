@@ -1,4 +1,5 @@
 import { useContext, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 
 export default function ControlSection({
@@ -43,9 +44,7 @@ export default function ControlSection({
           {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
         </span>
         <span className={`control-section-chevron${open ? ' open' : ''}`} aria-hidden>
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
+          <ChevronDown size={14} strokeWidth={2} />
         </span>
       </button>
       <div className={`control-section-body${open ? '' : ' collapsed'}`}>{children}</div>

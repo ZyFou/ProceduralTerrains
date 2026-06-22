@@ -1,7 +1,7 @@
 {
   "name": "terrain-studio",
   "private": true,
-  "version": "0.5.5",
+  "version": "0.6.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "fflate": "^0.8.3",
+    "lucide-react": "^1.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.160.0"

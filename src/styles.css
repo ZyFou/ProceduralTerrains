@@ -387,6 +387,101 @@ body {
 }
 .panel-group-body { padding: 12px; }
 
+.collapsible-group .panel-group-header {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font);
+  text-align: left;
+  transition: background 0.12s ease;
+}
+.collapsible-group .panel-group-toggle:hover { background: var(--bg-control); }
+.collapsible-group .panel-group-toggle {
+  justify-content: flex-start;
+  border-bottom: none;
+}
+.collapsible-group.open .panel-group-toggle { border-bottom: 1px solid var(--border-subtle); }
+.collapsible-group .panel-group-chevron {
+  display: flex;
+  margin-left: auto;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+.collapsible-group .panel-group-chevron.open { transform: rotate(180deg); }
+
+.file-picker { margin-bottom: 10px; }
+.file-picker-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.file-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  color: var(--text-main);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.file-picker-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.file-picker-name {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.import-map-preview {
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  margin: 8px 0 10px;
+  border: 1px solid var(--border-subtle);
+}
+.import-map-error { color: #ff8a8a; }
+
+.biome-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.biome-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.biome-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 .perf-settings-body { display: flex; flex-direction: column; gap: 4px; }
 
 /* ============ CONTROL SECTION CARD ============ */

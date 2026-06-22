@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Cog, Dices, Eye, RefreshCw } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
+import { PANEL_ICONS } from '../icons/panelIcons.jsx';
+import ImportMapsContent from '../ui/ImportMapsContent.jsx';
+import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
+import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
 import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, WATER_COLORS, ColorField, InfoDot } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
 import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
@@ -18,12 +23,10 @@ import PerfSettings from './PerfSettings.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
-const ic = (children) => <svg viewBox="0 0 20 20" fill="none">{children}</svg>;
-
 export const PANEL_META = {
-  terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: ic(<path d="M3 15 L8 6 L11 10 L14 7 L17 15 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
-  noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: ic(<><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" /><circle cx="6" cy="6" r="1.3" fill="currentColor" /><circle cx="10" cy="10" r="1.3" fill="currentColor" /><circle cx="14" cy="14" r="1.3" fill="currentColor" /></>) },
-  world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: ic(<><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="3" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
+  terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
+  noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },
+  world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: PANEL_ICONS.world },
   planet: {
     label: 'Planet',
     title: 'Planet',
@@ -31,23 +34,22 @@ export const PANEL_META = {
     studioLabel: 'Colors',
     studioTitle: 'Colors',
     studioDesc: 'Biome palette and terrain material colors.',
-    icon: ic(<><circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" /><ellipse cx="10" cy="10" rx="3" ry="6.5" stroke="currentColor" strokeWidth="1" /></>),
+    icon: PANEL_ICONS.planet,
     modes: ['planet', 'studio'],
   },
-  biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: ic(<><rect x="4" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="4" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="4" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /><rect x="11" y="11" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" /></>) },
-  water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: ic(<path d="M10 4c-2 3-5 5-5 8a5 5 0 0 0 10 0c0-3-3-5-5-8z" stroke="currentColor" strokeWidth="1.4" />) },
-  props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: ic(<path d="M5 16c.2-5 1.2-9 3-13M10 16c-.1-4.8.4-8.6 1.5-12M14 16c-.4-4.2-1.2-7.4-2.4-9.6" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />) },
-  clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: ic(<path d="M5 14a3 3 0 0 1 .5-5.95A4.2 4.2 0 0 1 14 8.3a3 3 0 0 1-.4 5.7H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />) },
-  skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: ic(<><path d="M2 13h16" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /><circle cx="6.5" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.3" /><path d="M11 13a3.2 3.2 0 0 1 .3-6 4 4 0 0 1 6.4 1.1" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></>) },
-  lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: ic(<><circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8" stroke="currentColor" strokeWidth="1.3" /></>) },
-  export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: ic(<><path d="M10 3v9M10 3 7 6M10 3l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 12v4h12v-4" stroke="currentColor" strokeWidth="1.4" /></>) },
-  performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: ic(<path d="M3 15h14M5 11l3-5 3 4 4-7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />) },
-  tileMaps: { label: 'Maps', title: 'Tile Maps', desc: 'Debug terrain maps and import custom map inputs.', modes: ['studio'], icon: ic(<><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.3" /><path d="M3 8h14M8 3v14" stroke="currentColor" strokeWidth="1.1" /></>) },
-  debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: ic(<><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.4" /><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.5 4.5l1.5 1.5M14 14l1.5 1.5M15.5 4.5L14 6M6 14l-1.5 1.5" stroke="currentColor" strokeWidth="1.2" /></>) },
+  biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
+  water: { label: 'Water', title: 'Water', desc: 'Ocean surface and colours.', icon: PANEL_ICONS.water },
+  props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: PANEL_ICONS.props },
+  clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
+  skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
+  lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
+  export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
+  performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: PANEL_ICONS.performance },
+  debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'tileMaps', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -87,10 +89,7 @@ function SeedRow({ seed, onParam, onRandomizeSeed }) {
           onChange={(e) => setText(e.target.value)} onBlur={commit}
           onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} />
         <button type="button" className="icon-btn" title="Randomize seed" onClick={onRandomizeSeed}>
-          <svg viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.1" />
-            <circle cx="5.5" cy="5.5" r="1" fill="currentColor" /><circle cx="10.5" cy="10.5" r="1" fill="currentColor" />
-          </svg>
+          <Dices size={14} strokeWidth={1.75} aria-hidden />
         </button>
       </div>
     </div>
@@ -99,7 +98,7 @@ function SeedRow({ seed, onParam, onRandomizeSeed }) {
 
 const RegenButton = ({ onRegenerate }) => (
   <button type="button" className="action-btn primary" onClick={onRegenerate}>
-    <svg viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" strokeWidth="1.3" /><path d="M13.7 1.8v2.8h-2.8" stroke="currentColor" strokeWidth="1.3" /></svg>
+    <RefreshCw size={14} strokeWidth={1.75} aria-hidden />
     Regenerate
   </button>
 );
@@ -107,13 +106,18 @@ const RegenButton = ({ onRegenerate }) => (
 // ---------------------------------------------------------------- panels
 function TerrainPanel({ ctx }) {
   const [tab, setTab] = useState('shape');
-  const { params, onParam } = ctx;
+  const { params, onParam, worldMode } = ctx;
+  const isStudio = worldMode === 'studio';
+  const tabs = [
+    { id: 'shape', label: 'Shape' },
+    { id: 'noise', label: 'Noise' },
+    { id: 'surface', label: 'Surface' },
+    ...(isStudio ? [{ id: 'import', label: 'Import' }] : []),
+  ];
   return (
     <SidePanel title="Terrain" description="Shape and surface generation." onClose={ctx.onClose}
       footer={<RegenButton onRegenerate={ctx.onRegenerate} />}>
-      <PanelTabs active={tab} onChange={setTab} tabs={[
-        { id: 'shape', label: 'Shape' }, { id: 'noise', label: 'Noise' }, { id: 'surface', label: 'Surface' },
-      ]} />
+      <PanelTabs active={tab} onChange={setTab} tabs={tabs} />
       {tab === 'shape' && (
         <>
           <SelectRow label="Preset" value={params.preset}
@@ -142,6 +146,7 @@ function TerrainPanel({ ctx }) {
           ))}
         </>
       )}
+      {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
     </SidePanel>
   );
 }
@@ -338,158 +343,200 @@ function PerformancePanel({ ctx }) {
 }
 
 function DebugPanel({ ctx }) {
+  const [tab, setTab] = useState('monitor');
+  const isStudio = ctx.worldMode === 'studio';
+
   return (
     <SidePanel title="Debug" description="Live stats and diagnostics." onClose={ctx.onClose}>
-      <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
-      {ctx.worldMode !== 'planet' && (
-        <LodPanel
-          lodCounts={ctx.lodCounts} chunkCount={ctx.chunkCount}
-          visibleChunks={ctx.visibleChunks} culledChunks={ctx.culledChunks}
-          cullingEnabled={ctx.cullingEnabled} behindCameraCulling={ctx.behindCameraCulling}
-          onCullingEnabled={ctx.onCullingEnabled} onBehindCameraCulling={ctx.onBehindCameraCulling}
-          embedded />
+      <PanelTabs
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'monitor', label: 'Monitor' },
+          { id: 'viewport', label: 'Viewport' },
+          { id: 'engine', label: 'Engine' },
+        ]}
+      />
+
+      {tab === 'monitor' && (
+        <>
+          <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
+          <SessionInfo ctx={ctx} />
+        </>
       )}
-      <CameraPanel camInfo={ctx.camInfo} camMode={ctx.camMode} onMode={ctx.onMode}
-        onFov={ctx.onFov} onFocusCenter={ctx.onFocusCenter} embedded />
 
-      <DebugOptions ctx={ctx} />
-
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">SESSION</span></div>
-        <div className="panel-group-body">
-          <div className="stat-row"><span className="stat-label">World Mode</span><span className="stat-value">{ctx.worldMode}</span></div>
-          <div className="stat-row"><span className="stat-label">Seed</span><span className="stat-value stat-mono">{ctx.params.seed}</span></div>
-          <div className="stat-row"><span className="stat-label">Board</span><span className="stat-value stat-mono">{ctx.boardSize} u</span></div>
-          {ctx.worldMode === 'studio' && (
-            <div className="stat-row"><span className="stat-label">Height Bake</span>
-              <span className="stat-value">{ctx.debugFlags?.disableHeightBake ? 'Off (live field)' : 'Active'}</span></div>
+      {tab === 'viewport' && (
+        <>
+          <CameraPanel
+            camInfo={ctx.camInfo}
+            camMode={ctx.camMode}
+            onMode={ctx.onMode}
+            onFov={ctx.onFov}
+            onFocusCenter={ctx.onFocusCenter}
+            embedded
+          />
+          {ctx.worldMode !== 'planet' && (
+            <LodPanel
+              lodCounts={ctx.lodCounts}
+              chunkCount={ctx.chunkCount}
+              visibleChunks={ctx.visibleChunks}
+              culledChunks={ctx.culledChunks}
+              cullingEnabled={ctx.cullingEnabled}
+              behindCameraCulling={ctx.behindCameraCulling}
+              onCullingEnabled={ctx.onCullingEnabled}
+              onBehindCameraCulling={ctx.onBehindCameraCulling}
+              embedded
+            />
           )}
-          <div className="stat-row"><span className="stat-label">Version</span><span className="stat-value stat-mono">v{APP_VERSION}</span></div>
-        </div>
-      </div>
+          <TerrainOverlayOptions ctx={ctx} />
+          {isStudio && (
+            <TileMapDebugSection
+              tileDebug={ctx.tileDebug}
+              onTileDebug={ctx.onTileDebug}
+            />
+          )}
+        </>
+      )}
+
+      {tab === 'engine' && <EngineDebugOptions ctx={ctx} />}
     </SidePanel>
   );
 }
 
-// Consolidated developer debug toggles. Visualization + generation toggles are
-// terrain params (onParam); the freeze / render / bake switches are transient
-// engine flags (debugFlags / onDebugFlag) that never persist to saved projects.
-function DebugOptions({ ctx }) {
+function SessionInfo({ ctx }) {
+  return (
+    <div className="panel-group">
+      <div className="panel-group-header">
+        <span className="panel-group-title">SESSION</span>
+      </div>
+      <div className="panel-group-body">
+        <div className="stat-row">
+          <span className="stat-label">World Mode</span>
+          <span className="stat-value">{ctx.worldMode}</span>
+        </div>
+        <div className="stat-row">
+          <span className="stat-label">Seed</span>
+          <span className="stat-value stat-mono">{ctx.params.seed}</span>
+        </div>
+        <div className="stat-row">
+          <span className="stat-label">Board</span>
+          <span className="stat-value stat-mono">{ctx.boardSize} u</span>
+        </div>
+        {ctx.worldMode === 'studio' && (
+          <div className="stat-row">
+            <span className="stat-label">Height Bake</span>
+            <span className="stat-value">
+              {ctx.debugFlags?.disableHeightBake ? 'Off (live field)' : 'Active'}
+            </span>
+          </div>
+        )}
+        <div className="stat-row">
+          <span className="stat-label">Version</span>
+          <span className="stat-value stat-mono">v{APP_VERSION}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TerrainOverlayOptions({ ctx }) {
+  const { params, onParam, worldMode } = ctx;
+  const isStudio = worldMode === 'studio';
+
+  return (
+    <CollapsibleGroup
+      title="Terrain Overlays"
+      icon={<Eye size={15} strokeWidth={1.75} />}
+      defaultOpen
+    >
+      <ToggleRow
+        label="Wireframe"
+        value={params.wireframe}
+        onChange={(v) => onParam('wireframe', v)}
+        info="Draw the terrain as wire mesh lines instead of solid triangles."
+      />
+      <ToggleRow
+        label="LOD Debug"
+        value={params.lodDebug}
+        onChange={(v) => onParam('lodDebug', v)}
+        info="Tint chunks by their active level-of-detail (red = highest detail → blue = lowest)."
+      />
+      {isStudio && (
+        <ToggleRow
+          label="Chunk Grid"
+          value={params.chunkGrid}
+          onChange={(v) => onParam('chunkGrid', v)}
+          info="Overlay borders along chunk boundaries."
+        />
+      )}
+      <ToggleRow
+        label="Biome Debug"
+        value={params.biomeDebug}
+        onChange={(v) => onParam('biomeDebug', v)}
+        info="Color-code biomes directly on the terrain surface for inspection."
+      />
+    </CollapsibleGroup>
+  );
+}
+
+function EngineDebugOptions({ ctx }) {
   const { params, onParam, worldMode } = ctx;
   const flags = ctx.debugFlags ?? {};
   const setFlag = ctx.onDebugFlag ?? (() => {});
   const isStudio = worldMode === 'studio';
+
   return (
     <>
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">VISUALIZATION</span></div>
-        <div className="panel-group-body">
-          <ToggleRow label="Wireframe" value={params.wireframe} onChange={(v) => onParam('wireframe', v)}
-            info="Draw the terrain as wire mesh lines instead of solid triangles." />
-          <ToggleRow label="LOD Debug" value={params.lodDebug} onChange={(v) => onParam('lodDebug', v)}
-            info="Tint chunks by their active level-of-detail (red = highest detail → blue = lowest)." />
-          {!isStudio ? null : (
-            <ToggleRow label="Chunk Grid" value={params.chunkGrid} onChange={(v) => onParam('chunkGrid', v)}
-              info="Overlay borders along chunk boundaries." />
-          )}
-          <ToggleRow label="Biome Debug" value={params.biomeDebug} onChange={(v) => onParam('biomeDebug', v)}
-            info="Color-code biomes directly on the terrain surface for inspection." />
-        </div>
-      </div>
+      <CollapsibleGroup
+        title="Generation"
+        icon={<RefreshCw size={15} strokeWidth={1.75} />}
+        defaultOpen
+      >
+        <ToggleRow
+          label="Auto Update"
+          value={params.autoUpdate}
+          onChange={(v) => onParam('autoUpdate', v)}
+          info="Rebuild the terrain live as shape settings change. When off, edits are deferred until you press Regenerate."
+        />
+      </CollapsibleGroup>
 
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">GENERATION</span></div>
-        <div className="panel-group-body">
-          <ToggleRow label="Auto Update" value={params.autoUpdate} onChange={(v) => onParam('autoUpdate', v)}
-            info="Rebuild the terrain live as shape settings change. When off, edits are deferred until you press Regenerate." />
-        </div>
-      </div>
-
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">DIAGNOSTICS</span></div>
-        <div className="panel-group-body">
-          {isStudio ? (
-            <>
-              <ToggleRow label="Freeze Culling" value={!!flags.freezeCulling} onChange={(v) => setFlag('freezeCulling', v)}
-                info="Stop recomputing chunk visibility. Freeze, then orbit out to inspect the culling frustum from outside." />
-              <ToggleRow label="Freeze LOD" value={!!flags.freezeLod} onChange={(v) => setFlag('freezeLod', v)}
-                info="Stop recomputing per-chunk level of detail — hold the current LOD layout while you move." />
-              <ToggleRow label="Force Render" value={!!flags.forceRender} onChange={(v) => setFlag('forceRender', v)}
-                info="Bypass on-demand rendering and draw every frame (use to read true sustained FPS)." />
-              <ToggleRow label="Disable Height Bake" value={!!flags.disableHeightBake} onChange={(v) => setFlag('disableHeightBake', v)}
-                info="Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization." />
-            </>
-          ) : (
-            <p className="section-hint">Freeze / render diagnostics apply to Tile mode.</p>
-          )}
-        </div>
-      </div>
+      <CollapsibleGroup
+        title="Diagnostics"
+        icon={<Cog size={15} strokeWidth={1.75} />}
+        defaultOpen={isStudio}
+      >
+        {isStudio ? (
+          <>
+            <ToggleRow
+              label="Freeze Culling"
+              value={!!flags.freezeCulling}
+              onChange={(v) => setFlag('freezeCulling', v)}
+              info="Stop recomputing chunk visibility. Freeze, then orbit out to inspect the culling frustum from outside."
+            />
+            <ToggleRow
+              label="Freeze LOD"
+              value={!!flags.freezeLod}
+              onChange={(v) => setFlag('freezeLod', v)}
+              info="Stop recomputing per-chunk level of detail — hold the current LOD layout while you move."
+            />
+            <ToggleRow
+              label="Force Render"
+              value={!!flags.forceRender}
+              onChange={(v) => setFlag('forceRender', v)}
+              info="Bypass on-demand rendering and draw every frame (use to read true sustained FPS)."
+            />
+            <ToggleRow
+              label="Disable Height Bake"
+              value={!!flags.disableHeightBake}
+              onChange={(v) => setFlag('disableHeightBake', v)}
+              info="Force the live per-pixel height field instead of the baked texture — A/B the studio render optimization."
+            />
+          </>
+        ) : (
+          <p className="section-hint">Freeze and render diagnostics are available in Tile mode.</p>
+        )}
+      </CollapsibleGroup>
     </>
-  );
-}
-
-
-const DEBUG_VIEW_OPTIONS = [
-  { value: 'off', label: 'Off' }, { value: 'noise', label: 'Noise Texture' },
-  { value: 'height', label: 'Height Map' }, { value: 'biome', label: 'Biome Map' },
-];
-const IMPORT_MODE_OPTIONS = [
-  { value: 'disabled', label: 'Disabled' }, { value: 'preview', label: 'Preview Only' },
-  { value: 'replace', label: 'Replace Procedural' }, { value: 'blend', label: 'Blend With Procedural' },
-];
-const MAP_LABEL = { noise: 'Noise Map', height: 'Height Map', biome: 'Biome Map' };
-
-function TileMapsPanel({ ctx }) {
-  const dbg = ctx.tileDebug ?? { view: 'off', showLegend: true, opacity: 1, showPreview: true };
-  return (
-    <SidePanel title="Tile Maps" description="Debug generated Tile maps and import custom map inputs." onClose={ctx.onClose}>
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">TILE DEBUG</span></div>
-        <div className="panel-group-body">
-          <SelectRow label="Debug View" value={dbg.view} options={DEBUG_VIEW_OPTIONS} onChange={(v) => ctx.onTileDebug({ view: v })}
-            info="Displays internal terrain maps directly on the Tile terrain without changing saved terrain data." />
-          <ToggleRow label="Show Legend" value={!!dbg.showLegend} onChange={(v) => ctx.onTileDebug({ showLegend: v })} />
-          {dbg.view === 'biome' && dbg.showLegend && <BiomeLegend />}
-        </div>
-      </div>
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">IMPORT MAPS</span></div>
-        <div className="panel-group-body">
-          <p className="section-hint">Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.</p>
-          {['noise', 'height', 'biome'].map((type) => <ImportMapSection key={type} type={type} map={ctx.importedMaps?.[type]} ctx={ctx} />)}
-        </div>
-      </div>
-    </SidePanel>
-  );
-}
-function BiomeLegend() {
-  const rows = [['#d6b35a', 'Desert / sand'], ['#b05f32', 'Canyon / dry rock'], ['#2f9f67', 'Wetland / grass'], ['#8b8f98', 'Mountains / snow']];
-  return <div className="panel-group-body" style={{ padding: '6px 0' }}>{rows.map(([c,l]) => <div className="stat-row" key={l}><span><span style={{ display:'inline-block', width:12, height:12, borderRadius:3, background:c, marginRight:8, verticalAlign:'-2px' }} />{l}</span></div>)}</div>;
-}
-function ImportMapSection({ type, map, ctx }) {
-  const settings = map?.settings ?? { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
-  const set = (key, value) => ctx.onTileMapSetting(type, key, value);
-  return (
-    <div className="panel-group" style={{ marginTop: 10 }}>
-      <div className="panel-group-header"><span className="panel-group-title">{MAP_LABEL[type]}</span></div>
-      <div className="panel-group-body">
-        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && ctx.onImportTileMap(type, e.target.files[0])} />
-        {map?.preview && <img src={map.preview} alt={`${MAP_LABEL[type]} preview`} style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginTop: 8 }} />}
-        <div className="stat-row"><span className="stat-label">File</span><span className="stat-value">{map?.fileName ?? 'None'}</span></div>
-        <div className="stat-row"><span className="stat-label">Resolution</span><span className="stat-value stat-mono">{map ? `${map.width}×${map.height}` : '—'}</span></div>
-        {map?.error && <p className="section-hint" style={{ color: '#ff8a8a' }}>{map.error}</p>}
-        {map?.warning && <p className="section-hint">{map.warning}</p>}
-        <SelectRow label="Usage Mode" value={settings.mode} options={IMPORT_MODE_OPTIONS} onChange={(v) => set('mode', v)} />
-        {settings.mode === 'replace' && <p className="section-hint">{MAP_LABEL[type]} is replacing procedural data. Some procedural settings may have reduced or no effect for this map type.</p>}
-        {settings.mode === 'blend' && <SliderCtl def={{ label: 'Blend Strength', min: 0, max: 1, step: 0.01, digits: 2 }} value={settings.blend} onChange={(v) => set('blend', v)} />}
-        <ToggleRow label="Invert" value={!!settings.invert} onChange={(v) => set('invert', v)} />
-        <ToggleRow label="Normalize" value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
-        {type === 'height' && <>
-          <SliderCtl def={{ label: 'Height Strength', min: 0, max: 2, step: 0.01, digits: 2 }} value={settings.heightStrength} onChange={(v) => set('heightStrength', v)} />
-          <SliderCtl def={{ label: 'Height Offset', min: -500, max: 500, step: 1, digits: 0, unit: 'm' }} value={settings.heightOffset} onChange={(v) => set('heightOffset', v)} />
-        </>}
-      </div>
-    </div>
   );
 }
 
@@ -585,7 +632,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
-  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, tileMaps: TileMapsPanel, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

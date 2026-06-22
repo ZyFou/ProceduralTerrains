@@ -1,3 +1,5 @@
+import { X } from 'lucide-react';
+
 // Shared chrome for every drawer panel: header (title + description + close),
 // scrollable content, optional footer.
 export default function SidePanel({ title, description, onClose, footer, children }) {
@@ -9,9 +11,7 @@ export default function SidePanel({ title, description, onClose, footer, childre
           {description && <p className="side-panel-desc">{description}</p>}
         </div>
         <button type="button" className="side-panel-close" onClick={onClose} aria-label="Close panel" title="Close (Esc)">
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
+          <X size={15} strokeWidth={2} aria-hidden />
         </button>
       </header>
       <div className="side-panel-content">{children}</div>
