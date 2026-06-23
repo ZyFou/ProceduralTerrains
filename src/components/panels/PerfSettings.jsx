@@ -235,10 +235,6 @@ function renderSettings({
 
       <SettingNote tab="overview" text={`Worst-case visible triangles: ~${(estTris / 1e6).toFixed(2)}M`} {...groupProps} />
 
-      <SettingGroup tab="overview" label="Reset Performance" keywords="restore defaults" {...groupProps}>
-        <button type="button" className="action-btn perf-reset-btn" onClick={onPerfReset} data-setting-id="performance.reset">Reset Performance Settings</button>
-      </SettingGroup>
-
       <SettingGroup tab="lod" label="Terrain Resolution" keywords="mesh detail segments" {...groupProps}>
         <PerfSlider perf={perf} id="resolutionScale" onPerfSetting={onPerfSetting} settingId="performance.resolutionScale" />
       </SettingGroup>

@@ -35,7 +35,6 @@ const SETTINGS_INDEX = [
   { panelId: 'water', settingId: 'water.waterEnabled', label: 'Water Enabled', keywords: 'water ocean enable disable' },
   { panelId: 'water', settingId: 'water.seaLevel', label: 'Sea Level', keywords: 'water ocean sea level height coast' },
   { panelId: 'water', settingId: 'water.waterMode', label: 'Water Mode', keywords: 'water legacy realistic volumetric cinematic quality' },
-  { panelId: 'water', settingId: 'water.waterQualityPreset', label: 'Water Quality Preset', keywords: 'water preset tropical ocean lake' },
   { panelId: 'water', settingId: 'water.waterAnim', label: 'Water Animation', keywords: 'water waves ocean motion' },
   { panelId: 'water', settingId: 'water.waterDebugView', label: 'Water Debug View', keywords: 'water debug depth foam shoreline mask' },
 

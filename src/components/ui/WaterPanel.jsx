@@ -7,7 +7,6 @@ import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import { PERF_LIMITS } from '../../engine/render/PerformanceSettings.js';
 import {
   WATER_MODES,
-  WATER_QUALITY_PRESETS,
   WATER_DEFAULT_PARAMS,
   isRealisticWaterMode,
   resolveEffectiveWaterMode,
@@ -16,6 +15,7 @@ import {
   WORLD_MODE_WATER_HINTS,
 } from '../../engine/water/WaterSettings.js';
 import { WATER_DEBUG_VIEWS } from '../../engine/water/WaterDebugViews.js';
+import PanelResetButton from './PanelResetButton.jsx';
 
 function val(params, key) {
   return params[key] ?? WATER_DEFAULT_PARAMS[key];
@@ -126,7 +126,6 @@ export default function WaterPanelInner({
   perf,
   onPerfSetting,
   planetStyleProps,
-  onApplyWaterPreset,
   onResetWaterSettings,
   onExportWaterMasks,
   id = 'inspector-water',
@@ -210,14 +209,6 @@ export default function WaterPanelInner({
           settingId="water.waterMode"
           info={MODE_HINTS[mode] ?? 'Select the water rendering pipeline.'}
         />
-        <SelectRow
-          label="Quality Preset"
-          value={val(params, 'waterQualityPreset')}
-          options={WATER_QUALITY_PRESETS}
-          onChange={(v) => onApplyWaterPreset?.(v)}
-          settingId="water.waterQualityPreset"
-          info="Apply a bundled set of water settings."
-        />
         {isInfinite && (
           <ToggleRow
             label="Auto Downgrade in Infinite World"
@@ -234,9 +225,6 @@ export default function WaterPanelInner({
           settingId="water.waterLegacyOnLowFps"
           info="Temporarily reduce expensive water effects when FPS drops below the threshold."
         />
-        <button type="button" className="action-btn" onClick={() => onResetWaterSettings?.()}>
-          Reset Water Settings
-        </button>
       </ControlSection>
 
       {enabled && mode !== 'off' && (
@@ -431,6 +419,8 @@ export default function WaterPanelInner({
           Export Shoreline + Foam Masks
         </button>
       </ControlSection>
+
+      <PanelResetButton label="Reset Water Settings" onClick={onResetWaterSettings} settingId="water.reset" />
     </>
   );
 

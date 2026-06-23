@@ -627,6 +627,15 @@ body {
   font-weight: 600;
   color: var(--text);
 }
+.panel-reset-footer {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.panel-reset-btn {
+  width: 100%;
+  justify-content: center;
+}
 
 /* ============ VIEWPORT ============ */
 #main { position: relative; flex: 1; overflow: hidden; min-height: 0; }
@@ -644,6 +653,59 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+#viewport.viewport-disabled {
+  visibility: hidden;
+}
+
+.webgl-error-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(11, 14, 20, 0.96);
+  color: #e8ecf4;
+}
+
+.webgl-error-overlay h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.webgl-error-overlay p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a8b0c0;
+}
+
+.webgl-error-hint {
+  font-size: 12px !important;
+  color: #7a8498 !important;
+}
+
+.webgl-error-overlay button {
+  margin-top: 8px;
+  padding: 8px 18px;
+  border: 1px solid #3a4560;
+  border-radius: 6px;
+  background: #1a2233;
+  color: #e8ecf4;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.webgl-error-overlay button:hover {
+  background: #243048;
 }
 
 /* ============ LEGACY PANEL (modals / fallback) ============ */

@@ -81,8 +81,8 @@ export const WATER_DEFAULT_PARAMS = {
   waterFoamWidth: 3.2,
   waterFoamSoftness: 0.6,
   waterFoamAnimSpeed: 1.0,
-  waterSlopeFoam: 0.5,
-  waterCliffFoam: 0.65,
+  waterSlopeFoam: 0.25,
+  waterCliffFoam: 0.3,
 
   // underwater (post-effect tuning — actual toggle lives in perf.underwaterEffect)
   waterUnderwaterEnabled: true,

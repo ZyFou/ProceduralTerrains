@@ -15,6 +15,7 @@ import PlanetStylePanel from '../PlanetStylePanel.jsx';
 import WorldPanelInner from '../ui/WorldPanel.jsx';
 import CloudPanelInner from '../ui/CloudPanel.jsx';
 import WaterPanelInner from '../ui/WaterPanel.jsx';
+import PanelResetButton from '../ui/PanelResetButton.jsx';
 import EnvironmentPanelInner from '../ui/EnvironmentPanel.jsx';
 import PerformanceStats from '../ui/PerformancePanel.jsx';
 import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
@@ -151,6 +152,7 @@ function TerrainPanel({ ctx }) {
         </>
       )}
       {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
+      <PanelResetButton label="Reset Terrain Settings" onClick={() => ctx.onResetPanel?.('terrain')} settingId="terrain.reset" />
     </SidePanel>
   );
 }
@@ -159,6 +161,7 @@ function WorldPanel({ ctx }) {
   return (
     <SidePanel title="World" description="Chunking, streaming and grid." onClose={ctx.onClose}>
       <WorldPanelInner params={ctx.params} worldMode={ctx.worldMode} onParam={ctx.onParam} />
+      <PanelResetButton label="Reset World Settings" onClick={() => ctx.onResetPanel?.('world')} settingId="world.reset" />
     </SidePanel>
   );
 }
@@ -178,6 +181,7 @@ function PlanetPanel({ ctx }) {
       {!isPlanet && (
         <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
       )}
+      <PanelResetButton label="Reset Planet / Colors Settings" onClick={() => ctx.onResetPanel?.('planet')} settingId="planet.reset" />
     </SidePanel>
   );
 }
@@ -192,6 +196,7 @@ function BiomesPanel({ ctx }) {
       <ToggleRow label="Biome Debug" value={params.biomeDebug} onChange={(v) => onParam('biomeDebug', v)}
         settingId="biomes.biomeDebug"
         info="Color-code biomes directly on the terrain surface for inspection." />
+      <PanelResetButton label="Reset Biome Settings" onClick={() => ctx.onResetPanel?.('biomes')} settingId="biomes.reset" />
     </SidePanel>
   );
 }
@@ -206,8 +211,7 @@ function WaterPanel({ ctx }) {
         perf={ctx.perf}
         onPerfSetting={ctx.onPerfSetting}
         planetStyleProps={ctx.planetStyleProps}
-        onApplyWaterPreset={ctx.onApplyWaterPreset}
-        onResetWaterSettings={ctx.onResetWaterSettings}
+        onResetWaterSettings={() => ctx.onResetPanel?.('water')}
         onExportWaterMasks={ctx.onExportWaterMasks}
       />
     </SidePanel>
@@ -248,6 +252,7 @@ function PropsPanel({ ctx }) {
           </p>
         </>
       )}
+      <PanelResetButton label="Reset Props Settings" onClick={() => ctx.onResetPanel?.('props')} settingId="props.reset" />
     </SidePanel>
   );
 }
@@ -263,6 +268,7 @@ function CloudsPanel({ ctx }) {
         onCloudQuality={ctx.onCloudQuality}
         worldMode={ctx.worldMode}
       />
+      <PanelResetButton label="Reset Cloud Settings" onClick={() => ctx.onResetPanel?.('clouds')} settingId="clouds.reset" />
     </SidePanel>
   );
 }
@@ -322,6 +328,7 @@ function SkyboxPanel({ ctx }) {
             info="Show the procedural star field when the sun is below the horizon." />
         </>
       )}
+      <PanelResetButton label="Reset Skybox Settings" onClick={() => ctx.onResetPanel?.('skybox')} settingId="skybox.reset" />
     </SidePanel>
   );
 }
@@ -336,6 +343,7 @@ function LightingPanel({ ctx }) {
       )}
       <EnvironmentPanelInner params={params} planetStyle={params.planetStyle}
         onParam={ctx.onParam} onTuning={ctx.onStyleTuning} />
+      <PanelResetButton label="Reset Lighting Settings" onClick={() => ctx.onResetPanel?.('lighting')} settingId="lighting.reset" />
     </SidePanel>
   );
 }
@@ -348,6 +356,7 @@ function PerformancePanel({ ctx }) {
         onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset}
         settingsTarget={ctx.settingsTarget}
         onSettingsTargetHandled={ctx.onSettingsTargetHandled} />
+      <PanelResetButton label="Reset Performance Settings" onClick={() => ctx.onResetPanel?.('performance')} settingId="performance.reset" />
     </SidePanel>
   );
 }
@@ -409,6 +418,8 @@ function DebugPanel({ ctx }) {
       )}
 
       {tab === 'engine' && <EngineDebugOptions ctx={ctx} />}
+
+      <PanelResetButton label="Reset Debug Settings" onClick={() => ctx.onResetPanel?.('debug')} settingId="debug.reset" />
     </SidePanel>
   );
 }
@@ -656,7 +667,11 @@ function ExportPanel({ ctx }) {
 }
 
 function NoiseLayersPanelWrapper({ ctx }) {
-  return <NoiseLayersPanel ctx={ctx} />;
+  return (
+    <NoiseLayersPanel ctx={ctx}>
+      <PanelResetButton label="Reset Noise Layers" onClick={() => ctx.onResetPanel?.('noiseLayers')} settingId="noiseLayers.reset" />
+    </NoiseLayersPanel>
+  );
 }
 
 const COMPONENTS = {

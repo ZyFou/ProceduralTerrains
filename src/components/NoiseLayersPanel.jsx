@@ -275,7 +275,7 @@ function AddLayerMenu({ onAdd, onClose }) {
 // ============================================================================
 // NoiseLayersPanel — the full side drawer panel
 // ============================================================================
-export default function NoiseLayersPanel({ ctx }) {
+export default function NoiseLayersPanel({ ctx, children }) {
   const { params, onNoiseStack, onSoloLayer } = ctx;
   const stack = params.noiseStack;
 
@@ -409,6 +409,7 @@ export default function NoiseLayersPanel({ ctx }) {
       <p className="section-hint" style={{ marginTop: 12 }}>
         {layers.length} / {MAX_LAYERS} layers. Drag to reorder. The terrain is evaluated top → bottom.
       </p>
+      {children}
     </SidePanel>
   );
 }

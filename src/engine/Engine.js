@@ -35,13 +35,21 @@ import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
-import { migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
+import { defaultLegacyStack, migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
+import {
+  TERRAIN_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
+  LIGHTING_PARAM_KEYS, LIGHTING_STYLE_KEYS, DEBUG_PARAM_KEYS,
+  patchParamsFromDefaults, resetWaterParams, resetCloudParams, resetSkyboxParams,
+  lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY,
+} from './panelResets.js';
+import { EARTH_PALETTE } from './style/ColorPalette.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams } from './water/WaterSettings.js';
+import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -240,7 +248,7 @@ export class Engine {
   // ----------------------------------------------------------------- setup
 
   _initRenderer() {
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+    this.renderer = createRendererForCanvas(this.canvas);
     this.renderer.setClearColor(0x0b0e14, 1);
 
     const gl = this.renderer.getContext();
@@ -1031,34 +1039,75 @@ export class Engine {
   }
 
   // -------------------------------------------------- async shader compiling
-  // All heavy shaders (terrain/water FBM) are compiled via compileAsync so
-  // the GPU driver links them off the main thread (KHR_parallel_shader_compile)
-  // while ticks keep running without rendering. Each shader needs TWO program
-  // variants: the canvas one and the render-target one (different program
-  // cache key — linear output color space) used by the underwater pass.
+  // Heavy shaders are compiled via renderer.compile + _waitForMaterialsReady so
+  // the GPU driver can link off-thread (KHR_parallel_shader_compile) while ticks
+  // keep running. Avoids Three.js compileAsync crashing when currentProgram is
+  // still undefined during transparent DoubleSide prepare.
 
-  /**
-   * Compile materials without blocking. By default compiles BOTH output
-   * variants (canvas + underwater render-target), since each has a distinct
-   * program cache key (output color space). Pass { canvasOnly: true } for
-   * modes that never use the underwater pass (planet) to skip the second,
-   * unused program — roughly halving the compile work.
-   */
-  async _compileMaterialVariants(mats, { canvasOnly = false } = {}) {
+  async _compileMaterialVariants(mats, { canvasOnly = false, timeoutMs, stagger = false } = {}) {
+    const list = mats.filter(Boolean);
+    if (!list.length) return;
+
+    if (stagger && list.length > 1) {
+      for (const m of list) {
+        await this._compileMaterialVariants([m], { canvasOnly, timeoutMs });
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return;
+    }
+
     const group = new THREE.Group();
-    for (const m of mats) group.add(new THREE.Mesh(this._warmGeo, m));
+    for (const m of list) group.add(new THREE.Mesh(this._warmGeo, m));
 
-    // canvas variant (targetScene = real scene so light counts match)
-    await this.renderer.compileAsync(group, this.camera, this.scene);
+    const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
+    const pending = this.renderer.compile(group, this.camera, this.scene);
+    await this._waitForMaterialsReady(pending, waitOpts);
 
     if (canvasOnly) return;
 
-    // render-target variant (used when the underwater pass is active)
     this.underwater._ensureTarget(this.renderer);
     this.renderer.setRenderTarget(this.underwater._rt);
-    const pending = this.renderer.compileAsync(group, this.camera, this.scene);
+    const pendingRt = this.renderer.compile(group, this.camera, this.scene);
     this.renderer.setRenderTarget(null);
-    await pending;
+    await this._waitForMaterialsReady(pendingRt, waitOpts);
+  }
+
+  /**
+   * Poll until compiled materials report ready. Guards against Three.js
+   * compileAsync throwing when currentProgram is still undefined (common for
+   * transparent DoubleSide materials mid-prepare).
+   */
+  _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
+    const pending = materials instanceof Set ? materials : new Set(materials);
+    const props = this.renderer.properties;
+
+    return new Promise((resolve) => {
+      if (!pending.size) {
+        resolve();
+        return;
+      }
+      const start = performance.now();
+
+      const check = () => {
+        pending.forEach((material) => {
+          const program = props.get(material)?.currentProgram;
+          if (program?.isReady?.()) pending.delete(material);
+        });
+
+        if (!pending.size) {
+          resolve();
+          return;
+        }
+        if (performance.now() - start > timeoutMs) {
+          console.warn(`Shader compile wait timed out (${pending.size} material(s) still pending)`);
+          resolve();
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+
+      requestAnimationFrame(check);
+    });
   }
 
   async _withStudioCloudDetached(task) {
@@ -1070,6 +1119,38 @@ export class Engine {
     } finally {
       if (parent && mesh && !mesh.parent) parent.add(mesh);
     }
+  }
+
+  /**
+   * Compile realistic water shaders without pausing the whole app, then swap.
+   * Legacy water stays visible until programs are linked.
+   */
+  compileWaterMaterialsAsync(materials, onSwap) {
+    const mats = materials.filter(Boolean);
+    if (!mats.length) {
+      onSwap?.();
+      return;
+    }
+
+    this.cb.onStatus('Compiling water shaders…', false);
+
+    const run = () => {
+      this._compileMaterialVariants(mats, {
+        canvasOnly: true,
+        timeoutMs: 20000,
+        stagger: mats.length > 1,
+      })
+        .catch((e) => console.warn('Water shader compile failed', e))
+        .finally(() => {
+          if (!this._disposed) {
+            onSwap?.();
+            this.cb.onStatus('Ready', false);
+          }
+        });
+    };
+
+    // Yield two frames so the UI can paint before kicking off GPU work.
+    requestAnimationFrame(() => requestAnimationFrame(run));
   }
 
   /** Initial warmup: everything in the studio scene + the underwater pass. */
@@ -1084,7 +1165,8 @@ export class Engine {
       // never submerge, so this roughly halves the cold-boot compile burst that
       // otherwise saturates Chrome's shared GPU process and stalls other tabs.
       await this._withStudioCloudDetached(async () => {
-        await this.renderer.compileAsync(this.scene, this.camera);
+        const pending = this.renderer.compile(this.scene, this.camera);
+        await this._waitForMaterialsReady(pending);
       });
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
@@ -1115,13 +1197,14 @@ export class Engine {
       await this._withStudioCloudDetached(async () => {
         this.underwater._ensureTarget(this.renderer);
         this.renderer.setRenderTarget(this.underwater._rt);
-        const pending = this.renderer.compileAsync(this.scene, this.camera);
+        const pending = this.renderer.compile(this.scene, this.camera);
         this.renderer.setRenderTarget(null);
-        await pending;
+        await this._waitForMaterialsReady(pending);
       });
-      await this.renderer.compileAsync(
+      const quadPending = this.renderer.compile(
         this.underwater._quadScene, this.underwater._quadCam
       );
+      await this._waitForMaterialsReady(quadPending);
     } catch (e) {
       this._underwaterWarmed = false;   // allow a later retry
       console.warn('Underwater shader warmup failed', e);
@@ -1560,7 +1643,8 @@ export class Engine {
       await this._compileMaterialVariants(warm, { canvasOnly: true });
       // sky dome material (already in the scene) — canvas variant only
       await this._withStudioCloudDetached(async () => {
-        await this.renderer.compileAsync(this.scene, this.camera);
+        const pending = this.renderer.compile(this.scene, this.camera);
+        await this._waitForMaterialsReady(pending);
       });
     } catch (e) {
       console.warn('Infinite shader warmup failed', e);
@@ -2296,10 +2380,105 @@ export class Engine {
   }
 
   resetWaterSettings() {
-    this.params = this.waterSystem.resetSettings();
+    this.params = resetWaterParams(this.params);
+    for (const key of ['deep', 'shallow', 'foam']) {
+      this.planetStyle.setPaletteColor(key, [...EARTH_PALETTE[key]]);
+    }
+    this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
     this._afterParamChange(false);
     this.cb.onToast('Water settings reset');
+  }
+
+  resetPanelSettings(panelId) {
+    const toast = (msg) => this.cb.onToast(msg);
+    switch (panelId) {
+      case 'terrain': {
+        const keepSeed = this.params.seed;
+        this.params = patchParamsFromDefaults(this.params, TERRAIN_RESET_KEYS);
+        this.params.seed = keepSeed;
+        this.params.preset = 'highlands';
+        const { params: noisePatch } = this.planetStyle.applyNoisePreset('default');
+        this.params.noisePreset = 'default';
+        for (const [k, v] of Object.entries(noisePatch)) this.params[k] = v;
+        this._syncPlanetStyleToParams();
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(true);
+        toast('Terrain settings reset');
+        break;
+      }
+      case 'noiseLayers':
+        this.setNoiseStack(defaultLegacyStack());
+        toast('Noise layers reset');
+        break;
+      case 'biomes': {
+        this.params = patchParamsFromDefaults(this.params, BIOME_RESET_KEYS);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Biome settings reset');
+        break;
+      }
+      case 'water':
+        this.resetWaterSettings();
+        break;
+      case 'props': {
+        this.params = patchParamsFromDefaults(this.params, PROPS_RESET_KEYS);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Props settings reset');
+        break;
+      }
+      case 'clouds': {
+        this.params = resetCloudParams(this.params);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Cloud settings reset');
+        break;
+      }
+      case 'skybox': {
+        this.params = resetSkyboxParams(this.params);
+        this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Skybox settings reset');
+        break;
+      }
+      case 'lighting': {
+        this.params = patchParamsFromDefaults(this.params, LIGHTING_PARAM_KEYS);
+        for (const [key, val] of Object.entries(lightingStyleDefaults())) {
+          this.setPlanetStyleTuning(key, val);
+        }
+        this._syncPlanetStyleToParams();
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Lighting settings reset');
+        break;
+      }
+      case 'planet':
+        this.applyPlanetPresetByKey('earth');
+        toast('Planet style reset');
+        break;
+      case 'world': {
+        this.params = patchParamsFromDefaults(this.params, WORLD_RESET_KEYS);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(true);
+        toast('World settings reset');
+        break;
+      }
+      case 'performance':
+        this.resetPerfSettings();
+        break;
+      case 'debug': {
+        this.params = patchParamsFromDefaults(this.params, DEBUG_PARAM_KEYS);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        if (this.cb.onDebugReset) this.cb.onDebugReset();
+        toast('Debug settings reset');
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   exportWaterMasks(options) {
@@ -2709,9 +2888,11 @@ export class Engine {
     for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
     if (this._disposed) return;
     this._disposed = true;
-    this._resizeObserver.disconnect();
+    if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
-    this.renderer.setAnimationLoop(null);
+    if (this.renderer) {
+      this.renderer.setAnimationLoop(null);
+    }
     if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
     if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
@@ -2729,8 +2910,12 @@ export class Engine {
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];
     this._warmGeo.dispose();
-    this.terrainMaterial.dispose();
-    this.waterMaterial.dispose();
-    this.renderer.dispose();
+    if (this.terrainMaterial) this.terrainMaterial.dispose();
+    if (this.waterMaterial) this.waterMaterial.dispose();
+    if (this.renderer) {
+      loseRendererContext(this.renderer);
+      this.renderer.dispose();
+      this.renderer = null;
+    }
   }
 }

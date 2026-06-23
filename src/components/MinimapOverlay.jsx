@@ -31,7 +31,7 @@ export default function MinimapOverlay({
   onHoverChange,
   onHoverInfoRequest,
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [sizeMode, setSizeMode] = useState('compact');
   const [mode, setMode] = useState('color');
   const [zoom, setZoom] = useState(1);

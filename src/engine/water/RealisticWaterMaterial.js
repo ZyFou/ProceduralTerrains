@@ -110,12 +110,21 @@ float terrainHeightAt(vec2 xz) {
   return heightAt(xz);
 }
 
-float slopeAt(vec2 xz) {
-  float e = 2.5;
-  float h0 = terrainHeightAt(xz);
+// Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
+float smoothedFloorHeight(vec2 xz, float centerH) {
+  float e = 8.0;
+  float h1 = terrainHeightAt(xz + vec2(e, 0.0));
+  float h2 = terrainHeightAt(xz - vec2(e, 0.0));
+  float h3 = terrainHeightAt(xz + vec2(0.0, e));
+  float h4 = terrainHeightAt(xz + vec2(0.0, -e));
+  return (centerH + h1 + h2 + h3 + h4) * 0.2;
+}
+
+float slopeFromCenter(vec2 xz, float centerH) {
+  float e = 4.0;
   float hx = terrainHeightAt(xz + vec2(e, 0.0));
   float hz = terrainHeightAt(xz + vec2(0.0, e));
-  return length(vec2(hx - h0, hz - h0)) / e;
+  return length(vec2(hx - centerH, hz - centerH)) / e;
 }
 
 void main() {
@@ -124,14 +133,21 @@ void main() {
   float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
 
+  // Smoothed bathymetry for depth tint — 4 extra samples max (not 20+).
+  float visualDepth = depth;
+  if (uDepthColorStr > 0.05 || uDepthOpacityStr > 0.05) {
+    visualDepth = uSeaLevel - smoothedFloorHeight(xz, floorH);
+  }
+  visualDepth = max(visualDepth, 0.0);
+
   float t = uTime * uWaterAnim * uAnimSpeed;
   vec3 n = rippleNormal(xz, t);
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
 
-  // depth grading with shallow/deep distances
-  float shallowT = smoothstep(0.0, uShallowDist, depth);
-  float deepT = smoothstep(uShallowDist, uDeepDist, depth);
-  float dGrade = pow(clamp(depth / max(uMaxVisibleDepth, 1.0), 0.0, 1.0), max(uDepthFalloff, 0.1));
+  // depth grading — smoothed bathymetry only (not raw relief)
+  float shallowT = smoothstep(0.0, uShallowDist, visualDepth);
+  float deepT = smoothstep(uShallowDist, uDeepDist, visualDepth);
+  float dGrade = pow(clamp(visualDepth / max(uMaxVisibleDepth, 1.0), 0.0, 1.0), max(uDepthFalloff, 0.1));
   dGrade = mix(shallowT * 0.35, deepT, dGrade) * uDepthColorStr;
 
   vec3 col = mix(uColShallow, uColDeep, clamp(dGrade, 0.0, 1.0));
@@ -150,17 +166,22 @@ void main() {
   float fres = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
   col += vec3(0.30, 0.42, 0.55) * fres * 0.28 * uWaterReflection * uFresnelStrength;
 
-  // shoreline foam
-  float slope = slopeAt(xz);
+  // shoreline foam — depth-based only; slope foam restricted to very shallow water
   float shoreDist = depth;
   float foamNoise = 0.0;
   if (uFoamEnabled > 0.5 && uFoamQual > 0.1) {
-    foamNoise = vnoise(xz * 0.22 * uFoamQual + vec2(t * uFoamAnimSpeed * 1.4, -t * uFoamAnimSpeed * 1.1));
+    foamNoise = vnoise(xz * 0.18 + vec2(t * uFoamAnimSpeed * 1.4, -t * uFoamAnimSpeed * 1.1));
   }
-  float shoreFoam = smoothstep(uFoamWidth + uFoamSoftness, uFoamSoftness, shoreDist + foamNoise * 2.2);
-  float slopeFoam = smoothstep(0.15, 0.85, slope) * uSlopeFoam;
-  float cliffFoam = smoothstep(0.55, 1.4, slope) * uCliffFoam;
-  float foam = clamp((shoreFoam + slopeFoam * 0.35 + cliffFoam * 0.25) * uFoamStrength, 0.0, 1.0);
+  float shoreFoam = smoothstep(uFoamWidth + uFoamSoftness, uFoamSoftness, shoreDist + foamNoise * 1.4);
+  float nearShore = smoothstep(10.0, 0.0, shoreDist);
+  float slopeFoam = 0.0;
+  float cliffFoam = 0.0;
+  if (uFoamEnabled > 0.5 && nearShore > 0.01 && (uSlopeFoam > 0.01 || uCliffFoam > 0.01)) {
+    float slope = slopeFromCenter(xz, floorH);
+    slopeFoam = smoothstep(0.35, 1.1, slope) * uSlopeFoam * nearShore;
+    cliffFoam = smoothstep(0.85, 1.8, slope) * uCliffFoam * nearShore;
+  }
+  float foam = clamp((shoreFoam + slopeFoam * 0.2 + cliffFoam * 0.15) * uFoamStrength, 0.0, 1.0);
   col = mix(col, uColFoam, foam);
 
   // fake refraction tint (screen-space-ish color shift)
@@ -169,12 +190,13 @@ void main() {
     col = mix(col, uColShallow * 1.1, refr);
   }
 
-  // fake caustics in shallow water
+  // fake caustics in shallow water (smoothed depth, coarse noise)
   if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
-    float c1 = vnoise(xz * 0.18 + vec2(t * 0.9, -t * 0.7));
-    float c2 = vnoise(xz * 0.31 - vec2(t * 0.6, t * 0.5));
-    float caust = pow(max(c1 * c2, 0.0), 2.5) * (1.0 - deepT);
-    col += vec3(0.9, 0.95, 1.0) * caust * uCausticsStr * uCausticsQual * 0.35;
+    float shallowMask = 1.0 - smoothstep(uShallowDist * 0.5, uDeepDist, visualDepth);
+    float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
+    float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));
+    float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;
+    col += vec3(0.9, 0.95, 1.0) * caust * uCausticsStr * uCausticsQual * 0.28;
   }
 
   float alpha = clamp(
@@ -269,6 +291,7 @@ export function createRealisticWaterMaterial(sharedUniforms, octaves = 7, stackG
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
 }
 

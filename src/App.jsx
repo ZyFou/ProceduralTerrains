@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Engine } from './engine/Engine.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
+import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
@@ -80,6 +81,7 @@ export default function App() {
   const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
   const [settingsSearchIndex, setSettingsSearchIndex] = useState(0);
   const [settingsTarget, setSettingsTarget] = useState(null);
+  const [webglError, setWebglError] = useState(null);
 
   // ---- toasts ----
   const [toasts, setToasts] = useState([]);
@@ -89,6 +91,8 @@ export default function App() {
     setToasts((prev) => [...prev, { id, msg, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2800);
   }, []);
+  const pushToastRef = useRef(pushToast);
+  pushToastRef.current = pushToast;
   const showToast = useCallback((msg, type) => pushToast(msg, type ?? classifyToast(msg)), [pushToast]);
 
   // refs read by stable engine callbacks
@@ -100,61 +104,85 @@ export default function App() {
   blockingActiveRef.current = !!blockingTask(loading.tasks);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      setWebglError('Viewport canvas is not available.');
+      loadingRef.current.done('boot');
+      return undefined;
+    }
+
     loadingRef.current.start('boot', { blocking: true, label: 'Loading Terrain Studio…', detail: 'Initializing engine' });
 
-    const engine = new Engine({
-      canvas: canvasRef.current,
-      minimapBase: minimapBaseRef.current,
-      minimapOverlay: minimapOverlayRef.current,
-      initialParams: landingRef.current?.sessionSeed != null
-        ? { seed: landingRef.current.sessionSeed }
-        : undefined,
-      callbacks: {
-        onParams: (next) => {
-          setParams({
-            ...next,
-            planetStyle: next.planetStyle ? clonePlanetStyle(next.planetStyle) : next.planetStyle,
-          });
+    let engine;
+    try {
+      engine = new Engine({
+        canvas,
+        minimapBase: minimapBaseRef.current,
+        minimapOverlay: minimapOverlayRef.current,
+        initialParams: landingRef.current?.sessionSeed != null
+          ? { seed: landingRef.current.sessionSeed }
+          : undefined,
+        callbacks: {
+          onParams: (next) => {
+            setParams({
+              ...next,
+              planetStyle: next.planetStyle ? clonePlanetStyle(next.planetStyle) : next.planetStyle,
+            });
+          },
+          onStatus: (text, busy) => {
+            setStatus({ text, busy });
+            // feed the active blocking task's detail line
+            if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
+            // clear the initial boot overlay once the engine is first ready
+            if (!busy && !bootedRef.current) {
+              bootedRef.current = true;
+              loadingRef.current.done('boot');
+              landingRef.current?.setBootReady(true);
+            }
+          },
+          onStats: setStats,
+          onLod: (counts, count, visible, culled) => {
+            setLodCounts(counts);
+            setChunkCount(count);
+            setVisibleChunks(visible !== undefined ? visible : count * count);
+            setCulledChunks(culled !== undefined ? culled : 0);
+          },
+          onCamera: setCamInfo,
+          onBoard: setBoardSize,
+          onToast: (msg) => {
+            const type = classifyToast(msg);
+            if (/fail|error/i.test(msg)) exportFailedRef.current = true;
+            // suppress progress (info) toasts while a blocking overlay is up
+            if (blockingActiveRef.current && type === 'info') return;
+            pushToastRef.current(msg, type);
+          },
+          onFirstInteract: () => setHelpVisible(false),
+          onInfiniteStats: setInfiniteStats,
+          onPlayerMode: setPlayerMode,
+          onPlayerState: setPlayerState,
+          onQualityChange: setQualityPreset,
+          onTimeOfDayChange: setTimeOfDay,
+          onPerfChange: setPerf,
+          onPaintState: setPaintState,
+          onTileDebug: setTileDebug,
+          onImportedMaps: setImportedMaps,
+          onDebugReset: () => {
+            setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
+            setTileDebug({ ...DEFAULT_TILE_DEBUG });
+          },
         },
-        onStatus: (text, busy) => {
-          setStatus({ text, busy });
-          // feed the active blocking task's detail line
-          if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
-          // clear the initial boot overlay once the engine is first ready
-          if (!busy && !bootedRef.current) {
-            bootedRef.current = true;
-            loadingRef.current.done('boot');
-            landingRef.current?.setBootReady(true);
-          }
-        },
-        onStats: setStats,
-        onLod: (counts, count, visible, culled) => {
-          setLodCounts(counts);
-          setChunkCount(count);
-          setVisibleChunks(visible !== undefined ? visible : count * count);
-          setCulledChunks(culled !== undefined ? culled : 0);
-        },
-        onCamera: setCamInfo,
-        onBoard: setBoardSize,
-        onToast: (msg) => {
-          const type = classifyToast(msg);
-          if (/fail|error/i.test(msg)) exportFailedRef.current = true;
-          // suppress progress (info) toasts while a blocking overlay is up
-          if (blockingActiveRef.current && type === 'info') return;
-          pushToast(msg, type);
-        },
-        onFirstInteract: () => setHelpVisible(false),
-        onInfiniteStats: setInfiniteStats,
-        onPlayerMode: setPlayerMode,
-        onPlayerState: setPlayerState,
-        onQualityChange: setQualityPreset,
-        onTimeOfDayChange: setTimeOfDay,
-        onPerfChange: setPerf,
-        onPaintState: setPaintState,
-        onTileDebug: setTileDebug,
-        onImportedMaps: setImportedMaps,
-      },
-    });
+      });
+    } catch (err) {
+      console.error('WebGL initialization failed', err);
+      const message = err?.message || 'Could not create a WebGL context.';
+      setWebglError(message);
+      setStatus({ text: 'WebGL unavailable', busy: false });
+      bootedRef.current = true;
+      loadingRef.current.done('boot');
+      landingRef.current?.setBootReady(true);
+      return undefined;
+    }
+
     engine.setCullingEnabled(cullingEnabled);
     engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
@@ -173,9 +201,26 @@ export default function App() {
         landingRef.current?.setBootReady(true);
       }
     }, 30000);
-    return () => { clearTimeout(bootTimer); engine.dispose(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pushToast]);
+    return () => {
+      clearTimeout(bootTimer);
+      engine.dispose();
+      engineRef.current = null;
+      if (import.meta.env.DEV && window.terrainStudio === engine) window.terrainStudio = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.hot) return undefined;
+    const disposeEngine = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.dispose();
+      engineRef.current = null;
+      if (import.meta.env.DEV && window.terrainStudio === e) window.terrainStudio = null;
+    };
+    import.meta.hot.dispose(disposeEngine);
+    return disposeEngine;
+  }, []);
 
   const engine = () => engineRef.current;
 
@@ -595,12 +640,11 @@ export default function App() {
     cullingEnabled, behindCameraCulling,
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
     debugFlags, onDebugFlag: handleDebugFlag,
+    onResetPanel: (id) => engine().resetPanelSettings(id),
     stats, gpu, perf,
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
-    onApplyWaterPreset: (key) => engine().applyWaterPreset(key),
-    onResetWaterSettings: () => engine().resetWaterSettings(),
     onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
     onPerfReset: () => engine().resetPerfSettings(),
     timeOfDay, onTimeOfDay: handleTimeOfDay,
@@ -643,7 +687,20 @@ export default function App() {
         )}
 
         <div className="viewport-area">
-          <canvas id="viewport" ref={canvasRef} />
+          <canvas id="viewport" ref={canvasRef} className={webglError ? 'viewport-disabled' : ''} />
+          {webglError && (
+            <div className="webgl-error-overlay" role="alert">
+              <h2>WebGL unavailable</h2>
+              <p>{webglError}</p>
+              <p className="webgl-error-hint">
+                Close other 3D tabs, reload the page, or enable hardware acceleration in your browser settings
+                (Chrome: Settings → System → &quot;Use graphics acceleration when available&quot;).
+              </p>
+              <button type="button" onClick={() => window.location.reload()}>
+                Reload
+              </button>
+            </div>
+          )}
           {showToolPanels && settingsSearchOpen && (
             <SettingsSearchOverlay
               open={settingsSearchOpen}
