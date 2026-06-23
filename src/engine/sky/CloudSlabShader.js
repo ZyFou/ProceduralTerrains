@@ -42,6 +42,20 @@ uniform mat4 uProjectionMatrixInverse;
 uniform mat4 uViewMatrixInverse;
 uniform float uDepthBias;
 
+// Planar occupancy grid (XZ): a small map (built on the CPU from the coverage
+// field, conservative + dilated) telling whether a column over the board holds
+// any cloud. A cheap texture lookup lets the march skip the expensive density
+// over empty columns and reject empty rays — the freed budget also cuts grain.
+uniform sampler2D uCloudOccupancy;
+uniform float uUseOccupancy;
+uniform vec2 uOccCenter;   // board-center XZ
+uniform float uOccExtent;  // half-size of the mapped square (= fade radius)
+
+float occAt(vec3 P) {
+  vec2 uv = (P.xz - uOccCenter) / (2.0 * max(uOccExtent, 1.0)) + 0.5;
+  return texture2D(uCloudOccupancy, uv).r;
+}
+
 vec3 reconstructWorldPosition(vec2 uv, float depth) {
   vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
   vec4 view = uProjectionMatrixInverse * clip;
@@ -68,6 +82,28 @@ void main() {
   }
   if (t1 <= t0) discard;
 
+  // clamp the segment to the cloud disc (radius uCloudRadius around the board
+  // center): beyond it the radial fade is zero, so this both skips wasted
+  // marching AND keeps the step fine on grazing rays (much less stipple).
+  {
+    vec2 oc = ro.xz - uCloudCenter.xz;
+    vec2 dc = rd.xz;
+    float A = dot(dc, dc);
+    if (A > 1e-8) {
+      float B = dot(oc, dc);
+      float C = dot(oc, oc) - uCloudRadius * uCloudRadius;
+      float disc = B * B - A * C;
+      if (disc < 0.0) discard;                 // ray never crosses the disc
+      float sq = sqrt(disc);
+      t0 = max(t0, (-B - sq) / A);
+      t1 = min(t1, (-B + sq) / A);
+      if (t1 <= t0) discard;
+    } else {
+      // vertical ray: only inside the disc if the camera column is within it
+      if (dot(oc, oc) > uCloudRadius * uCloudRadius) discard;
+    }
+  }
+
   vec2 depthUv = gl_FragCoord.xy / max(uDepthResolution, vec2(1.0));
   if (depthUv.x >= 0.0 && depthUv.x <= 1.0 && depthUv.y >= 0.0 && depthUv.y <= 1.0) {
     float sceneDepth = texture2D(tSceneDepth, depthUv).x;
@@ -89,25 +125,42 @@ void main() {
   float stepLen = segLen / float(effSteps);
 
   float dither = cl_hash13(vec3(gl_FragCoord.xy, uCloudTime));
-  float t = t0 + stepLen * dither;
 
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
   vec3 ambient = uCloudShadowColor * uCloudShadowStrength;
 
+  // whole-ray reject: if the columns the segment crosses are all empty, skip it
+  if (uUseOccupancy > 0.5) {
+    float oA = occAt(ro + rd * t0);
+    float oM = occAt(ro + rd * (t0 + t1) * 0.5);
+    float oB = occAt(ro + rd * t1);
+    if (max(oA, max(oM, oB)) < 0.5) discard;
+  }
+
+  // OCCUPANCY-GRID empty-space skipping: a cheap lookup gates the expensive
+  // cloudDensity — empty columns are skipped with a coarse stride, occupied
+  // columns march at the fine step. The map is conservative + dilated (no clip).
+  float coarse = stepLen * 2.0;
+  float t = t0 + stepLen * dither;
   for (int i = 0; i < CLOUD_STEPS; i++) {
-    if (i < effSteps && transmittance > 0.01) {
+    if (t < t1 && transmittance > 0.01) {
       vec3 P = ro + rd * t;
-      float dens = cloudDensity(P);
-      if (dens > 0.001) {
-        float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
-        vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
-        float dT = exp(-dens * stepLen * uCloudExtinction);
-        scatter += transmittance * (1.0 - dT) * lit;
-        transmittance *= dT;
+      float occ = uUseOccupancy > 0.5 ? occAt(P) : 1.0;
+      if (occ < 0.5) {
+        t += coarse;
+      } else {
+        float dens = cloudDensity(P);
+        if (dens > 0.001) {
+          float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
+          vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
+          float dT = exp(-dens * stepLen * uCloudExtinction);
+          scatter += transmittance * (1.0 - dT) * lit;
+          transmittance *= dT;
+        }
+        t += stepLen;
       }
     }
-    t += stepLen;
   }
 
   float alpha = 1.0 - transmittance;
@@ -152,6 +205,10 @@ export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5,
       uProjectionMatrixInverse: { value: new THREE.Matrix4() },
       uViewMatrixInverse:    { value: new THREE.Matrix4() },
       uDepthBias:            { value: 2.0 },
+      uCloudOccupancy:       { value: null },
+      uUseOccupancy:         { value: 0.0 },
+      uOccCenter:            { value: new THREE.Vector2() },
+      uOccExtent:            { value: 1500 },
     },
     defines: {
       CLOUD_STEPS: Math.max(8, Math.round(steps)),

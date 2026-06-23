@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
+import { buildOccupancyOctahedral } from './cloudFieldCPU.js';
+
+// Resolution of the directional occupancy grid (octahedral). Low-res + dilated
+// is enough: it only needs to say "this column has some cloud" so the shader can
+// skip the expensive density over empty sky.
+const OCC_SIZE = 48;
 
 // The cloud altitude/thickness defaults (and the slider ranges) were tuned for
 // the default planet radius. They're world-unit offsets, so on a much smaller
@@ -59,7 +65,18 @@ export class PlanetCloudLayer {
     this._depthSize = new THREE.Vector2();
     this._prevClearColor = new THREE.Color();
 
+    // directional occupancy grid (empty-space-skip acceleration; rebuilt on a
+    // throttle since wind/rotation drift the field slowly)
+    this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occTex = new THREE.DataTexture(this._occData, OCC_SIZE, OCC_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    this._occTex.minFilter = THREE.LinearFilter;
+    this._occTex.magFilter = THREE.LinearFilter;
+    this._occTex.generateMipmaps = false;
+    this._occTex.needsUpdate = true;
+    this._occBuiltAt = 0;
+
     this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion, this._lightMode);
+    this._applyOccupancyUniforms();
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 20;        // after terrain (default) + water (10)
@@ -190,6 +207,33 @@ export class PlanetCloudLayer {
     else material.dispose();
   }
 
+  /** Point the current material at the occupancy texture (after create/rebuild). */
+  _applyOccupancyUniforms() {
+    const u = this.material.uniforms;
+    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+  }
+
+  /** Rebuild the directional occupancy grid from the current field params. Cheap
+   *  (one FBM sample per texel of a 48² map) and throttled by the caller. */
+  _rebuildOccupancy() {
+    const u = this.material.uniforms;
+    const inner = u.uCloudInner.value, outer = u.uCloudOuter.value;
+    const w = u.uCloudWind.value;
+    buildOccupancyOctahedral(this._occData, OCC_SIZE, inner, outer, {
+      scale: u.uCloudScale.value,
+      windX: w.x, windY: w.y, windZ: w.z,
+      time: u.uCloudTime.value,
+      rotation: u.uCloudRotation.value,
+      coverage: u.uCloudCoverage.value,
+      softness: u.uCloudSoftness.value,
+      octaves: this._octaves,
+      // conservative upper-bound margin for the detail noise the GPU adds
+      boost: (u.uCloudDetailStrength.value || 0) + 0.12,
+    });
+    this._occTex.needsUpdate = true;
+    u.uUseOccupancy.value = 1.0;
+  }
+
   /** Swap the cloud material for a new step count (compile-time #define). */
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
     this._steps = steps;
@@ -219,6 +263,7 @@ export class PlanetCloudLayer {
       }
       this.mesh.material = next;
       this.material = next;
+      this._applyOccupancyUniforms();
       this._disposeWhenSafe(previous, pendingPrevious);
     });
   }
@@ -248,6 +293,14 @@ export class PlanetCloudLayer {
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
+
+    // refresh the empty-space-skip occupancy grid on a throttle (the field drifts
+    // slowly with wind/rotation; the dilation margin absorbs the lag)
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (now - this._occBuiltAt > 150) {
+      this._occBuiltAt = now;
+      this._rebuildOccupancy();
+    }
   }
 
   /** Render the opaque scene depth (clouds hidden) so the cloud march can clamp
@@ -312,6 +365,7 @@ export class PlanetCloudLayer {
       this._depthTarget = null;
       this._depthTexture = null;
     }
+    if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();

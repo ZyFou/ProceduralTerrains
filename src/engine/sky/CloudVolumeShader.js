@@ -64,6 +64,26 @@ vec3 reconstructWorldPosition(vec2 uv, float depth) {
   return (uViewMatrixInverse * vec4(view.xyz, 1.0)).xyz;
 }
 
+// Directional occupancy grid: a small octahedral map (built on the CPU from the
+// coverage field, conservative + dilated) telling whether a column/direction
+// holds any cloud. A cheap texture lookup lets the march skip the expensive
+// density (FBM + worley + self-shadow) over empty sky and reject empty rays
+// outright — the freed step budget also concentrates inside real cloud, cutting
+// grazing-angle grain.
+uniform sampler2D uCloudOccupancy;
+uniform float uUseOccupancy;
+
+vec2 octEncode(vec3 n) {
+  n /= (abs(n.x) + abs(n.y) + abs(n.z));
+  vec2 p = n.xy;
+  if (n.z < 0.0) p = (1.0 - abs(p.yx)) * sign(p);
+  return p * 0.5 + 0.5;
+}
+
+float occAt(vec3 P) {
+  return texture2D(uCloudOccupancy, octEncode(normalize(P))).r;
+}
+
 void main() {
   // planet is centered at the world origin, so camera position IS the ray
   // origin in planet-local space.
@@ -159,23 +179,29 @@ void main() {
     t += stepLen;
   }
 #else
-  // single-shell mode (default): ADAPTIVE empty-space skipping. Stride through
-  // empty shell with a coarse step; once density is found, step back to the
-  // previous coarse sample and refine at stepLen so the cloud's leading edge is
-  // never overshot (no banding). The step budget concentrates where there is
-  // actually cloud — a big win for scattered skies — with no seams (one mesh).
+  // single-shell mode (default): OCCUPANCY-GRID empty-space skipping. A cheap
+  // directional lookup gates the expensive cloudDensity — empty columns are
+  // skipped with a coarse stride and never pay for noise; occupied columns march
+  // at the fine step. The occupancy map is conservative + dilated, so a cloud's
+  // leading edge is always entered a little early (no overshoot, no banding).
+  if (uUseOccupancy > 0.5) {
+    // whole-ray reject: if every column the segment crosses is empty, skip it.
+    float oA = occAt(ro + rd * shellStart);
+    float oM = occAt(ro + rd * (shellStart + shellEnd) * 0.5);
+    float oB = occAt(ro + rd * tEnd);
+    if (max(oA, max(oM, oB)) < 0.5) discard;
+  }
+
   float coarse = stepLen * 2.0;
   float t = baseT;
-  bool refining = false;
   for (int i = 0; i < CLOUD_STEPS; i++) {
     if (t < tEnd && transmittance > 0.01) {
       vec3 P = ro + rd * t;
-      float dens = cloudDensity(P);
-      if (!refining && dens > 0.001) {
-        // entered a cloud on a coarse stride: drop back and switch to fine steps
-        refining = true;
-        t = max(baseT, t - coarse);
-      } else if (refining) {
+      float occ = uUseOccupancy > 0.5 ? occAt(P) : 1.0;
+      if (occ < 0.5) {
+        t += coarse;                 // empty column — skip cheaply, no density eval
+      } else {
+        float dens = cloudDensity(P);
         if (dens > 0.001) {
           float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
           vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
@@ -184,8 +210,6 @@ void main() {
           transmittance *= dT;
         }
         t += stepLen;
-      } else {
-        t += coarse;   // still in empty space — keep striding
       }
     }
   }
@@ -240,6 +264,8 @@ export function createCloudMaterial(steps = 24, lightSteps = 6, octaves = 5, det
       uViewMatrixInverse:    { value: new THREE.Matrix4() },
       uDepthBias:            { value: 2.0 },
       uUseDepth:             { value: 0.0 },
+      uCloudOccupancy:       { value: null },
+      uUseOccupancy:         { value: 0.0 },
   };
   if (chunk) {
     // 4 inward sector planes through the planet origin (set per chunk)

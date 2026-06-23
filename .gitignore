@@ -63,4 +63,4 @@ temp/
 
 # Optional eslint cache
 .eslintcache
-.claude/*.jpg
+.claude/

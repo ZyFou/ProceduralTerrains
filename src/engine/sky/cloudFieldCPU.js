@@ -85,7 +85,111 @@ export function cloudCoverageAt(x, y, z, f) {
   const qz = -s * x + c * z;
   // baseP = q * scale + wind * time
   const dx = f.windX * f.time, dy = f.windY * f.time, dz = f.windZ * f.time;
-  const n = fbmBase(qx * f.scale + dx, qy * f.scale + dy, qz * f.scale + dz, f.octaves);
+  // `boost` is an UPPER-BOUND margin (≈ detail strength + softness): the GPU adds
+  // detail noise on top of the base FBM, so a column that is empty in the base
+  // can still grow cloud from detail. Adding the boost before thresholding makes
+  // the occupancy a conservative over-estimate that never skips real cloud.
+  const n = fbmBase(qx * f.scale + dx, qy * f.scale + dy, qz * f.scale + dz, f.octaves) + (f.boost || 0);
   const threshold = 1.0 - f.coverage;
   return smoothstep(threshold, threshold + f.softness, n);
+}
+
+// Octahedral decode: texel uv in [-1,1]² → unit direction.
+function octDecode(u, v, out) {
+  let x = u, y = v;
+  const z = 1 - Math.abs(x) - Math.abs(y);
+  if (z < 0) {
+    const ox = x;
+    x = (1 - Math.abs(y)) * (ox >= 0 ? 1 : -1);
+    y = (1 - Math.abs(ox)) * (y >= 0 ? 1 : -1);
+  }
+  const len = Math.hypot(x, y, z) || 1;
+  out[0] = x / len; out[1] = y / len; out[2] = z / len;
+}
+
+/**
+ * Build a directional occupancy map (octahedral, `size`×`size`, R8) marking which
+ * directions hold any cloud at mid-shell radius. Conservative: a low coverage
+ * threshold + a few dilation passes so the GPU march never skips a column that
+ * has (or is about to grow) cloud. Reused as an empty-space-skip acceleration
+ * grid by the cloud shader.
+ * @param {Uint8Array} out  length size*size (reused buffer)
+ * @param {number} size
+ * @param {number} inner  inner shell radius
+ * @param {number} outer  outer shell radius
+ * @param {object} field  cloud field params (see cloudCoverageAt)
+ * @param {number} [dilate] dilation passes (default 2)
+ */
+export function buildOccupancyOctahedral(out, size, inner, outer, field, dilate = 2) {
+  const d = [0, 0, 0];
+  // sample a few radii up the column (the shape field varies with radius) and
+  // take the max so a column with cloud only near the inner/outer edge is kept.
+  const radii = [inner + (outer - inner) * 0.2, 0.5 * (inner + outer), outer - (outer - inner) * 0.2];
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const u = ((i + 0.5) / size) * 2 - 1;
+      const v = ((j + 0.5) / size) * 2 - 1;
+      octDecode(u, v, d);
+      let cov = 0;
+      for (let r = 0; r < radii.length; r++) {
+        const R = radii[r];
+        cov = Math.max(cov, cloudCoverageAt(d[0] * R, d[1] * R, d[2] * R, field));
+      }
+      out[j * size + i] = cov > 0.003 ? 255 : 0;
+    }
+  }
+  dilateMax(out, size, dilate);
+}
+
+// 3×3 max dilation, `passes` times, in place (grows the occupied region so
+// edges/wisps and the rebuild lag never clip a real cloud).
+function dilateMax(out, size, passes) {
+  if (passes <= 0) return;
+  let src = out;
+  let tmp = new Uint8Array(size * size);
+  for (let p = 0; p < passes; p++) {
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++) {
+        let m = 0;
+        for (let dj = -1; dj <= 1 && m < 255; dj++) {
+          const jj = j + dj; if (jj < 0 || jj >= size) continue;
+          for (let di = -1; di <= 1; di++) {
+            const ii = i + di; if (ii < 0 || ii >= size) continue;
+            if (src[jj * size + ii] > m) m = src[jj * size + ii];
+          }
+        }
+        tmp[j * size + i] = m;
+      }
+    }
+    const swap = src; src = tmp; tmp = swap;
+  }
+  if (src !== out) out.set(src);
+}
+
+/**
+ * Build a planar (XZ) occupancy map for the studio cloud slab: `size`×`size` R8
+ * over the square [center ± extent], marking which columns hold any cloud
+ * between bottom..top. Conservative (low threshold, 3 Y samples, dilation).
+ * @param {Uint8Array} out  length size*size (reused buffer)
+ * @param {number} size
+ * @param {number} cx @param {number} cz  board center XZ
+ * @param {number} extent  half-size of the mapped square (= fade radius)
+ * @param {number} bottom @param {number} top  slab Y planes
+ * @param {object} field  cloud field params (see cloudCoverageAt)
+ * @param {number} [dilate]
+ */
+export function buildOccupancyPlanar(out, size, cx, cz, extent, bottom, top, field, dilate = 2) {
+  const ys = [bottom + (top - bottom) * 0.25, 0.5 * (bottom + top), top - (top - bottom) * 0.25];
+  for (let j = 0; j < size; j++) {
+    const z = cz + (((j + 0.5) / size) * 2 - 1) * extent;
+    for (let i = 0; i < size; i++) {
+      const x = cx + (((i + 0.5) / size) * 2 - 1) * extent;
+      let cov = 0;
+      for (let y = 0; y < ys.length; y++) {
+        cov = Math.max(cov, cloudCoverageAt(x, ys[y], z, field));
+      }
+      out[j * size + i] = cov > 0.003 ? 255 : 0;
+    }
+  }
+  dilateMax(out, size, dilate);
 }

@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { createCloudSlabMaterial } from './CloudSlabShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
+import { buildOccupancyPlanar } from './cloudFieldCPU.js';
+
+// Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
+const OCC_SIZE = 64;
 
 // ============================================================================
 // CloudSlabLayer: studio/flat-board manager for the planar volumetric cloud
@@ -46,6 +50,17 @@ export class CloudSlabLayer {
     this._compileToken = 0;
     this._pendingCompile = null;
 
+    // planar occupancy grid (empty-space-skip acceleration), rebuilt on a throttle
+    this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occTex = new THREE.DataTexture(this._occData, OCC_SIZE, OCC_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    this._occTex.minFilter = THREE.LinearFilter;
+    this._occTex.magFilter = THREE.LinearFilter;
+    this._occTex.wrapS = THREE.ClampToEdgeWrapping;
+    this._occTex.wrapT = THREE.ClampToEdgeWrapping;
+    this._occTex.generateMipmaps = false;
+    this._occTex.needsUpdate = true;
+    this._occBuiltAt = 0;
+
     this.material = createCloudSlabMaterial(
       this._steps,
       this._lightSteps,
@@ -54,6 +69,7 @@ export class CloudSlabLayer {
       this._useErosion,
       this._lightMode
     );
+    this._applyOccupancyUniforms();
 
     // a unit box that ENCLOSES the slab volume (scaled in applyParams). Drawn
     // BackSide so its far faces always cover the volume's screen footprint from
@@ -105,6 +121,10 @@ export class CloudSlabLayer {
     u.uCloudRadius.value = radius;
     u.uCloudFar.value = this._boardSize * 4.0;   // bound horizon marching
     u.uCloudCenter.value.set(0, 0, 0);
+
+    // occupancy grid maps the square [center ± radius] (clouds are zero past it)
+    u.uOccCenter.value.set(0, 0);
+    u.uOccExtent.value = radius;
 
     // size + place the enclosing box: horizontal extent just past the radial
     // fade (clouds are zero beyond uCloudRadius), height = slab thickness with a
@@ -217,6 +237,37 @@ export class CloudSlabLayer {
     else material.dispose();
   }
 
+  /** Point the current material at the occupancy texture (after create/rebuild). */
+  _applyOccupancyUniforms() {
+    const u = this.material.uniforms;
+    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+  }
+
+  /** Rebuild the planar occupancy grid from the current field params (cheap,
+   *  throttled by the caller). */
+  _rebuildOccupancy() {
+    const u = this.material.uniforms;
+    const w = u.uCloudWind.value;
+    buildOccupancyPlanar(
+      this._occData, OCC_SIZE,
+      u.uOccCenter.value.x, u.uOccCenter.value.y, u.uOccExtent.value,
+      u.uCloudBottom.value, u.uCloudTop.value,
+      {
+        scale: u.uCloudScale.value,
+        windX: w.x, windY: w.y, windZ: w.z,
+        time: u.uCloudTime.value,
+        rotation: u.uCloudRotation.value,
+        coverage: u.uCloudCoverage.value,
+        softness: u.uCloudSoftness.value,
+        octaves: this._octaves,
+        // conservative upper-bound margin for the detail noise the GPU adds
+        boost: (u.uCloudDetailStrength.value || 0) + 0.12,
+      }
+    );
+    this._occTex.needsUpdate = true;
+    u.uUseOccupancy.value = 1.0;
+  }
+
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
     this._steps = steps;
     this._lightSteps = lightSteps;
@@ -267,6 +318,7 @@ export class CloudSlabLayer {
       }
       this.mesh.material = next;
       this.material = next;
+      this._applyOccupancyUniforms();
       this._disposeWhenSafe(previous, pendingPrevious);
     });
   }
@@ -293,6 +345,13 @@ export class CloudSlabLayer {
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
+
+    // refresh the empty-space-skip occupancy grid on a throttle
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (now - this._occBuiltAt > 150) {
+      this._occBuiltAt = now;
+      this._rebuildOccupancy();
+    }
   }
 
   renderDepthPrepass(renderer, camera) {
@@ -351,6 +410,7 @@ export class CloudSlabLayer {
       this._depthTarget = null;
       this._depthTexture = null;
     }
+    if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();
