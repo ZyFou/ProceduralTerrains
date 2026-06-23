@@ -14,7 +14,7 @@ export default function TopBar({
   previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
   onTogglePreview, onResetView, onToggleHelp, onSetWorldMode,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
-  loading, modeLocked,
+  loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
 }) {
   const fileRef = useRef(null);
 
@@ -41,6 +41,20 @@ export default function TopBar({
       </div>
 
       <div className="tb-group tb-actions">
+        <button
+          type="button"
+          className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
+          onClick={onOpenSettingsSearch}
+          title="Search settings (Ctrl+K)"
+          aria-pressed={settingsSearchOpen}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" fill="none" strokeWidth="1.2" />
+            <path d="M10.5 10.5L14 14" stroke="currentColor" fill="none" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+          <span className="tb-text">Search settings</span>
+          <span className="tb-shortcut">Ctrl+K</span>
+        </button>
         <button className="tb-btn" onClick={onNew} title="Reset to default project">
           <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> <span className="tb-text">New</span>
         </button>
@@ -73,7 +87,9 @@ export default function TopBar({
         </button>
       </div>
 
-      <WorldModeBar worldMode={worldMode} onSetWorldMode={onSetWorldMode} modeLocked={modeLocked} />
+      <div className="tb-group tb-center">
+        <WorldModeBar worldMode={worldMode} onSetWorldMode={onSetWorldMode} modeLocked={modeLocked} />
+      </div>
 
       <div className="tb-group tb-right">
         {loading && (

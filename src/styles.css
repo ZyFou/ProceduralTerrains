@@ -59,7 +59,7 @@ body {
 #topbar {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   height: 46px;
   flex: 0 0 46px;
   padding: 0 14px;
@@ -69,6 +69,12 @@ body {
 }
 .tb-group { display: flex; align-items: center; gap: 6px; }
 .tb-brand { gap: 9px; margin-right: 8px; }
+.tb-center {
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+  gap: 8px;
+}
 .logo { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
 .app-name { font-weight: 700; letter-spacing: 1.5px; font-size: 13px; color: var(--text-bright); }
 .app-version { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
@@ -102,6 +108,36 @@ body {
 }
 .tb-btn svg { width: 14px; height: 14px; }
 .tb-btn .caret { width: 8px; height: 8px; }
+.tb-search-btn {
+  padding: 0 12px;
+  gap: 8px;
+  background: var(--bg-control);
+  border-color: var(--border-subtle);
+}
+.tb-search-btn:hover {
+  border-color: var(--border-active);
+  background: var(--accent-bg);
+}
+.tb-search-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--border-active);
+  color: var(--accent);
+}
+.tb-search-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+.tb-shortcut {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
 .tb-btn.primary {
   background: var(--accent);
   color: #fff;
@@ -2302,6 +2338,7 @@ input[type="color"].palette-color-input {
 @media (max-width: 1180px) {
   /* collapse secondary top-bar button labels; keep icons */
   .tb-actions .tb-text { display: none; }
+  .tb-search-btn .tb-text { display: none; }
 }
 @media (max-width: 900px) {
   .left-toolbar { width: 60px; flex-basis: 60px; }
@@ -2908,6 +2945,7 @@ input[type="color"].palette-color-input {
   .app-name { display: none; }
   .app-version { display: none; }
   .tb-group, .tb-segment { flex: 0 0 auto; gap: 2px; }
+  .tb-center { flex: 0 0 auto; margin: 0; gap: 4px; }
   .tb-right { margin-left: auto; flex-shrink: 0; }
   #topbar .tb-segment { display: none; }
   .viewport-mode-bar { display: flex; }
@@ -2923,6 +2961,7 @@ input[type="color"].palette-color-input {
   .tb-btn svg { width: 15px; height: 15px; }
   .tb-mode { min-height: 32px; padding: 0 10px; font-size: 11px; }
   .tb-actions .tb-text, .tb-right .tb-text { display: none; }
+  .tb-search-btn .tb-shortcut { display: none; }
   .tb-loading { height: 34px; padding: 0 8px; }
   .tb-loading .tb-text { display: none; }
 

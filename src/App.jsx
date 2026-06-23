@@ -627,6 +627,8 @@ export default function App() {
         onOpenPanel={togglePanel}
         activePanel={effectivePanel}
         loading={nonBlock}
+        onOpenSettingsSearch={openSettingsSearch}
+        settingsSearchOpen={settingsSearchOpen}
       />
 
       <div id="main" className="app-shell">
