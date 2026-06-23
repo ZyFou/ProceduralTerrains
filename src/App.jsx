@@ -645,6 +645,7 @@ export default function App() {
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
+    onVisualPreset: (key) => engine().applyVisualPreset(key),
     onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
     onPerfReset: () => engine().resetPerfSettings(),
     timeOfDay, onTimeOfDay: handleTimeOfDay,

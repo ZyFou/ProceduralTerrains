@@ -50,6 +50,8 @@ import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
+import { VisualsSystem } from './render/VisualsSystem.js';
+import { VISUAL_DEFAULT_PARAMS, sanitizeVisualParams, visualPatchForPreset } from './render/VisualSettings.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -216,6 +218,7 @@ export class Engine {
     this.camera.updateMatrixWorld(true);
 
     this.applyAll({ force: true });
+    this.visuals?.applyParams(this.params, this.worldMode);
     this._applyPerformance();
     this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
@@ -321,6 +324,7 @@ export class Engine {
 
     // camera-underwater post effect (inactive above water — zero cost)
     this.underwater = new UnderwaterEffect();
+    this.visuals = new VisualsSystem(this.renderer, this.scene);
 
     // studio/flat-board volumetric cloud slab (sits above the board; hidden
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
@@ -609,6 +613,7 @@ export class Engine {
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
     this.applyAll({ force: true });
+    this.visuals?.applyParams(this.params, this.worldMode);
 
     const defaultStack = migrateStack(undefined);
     this.setNoiseStack(defaultStack);
@@ -2300,6 +2305,36 @@ export class Engine {
     this._needsRender = true;
   }
 
+
+  _renderMainScene(dt = 0, options = {}) {
+    const time = this.uniforms?.uTime?.value ?? this._clock.elapsedTime ?? 0;
+    this.visuals?.applyParams(this.params, this.worldMode);
+    this.visuals?._mat?.uniforms?.uTime && (this.visuals._mat.uniforms.uTime.value = time);
+    if (!options.skipUnderwater) this._maybeWarmUnderwater();
+    if (!options.skipUnderwater && this.underwater?.active) {
+      this.underwater.render(this.renderer, this.scene, this.camera);
+      return;
+    }
+    this.visuals.render(this.scene, this.camera, time, this.uniforms?.uSunDir?.value);
+  }
+
+  applyVisualPreset(presetKey) {
+    const patch = visualPatchForPreset(presetKey, this.worldMode);
+    this.params = { ...this.params, ...patch };
+    this.visuals?.applyParams(this.params, this.worldMode);
+    this.cb.onParams({ ...this.params });
+    this._needsRender = true;
+    this.cb.onToast(`Visual preset: ${presetKey}`);
+  }
+
+  resetVisualSettings() {
+    this.params = { ...this.params, ...sanitizeVisualParams(VISUAL_DEFAULT_PARAMS, this.worldMode) };
+    this.visuals?.applyParams(this.params, this.worldMode);
+    this.cb.onParams({ ...this.params });
+    this._needsRender = true;
+    this.cb.onToast('Visual settings reset');
+  }
+
   // ------------------------------------------------------------- save/load
 
   saveSeed() {
@@ -2335,13 +2370,14 @@ export class Engine {
         next.waterEnabled = true;
       }
     }
-    this.params = next;
+    this.params = sanitizeVisualParams(next, this.worldMode);
     this._migrateLegacyCloudPerf(src);
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
     this._syncPlanetStyleToParams();
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
+    this.visuals?.applyParams(this.params, this.worldMode);
     if (json?.paint) this.paintMode?.load(json.paint);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
@@ -2443,6 +2479,9 @@ export class Engine {
         toast('Skybox settings reset');
         break;
       }
+      case 'visuals':
+        this.resetVisualSettings();
+        break;
       case 'lighting': {
         this.params = patchParamsFromDefaults(this.params, LIGHTING_PARAM_KEYS);
         for (const [key, val] of Object.entries(lightingStyleDefaults())) {
@@ -2498,9 +2537,10 @@ export class Engine {
   }
 
   exportScreenshot() {
-    // planet renders straight to the canvas (no underwater pass)
-    if (this.worldMode === 'planet') this.renderer.render(this.scene, this.camera);
-    else this.underwater.render(this.renderer, this.scene, this.camera);
+    const prevShot = this.visuals?.screenshotOverride;
+    this.visuals?.setScreenshotOverride(!!this.params.screenshotVisualOverride);
+    this._renderMainScene(0, { skipUnderwater: this.worldMode === 'planet' });
+    this.visuals?.setScreenshotOverride(prevShot);
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
@@ -2739,8 +2779,7 @@ export class Engine {
       // pixel instead of re-evaluating the full height field.
       this._ensureTerrainHeightTex();
 
-      this._maybeWarmUnderwater();
-      this.underwater.render(this.renderer, this.scene, this.camera);
+      this._renderMainScene(dt);
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
 
@@ -2772,8 +2811,7 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
     }
 
-    this._maybeWarmUnderwater();
-    this.underwater.render(this.renderer, this.scene, this.camera);
+    this._renderMainScene(dt);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
 
@@ -2850,8 +2888,8 @@ export class Engine {
       this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera);
     }
 
-    // planet renders straight to the canvas — no underwater render-target pass
-    this.renderer.render(this.scene, this.camera);
+    // planet uses the visual pipeline with compatibility-safe atmosphere.
+    this._renderMainScene(dt, { skipUnderwater: true });
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
@@ -2906,6 +2944,7 @@ export class Engine {
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();
+    this.visuals?.dispose();
     this.waterSystem?.dispose();
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];

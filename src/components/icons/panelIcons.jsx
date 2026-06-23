@@ -12,6 +12,7 @@ import {
   Sprout,
   Sun,
   SunMedium,
+  Sparkles,
 } from 'lucide-react';
 
 const SIZE = 19;
@@ -32,6 +33,7 @@ export const PANEL_ICONS = {
   clouds: panelIcon(Cloud),
   skybox: panelIcon(Sun),
   lighting: panelIcon(SunMedium),
+  visuals: panelIcon(Sparkles),
   export: panelIcon(Download),
   performance: panelIcon(Activity),
   debug: panelIcon(Bug),

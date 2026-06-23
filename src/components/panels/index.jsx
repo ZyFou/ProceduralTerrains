@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Cog, Dices, Eye, RefreshCw } from 'lucide-react';
+import { Cog, Dices, Eye, RefreshCw, Sparkles } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
-import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot } from './defs.jsx';
+import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot, ColorField } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
 import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
 import { formatTimeOfDay } from '../../engine/sky/TimeOfDay.js';
@@ -44,13 +44,14 @@ export const PANEL_META = {
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
+  visuals: { label: 'Visuals', title: 'Visuals / Post FX', desc: 'Atmosphere, volumetrics, color grading and final image polish.', icon: PANEL_ICONS.visuals },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
   performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: PANEL_ICONS.performance },
   debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'visuals', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -666,6 +667,82 @@ function ExportPanel({ ctx }) {
   );
 }
 
+
+function VisualsPanel({ ctx }) {
+  const { params, onParam, onVisualPreset, worldMode } = ctx;
+  const set = (key, value) => onParam(key, value);
+  const presetOptions = ['off', 'low', 'balanced', 'high', 'cinematic'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
+  const qualityOptions = ['low', 'medium', 'high'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
+  const debugOptions = [
+    { value: 'off', label: 'Off' }, { value: 'depth', label: 'Depth Buffer' },
+    { value: 'fog', label: 'Fog Density' }, { value: 'cloudShadows', label: 'Cloud Shadow Mask' },
+  ];
+  const cinematicBlocked = worldMode === 'infinite';
+  return (
+    <SidePanel title="Visuals / Post FX" description="Cost-aware cinematic atmosphere, volumetrics, cloud shadows and final color polish.">
+      <ControlSection id="visuals-preset" title="Preset" icon={<Sparkles size={15} strokeWidth={1.75} />} defaultOpen>
+        <SelectRow label="Visual Quality Preset" value={params.visualPreset} options={presetOptions} onChange={(v) => onVisualPreset?.(v)} info="Applies a coordinated atmosphere and post-processing preset. Infinite World keeps cinematic effects opt-in and safe." settingId="visuals.preset" />
+        {cinematicBlocked && <p className="section-hint">Infinite World uses safe defaults; cinematic render scale and heavy volumetrics remain opt-in.</p>}
+        <ToggleRow label="Visuals Enabled" value={params.visualsEnabled} onChange={(v) => set('visualsEnabled', v)} settingId="visuals.enabled" />
+        <ToggleRow label="Atmosphere Enabled" value={params.atmosphereEnabled} onChange={(v) => set('atmosphereEnabled', v)} settingId="visuals.atmosphere" />
+        <ToggleRow label="Post FX Enabled" value={params.postFxEnabled} onChange={(v) => set('postFxEnabled', v)} settingId="visuals.postfx" />
+        <ToggleRow label="Auto Adjust With Time" value={params.atmosphereAutoTime} onChange={(v) => set('atmosphereAutoTime', v)} settingId="visuals.autoTime" />
+        <ToggleRow label="Biome-Aware Atmosphere" value={params.atmosphereAutoBiome} onChange={(v) => set('atmosphereAutoBiome', v)} settingId="visuals.autoBiome" />
+      </ControlSection>
+      <ControlSection id="visuals-fog" title="Fog & Haze" defaultOpen>
+        <ToggleRow label="Fog Enabled" value={params.fogEnabled} onChange={(v) => set('fogEnabled', v)} />
+        <ColorField label="Fog Color" value={params.fogColor} onChange={(e) => set('fogColor', e.target.value)} />
+        <SliderCtl def={{ label:'Fog Density', min:0, max:0.8, step:0.01, digits:2 }} value={params.fogDensity} onChange={(v) => set('fogDensity', v)} />
+        <SliderCtl def={{ label:'Fog Start', min:0, max:3000, step:10, unit:'m' }} value={params.fogStart} onChange={(v) => set('fogStart', v)} />
+        <SliderCtl def={{ label:'Fog End', min:200, max:8000, step:25, unit:'m' }} value={params.fogEnd} onChange={(v) => set('fogEnd', v)} />
+        <SliderCtl def={{ label:'Height Fog Strength', min:0, max:1, step:0.01, digits:2 }} value={params.heightFogStrength} onChange={(v) => set('heightFogStrength', v)} />
+        <SliderCtl def={{ label:'Distance Fog Strength', min:0, max:1, step:0.01, digits:2 }} value={params.distanceFogStrength} onChange={(v) => set('distanceFogStrength', v)} />
+        <ToggleRow label="Horizon Haze" value={params.horizonHaze} onChange={(v) => set('horizonHaze', v)} />
+        <ColorField label="Haze Color" value={params.hazeColor} onChange={(e) => set('hazeColor', e.target.value)} />
+        <SliderCtl def={{ label:'Haze Density', min:0, max:1, step:0.01, digits:2 }} value={params.hazeDensity} onChange={(v) => set('hazeDensity', v)} />
+        <SliderCtl def={{ label:'Sun Haze Strength', min:0, max:1, step:0.01, digits:2 }} value={params.sunHazeStrength} onChange={(v) => set('sunHazeStrength', v)} />
+      </ControlSection>
+      <ControlSection id="visuals-shadows-rays" title="Cloud Shadows & Light Shafts" defaultOpen={false}>
+        <ToggleRow label="Cloud Shadows" value={params.cloudShadowsEnabled} onChange={(v) => set('cloudShadowsEnabled', v)} />
+        <SliderCtl def={{ label:'Shadow Strength', min:0, max:0.6, step:0.01, digits:2 }} value={params.cloudShadowStrength} onChange={(v) => set('cloudShadowStrength', v)} />
+        <SliderCtl def={{ label:'Shadow Scale', min:0.2, max:6, step:0.05, digits:2 }} value={params.cloudShadowScale} onChange={(v) => set('cloudShadowScale', v)} />
+        <SliderCtl def={{ label:'Shadow Speed', min:0, max:0.2, step:0.005, digits:3 }} value={params.cloudShadowSpeed} onChange={(v) => set('cloudShadowSpeed', v)} />
+        <ToggleRow label="Light Shafts" value={params.lightShaftsEnabled} onChange={(v) => set('lightShaftsEnabled', v)} disabled={worldMode === 'infinite'} disabledTooltip="Disabled by default in Infinite World to protect movement FPS." />
+        <SliderCtl def={{ label:'Shaft Intensity', min:0, max:1, step:0.01, digits:2 }} value={params.lightShaftIntensity} onChange={(v) => set('lightShaftIntensity', v)} />
+        <SliderCtl def={{ label:'Shaft Length', min:0.1, max:1.5, step:0.01, digits:2 }} value={params.lightShaftLength} onChange={(v) => set('lightShaftLength', v)} />
+        <SelectRow label="Shaft Quality" value={params.lightShaftQuality} options={qualityOptions} onChange={(v) => set('lightShaftQuality', v)} />
+      </ControlSection>
+      <ControlSection id="visuals-post" title="Tone Mapping & Color" defaultOpen>
+        <SelectRow label="Tone Mapping" value={params.toneMappingMode} options={['linear','filmic','reinhard'].map((value)=>({value,label:value}))} onChange={(v) => set('toneMappingMode', v)} />
+        <SliderCtl def={{ label:'Exposure', min:0.2, max:2.5, step:0.01, digits:2 }} value={params.exposure} onChange={(v) => set('exposure', v)} />
+        <SliderCtl def={{ label:'Gamma', min:1, max:3, step:0.01, digits:2 }} value={params.gamma} onChange={(v) => set('gamma', v)} />
+        <SliderCtl def={{ label:'Contrast', min:0.5, max:1.8, step:0.01, digits:2 }} value={params.contrast} onChange={(v) => set('contrast', v)} />
+        <SliderCtl def={{ label:'Saturation', min:0, max:2, step:0.01, digits:2 }} value={params.saturation} onChange={(v) => set('saturation', v)} />
+        <SliderCtl def={{ label:'Temperature', min:-1, max:1, step:0.01, digits:2 }} value={params.temperature} onChange={(v) => set('temperature', v)} />
+        <SliderCtl def={{ label:'Tint', min:-1, max:1, step:0.01, digits:2 }} value={params.tint} onChange={(v) => set('tint', v)} />
+      </ControlSection>
+      <ControlSection id="visuals-bloom-lens" title="Bloom, AO & Lens" defaultOpen={false}>
+        <ToggleRow label="Bloom" value={params.bloomEnabled} onChange={(v) => set('bloomEnabled', v)} />
+        <SliderCtl def={{ label:'Bloom Strength', min:0, max:0.8, step:0.01, digits:2 }} value={params.bloomStrength} onChange={(v) => set('bloomStrength', v)} />
+        <SliderCtl def={{ label:'Bloom Threshold', min:0, max:1.5, step:0.01, digits:2 }} value={params.bloomThreshold} onChange={(v) => set('bloomThreshold', v)} />
+        <ToggleRow label="Ambient Occlusion" value={params.aoEnabled} onChange={(v) => set('aoEnabled', v)} />
+        <SliderCtl def={{ label:'AO Strength', min:0, max:0.6, step:0.01, digits:2 }} value={params.aoStrengthPost} onChange={(v) => set('aoStrengthPost', v)} />
+        <ToggleRow label="Depth of Field" value={params.dofEnabled} onChange={(v) => set('dofEnabled', v)} />
+        <ToggleRow label="Vignette" value={params.vignette} onChange={(v) => set('vignette', v)} />
+        <ToggleRow label="Film Grain" value={params.filmGrain} onChange={(v) => set('filmGrain', v)} />
+        <ToggleRow label="Chromatic Aberration" value={params.chromaticAberration} onChange={(v) => set('chromaticAberration', v)} />
+      </ControlSection>
+      <ControlSection id="visuals-performance" title="Performance & Debug" defaultOpen={false}>
+        <SliderCtl def={{ label:'Post FX Render Scale', min:0.5, max:1.5, step:0.05, digits:2 }} value={params.visualRenderScale} onChange={(v) => set('visualRenderScale', v)} />
+        <ToggleRow label="Volumetric Fog Layer" value={params.volumetricFogEnabled} onChange={(v) => set('volumetricFogEnabled', v)} disabled={worldMode !== 'studio'} disabledTooltip="Optimized volumetric fog is currently limited to Tile mode; planet/infinite use haze fallbacks." />
+        <ToggleRow label="Screenshot Override" value={params.screenshotVisualOverride} onChange={(v) => set('screenshotVisualOverride', v)} />
+        <SliderCtl def={{ label:'Screenshot Render Scale', min:1, max:2, step:0.05, digits:2 }} value={params.screenshotRenderScale} onChange={(v) => set('screenshotRenderScale', v)} />
+        <SelectRow label="Debug View" value={params.visualDebugView} options={debugOptions} onChange={(v) => set('visualDebugView', v)} />
+      </ControlSection>
+    </SidePanel>
+  );
+}
+
 function NoiseLayersPanelWrapper({ ctx }) {
   return (
     <NoiseLayersPanel ctx={ctx}>
@@ -676,7 +753,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
-  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
+  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, visuals: VisualsPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };
 

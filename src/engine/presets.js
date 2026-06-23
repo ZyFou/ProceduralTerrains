@@ -6,6 +6,7 @@
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
+import { VISUAL_DEFAULT_PARAMS } from './render/VisualSettings.js';
 
 export const DEFAULT_PARAMS = {
   seed: 1337,
@@ -81,6 +82,10 @@ export const DEFAULT_PARAMS = {
 
   // scalable water pipeline — old saves without waterMode migrate to legacy.
   ...WATER_DEFAULT_PARAMS,
+
+  // cinematic visual atmosphere + post-processing pipeline. Old saves without
+  // these keys fall back to the balanced, performance-safe defaults.
+  ...VISUAL_DEFAULT_PARAMS,
 };
 
 export const PRESETS = {
