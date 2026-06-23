@@ -5,6 +5,7 @@ import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
+import ControlSection from '../ui/ControlSection.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
 import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot, ColorField } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
