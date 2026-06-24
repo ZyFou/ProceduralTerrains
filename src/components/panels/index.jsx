@@ -691,8 +691,10 @@ function ExportPanel({ ctx }) {
 // --------------------------------------------------------------- tiles panel
 function TilesPanel({ ctx }) {
   const tiles = ctx.tiles ?? [{ cx: 0, cz: 0 }];
-  const max = ctx.maxTiles ?? 9;
-  const atCap = tiles.length >= max;
+  const grid = ctx.tileGridSize ?? 5;
+  const extent = ctx.tileGridExtent ?? 2;
+  const gridCells = grid * grid;
+  const atGridEdge = tiles.length >= gridCells;
   return (
     <SidePanel title="Tiles" description="Grow the board into seamless adjacent tiles."
       onClose={ctx.onClose}>
@@ -700,9 +702,13 @@ function TilesPanel({ ctx }) {
       <div className="settings-hint" style={{ marginBottom: 8 }}>
         Hover near a board edge and click the highlighted square to add a tile that
         continues the terrain. Tiles share the same noise field and export together.
+        Placement is limited to a {grid}×{grid} grid centred on the origin
+        (coordinates ±{extent}).
       </div>
-      <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {max}</span></div>
-      {atCap && <div className="settings-hint">Maximum tiles reached.</div>}
+      <div className="kv-row"><span>Tiles</span><span>{tiles.length}</span></div>
+      {atGridEdge && (
+        <div className="settings-hint">All {gridCells} cells in the grid are occupied.</div>
+      )}
 
       {tiles.length > 1 && (
         <>

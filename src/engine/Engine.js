@@ -500,11 +500,16 @@ export class Engine {
     return this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
   }
 
-  get maxTiles() { return 9; }
+  get tileGridSize() { return 5; }           // 5×5 window centred on (0,0)
+  get tileGridExtent() { return 2; }         // max |cx| / |cz| from origin (5 = 2+1+2)
+  _inTileGridBounds(cx, cz) {
+    const e = this.tileGridExtent;
+    return Math.abs(cx) <= e && Math.abs(cz) <= e;
+  }
   _hasTile(cx, cz) { return this.tiles.some((t) => t.cx === cx && t.cz === cz); }
 
   // Validate a loaded/restored tiles array: integer cells, deduped, origin
-  // guaranteed, capped. Falls back to a single origin tile for old/invalid data.
+  // guaranteed, kept inside the 5×5 grid. Falls back to a single origin tile.
   _sanitizeTiles(raw) {
     const out = [];
     const seen = new Set();
@@ -513,22 +518,22 @@ export class Engine {
         const cx = Math.trunc(Number(t?.cx));
         const cz = Math.trunc(Number(t?.cz));
         if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+        if (!this._inTileGridBounds(cx, cz)) continue;
         const key = `${cx},${cz}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({ cx, cz });
-        if (out.length >= this.maxTiles) break;
       }
     }
     if (!out.some((t) => t.cx === 0 && t.cz === 0)) out.unshift({ cx: 0, cz: 0 });
     return out.length ? out : [{ cx: 0, cz: 0 }];
   }
 
-  // A cell can be added if empty, under the cap, and 4-adjacent to an occupied
-  // cell (so the assembly stays connected). Used by the hover UI + addTile.
+  // A cell can be added if empty, inside the 5×5 grid, and 4-adjacent to an
+  // occupied cell (assembly stays connected). No cap on how many are placed.
   canAddTileAt(cx, cz) {
     if (this.worldMode !== 'studio') return false;
-    if (this.tiles.length >= this.maxTiles) return false;
+    if (!this._inTileGridBounds(cx, cz)) return false;
     if (this._hasTile(cx, cz)) return false;
     return this._hasTile(cx - 1, cz) || this._hasTile(cx + 1, cz)
         || this._hasTile(cx, cz - 1) || this._hasTile(cx, cz + 1);

@@ -835,7 +835,7 @@ export default function App() {
     onExport, onExportScreenshot, onExportHeightmap,
     onNoiseStack: (stack) => engine().setNoiseStack(stack),
     tileDebug, importedMaps,
-    tiles, maxTiles: 9,
+    tiles, tileGridSize: 5, tileGridExtent: 2,
     onRemoveTile: (cx, cz) => engine().removeTile(cx, cz),
     onTileDebug: (next) => engine().setTileDebug(next),
     onImportTileMap: (type, file) => engine().importTileMap(type, file),
