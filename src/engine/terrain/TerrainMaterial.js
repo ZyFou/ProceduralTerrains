@@ -27,6 +27,8 @@ ${BIOME_GLSL}
 ${heightGLSL}
 
 uniform float uSkirtDepth;
+uniform float uPlinthBaseY;
+uniform float uWallThickness;
 
 attribute float aSkirt;
 attribute float aLod;
@@ -34,24 +36,38 @@ attribute float aLod;
 varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
+varying float vWall;
 
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   float h = heightAt(wp.xz);
 
   float skirt = aSkirt;
+  float wall = 0.0;   // outer-perimeter skirt -> plinth wall
   #ifndef INFINITE_MODE
     float bx = abs(wp.x);
     float bz = abs(wp.z);
     float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
+    // outer-edge skirt verts become the plinth wall; interior skirts unchanged
+    wall = skirt * step(0.5, onOuter);
     skirt *= 1.0 - step(0.5, onOuter);
+    // flare the wall base outward (away from the board) so it sits OUTSIDE the
+    // water plane edge — no z-fighting with the water, and it leans over any
+    // terrain edge that dips below the waterline so the side never shows through.
+    vec2 outDir = vec2(step(uBoardHalf - 1.0, bx) * sign(wp.x),
+                       step(uBoardHalf - 1.0, bz) * sign(wp.z));
+    wp.xz += outDir * (wall * uWallThickness);
   #endif
 
-  wp.y = h - skirt * uSkirtDepth;
+  // interior skirt drops by uSkirtDepth; the perimeter wall drops all the way to
+  // the plinth base so the terrain's own edge masks the under-the-map view at
+  // whatever LOD the border chunks are rendered at.
+  wp.y = mix(h - skirt * uSkirtDepth, uPlinthBaseY, wall);
 
   vWorldPos = wp.xyz;
   vLod = aLod;
-  vSkirt = skirt;
+  vSkirt = max(skirt, wall);
+  vWall = wall;
 
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -74,10 +90,12 @@ uniform float uGrid;
 uniform float uLodDebug;
 uniform float uColorMode;
 uniform float uEps;
+uniform vec3  uPlinthColor;
 
 varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
+varying float vWall;
 
 const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.90, 0.28, 0.30),
@@ -173,6 +191,19 @@ void main() {
     return;
   }
 
+  // perimeter plinth wall: flat plinth colour (with fog), no terrain shading.
+  // Placed after the export/debug early-outs so heightmap/minimap stay clean.
+  // vWall interpolates 0 (surface rim vertex) -> 1 (skirt vertex at the base),
+  // so a small threshold colours the whole wall, leaving only a hairline of
+  // terrain colour at the rim where it meets the surface (a natural transition).
+  if (vWall > 0.02) {
+    float wd = length(cameraPosition - vWorldPos);
+    float wfog = 1.0 - exp(-uFogDensity * uFogDensity * wd * wd);
+    vec3 wcol = mix(uPlinthColor, uFogColor, clamp(wfog, 0.0, 1.0));
+    gl_FragColor = vec4(wcol, 1.0);
+    return;
+  }
+
   vec3 n = normalize(vec3(nGeo.x * uNormalStrength, 1.0, nGeo.z * uNormalStrength));
 
   float slope = 1.0 - nGeo.y;
@@ -260,6 +291,9 @@ export function createTerrainUniforms() {
     uColorMode:      { value: 0.0 },
     uEps:            { value: 0.6 },
     uSkirtDepth:     { value: 40 },
+    uPlinthBaseY:    { value: -40 },
+    uPlinthColor:    { value: new THREE.Color(0x14110d) },
+    uWallThickness:  { value: 12 },
     uPlanetRadius:   { value: 8000 },
     uPlanetEps:      { value: 0.0015 },
     uSunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },

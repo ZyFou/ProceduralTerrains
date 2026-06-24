@@ -961,7 +961,10 @@ export class Engine {
       this.appliedChunkSize = p.chunkSize;
 
       const size = this.boardSize;
-      this.water.scale.set(size, 1, size);
+      // extend the water out to the flared plinth wall so it meets the dark box
+      // with no gap (otherwise you see under the map through the strip between
+      // the board edge and the outset wall).
+      this.water.scale.set(size + 2 * this._wallThickness(), 1, size + 2 * this._wallThickness());
       this._updatePlinth();
       this.controls.setBoardSize(size);
       this.minimap.setBoard(size, maxHeight);
@@ -985,6 +988,9 @@ export class Engine {
 
   _maxHeight() { return this.params.heightScale * 1.35 + 2; }
   _skirtDepth() { return Math.max(24, this.params.heightScale * 0.08); }
+  // how far the terrain's perimeter wall flares out past the board edge (and how
+  // far the plinth box is outset to cap it) — keeps the wall clear of the water.
+  _wallThickness() { return Math.max(10, (this.boardSize || 0) * 0.006); }
 
   _updatePlinth() {
     const size = this.boardSize;
@@ -992,7 +998,7 @@ export class Engine {
     const skirtDepth = this._skirtDepth();
     const sea = this.params.seaLevel;
     const topY = sea > 0.5 ? sea : 0;
-    const geo = buildBoardPlinthGeometry(size, skirtDepth, topY);
+    const geo = buildBoardPlinthGeometry(size, skirtDepth, topY, this._wallThickness());
     this.plinth.geometry.dispose();
     this.plinth.geometry = geo;
   }
@@ -1031,6 +1037,8 @@ export class Engine {
     u.uLodDebug.value = p.lodDebug ? 1 : 0;
     u.uEps.value = Math.max(0.35, size / 4096);
     u.uSkirtDepth.value = this._skirtDepth();
+    u.uPlinthBaseY.value = -this._skirtDepth();   // perimeter wall drops to plinth base
+    u.uWallThickness.value = this._wallThickness();
     u.uPlanetRadius.value = p.planetRadius;
     // angular epsilon for analytic planet normals ≈ one finest-LOD quad
     u.uPlanetEps.value = 2.0 / (this._planetFaceGrid() * 64);
