@@ -1441,11 +1441,9 @@ input[type="color"].palette-color-input {
 }
 .explore-menu-trigger .explore-chevron.open { transform: rotate(180deg); }
 .explore-menu {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
+  position: fixed;
   transform: translateX(-50%);
-  z-index: 30;
+  z-index: 1000;
   min-width: 118px;
   padding: 4px;
   border-radius: 10px;

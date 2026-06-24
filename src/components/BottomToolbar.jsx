@@ -1,18 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronUp, Compass } from 'lucide-react';
 
 export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode }) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState(null);
   const wrapRef = useRef(null);
+  const triggerRef = useRef(null);
   const exploring = exploreMode === 'walk' || exploreMode === 'plane';
 
   useEffect(() => {
     if (!open) return undefined;
+    const placeMenu = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuStyle({
+        left: rect.left + rect.width / 2,
+        bottom: window.innerHeight - rect.top + 8,
+      });
+    };
     const onPointerDown = (e) => {
       if (!wrapRef.current?.contains(e.target)) setOpen(false);
     };
+    placeMenu();
     window.addEventListener('pointerdown', onPointerDown, true);
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('resize', placeMenu);
+    window.addEventListener('scroll', placeMenu, true);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('resize', placeMenu);
+      window.removeEventListener('scroll', placeMenu, true);
+    };
   }, [open]);
 
   const select = (mode) => {
@@ -64,6 +82,7 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
 
       <div className="explore-menu-wrap" ref={wrapRef}>
         <button
+          ref={triggerRef}
           type="button"
           className={`camera-bar-btn explore-menu-trigger${exploring ? ' active' : ''}`}
           onClick={() => setOpen((v) => !v)}
@@ -76,8 +95,13 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
           <span className="camera-bar-label">Explore</span>
           <ChevronUp className={`explore-chevron${open ? ' open' : ''}`} aria-hidden size={12} strokeWidth={2} />
         </button>
-        {open && (
-          <div className="explore-menu" role="menu" aria-label="Explore modes">
+        {open && menuStyle && createPortal(
+          <div
+            className="explore-menu"
+            style={{ left: menuStyle.left, bottom: menuStyle.bottom }}
+            role="menu"
+            aria-label="Explore modes"
+          >
             <button
               type="button"
               className={`explore-menu-item${exploreMode === 'walk' ? ' active' : ''}`}
@@ -94,7 +118,8 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
             >
               Plane
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </div>
