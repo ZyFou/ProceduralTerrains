@@ -155,6 +155,7 @@ export class Engine {
     // assembly's outer rim keeps the diorama edge falloff. tiles always holds
     // origin (0,0). A small R8 occupancy texture drives the shader falloff/wall.
     this.tileAssemblyShape = 'square';
+    this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];
     this._tileOccTex = null;
     // hover-to-add interaction (studio only)
@@ -509,7 +510,34 @@ export class Engine {
   get tileGridSize() { return 5; }           // 5×5 window centred on (0,0)
   get tileGridExtent() { return 2; }         // max |cx| / |cz| from origin (5 = 2+1+2)
   get diskRadiusCells() {
+    if (this.tileAssemblyShape === 'circle') return this.circleRadiusCells;
     return this.tiles.reduce((m, t) => Math.max(m, Math.hypot(t.cx, t.cz)), 0);
+  }
+  _circleTiles(radius) {
+    const r = Math.max(0, Math.min(this.tileGridExtent, Math.round(radius)));
+    const outer = r + 0.5;
+    const out = [];
+    for (let cz = -this.tileGridExtent; cz <= this.tileGridExtent; cz++) {
+      for (let cx = -this.tileGridExtent; cx <= this.tileGridExtent; cx++) {
+        // Include every square chunk whose area intersects the rendered disk.
+        // Testing centers alone leaves wedge-shaped holes in diagonal chunks.
+        const dx = Math.max(Math.abs(cx) - 0.5, 0);
+        const dz = Math.max(Math.abs(cz) - 0.5, 0);
+        if (Math.hypot(dx, dz) < outer - 1e-6 || (cx === 0 && cz === 0)) {
+          out.push({ cx, cz });
+        }
+      }
+    }
+    return out;
+  }
+  _circleRadiusForTiles(raw) {
+    if (!Array.isArray(raw) || !raw.length) return 0;
+    const farthest = raw.reduce((m, t) => {
+      const cx = Math.trunc(Number(t?.cx));
+      const cz = Math.trunc(Number(t?.cz));
+      return Number.isFinite(cx) && Number.isFinite(cz) ? Math.max(m, Math.hypot(cx, cz)) : m;
+    }, 0);
+    return Math.min(this.tileGridExtent, Math.ceil(farthest - 1e-6));
   }
   _inTilePlacementBounds(cx, cz, shape = this.tileAssemblyShape) {
     const e = this.tileGridExtent;
@@ -520,6 +548,9 @@ export class Engine {
   // Validate a loaded/restored tiles array: integer cells, deduped, origin
   // guaranteed, kept inside the 5×5 grid. Falls back to a single origin tile.
   _sanitizeTiles(raw) {
+    if (this.tileAssemblyShape === 'circle') {
+      return this._circleTiles(this._circleRadiusForTiles(raw));
+    }
     const out = [];
     const seen = new Set();
     if (Array.isArray(raw)) {
@@ -572,7 +603,30 @@ export class Engine {
     return true;
   }
 
+  canExpandCircle() {
+    return this.worldMode === 'studio'
+      && this.tileAssemblyShape === 'circle'
+      && this.diskRadiusCells < this.tileGridExtent;
+  }
+
+  expandCircle() {
+    if (!this.canExpandCircle()) return false;
+    this.circleRadiusCells = Math.min(this.tileGridExtent, this.circleRadiusCells + 1);
+    this.tiles = this._circleTiles(this.circleRadiusCells);
+    this._tileGhostCell = null;
+    this._rebuildTiles();
+    this._frameCircleExpansion();
+    return true;
+  }
+
+  _frameCircleExpansion() {
+    if (this.tileAssemblyShape !== 'circle') return;
+    const previewRadius = this.diskRadiusCells + (this.canExpandCircle() ? 1.5 : 0.5);
+    this.controls.blendToDefault(previewRadius * 2 * this.cellSize);
+  }
+
   removeTile(cx, cz) {
+    if (this.tileAssemblyShape === 'circle') return false;
     if (this.tiles.length <= 1) return false;
     const i = this.tiles.findIndex((t) => t.cx === cx && t.cz === cz);
     if (i < 0) return false;
@@ -604,10 +658,13 @@ export class Engine {
   setTileAssemblyShape(shape) {
     const next = shape === 'circle' ? 'circle' : 'square';
     if (next === this.tileAssemblyShape) return;
+    const circleRadius = next === 'circle' ? this._circleRadiusForTiles(this.tiles) : 0;
     this.tileAssemblyShape = next;
-    this.tiles = this._sanitizeTiles(this.tiles);
+    this.circleRadiusCells = circleRadius;
+    this.tiles = next === 'circle' ? this._circleTiles(circleRadius) : this._sanitizeTiles(this.tiles);
     this._tileGhostCell = null;
     this._rebuildTiles();
+    if (next === 'circle') this._frameCircleExpansion();
   }
 
   // ---------------------------------------------------- hover-to-add tile UI
@@ -616,6 +673,9 @@ export class Engine {
     const group = new THREE.Group();
     group.name = 'tile-ghost';
     group.renderOrder = 20;
+
+    const square = new THREE.Group();
+    square.name = 'tile-ghost-square';
     const plane = new THREE.PlaneGeometry(1, 1);
     plane.rotateX(-Math.PI / 2);
     const fill = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({
@@ -628,15 +688,45 @@ export class Engine {
       new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.9 })
     );
     edges.name = 'tile-ghost-edge';
-    group.add(fill, edges);
+    square.add(fill, edges);
+
+    const circle = new THREE.Group();
+    circle.name = 'tile-ghost-circle';
+    circle.visible = false;
+    const ring = new THREE.RingGeometry(0.5, 1, 96);
+    ring.rotateX(-Math.PI / 2);
+    const ringFill = new THREE.Mesh(ring, fill.material);
+    ringFill.name = 'tile-ghost-ring-fill';
+    const ringEdges = new THREE.LineSegments(new THREE.EdgesGeometry(ring), edges.material);
+    ringEdges.name = 'tile-ghost-ring-edge';
+    circle.add(ringFill, ringEdges);
+
+    group.add(square, circle);
+    group.userData.square = square;
+    group.userData.circle = circle;
     return group;
   }
 
   _tileInteractionActive() {
     return this.worldMode === 'studio'
-      && this.tileAssemblyShape === 'square'
       && this.exploreMode === 'none'
       && !this.paintState?.enabled;
+  }
+
+  _setCircleGhostGeometry(nextRadius) {
+    const circle = this._tileGhost?.userData?.circle;
+    if (!circle || circle.userData.radius === nextRadius) return;
+    const outerCells = nextRadius + 0.5;
+    const innerCells = Math.max(0, nextRadius - 0.5);
+    const ring = new THREE.RingGeometry(innerCells / outerCells, 1, 96);
+    ring.rotateX(-Math.PI / 2);
+    const fill = circle.getObjectByName('tile-ghost-ring-fill');
+    const edge = circle.getObjectByName('tile-ghost-ring-edge');
+    fill.geometry.dispose();
+    edge.geometry.dispose();
+    fill.geometry = ring;
+    edge.geometry = new THREE.EdgesGeometry(ring);
+    circle.userData.radius = nextRadius;
   }
 
   // Position/show the ghost for the current candidate cell, or hide it.
@@ -649,15 +739,28 @@ export class Engine {
       return;
     }
     const cs = this.cellSize;
-    const c = this._cellWorldCenter(cell.cx, cell.cz);
     const y = (this.params.seaLevel > 0.5 ? this.params.seaLevel : 0) + Math.max(2, cs * 0.002);
-    g.position.set(c.x, y, c.z);
-    g.scale.set(cs, 1, cs);
+    const square = g.userData.square;
+    const circle = g.userData.circle;
+    if (this.tileAssemblyShape === 'circle') {
+      this._setCircleGhostGeometry(cell.circleRadius);
+      square.visible = false;
+      circle.visible = true;
+      g.position.set(0, y, 0);
+      const outer = (cell.circleRadius + 0.5) * cs;
+      g.scale.set(outer, 1, outer);
+    } else {
+      const c = this._cellWorldCenter(cell.cx, cell.cz);
+      square.visible = true;
+      circle.visible = false;
+      g.position.set(c.x, y, c.z);
+      g.scale.set(cs, 1, cs);
+    }
     g.visible = true;
     this._needsRender = true;
   }
 
-  _pointerToCell(clientX, clientY) {
+  _pointerToGround(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
     this._tilePointer.set(
@@ -667,8 +770,27 @@ export class Engine {
     this._tileRay.setFromCamera(this._tilePointer, this.camera);
     const hit = new THREE.Vector3();
     if (!this._tileRay.ray.intersectPlane(this._tileGroundPlane, hit)) return null;
+    return hit;
+  }
+
+  _pointerToCell(clientX, clientY) {
+    const hit = this._pointerToGround(clientX, clientY);
+    if (!hit) return null;
     const cs = this.cellSize;
     return { cx: Math.round(hit.x / cs), cz: Math.round(hit.z / cs) };
+  }
+
+  _pointerToCircleExpansion(clientX, clientY) {
+    if (!this.canExpandCircle()) return null;
+    const hit = this._pointerToGround(clientX, clientY);
+    if (!hit) return null;
+    const currentOuter = (this.diskRadiusCells + 0.5) * this.cellSize;
+    const nextRadius = this.diskRadiusCells + 1;
+    const nextOuter = (nextRadius + 0.5) * this.cellSize;
+    const distance = Math.hypot(hit.x, hit.z);
+    return distance >= currentOuter * 0.92 && distance <= nextOuter
+      ? { circleRadius: nextRadius }
+      : null;
   }
 
   _initTileInteraction() {
@@ -688,10 +810,15 @@ export class Engine {
       if (this._tileGhostCell) { this._tileGhostCell = null; this._updateTileGhost(); }
       return;
     }
-    const cell = this._pointerToCell(e.clientX, e.clientY);
-    const next = (cell && this.canAddTileAt(cell.cx, cell.cz)) ? cell : null;
+    const cell = this.tileAssemblyShape === 'circle'
+      ? this._pointerToCircleExpansion(e.clientX, e.clientY)
+      : this._pointerToCell(e.clientX, e.clientY);
+    const next = this.tileAssemblyShape === 'circle'
+      ? cell
+      : ((cell && this.canAddTileAt(cell.cx, cell.cz)) ? cell : null);
     const cur = this._tileGhostCell;
-    if ((next?.cx) !== (cur?.cx) || (next?.cz) !== (cur?.cz)) {
+    if ((next?.cx) !== (cur?.cx) || (next?.cz) !== (cur?.cz)
+        || (next?.circleRadius) !== (cur?.circleRadius)) {
       this._tileGhostCell = next;
       this._updateTileGhost();
     }
@@ -711,6 +838,11 @@ export class Engine {
     // a click (negligible drag) over the ghost adds the tile; a drag pans
     if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
     const cell = this._tileGhostCell;
+    if (this.tileAssemblyShape === 'circle' && cell?.circleRadius) {
+      this._tileGhostCell = null;
+      this.expandCircle();
+      return;
+    }
     if (cell && this.canAddTileAt(cell.cx, cell.cz)) {
       this._tileGhostCell = null;
       this.addTile(cell.cx, cell.cz);
@@ -995,6 +1127,7 @@ export class Engine {
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
     this.tileAssemblyShape = 'square';
+    this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
     this._tileGhostCell = null;
     this.applyAll({ force: true });
@@ -1301,7 +1434,12 @@ export class Engine {
       this.water.position.x = c.x;
       this.water.position.z = c.z;
       this._updatePlinth();
-      this.controls.setBoardSize(Math.max(uw, ud), c);
+      // Keep the next circular growth ring inside the camera's framing so the
+      // all-around hover target is visible and reachable before it is added.
+      const circlePreviewSize = this.tileAssemblyShape === 'circle' && this.canExpandCircle()
+        ? (this.diskRadiusCells + 1.5) * 2 * this.cellSize
+        : 0;
+      this.controls.setBoardSize(Math.max(uw, ud, circlePreviewSize), c);
       this.minimap.setBoard(Math.max(uw, ud), maxHeight);
       this.cb.onBoard(this.boardSize);
 
@@ -2818,6 +2956,7 @@ export class Engine {
       params: this.params,
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
+      diskRadiusCells: this.circleRadiusCells,
     };
     // Only embed paint pixel data when something was actually painted —
     // serialize() returns null for an untouched canvas, which would otherwise
@@ -2855,7 +2994,15 @@ export class Engine {
     this._syncPlanetStyleToParams();
     // restore the tile assembly (old saves with no tiles -> single origin tile)
     this.tileAssemblyShape = json?.tileAssemblyShape === 'circle' ? 'circle' : 'square';
-    this.tiles = this._sanitizeTiles(json?.tiles);
+    this.circleRadiusCells = this.tileAssemblyShape === 'circle'
+      ? Math.max(0, Math.min(this.tileGridExtent,
+        Number.isFinite(Number(json?.diskRadiusCells))
+          ? Math.round(Number(json.diskRadiusCells))
+          : this._circleRadiusForTiles(json?.tiles)))
+      : 0;
+    this.tiles = this.tileAssemblyShape === 'circle'
+      ? this._circleTiles(this.circleRadiusCells)
+      : this._sanitizeTiles(json?.tiles);
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
     const c = this._unionCenter();
@@ -2889,6 +3036,7 @@ export class Engine {
       paintRev: this.paintMode?.layers?.revision ?? 0,
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
+      diskRadiusCells: this.circleRadiusCells,
     };
   }
 
@@ -2928,7 +3076,15 @@ export class Engine {
 
     // tile assembly (so the board rebuild below lays out the right cells)
     this.tileAssemblyShape = snap.tileAssemblyShape === 'circle' ? 'circle' : 'square';
-    this.tiles = this._sanitizeTiles(snap.tiles);
+    this.circleRadiusCells = this.tileAssemblyShape === 'circle'
+      ? Math.max(0, Math.min(this.tileGridExtent,
+        Number.isFinite(Number(snap.diskRadiusCells))
+          ? Math.round(Number(snap.diskRadiusCells))
+          : this._circleRadiusForTiles(snap.tiles)))
+      : 0;
+    this.tiles = this.tileAssemblyShape === 'circle'
+      ? this._circleTiles(this.circleRadiusCells)
+      : this._sanitizeTiles(snap.tiles);
 
     // push params → uniforms and rebuild board geometry (chunk layout may differ)
     this.cb.onParams(this._paramsSnapshot());

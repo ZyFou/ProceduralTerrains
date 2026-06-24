@@ -135,7 +135,7 @@ function TerrainPanel({ ctx }) {
           ))}
           <SelectRow label="Edge Falloff" value={params.edgeFalloffMode ?? 'island'}
             options={[{ value: 'island', label: 'Island' }, { value: 'mountains', label: 'Mountains' }]}
-            onChange={(v) => onParam('edgeFalloffMode', v)} info="Island gives a gentle beach rim; Mountains keeps relief longer then drops more sharply at the edge." />
+            onChange={(v) => onParam('edgeFalloffMode', v)} info="Island fades terrain toward the boundary. Mountains preserves the terrain and adds ridged noise around the outer edge." />
         </>
       )}
       {tab === 'noise' && (
@@ -700,7 +700,11 @@ function TilesContent({ ctx }) {
   const extent = ctx.tileGridExtent ?? 2;
   const gridCells = grid * grid;
   const shape = ctx.tileAssemblyShape ?? 'square';
-  const diskMaxCells = Array.from({ length: grid }, (_, ix) => ix - extent).flatMap((cx) => Array.from({ length: grid }, (_, iz) => ({ cx, cz: iz - extent }))).filter((t) => Math.hypot(t.cx, t.cz) <= extent + 1e-6).length;
+  const diskOuter = extent + 0.5;
+  const diskMaxCells = Array.from({ length: grid }, (_, ix) => ix - extent)
+    .flatMap((cx) => Array.from({ length: grid }, (_, iz) => ({ cx, cz: iz - extent })))
+    .filter(({ cx, cz }) => Math.hypot(Math.max(Math.abs(cx) - 0.5, 0), Math.max(Math.abs(cz) - 0.5, 0)) < diskOuter - 1e-6)
+    .length;
   const maxCells = shape === 'circle' ? diskMaxCells : gridCells;
   const atGridEdge = tiles.length >= maxCells;
   return (
@@ -709,7 +713,9 @@ function TilesContent({ ctx }) {
       <div className="settings-hint" style={{ marginBottom: 8 }}>
         {shape === 'square'
           ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
-          : 'Circle crops the current terrain assembly to a radial disk. Switch to Square to add more tiles.'}
+          : (ctx.diskRadiusCells < extent
+            ? 'Hover around the circular edge and click the highlighted ring to expand the disk.'
+            : 'The circular terrain has reached its maximum radius.')}
         {' '}Tiles share the same noise field and export together.
       </div>
       <SelectRow label="Shape" value={shape}
@@ -722,7 +728,7 @@ function TilesContent({ ctx }) {
         <div className="settings-hint">All {maxCells} available cells are occupied.</div>
       )}
 
-      {tiles.length > 1 && (
+      {shape === 'square' && tiles.length > 1 && (
         <>
           <div className="subsection-label">Remove a tile</div>
           <div className="tile-chip-grid">

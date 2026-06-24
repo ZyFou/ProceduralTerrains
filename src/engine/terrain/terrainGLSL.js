@@ -84,9 +84,7 @@ uniform float uTileDiskRadius;      // world-space disk outer radius
 
 float rimFalloff(float t) {
   t = clamp(t, 0.0, 1.0);
-  float island = t * t * (3.0 - 2.0 * t);
-  float mountains = pow(t, 1.6);
-  return mix(island, mountains, step(0.5, uEdgeFalloffMode));
+  return t * t * (3.0 - 2.0 * t);
 }
 
 float diskMask(vec2 xz) {
@@ -355,15 +353,27 @@ float shapeHeight(vec2 xz, Climate c) {
   }
 #endif
 #ifndef INFINITE_MODE
+  float rim = 1.0;
   if (uUseTiles > 0.5) {
-    // multi-cell assembly: fade only at the outer rim (seamless interior seams)
-    h *= assemblyFalloff(xz);
+    // multi-cell assembly: affect only the outer rim (seamless interiors)
+    rim = assemblyFalloff(xz);
   } else {
     // island/continent falloff toward board edges (square+radial blend)
     vec2 e = abs(xz) / uBoardHalf;
     float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
     float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
-    h *= rimFalloff(t);
+    rim = rimFalloff(t);
+  }
+  if (uEdgeFalloffMode < 0.5) {
+    h *= rim;
+  } else {
+    // Mountain edges preserve the existing terrain and add a noisy ridged
+    // perimeter whose strength rises toward the assembly boundary.
+    float edgeMask = 1.0 - rim;
+    vec2 edgeP = xz * uFrequency + uSeedOffset + vec2(173.7, 419.2);
+    float edgeMountains = pow(ridgedFBM(edgeP * 2.35), 1.25);
+    float edgeBreakup = vnoise(edgeP * 5.1 + vec2(61.4, 27.8));
+    h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude;
   }
 #endif
   float finalH = clamp(h, 0.0, 1.35) * uHeightScale;

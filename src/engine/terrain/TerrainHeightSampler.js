@@ -75,9 +75,19 @@ export class TerrainHeightSampler {
 
   _rimFalloff(t) {
     t = clamp(t, 0, 1);
-    const island = f(f(t * t) * f(3 - f(2 * t)));
-    const mountains = f(Math.pow(t, 1.6));
-    return (this.u.uEdgeFalloffMode?.value ?? 0) >= 0.5 ? mountains : island;
+    return f(f(t * t) * f(3 - f(2 * t)));
+  }
+
+  _applyEdgeProfile(h, x, z, rim, octaves) {
+    if ((this.u.uEdgeFalloffMode?.value ?? 0) < 0.5) return f(h * rim);
+    const edgeMask = f(1 - rim);
+    const freq = f(this.u.uFrequency.value);
+    const px = f(f(f(x * freq) + f(this.u.uSeedOffset.value.x)) + 173.7);
+    const pz = f(f(f(z * freq) + f(this.u.uSeedOffset.value.y)) + 419.2);
+    const mountains = f(Math.pow(this._ridgedFBM(f(px * 2.35), f(pz * 2.35), octaves), 1.25));
+    const breakup = vnoise(f(f(px * 5.1) + 61.4), f(f(pz * 5.1) + 27.8));
+    const added = f(f(f(mountains * 0.55) + f(breakup * 0.12)) * edgeMask);
+    return f(h + f(added * f(this.u.uAmplitude.value)));
   }
 
   _tileOccAt(cx, cz) {
@@ -229,15 +239,17 @@ export class TerrainHeightSampler {
 
     // island falloff (studio board only) + clamp + world height scale
     if (!env.infinite) {
+      let rim;
       if ((u.uUseTiles?.value ?? 0) > 0.5) {
-        h = f(h * this._assemblyFalloff(x, z));
+        rim = this._assemblyFalloff(x, z);
       } else {
         const half = f(u.uBoardHalf.value);
         const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
         const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
         const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
-        h = f(h * this._rimFalloff(t));
+        rim = this._rimFalloff(t);
       }
+      h = this._applyEdgeProfile(h, x, z, rim, env.octaves);
     }
     return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
   }

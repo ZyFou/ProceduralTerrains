@@ -7,3 +7,4 @@ Original prompt: In square mode the add-tile overlay must be square; circle mode
 - Live verification: World contains Tiles, circle mode crops the square mesh cleanly and has no add preview, square mode shows a square add-tile preview.
 - Removed an ANGLE shader warning by making assemblyFalloff assign both branches before mixing.
 - Final production build passes and a clean browser startup reports no console warnings or errors.
+- Follow-up requested: complete missing circle cells when switching from Square, support circular ring expansion, and make Mountains add edge noise instead of behaving like Island.
