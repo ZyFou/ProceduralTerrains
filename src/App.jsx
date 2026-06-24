@@ -60,6 +60,7 @@ export default function App() {
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
   const [tileDebug, setTileDebug] = useState({ view: 'off', showLegend: true, opacity: 1, showPreview: true });
+  const [tiles, setTiles] = useState([{ cx: 0, cz: 0 }]);
   const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null });
 
   const [worldMode, setWorldMode] = useState('studio');
@@ -181,6 +182,7 @@ export default function App() {
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
           onTileDebug: (t) => { setTileDebug(t); scheduleRecordRef.current?.(); },
+          onTiles: (t) => { setTiles(t); scheduleRecordRef.current?.(); },
           onImportedMaps: setImportedMaps,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
@@ -833,6 +835,8 @@ export default function App() {
     onExport, onExportScreenshot, onExportHeightmap,
     onNoiseStack: (stack) => engine().setNoiseStack(stack),
     tileDebug, importedMaps,
+    tiles, maxTiles: 9,
+    onRemoveTile: (cx, cz) => engine().removeTile(cx, cz),
     onTileDebug: (next) => engine().setTileDebug(next),
     onImportTileMap: (type, file) => engine().importTileMap(type, file),
     onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),

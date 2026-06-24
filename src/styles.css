@@ -633,6 +633,12 @@ body {
 }
 .subsection-label:first-child { margin-top: 4px; }
 
+/* Tiles panel */
+.settings-hint { font-size: 11px; line-height: 1.45; color: var(--text-dim, #9aa0a6); margin: 4px 0 8px; }
+.kv-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 0; }
+.tile-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.tile-chip-grid .action-btn { margin-top: 0; flex: 0 0 auto; }
+
 .section-hint {
   font-size: 11px;
   color: var(--text-dim);

@@ -18,6 +18,7 @@ export class EditorControls {
 
     this.target = new THREE.Vector3(0, 0, 0);
     this.goalTarget = new THREE.Vector3(0, 0, 0);
+    this.panCenter = new THREE.Vector3(0, 0, 0);   // assembly center for pan clamp
 
     // spherical state: radius, phi (from +Y), theta (azimuth)
     this.radius = 2850; this.goalRadius = 2850;
@@ -71,10 +72,12 @@ export class EditorControls {
     this.onFirstInteract = null;
   }
 
-  setBoardSize(boardSize) {
+  setBoardSize(boardSize, center = null) {
     this.panLimit = boardSize * 0.55;
     this.minRadius = Math.max(120, boardSize * 0.06);
     this.maxRadius = boardSize * 3.2;
+    // pan clamp is centred on the assembly (origin for a single tile)
+    if (center) this.panCenter.set(center.x, 0, center.z);
     this.goalRadius = Math.min(Math.max(this.goalRadius, this.minRadius), this.maxRadius);
   }
 
@@ -247,8 +250,8 @@ export class EditorControls {
 
   _clampTarget() {
     const lim = this.panLimit;
-    this.goalTarget.x = Math.min(Math.max(this.goalTarget.x, -lim), lim);
-    this.goalTarget.z = Math.min(Math.max(this.goalTarget.z, -lim), lim);
+    this.goalTarget.x = Math.min(Math.max(this.goalTarget.x, this.panCenter.x - lim), this.panCenter.x + lim);
+    this.goalTarget.z = Math.min(Math.max(this.goalTarget.z, this.panCenter.z - lim), this.panCenter.z + lim);
     this.goalTarget.y = 0;
   }
 

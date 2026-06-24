@@ -5,6 +5,7 @@ import {
   Download,
   Droplets,
   Globe,
+  Grid2x2,
   Layers,
   LayoutGrid,
   Mountain,
@@ -23,6 +24,7 @@ function panelIcon(Icon) {
 
 export const PANEL_ICONS = {
   terrain: panelIcon(Mountain),
+  tiles: panelIcon(Grid2x2),
   noiseLayers: panelIcon(Layers),
   world: panelIcon(LayoutGrid),
   planet: panelIcon(Globe),

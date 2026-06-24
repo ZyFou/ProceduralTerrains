@@ -57,10 +57,91 @@ uniform float uImportHeightStrength;
 uniform float uImportHeightOffset;
 uniform float uImportBiomeBlend;
 
+// Studio height bake region (world XZ). Single cell: origin=(-half,-half), span=boardSize.
+uniform vec2 uBakeOrigin;
+uniform vec2 uBakeSpan;
+
 vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
 float importedMapValue(sampler2D tex, vec2 uv) {
   vec3 c = texture2D(tex, clamp(uv, 0.0, 1.0)).rgb;
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// --- Tile mode (multi-cell studio assembly) ---------------------------------
+// When uUseTiles > 0.5 the studio board is a grid of square cells. A small
+// occupancy texture (1 = occupied) drives an edge falloff that fades ONLY at
+// the assembly's outer rim, so neighbouring cells meet seamlessly. A single
+// tile is handled by the legacy origin-centred path (uUseTiles stays 0), which
+// keeps that case byte-identical to before.
+uniform sampler2D uTileOccupancy;   // R8, uTileGridDim cells, 1 = occupied
+uniform vec2  uTileGridOrigin;      // world XZ of the min-cell corner (cell 0,0)
+uniform vec2  uTileGridDim;         // grid size in cells (cols, rows)
+uniform float uTileCellSize;        // one cell's world size (== single board)
+uniform float uUseTiles;            // 0 = legacy single board, 1 = tile assembly
+
+float tileOccAt(vec2 cell) {
+  if (cell.x < 0.0 || cell.y < 0.0 ||
+      cell.x > uTileGridDim.x - 0.5 || cell.y > uTileGridDim.y - 0.5) return 0.0;
+  vec2 uv = (cell + 0.5) / uTileGridDim;
+  return step(0.5, texture2D(uTileOccupancy, uv).r);
+}
+
+// Per-cell, occupancy-aware island falloff. Each side fades toward its edge
+// only when the neighbour across that edge is empty; a present neighbour keeps
+// the factor at 1 across the shared edge so both cells meet at full height.
+float tileFalloff(vec2 xz) {
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  vec2 cell = floor(rel);
+  vec2 lc = (rel - cell) * 2.0 - 1.0;        // [-1,1] within the cell
+  float band = max(uFalloff, 1e-3);
+  float fXp = mix(smoothstep(0.0, band, 1.0 - lc.x), 1.0, tileOccAt(cell + vec2( 1.0, 0.0)));
+  float fXn = mix(smoothstep(0.0, band, 1.0 + lc.x), 1.0, tileOccAt(cell + vec2(-1.0, 0.0)));
+  float fZp = mix(smoothstep(0.0, band, 1.0 - lc.y), 1.0, tileOccAt(cell + vec2(0.0,  1.0)));
+  float fZn = mix(smoothstep(0.0, band, 1.0 + lc.y), 1.0, tileOccAt(cell + vec2(0.0, -1.0)));
+  return fXp * fXn * fZp * fZn;
+}
+
+// Vertex helper: classify a perimeter (skirt) position. A cell boundary where
+// exactly one side is occupied is an OUTER edge -> becomes the diorama wall;
+// a boundary between two occupied cells is an interior seam (no wall). Robust
+// to the float ambiguity of points sitting exactly on a boundary by testing
+// the occupancy of the two cells either side of the nearest grid line.
+// Returns (onOuter, outDir.x, outDir.z) with outDir pointing toward empty space.
+vec3 tileWall(vec2 xz) {
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  float e = 2.0 / max(uTileCellSize, 1.0);   // ~1 world unit, in cell units
+  float fx = floor(rel.x);
+  float fz = floor(rel.y);
+  // vertical boundary (constant X) at the nearest grid line
+  float nx = floor(rel.x + 0.5);
+  float onXB = step(abs(rel.x - nx), e);
+  float occXL = tileOccAt(vec2(nx - 1.0, fz));
+  float occXR = tileOccAt(vec2(nx, fz));
+  float wallX = onXB * abs(occXL - occXR);
+  // horizontal boundary (constant Z)
+  float nz = floor(rel.y + 0.5);
+  float onZB = step(abs(rel.y - nz), e);
+  float occZD = tileOccAt(vec2(fx, nz - 1.0));
+  float occZU = tileOccAt(vec2(fx, nz));
+  float wallZ = onZB * abs(occZD - occZU);
+  return vec3(wallX + wallZ, (occXL - occXR) * wallX, (occZD - occZU) * wallZ);
+}
+
+// 1 on a cell perimeter between two occupied cells (no wall).
+float tileInteriorSeam(vec2 xz) {
+  vec3 tw = tileWall(xz);
+  if (tw.x > 0.5) return 0.0;
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  vec2 lc = (rel - floor(rel)) * 2.0 - 1.0;
+  float band = 2.0 / max(uTileCellSize, 1.0);
+  return step(1.0 - band, max(abs(lc.x), abs(lc.y)));
+}
+
+// 1 when the world XZ lies inside an occupied tile cell.
+float tileOccupiedAt(vec2 xz) {
+  if (uUseTiles < 0.5) return 1.0;
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  return tileOccAt(floor(rel));
 }
 `;
 
@@ -68,12 +149,12 @@ float importedMapValue(sampler2D tex, vec2 uv) {
 // shaders include this so they can replace the per-pixel ~46-octave height
 // field with a single texture2D fetch when the engine's bake is active. Gated
 // to non-infinite materials (the infinite world is unbounded — no fixed bake).
-// The board spans world XZ in [-uBoardHalf, uBoardHalf]; map XZ → UV to match.
+// Studio bake covers uBakeOrigin … uBakeOrigin+uBakeSpan in world XZ.
 export const TERRAIN_HEIGHT_TEX_GLSL = /* glsl */ `
 #ifndef INFINITE_MODE
 uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
-vec2 bakedUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + 0.5; }
+vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
   return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
 }
@@ -246,11 +327,16 @@ float shapeHeight(vec2 xz, Climate c) {
   }
 #endif
 #ifndef INFINITE_MODE
-  // island/continent falloff toward board edges (square+radial blend)
-  vec2 e = abs(xz) / uBoardHalf;
-  float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
-  float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
-  h *= t * t * (3.0 - 2.0 * t);
+  if (uUseTiles > 0.5) {
+    // multi-cell assembly: fade only at the outer rim (seamless interior seams)
+    h *= tileFalloff(xz);
+  } else {
+    // island/continent falloff toward board edges (square+radial blend)
+    vec2 e = abs(xz) / uBoardHalf;
+    float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
+    float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
+    h *= t * t * (3.0 - 2.0 * t);
+  }
 #endif
   float finalH = clamp(h, 0.0, 1.35) * uHeightScale;
 #ifndef INFINITE_MODE

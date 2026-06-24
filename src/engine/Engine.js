@@ -32,6 +32,7 @@ import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { PlanetExporter } from './terrain/PlanetExporter.js';
 import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
@@ -147,6 +148,21 @@ export class Engine {
     this.infiniteWorld = null;
     this.fpsControls = null;
 
+    // Tile mode: the studio board can grow into a grid of square cells. Each
+    // cell is one cellSize (== the single-board size) patch of the SAME
+    // continuous noise field, so adjacent cells meet seamlessly; only the
+    // assembly's outer rim keeps the diorama edge falloff. tiles always holds
+    // origin (0,0). A small R8 occupancy texture drives the shader falloff/wall.
+    this.tiles = [{ cx: 0, cz: 0 }];
+    this._tileOccTex = null;
+    // hover-to-add interaction (studio only)
+    this._tileGhost = null;          // translucent preview mesh for the candidate cell
+    this._tileGhostCell = null;      // {cx,cz} currently previewed, or null
+    this._tileRay = new THREE.Raycaster();
+    this._tileGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this._tilePointer = new THREE.Vector2();
+    this._tileDownAt = null;         // {x,y} pointer-down screen pos for click detection
+
     // Planet mode systems
     this.planetWorld = null;
     this.planetMaterial = null;
@@ -163,6 +179,7 @@ export class Engine {
     // field in the studio terrain + water shaders with a single texture fetch.
     this.terrainHeightBaker = null;
     this._bakedStudioGen = -1;       // terrain generation the studio texture was baked at
+    this._bakedStudioLayout = '';    // tile layout the studio texture was baked at
     this._paintWasEnabled = false;   // detect paint→idle transition to refresh the bake
     this.planetFaceGrid = 8;
     this._compiledKeys = new Set();   // mode:octave shader sets already compiled
@@ -207,6 +224,7 @@ export class Engine {
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
+    this._initTileInteraction();
     this._initPaintMode();
     this._initProps();
     this._bindMinimapSources();
@@ -313,6 +331,13 @@ export class Engine {
     this.plinth.renderOrder = 5;
     this.scene.add(this.plinth);
 
+    // Ghost preview for the hover-to-add tile feature: a translucent accent
+    // slab + outline shown over an empty cell adjacent to the assembly. Hidden
+    // until the pointer hovers a valid candidate cell in studio mode.
+    this._tileGhost = this._buildTileGhost();
+    this._tileGhost.visible = false;
+    this.scene.add(this._tileGhost);
+
     // lights only affect the plinth (terrain/water have custom shaders)
     this.sunLight = new THREE.DirectionalLight(0xfff2dd, 1.6);
     this.scene.add(this.sunLight);
@@ -393,6 +418,270 @@ export class Engine {
   // ------------------------------------------------------------ parameters
 
   get boardSize() { return this.params.chunkCount * this.params.chunkSize; }
+
+  // ------------------------------------------------------------------- tiles
+  // One cell == the classic single board. The assembly is the union of cells.
+  get cellSize() { return this.params.chunkCount * this.params.chunkSize; }
+
+  // Integer bounds over occupied cells, plus span in cells.
+  _tileBounds() {
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (const t of this.tiles) {
+      if (t.cx < minX) minX = t.cx;
+      if (t.cz < minZ) minZ = t.cz;
+      if (t.cx > maxX) maxX = t.cx;
+      if (t.cz > maxZ) maxZ = t.cz;
+    }
+    if (!this.tiles.length) { minX = minZ = maxX = maxZ = 0; }
+    return { minX, minZ, maxX, maxZ, cols: maxX - minX + 1, rows: maxZ - minZ + 1 };
+  }
+
+  // World-space extent of the whole assembly (single cell when one tile).
+  _unionWidth() { return this._tileBounds().cols * this.cellSize; }
+  _unionDepth() { return this._tileBounds().rows * this.cellSize; }
+  // World center of the union bounding box (origin for a single centered cell).
+  _unionCenter() {
+    const b = this._tileBounds();
+    const cs = this.cellSize;
+    return {
+      x: (b.minX + b.maxX) * 0.5 * cs,
+      z: (b.minZ + b.maxZ) * 0.5 * cs,
+    };
+  }
+  // World XZ of cell (cx,cz) center. Cell (0,0) is centered at the origin so a
+  // single tile is identical to the classic board.
+  _cellWorldCenter(cx, cz) { return { x: cx * this.cellSize, z: cz * this.cellSize }; }
+
+  // (Re)build the R8 occupancy DataTexture mirroring this.tiles, indexed over
+  // the union bounding box. Read by the terrain/water shaders (tileFalloff /
+  // tileWall) to fade only the outer rim and wall only outward-facing edges.
+  _buildOccupancyTexture() {
+    const b = this._tileBounds();
+    const w = Math.max(1, b.cols);
+    const h = Math.max(1, b.rows);
+    const data = new Uint8Array(w * h);
+    for (const t of this.tiles) {
+      const ix = t.cx - b.minX;
+      const iz = t.cz - b.minZ;
+      data[iz * w + ix] = 255;
+    }
+    if (this._tileOccTex) this._tileOccTex.dispose();
+    const tex = new THREE.DataTexture(data, w, h, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    // single-channel rows of arbitrary (non-×4) width need byte alignment
+    tex.unpackAlignment = 1;
+    tex.needsUpdate = true;
+    this._tileOccTex = tex;
+    return { tex, b, w, h };
+  }
+
+  // Push tile-mode uniforms. uUseTiles stays 0 for a single tile so that case
+  // takes the byte-identical legacy falloff/wall path.
+  _applyTileUniforms() {
+    const u = this.uniforms;
+    const { b, w, h } = this._buildOccupancyTexture();
+    const cs = this.cellSize;
+    u.uTileOccupancy.value = this._tileOccTex;
+    // world XZ of the min-cell's corner. Cell (cx) center is cx*cs, so its
+    // min corner is cx*cs - cs/2.
+    u.uTileGridOrigin.value.set(b.minX * cs - cs * 0.5, b.minZ * cs - cs * 0.5);
+    u.uTileGridDim.value.set(w, h);
+    u.uTileCellSize.value = cs;
+    u.uUseTiles.value = this.tiles.length > 1 ? 1 : 0;
+    // studio height bake spans the whole tile union
+    u.uBakeOrigin.value.set(b.minX * cs - cs * 0.5, b.minZ * cs - cs * 0.5);
+    u.uBakeSpan.value.set(this._unionWidth(), this._unionDepth());
+  }
+
+  _studioBakeLayoutKey() {
+    return this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
+  }
+
+  get maxTiles() { return 9; }
+  _hasTile(cx, cz) { return this.tiles.some((t) => t.cx === cx && t.cz === cz); }
+
+  // Validate a loaded/restored tiles array: integer cells, deduped, origin
+  // guaranteed, capped. Falls back to a single origin tile for old/invalid data.
+  _sanitizeTiles(raw) {
+    const out = [];
+    const seen = new Set();
+    if (Array.isArray(raw)) {
+      for (const t of raw) {
+        const cx = Math.trunc(Number(t?.cx));
+        const cz = Math.trunc(Number(t?.cz));
+        if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+        const key = `${cx},${cz}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ cx, cz });
+        if (out.length >= this.maxTiles) break;
+      }
+    }
+    if (!out.some((t) => t.cx === 0 && t.cz === 0)) out.unshift({ cx: 0, cz: 0 });
+    return out.length ? out : [{ cx: 0, cz: 0 }];
+  }
+
+  // A cell can be added if empty, under the cap, and 4-adjacent to an occupied
+  // cell (so the assembly stays connected). Used by the hover UI + addTile.
+  canAddTileAt(cx, cz) {
+    if (this.worldMode !== 'studio') return false;
+    if (this.tiles.length >= this.maxTiles) return false;
+    if (this._hasTile(cx, cz)) return false;
+    return this._hasTile(cx - 1, cz) || this._hasTile(cx + 1, cz)
+        || this._hasTile(cx, cz - 1) || this._hasTile(cx, cz + 1);
+  }
+
+  // List of empty cells adjacent to the assembly (candidate add positions).
+  candidateTileCells() {
+    const seen = new Set();
+    const out = [];
+    const consider = (cx, cz) => {
+      const key = `${cx},${cz}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (this.canAddTileAt(cx, cz)) out.push({ cx, cz });
+    };
+    for (const t of this.tiles) {
+      consider(t.cx - 1, t.cz); consider(t.cx + 1, t.cz);
+      consider(t.cx, t.cz - 1); consider(t.cx, t.cz + 1);
+    }
+    return out;
+  }
+
+  addTile(cx, cz) {
+    if (!this.canAddTileAt(cx, cz)) return false;
+    this.tiles.push({ cx, cz });
+    this._rebuildTiles();
+    return true;
+  }
+
+  removeTile(cx, cz) {
+    if (this.tiles.length <= 1) return false;
+    const i = this.tiles.findIndex((t) => t.cx === cx && t.cz === cz);
+    if (i < 0) return false;
+    this.tiles.splice(i, 1);
+    this._rebuildTiles();
+    return true;
+  }
+
+  // Rebuild board geometry + plinth/water/camera for the current tile set, then
+  // re-center the camera on the assembly and mirror the layout to the UI.
+  _rebuildTiles() {
+    this._bakedStudioGen = -1;   // union bounds changed — re-bake height texture
+    this.applyAll({ force: true });
+    const c = this._unionCenter();
+    this.controls.goalTarget.set(c.x, 0, c.z);
+    this._updateTileGhost();
+    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
+    this._needsRender = true;
+  }
+
+  // ---------------------------------------------------- hover-to-add tile UI
+
+  _buildTileGhost() {
+    const group = new THREE.Group();
+    group.name = 'tile-ghost';
+    group.renderOrder = 20;
+    const plane = new THREE.PlaneGeometry(1, 1);
+    plane.rotateX(-Math.PI / 2);
+    const fill = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({
+      color: 0x2563eb, transparent: true, opacity: 0.16,
+      depthWrite: false, side: THREE.DoubleSide,
+    }));
+    fill.name = 'tile-ghost-fill';
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(plane),
+      new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.9 })
+    );
+    edges.name = 'tile-ghost-edge';
+    group.add(fill, edges);
+    return group;
+  }
+
+  _tileInteractionActive() {
+    return this.worldMode === 'studio' && !this.playerMode && !this.paintState?.enabled;
+  }
+
+  // Position/show the ghost for the current candidate cell, or hide it.
+  _updateTileGhost() {
+    const g = this._tileGhost;
+    if (!g) return;
+    const cell = this._tileGhostCell;
+    if (!this._tileInteractionActive() || !cell) {
+      if (g.visible) { g.visible = false; this._needsRender = true; }
+      return;
+    }
+    const cs = this.cellSize;
+    const c = this._cellWorldCenter(cell.cx, cell.cz);
+    const y = (this.params.seaLevel > 0.5 ? this.params.seaLevel : 0) + Math.max(2, cs * 0.002);
+    g.position.set(c.x, y, c.z);
+    g.scale.set(cs, 1, cs);
+    g.visible = true;
+    this._needsRender = true;
+  }
+
+  _pointerToCell(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    this._tilePointer.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this._tileRay.setFromCamera(this._tilePointer, this.camera);
+    const hit = new THREE.Vector3();
+    if (!this._tileRay.ray.intersectPlane(this._tileGroundPlane, hit)) return null;
+    const cs = this.cellSize;
+    return { cx: Math.round(hit.x / cs), cz: Math.round(hit.z / cs) };
+  }
+
+  _initTileInteraction() {
+    const c = this.canvas;
+    this._onTilePointerMove = (e) => this._tilePointerMove(e);
+    this._onTilePointerDown = (e) => this._tilePointerDown(e);
+    this._onTilePointerUp = (e) => this._tilePointerUp(e);
+    c.addEventListener('pointermove', this._onTilePointerMove);
+    c.addEventListener('pointerdown', this._onTilePointerDown);
+    c.addEventListener('pointerup', this._onTilePointerUp);
+  }
+
+  _tilePointerMove(e) {
+    if (e.pointerType === 'touch') return;          // touch pans; add via panel
+    if (!this._tileInteractionActive() || e.buttons !== 0) {
+      // hide while dragging (camera pan/orbit) or when inactive
+      if (this._tileGhostCell) { this._tileGhostCell = null; this._updateTileGhost(); }
+      return;
+    }
+    const cell = this._pointerToCell(e.clientX, e.clientY);
+    const next = (cell && this.canAddTileAt(cell.cx, cell.cz)) ? cell : null;
+    const cur = this._tileGhostCell;
+    if ((next?.cx) !== (cur?.cx) || (next?.cz) !== (cur?.cz)) {
+      this._tileGhostCell = next;
+      this._updateTileGhost();
+    }
+  }
+
+  _tilePointerDown(e) {
+    if (e.pointerType === 'touch' || e.button !== 0) return;
+    if (!this._tileInteractionActive()) return;
+    this._tileDownAt = { x: e.clientX, y: e.clientY };
+  }
+
+  _tilePointerUp(e) {
+    if (e.pointerType === 'touch' || e.button !== 0) return;
+    const down = this._tileDownAt;
+    this._tileDownAt = null;
+    if (!down || !this._tileInteractionActive()) return;
+    // a click (negligible drag) over the ghost adds the tile; a drag pans
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+    const cell = this._tileGhostCell;
+    if (cell && this.canAddTileAt(cell.cx, cell.cz)) {
+      this._tileGhostCell = null;
+      this.addTile(cell.cx, cell.cz);
+    }
+  }
 
   setTileDebug(next = {}) {
     this.tileDebug = { ...this.tileDebug, ...next };
@@ -671,7 +960,10 @@ export class Engine {
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
+    this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
+    this._tileGhostCell = null;
     this.applyAll({ force: true });
+    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
 
     const defaultStack = migrateStack(undefined);
     this.setNoiseStack(defaultStack);
@@ -956,19 +1248,27 @@ export class Engine {
         maxHeight,
         skirtDepth: this._skirtDepth(),
         lodSegments: resolveLodSegments(this.perf),
+        cells: this.tiles,
       });
       this.appliedChunkCount = p.chunkCount;
       this.appliedChunkSize = p.chunkSize;
 
-      const size = this.boardSize;
+      // The board, plinth and water span the whole tile assembly (= one cell
+      // when there is a single tile, keeping the classic centred diorama).
+      const wall = this._wallThickness();
+      const uw = this._unionWidth();
+      const ud = this._unionDepth();
+      const c = this._unionCenter();
       // extend the water out to the flared plinth wall so it meets the dark box
       // with no gap (otherwise you see under the map through the strip between
       // the board edge and the outset wall).
-      this.water.scale.set(size + 2 * this._wallThickness(), 1, size + 2 * this._wallThickness());
+      this.water.scale.set(uw + 2 * wall, 1, ud + 2 * wall);
+      this.water.position.x = c.x;
+      this.water.position.z = c.z;
       this._updatePlinth();
-      this.controls.setBoardSize(size);
-      this.minimap.setBoard(size, maxHeight);
-      this.cb.onBoard(size);
+      this.controls.setBoardSize(Math.max(uw, ud), c);
+      this.minimap.setBoard(Math.max(uw, ud), maxHeight);
+      this.cb.onBoard(this.boardSize);
 
       // build() starts every chunk at the coarse base LOD; resolve per-chunk
       // LOD + culling NOW so the first rendered frame already shows the finished
@@ -998,7 +1298,15 @@ export class Engine {
     const skirtDepth = this._skirtDepth();
     const sea = this.params.seaLevel;
     const topY = sea > 0.5 ? sea : 0;
-    const geo = buildBoardPlinthGeometry(size, skirtDepth, topY, this._wallThickness());
+    const wall = this._wallThickness();
+    // One diorama box per occupied cell. Shared interior walls are buried
+    // between adjacent cells (DoubleSide, invisible); the outer walls cap the
+    // assembly rim. Works for any (even L-shaped) layout with no edge tracking.
+    const boxes = this.tiles.map((t) =>
+      buildBoardPlinthGeometry(size, skirtDepth, topY, wall, this._cellWorldCenter(t.cx, t.cz))
+    );
+    const geo = boxes.length > 1 ? mergeGeometries(boxes) : boxes[0];
+    if (boxes.length > 1) for (const b of boxes) b.dispose();
     this.plinth.geometry.dispose();
     this.plinth.geometry = geo;
   }
@@ -1025,6 +1333,7 @@ export class Engine {
     u.uFalloff.value = p.falloff;
     u.uBoardHalf.value = size / 2;
     u.uChunkSize.value = p.chunkSize;
+    this._applyTileUniforms();
     u.uMoistScale.value = p.moistScale;
     u.uMoistBias.value = p.moistBias;
     u.uBiomeScale.value = p.biomeScale;
@@ -1626,6 +1935,8 @@ export class Engine {
     this.board.group.visible = false;
     this.plinth.visible = false;
     this.water.visible = false;
+    this._tileGhostCell = null;
+    if (this._tileGhost) this._tileGhost.visible = false;
 
     // Compute fixed frequency matching the current tile
     const p = this.params;
@@ -1889,11 +2200,16 @@ export class Engine {
       });
       this._bakedStudioGen = -1;
     }
-    if (this._bakedStudioGen === this._terrainGen) return;
-    this.terrainHeightBaker.bake(Math.round(this.params.octaves), this._stackGLSL);
+    const layoutKey = this._studioBakeLayoutKey();
+    if (this._bakedStudioGen === this._terrainGen && this._bakedStudioLayout === layoutKey) return;
+    const b = this._tileBounds();
+    this.terrainHeightBaker.bake(
+      Math.round(this.params.octaves), this._stackGLSL, b.cols, b.rows
+    );
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
+    this._bakedStudioLayout = layoutKey;
   }
 
   _enterPlanetMode() {
@@ -1907,6 +2223,8 @@ export class Engine {
     this.board.group.visible = false;
     this.plinth.visible = false;
     this.water.visible = false;
+    this._tileGhostCell = null;
+    if (this._tileGhost) this._tileGhost.visible = false;
     this.controls.enabled = false;
 
     // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
@@ -2381,8 +2699,13 @@ export class Engine {
       version: 1,
       savedAt: new Date().toISOString(),
       params: this.params,
-      paint: this.paintMode?.serialize(),
+      tiles: this.tiles.map((t) => ({ ...t })),
     };
+    // Only embed paint pixel data when something was actually painted —
+    // serialize() returns null for an untouched canvas, which would otherwise
+    // bloat the file with ~3M neutral values.
+    const paint = this.paintMode?.serialize();
+    if (paint) data.paint = paint;
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     this._download(URL.createObjectURL(blob), `terrain-seed-${this.params.seed}.json`);
     this.cb.onToast('Seed saved as JSON');
@@ -2412,8 +2735,13 @@ export class Engine {
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
     this._syncPlanetStyleToParams();
+    // restore the tile assembly (old saves with no tiles -> single origin tile)
+    this.tiles = this._sanitizeTiles(json?.tiles);
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
+    const c = this._unionCenter();
+    this.controls.goalTarget.set(c.x, 0, c.z);
+    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
     if (json?.paint) this.paintMode?.load(json.paint);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
@@ -2440,6 +2768,7 @@ export class Engine {
       cullingEnabled: this.board?.cullingEnabled !== false,
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
+      tiles: this.tiles.map((t) => ({ ...t })),
     };
   }
 
@@ -2477,9 +2806,15 @@ export class Engine {
     if (snap.debug) this._debug = { ...this._debug, ...snap.debug };
     if (snap.tileDebug) this.tileDebug = { ...this.tileDebug, ...snap.tileDebug };
 
+    // tile assembly (so the board rebuild below lays out the right cells)
+    this.tiles = this._sanitizeTiles(snap.tiles);
+
     // push params → uniforms and rebuild board geometry (chunk layout may differ)
     this.cb.onParams(this._paramsSnapshot());
     this.applyAll({ force: true });
+    const uc = this._unionCenter();
+    this.controls.goalTarget.set(uc.x, 0, uc.z);
+    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
     this._applyPerformance();
     this._notifyPerf();
 
@@ -2724,7 +3059,8 @@ export class Engine {
         await PlanetExporter.export(this.renderer, this.params, this.uniforms, options, onMsg);
       } else {
         await TerrainExporter.export(
-          this.renderer, this.params, this.uniforms, this.boardSize, options, onMsg, this._stackGLSL
+          this.renderer, this.params, this.uniforms, this.boardSize,
+          { ...options, tiles: this.tiles.map((t) => ({ ...t })) }, onMsg, this._stackGLSL
         );
       }
     } catch (e) {
@@ -3076,6 +3412,17 @@ export class Engine {
     if (this.waterMaterial) this.waterMaterial.dispose();
     if (this.controls) { this.controls.dispose(); this.controls = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
+    // tile hover-to-add listeners + resources
+    if (this._onTilePointerMove) {
+      this.canvas.removeEventListener('pointermove', this._onTilePointerMove);
+      this.canvas.removeEventListener('pointerdown', this._onTilePointerDown);
+      this.canvas.removeEventListener('pointerup', this._onTilePointerUp);
+    }
+    if (this._tileGhost) {
+      this._tileGhost.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+      this._tileGhost = null;
+    }
+    if (this._tileOccTex) { this._tileOccTex.dispose(); this._tileOccTex = null; }
     if (this.renderer) {
       loseRendererContext(this.renderer);
       this.renderer.dispose();

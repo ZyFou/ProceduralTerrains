@@ -129,6 +129,11 @@ float slopeFromCenter(vec2 xz, float centerH) {
 
 void main() {
   vec2 xz = vWorldPos.xz;
+
+#ifndef INFINITE_MODE
+  if (tileOccupiedAt(xz) < 0.5) discard;
+#endif
+
   float floorH = terrainHeightAt(xz);
   float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;

@@ -26,6 +26,7 @@ import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 // ---- toolbar / panel metadata (single source for icons + labels) ----
 export const PANEL_META = {
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
+  tiles: { label: 'Tiles', title: 'Tiles', desc: 'Grow the board into seamless adjacent tiles.', icon: PANEL_ICONS.tiles, modes: ['studio'] },
   noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },
   world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: PANEL_ICONS.world },
   planet: {
@@ -50,7 +51,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'tiles', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -595,10 +596,12 @@ function ExportPanel({ ctx }) {
     exportWater: false, exportPreset: true,
     exportWaterMask: false, exportDepthMap: false, exportShorelineMask: false, exportFoamMask: false,
     excludeWaterFromExport: false, exportWaterMetadata: false,
+    exportTileMode: 'merged',
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setOpt((p) => ({ ...p, [k]: v }));
   const showTex = opt.bakeColor || opt.bakeNormal || opt.exportHeightmap;
+  const multiTile = ctx.worldMode === 'studio' && (ctx.tiles?.length ?? 1) > 1;
 
   const doExport = async () => {
     setBusy(true);
@@ -618,6 +621,25 @@ function ExportPanel({ ctx }) {
         <button type="button" className="action-btn" onClick={ctx.onExportScreenshot} disabled={busy}>Screenshot</button>
         <button type="button" className="action-btn" onClick={ctx.onExportHeightmap} disabled={busy}>Heightmap</button>
       </div>
+
+      {multiTile && (
+        <>
+          <div className="subsection-label">Tile Assembly</div>
+          <SelectRow
+            label="Tile Export"
+            value={opt.exportTileMode}
+            options={[
+              { value: 'merged', label: 'One terrain (merged)' },
+              { value: 'separate', label: 'Separate tiles' },
+            ]}
+            onChange={(v) => set('exportTileMode', v)}
+          />
+          <div className="settings-hint">
+            Merged = one continuous landscape. Separate = each tile as its own
+            named object with its own walls.
+          </div>
+        </>
+      )}
 
       <div className="subsection-label">Format &amp; Resolution</div>
       <SelectRow label="Format" value={opt.format} options={FORMAT_OPTIONS} onChange={(v) => set('format', v)} />
@@ -666,6 +688,44 @@ function ExportPanel({ ctx }) {
   );
 }
 
+// --------------------------------------------------------------- tiles panel
+function TilesPanel({ ctx }) {
+  const tiles = ctx.tiles ?? [{ cx: 0, cz: 0 }];
+  const max = ctx.maxTiles ?? 9;
+  const atCap = tiles.length >= max;
+  return (
+    <SidePanel title="Tiles" description="Grow the board into seamless adjacent tiles."
+      onClose={ctx.onClose}>
+      <div className="subsection-label">Assembly</div>
+      <div className="settings-hint" style={{ marginBottom: 8 }}>
+        Hover near a board edge and click the highlighted square to add a tile that
+        continues the terrain. Tiles share the same noise field and export together.
+      </div>
+      <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {max}</span></div>
+      {atCap && <div className="settings-hint">Maximum tiles reached.</div>}
+
+      {tiles.length > 1 && (
+        <>
+          <div className="subsection-label">Remove a tile</div>
+          <div className="tile-chip-grid">
+            {tiles.map((t) => (
+              <button
+                key={`${t.cx},${t.cz}`}
+                type="button"
+                className="action-btn"
+                title={`Remove tile (${t.cx}, ${t.cz})`}
+                onClick={() => ctx.onRemoveTile?.(t.cx, t.cz)}
+              >
+                {t.cx === 0 && t.cz === 0 ? 'origin' : `${t.cx}, ${t.cz}`} ✕
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </SidePanel>
+  );
+}
+
 function NoiseLayersPanelWrapper({ ctx }) {
   return (
     <NoiseLayersPanel ctx={ctx}>
@@ -675,7 +735,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
-  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, tiles: TilesPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

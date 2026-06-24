@@ -256,7 +256,26 @@ export class PaintLayerManager {
     this.revision++;
   }
 
+  // True when nothing has been painted: the height layer is uniformly neutral
+  // (with opaque alpha) and the biome/props layers are fully zero. Lets callers
+  // skip serializing the (multi-megabyte) pixel arrays for an untouched canvas.
+  isEmpty() {
+    const h = this.heightData;
+    for (let i = 0; i < h.length; i += 4) {
+      if (h[i] !== NEUTRAL_HEIGHT || h[i + 1] !== NEUTRAL_HEIGHT
+        || h[i + 2] !== NEUTRAL_HEIGHT || h[i + 3] !== 255) return false;
+    }
+    const b = this.biomeData;
+    for (let i = 0; i < b.length; i++) if (b[i] !== 0) return false;
+    const p = this.propsData;
+    for (let i = 0; i < p.length; i++) if (p[i] !== 0) return false;
+    return true;
+  }
+
+  // Returns null for an untouched canvas so save files don't carry ~3M numbers
+  // of neutral pixel data when no painting was done.
   serialize() {
+    if (this.isEmpty()) return null;
     return {
       version: 1,
       resolution: this.resolution,

@@ -45,18 +45,30 @@ void main() {
   float skirt = aSkirt;
   float wall = 0.0;   // outer-perimeter skirt -> plinth wall
   #ifndef INFINITE_MODE
-    float bx = abs(wp.x);
-    float bz = abs(wp.z);
-    float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
-    // outer-edge skirt verts become the plinth wall; interior skirts unchanged
-    wall = skirt * step(0.5, onOuter);
-    skirt *= 1.0 - step(0.5, onOuter);
-    // flare the wall base outward (away from the board) so it sits OUTSIDE the
-    // water plane edge — no z-fighting with the water, and it leans over any
-    // terrain edge that dips below the waterline so the side never shows through.
-    vec2 outDir = vec2(step(uBoardHalf - 1.0, bx) * sign(wp.x),
-                       step(uBoardHalf - 1.0, bz) * sign(wp.z));
-    wp.xz += outDir * (wall * uWallThickness);
+    if (uUseTiles > 0.5) {
+      // multi-cell assembly: only skirts on a cell edge facing empty space
+      // become the plinth wall; interior seams between two tiles stay terrain.
+      vec3 tw = tileWall(wp.xz);
+      float onOuter = step(0.5, tw.x);
+      float interiorSeam = tileInteriorSeam(wp.xz);
+      skirt = aSkirt * (1.0 - interiorSeam);
+      wall = aSkirt * onOuter;
+      skirt *= 1.0 - onOuter;
+      wp.xz += tw.yz * (wall * uWallThickness);
+    } else {
+      float bx = abs(wp.x);
+      float bz = abs(wp.z);
+      float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
+      // outer-edge skirt verts become the plinth wall; interior skirts unchanged
+      wall = skirt * step(0.5, onOuter);
+      skirt *= 1.0 - step(0.5, onOuter);
+      // flare the wall base outward (away from the board) so it sits OUTSIDE the
+      // water plane edge — no z-fighting with the water, and it leans over any
+      // terrain edge that dips below the waterline so the side never shows through.
+      vec2 outDir = vec2(step(uBoardHalf - 1.0, bx) * sign(wp.x),
+                         step(uBoardHalf - 1.0, bz) * sign(wp.z));
+      wp.xz += outDir * (wall * uWallThickness);
+    }
   #endif
 
   // interior skirt drops by uSkirtDepth; the perimeter wall drops all the way to
@@ -142,7 +154,7 @@ void main() {
     // the neighbour heights used by the concavity AO term — versus three full
     // ~46-octave evaluations. Branch is on a uniform, so it stays warp-coherent.
     vec2 uv = bakedUvAt(xz);
-    float du = uEps / (2.0 * uBoardHalf);
+    float du = uEps / max(uBakeSpan.x, 1.0);
     vec4 hT = texture2D(uTerrainHeightTex, uv);
     hC = hT.a * uHeightScale;
     nGeo = normalize(hT.rgb * 2.0 - 1.0);
@@ -238,7 +250,11 @@ void main() {
     vec2 gp = abs(fract(xz / uChunkSize - 0.5) - 0.5) * uChunkSize / gw;
     float line = 1.0 - min(min(gp.x, gp.y), 1.0);
     float gridFade = smoothstep(420.0, 60.0, length(cameraPosition - vWorldPos) / 8.0);
-    col = mix(col, vec3(0.45, 0.80, 0.95), line * uGrid * 0.22 * (0.35 + 0.65 * gridFade));
+    float gridMul = 1.0;
+#ifndef INFINITE_MODE
+    if (uUseTiles > 0.5) gridMul = 1.0 - tileInteriorSeam(xz);
+#endif
+    col = mix(col, vec3(0.45, 0.80, 0.95), line * uGrid * 0.22 * (0.35 + 0.65 * gridFade) * gridMul);
   }
 
   if (uLodDebug > 0.5) {
@@ -278,6 +294,13 @@ export function createTerrainUniforms() {
     uFalloff:        { value: 0.5 },
     uBoardHalf:      { value: 1024 },
     uChunkSize:      { value: 128 },
+    // Tile mode (multi-cell studio assembly). Defaults reproduce a single
+    // origin-centred board (uUseTiles=0 -> legacy falloff/wall path).
+    uTileOccupancy:  { value: null },
+    uTileGridOrigin: { value: new THREE.Vector2(-1024, -1024) },
+    uTileGridDim:    { value: new THREE.Vector2(1, 1) },
+    uTileCellSize:   { value: 2048 },
+    uUseTiles:       { value: 0.0 },
     uMoistScale:     { value: 1.0 },
     uMoistBias:      { value: 0.0 },
     uBiomeScale:     { value: 1.0 },
@@ -320,6 +343,8 @@ export function createTerrainUniforms() {
     // only by the non-infinite materials (TERRAIN_HEIGHT_TEX_GLSL).
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
+    uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
+    uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
 
     // Noise Stack per-layer continuous params (shared by every height material).
     // Packed each param change by Engine from the live NoiseStack; the GLSL

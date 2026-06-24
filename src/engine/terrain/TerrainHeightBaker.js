@@ -23,7 +23,7 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 //
 // The board spans world XZ in [-uBoardHalf, uBoardHalf]; the bake maps the
 // fullscreen quad UV straight onto that range, so a later fetch by world XZ
-// (uv = xz / (2*uBoardHalf) + 0.5) lines up automatically. Half-float keeps
+// (uv = (xz - uBakeOrigin) / uBakeSpan) lines up automatically. Half-float keeps
 // h01 precise and is linearly filterable in WebGL2.
 //
 // Vertex displacement stays analytic (matching PlanetMaterial), since vertex
@@ -51,7 +51,7 @@ uniform float uEps;
 varying vec2 vUv;
 
 void main() {
-  vec2 xz = (vUv * 2.0 - 1.0) * uBoardHalf;
+  vec2 xz = uBakeOrigin + vUv * max(uBakeSpan, vec2(1.0));
 
   float eps = uEps;
   float hC = heightAt(xz);
@@ -76,16 +76,11 @@ export class TerrainHeightBaker {
   constructor({ renderer, uniforms, size = 2048 }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
-    this.size = size;
+    this._baseSize = size;
+    this._texW = size;
+    this._texH = size;
 
-    this.target = new THREE.WebGLRenderTarget(size, size, {
-      type: THREE.HalfFloatType,
-      format: THREE.RGBAFormat,
-      magFilter: THREE.LinearFilter,
-      minFilter: THREE.LinearFilter,
-      depthBuffer: false,
-      generateMipmaps: false,
-    });
+    this.target = this._makeTarget(size, size);
 
     this.scene = new THREE.Scene();
     this.material = null;   // built on first bake so OCTAVES matches the params
@@ -99,6 +94,28 @@ export class TerrainHeightBaker {
   }
 
   get texture() { return this.target.texture; }
+
+  _makeTarget(w, h) {
+    return new THREE.WebGLRenderTarget(w, h, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      magFilter: THREE.LinearFilter,
+      minFilter: THREE.LinearFilter,
+      depthBuffer: false,
+      generateMipmaps: false,
+    });
+  }
+
+  /** Resize the bake target to cover a multi-cell union (cols × rows cells). */
+  _ensureTargetSize(cols, rows) {
+    const w = Math.min(4096, this._baseSize * Math.max(1, cols));
+    const h = Math.min(4096, this._baseSize * Math.max(1, rows));
+    if (w === this._texW && h === this._texH) return;
+    this.target.dispose();
+    this.target = this._makeTarget(w, h);
+    this._texW = w;
+    this._texH = h;
+  }
 
   _ensureMaterial(octaves, stackGLSL) {
     if (this.material && this._octaves === octaves && this._stackSig === stackGLSL.sig) return;
@@ -117,7 +134,8 @@ export class TerrainHeightBaker {
   }
 
   /** Re-evaluate the height field into the 2D texture from the current uniforms. */
-  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
+    this._ensureTargetSize(cols, rows);
     this._ensureMaterial(octaves, stackGLSL);
     const r = this.renderer;
     const prevTarget = r.getRenderTarget();

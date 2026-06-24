@@ -59,6 +59,12 @@ float rippleAt(vec2 p, float t) {
 void main() {
   vec2 xz = vWorldPos.xz;
 
+#ifndef INFINITE_MODE
+  // tile assembly: the water plane spans the union bbox but only occupied cells
+  // should render water (prevents blue over empty/ghost cells at shallow angles).
+  if (tileOccupiedAt(xz) < 0.5) discard;
+#endif
+
   // depth of the sea floor below this fragment (same height field as terrain)
   float floorH;
 #ifndef INFINITE_MODE

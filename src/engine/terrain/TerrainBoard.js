@@ -47,17 +47,22 @@ export class TerrainBoard {
     this._tmp = new THREE.Vector3();
   }
 
-  // (Re)build the chunk grid. Only called when chunk count / size change —
-  // every other parameter is a live shader uniform.
-  build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments }) {
+  // (Re)build the chunk grid. Only called when chunk count / size / tile layout
+  // change — every other parameter is a live shader uniform. `cells` is the list
+  // of occupied tile cells {cx,cz} (cell 0,0 centered at the origin); omit it for
+  // the classic single board. Chunks share the 4 LOD geometries + one material;
+  // each cell gets its own chunkCount×chunkCount block at its world offset, so
+  // the continuous shader height field tiles seamlessly across cells.
+  build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells }) {
     this.dispose();
 
     this.chunkCount = chunkCount;
     this.chunkSize = chunkSize;
-    this.boardSize = chunkCount * chunkSize;
+    this.boardSize = chunkCount * chunkSize;   // one cell
     this._maxHeight = maxHeight;
     this._skirtDepth = skirtDepth;
     if (lodSegments) this.lodSegments = [...lodSegments];
+    const cellList = (cells && cells.length) ? cells : [{ cx: 0, cz: 0 }];
     const half = this.boardSize / 2;
 
     this.geometries = this.lodSegments.map((res, lodIndex) => {
@@ -69,22 +74,28 @@ export class TerrainBoard {
     // LOD distance bands scale with chunk size so any board density works
     this._recalcThresholds();
 
-    for (let cz = 0; cz < chunkCount; cz++) {
-      for (let cx = 0; cx < chunkCount; cx++) {
-        const mesh = new THREE.Mesh(this.geometries[3], this.material);
-        mesh.position.set(cx * chunkSize - half, 0, cz * chunkSize - half);
-        mesh.scale.setScalar(chunkSize);
-        mesh.matrixAutoUpdate = false;
-        mesh.updateMatrix();
-        mesh.updateMatrixWorld(true);
-        this.group.add(mesh);
-        this.chunks.push({
-          mesh,
-          center: new THREE.Vector3(
-            mesh.position.x + chunkSize / 2, 0, mesh.position.z + chunkSize / 2
-          ),
-          lod: 3,
-        });
+    for (const cell of cellList) {
+      // cell (cx,cz) center sits at (cx*cellSize, cz*cellSize); its min corner
+      // is that minus half. Chunks tile the cell from the corner.
+      const originX = cell.cx * this.boardSize - half;
+      const originZ = cell.cz * this.boardSize - half;
+      for (let cz = 0; cz < chunkCount; cz++) {
+        for (let cx = 0; cx < chunkCount; cx++) {
+          const mesh = new THREE.Mesh(this.geometries[3], this.material);
+          mesh.position.set(originX + cx * chunkSize, 0, originZ + cz * chunkSize);
+          mesh.scale.setScalar(chunkSize);
+          mesh.matrixAutoUpdate = false;
+          mesh.updateMatrix();
+          mesh.updateMatrixWorld(true);
+          this.group.add(mesh);
+          this.chunks.push({
+            mesh,
+            center: new THREE.Vector3(
+              mesh.position.x + chunkSize / 2, 0, mesh.position.z + chunkSize / 2
+            ),
+            lod: 3,
+          });
+        }
       }
     }
   }

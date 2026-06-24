@@ -26,13 +26,13 @@ export function createBoardPlinthMaterial() {
   });
 }
 
-export function buildBoardPlinthGeometry(boardSize, skirtDepth, topY = 0, outset = OUTSET) {
+export function buildBoardPlinthGeometry(boardSize, skirtDepth, topY = 0, outset = OUTSET, center = { x: 0, z: 0 }) {
   const half = boardSize / 2;
   const baseY = -skirtDepth;
-  const x0 = -half - outset;
-  const x1 = half + outset;
-  const z0 = -half - outset;
-  const z1 = half + outset;
+  const x0 = center.x - half - outset;
+  const x1 = center.x + half + outset;
+  const z0 = center.z - half - outset;
+  const z1 = center.z + half + outset;
 
   const positions = new Float32Array([
     x0, topY, z0,  x1, topY, z0,  x1, topY, z1,  x0, topY, z1,

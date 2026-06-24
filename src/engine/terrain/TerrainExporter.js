@@ -36,6 +36,8 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
   uniform float uNormalStrength;
   uniform float uEps;
   uniform float uBoardSize;
+  uniform vec2 uBoardSizeXZ;    // baked region size (per-axis; == uBoardSize,uBoardSize for one cell)
+  uniform vec2 uCellOffset;     // world XZ of the baked region center
   uniform int uBakeMode;       // 0 = heightmap, 1 = normalmap, 2 = color, 3 = biome splat
   uniform bool uBakeLighting;
 
@@ -53,8 +55,9 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
   }
 
   void main() {
-    // Map UV back to world coordinates centered on board
-    vec2 xz = (vUv - 0.5) * uBoardSize;
+    // Map UV back to world coordinates for the baked region (one cell, or the
+    // whole assembly for the union-wide auxiliary maps).
+    vec2 xz = uCellOffset + (vUv - 0.5) * uBoardSizeXZ;
 
     Climate cl = climateAt(xz * uFrequency + uSeedOffset);
     BiomeWeights bw = biomeWeightsAt(cl);
@@ -162,6 +165,25 @@ export class TerrainExporter {
     const exportWater = !!options.exportWater;
     const exportPreset = !!options.exportPreset;
 
+    // Tile assembly: cellSize == the single-board size (boardSize). For one tile
+    // this is the classic centered board. tileMode controls multi-tile output.
+    const cellSize = boardSize;
+    const tiles = (Array.isArray(options.tiles) && options.tiles.length)
+      ? options.tiles : [{ cx: 0, cz: 0 }];
+    const tileMode = options.exportTileMode === 'separate' ? 'separate' : 'merged';
+    const tileSet = new Set(tiles.map((t) => `${t.cx},${t.cz}`));
+    const hasNeighbor = (cx, cz) => tileSet.has(`${cx},${cz}`);
+    const cellCenter = (cx, cz) => ({ x: cx * cellSize, z: cz * cellSize });
+    // union bounds (for the auxiliary union-wide maps + water plane)
+    let minCX = Infinity, minCZ = Infinity, maxCX = -Infinity, maxCZ = -Infinity;
+    for (const t of tiles) {
+      minCX = Math.min(minCX, t.cx); minCZ = Math.min(minCZ, t.cz);
+      maxCX = Math.max(maxCX, t.cx); maxCZ = Math.max(maxCZ, t.cz);
+    }
+    const unionCols = maxCX - minCX + 1, unionRows = maxCZ - minCZ + 1;
+    const unionSpanX = unionCols * cellSize, unionSpanZ = unionRows * cellSize;
+    const unionCenter = { x: (minCX + maxCX) * 0.5 * cellSize, z: (minCZ + maxCZ) * 0.5 * cellSize };
+
     const heightScale = engineParams.heightScale;
     const seaLevel = engineParams.seaLevel;
 
@@ -175,6 +197,8 @@ export class TerrainExporter {
     // Setup uniforms
     const bakeUniforms = {
       uBoardSize: { value: boardSize },
+      uBoardSizeXZ: { value: new THREE.Vector2(boardSize, boardSize) },
+      uCellOffset: { value: new THREE.Vector2(0, 0) },
       uBakeMode: { value: 0 },
       uBakeLighting: { value: bakeLighting },
       uEps: { value: Math.max(0.35, boardSize / 4096) }
@@ -198,72 +222,170 @@ export class TerrainExporter {
     });
     quadMesh.material = bakeMat;
 
-    // A. Render High-Precision Heightmap (needed for mesh deformation and heightmap file export)
-    // To map N segments perfectly, we need N+1 vertices. Hence target height size is meshRes + 1.
-    const hSize = meshRes + 1;
-    const heightRT = new THREE.WebGLRenderTarget(hSize, hSize, {
-      format: THREE.RGBAFormat,
-      type: THREE.UnsignedByteType,
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter
-    });
-    bakeUniforms.uBakeMode.value = 0;
-    renderer.setRenderTarget(heightRT);
-    renderer.render(quadScene, quadCam);
-    
-    // Read back height pixels
-    const heightPixels = new Uint8Array(hSize * hSize * 4);
-    renderer.readRenderTargetPixels(heightRT, 0, 0, hSize, hSize, heightPixels);
-    renderer.setRenderTarget(null);
-
-    // Helper to get float height at (i, j) vertex coordinates
-    function getHeightAt(i, j) {
-      const idx = (j * hSize + i) * 4;
-      const r = heightPixels[idx];
-      const g = heightPixels[idx + 1];
-      const b = heightPixels[idx + 2];
-      const h01 = (r * 65536 + g * 256 + b) / 16777215;
-      return h01 * heightScale;
-    }
-
-    // B. Bake Color Map
-    let colorCanvas = null;
-    if (bakeColor) {
-      onToast('Baking color map...');
-      const colorRT = new THREE.WebGLRenderTarget(texRes, texRes);
-      bakeUniforms.uBakeMode.value = 2;
-      renderer.setRenderTarget(colorRT);
+    // Region bake helpers. uCellOffset + uBoardSizeXZ select the world rectangle
+    // sampled by the bake shader, so one set of shaders covers each cell and the
+    // union-wide auxiliary maps. The occupancy uniforms were copied from the
+    // engine above, so the per-cell rim falloff matches the live view.
+    const setRegion = (ox, oz, sx, sz) => {
+      bakeUniforms.uCellOffset.value.set(ox, oz);
+      bakeUniforms.uBoardSizeXZ.value.set(sx, sz);
+    };
+    const bakeHeightGrid = (ox, oz, sx, sz, gx, gz) => {
+      const wpx = gx + 1, hpx = gz + 1;
+      const rt = new THREE.WebGLRenderTarget(wpx, hpx, {
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      });
+      setRegion(ox, oz, sx, sz);
+      bakeUniforms.uBakeMode.value = 0;
+      renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
-      colorCanvas = rtToCanvas(renderer, colorRT, texRes, texRes);
+      const px = new Uint8Array(wpx * hpx * 4);
+      renderer.readRenderTargetPixels(rt, 0, 0, wpx, hpx, px);
       renderer.setRenderTarget(null);
-      colorRT.dispose();
-    }
-
-    // C. Bake Normal Map
-    let normalCanvas = null;
-    if (bakeNormal) {
-      onToast('Baking normal map...');
-      const normalRT = new THREE.WebGLRenderTarget(texRes, texRes);
-      bakeUniforms.uBakeMode.value = 1;
-      renderer.setRenderTarget(normalRT);
+      rt.dispose();
+      const at = (i, j) => {
+        const idx = (j * wpx + i) * 4;
+        const h01 = (px[idx] * 65536 + px[idx + 1] * 256 + px[idx + 2]) / 16777215;
+        return h01 * heightScale;
+      };
+      return { wpx, hpx, px, at };
+    };
+    const bakeRegionCanvas = (mode, ox, oz, sx, sz, res) => {
+      const rt = new THREE.WebGLRenderTarget(res, res);
+      setRegion(ox, oz, sx, sz);
+      bakeUniforms.uBakeMode.value = mode;
+      renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
-      normalCanvas = rtToCanvas(renderer, normalRT, texRes, texRes);
+      const c = rtToCanvas(renderer, rt, res, res);
       renderer.setRenderTarget(null);
-      normalRT.dispose();
+      rt.dispose();
+      return c;
+    };
+
+    const skirtDepth = Math.max(24, heightScale * 0.08);
+    const baseHeight = -skirtDepth;
+    const multi = tiles.length > 1;
+
+    // --- 2. Construct 3D Mesh (one terrain block per occupied cell) ---
+    const exportGroup = new THREE.Group();
+    exportGroup.name = multi ? 'Terrain_Assembly' : 'Terrain_Board';
+
+    if (includeMesh) {
+      onToast(multi ? 'Generating tile geometry...' : 'Generating terrain geometry...');
+      const slabMaterial = new THREE.MeshStandardMaterial({
+        name: 'Slab_Material', color: 0x231e19, roughness: 0.9, metalness: 0.05,
+        side: THREE.DoubleSide,
+      });
+
+      for (const cell of tiles) {
+        const ctr = cellCenter(cell.cx, cell.cz);
+        const { at } = bakeHeightGrid(ctr.x, ctr.z, cellSize, cellSize, meshRes, meshRes);
+
+        let colorTex = null, normalTex = null;
+        if (bakeColor) {
+          const cv = bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes);
+          colorTex = new THREE.CanvasTexture(cv);
+          colorTex.colorSpace = THREE.SRGBColorSpace;
+        }
+        if (bakeNormal) {
+          const nv = bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes);
+          normalTex = new THREE.CanvasTexture(nv);
+        }
+        const terrainMaterial = new THREE.MeshStandardMaterial({
+          name: multi ? `Terrain_Material_${cell.cx}_${cell.cz}` : 'Terrain_Material',
+          map: colorTex, normalMap: normalTex, roughness: 0.85, metalness: 0.05,
+        });
+
+        // surface grid for this cell
+        const positions = [], uvs = [], indices = [];
+        for (let j = 0; j <= meshRes; j++) {
+          const z = ctr.z + (j / meshRes - 0.5) * cellSize;
+          for (let i = 0; i <= meshRes; i++) {
+            positions.push(ctr.x + (i / meshRes - 0.5) * cellSize, at(i, j), z);
+            uvs.push(i / meshRes, j / meshRes);
+          }
+        }
+        for (let j = 0; j < meshRes; j++) {
+          for (let i = 0; i < meshRes; i++) {
+            const p0 = j * (meshRes + 1) + i, p1 = p0 + 1;
+            const p2 = (j + 1) * (meshRes + 1) + i, p3 = p2 + 1;
+            indices.push(p0, p2, p1, p1, p2, p3);
+          }
+        }
+        const terrainGeo = new THREE.BufferGeometry();
+        terrainGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+        terrainGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+        terrainGeo.setIndex(indices);
+        terrainGeo.computeVertexNormals();
+        const terrainMesh = new THREE.Mesh(terrainGeo, terrainMaterial);
+        terrainMesh.name = multi ? `Terrain_Tile_${cell.cx}_${cell.cz}` : 'Terrain_Surface';
+        exportGroup.add(terrainMesh);
+
+        // walls + base. 'separate' gives every tile all four walls (standalone
+        // diorama pieces); 'merged' walls only outward-facing edges so adjacent
+        // tiles fuse into one continuous landscape.
+        if (includeSkirts) {
+          const sides = (multi && tileMode === 'merged')
+            ? {
+                bottom: !hasNeighbor(cell.cx, cell.cz - 1),
+                top: !hasNeighbor(cell.cx, cell.cz + 1),
+                left: !hasNeighbor(cell.cx - 1, cell.cz),
+                right: !hasNeighbor(cell.cx + 1, cell.cz),
+              }
+            : { bottom: true, top: true, left: true, right: true };
+
+          const sp = [], si = [];
+          const addWall = (edge) => {
+            const base = sp.length / 3;
+            for (const { i, j } of edge) {
+              const x = ctr.x + (i / meshRes - 0.5) * cellSize;
+              const z = ctr.z + (j / meshRes - 0.5) * cellSize;
+              sp.push(x, at(i, j), z);
+              sp.push(x, baseHeight, z);
+            }
+            for (let k = 0; k < edge.length - 1; k++) {
+              const tl = base + 2 * k, bl = tl + 1, tr = base + 2 * (k + 1), br = tr + 1;
+              si.push(tl, bl, tr, tr, bl, br);   // DoubleSide → winding-agnostic
+            }
+          };
+          const edgeI = (j) => Array.from({ length: meshRes + 1 }, (_, i) => ({ i, j }));
+          const edgeJ = (i) => Array.from({ length: meshRes + 1 }, (_, j) => ({ i, j }));
+          if (sides.bottom) addWall(edgeI(0));
+          if (sides.top) addWall(edgeI(meshRes));
+          if (sides.left) addWall(edgeJ(0));
+          if (sides.right) addWall(edgeJ(meshRes));
+
+          if (includeBase) {
+            const b = sp.length / 3;
+            const x0 = ctr.x - cellSize / 2, x1 = ctr.x + cellSize / 2;
+            const z0 = ctr.z - cellSize / 2, z1 = ctr.z + cellSize / 2;
+            sp.push(x0, baseHeight, z0, x1, baseHeight, z0, x1, baseHeight, z1, x0, baseHeight, z1);
+            si.push(b, b + 1, b + 2, b, b + 2, b + 3);
+          }
+
+          if (sp.length) {
+            const slabGeo = new THREE.BufferGeometry();
+            slabGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sp), 3));
+            slabGeo.setIndex(si);
+            slabGeo.computeVertexNormals();
+            const slabMesh = new THREE.Mesh(slabGeo, slabMaterial);
+            slabMesh.name = multi ? `Tile_Base_${cell.cx}_${cell.cz}` : 'Terrain_Base_Slab';
+            exportGroup.add(slabMesh);
+          }
+        }
+      }
     }
 
-    // D. Bake Heightmap Canvas for separate image export
+    // D. Union-wide grayscale heightmap (one image covering the whole assembly)
     let heightCanvas = null;
     if (exportHeightmap) {
       onToast('Baking grayscale heightmap...');
-      // Render standard 8-bit visual heightmap or simple orthographic capture
       const visualRT = new THREE.WebGLRenderTarget(texRes, texRes);
-      // We can use a shader logic or just copy height values directly to a gray canvas
-      // Let's implement height mode to write grayscale albedo in bake shader
+      setRegion(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
       bakeUniforms.uBakeMode.value = 0;
       renderer.setRenderTarget(visualRT);
       renderer.render(quadScene, quadCam);
-      
       const visualPixels = new Uint8Array(texRes * texRes * 4);
       renderer.readRenderTargetPixels(visualRT, 0, 0, texRes, texRes, visualPixels);
       renderer.setRenderTarget(null);
@@ -280,214 +402,40 @@ export class TerrainExporter {
         for (let x = 0; x < texRes; x++) {
           const sIdx = srcRow + x * 4;
           const dIdx = dstRow + x * 4;
-          // Unpack depth to value
-          const r = visualPixels[sIdx];
-          const g = visualPixels[sIdx + 1];
-          const b = visualPixels[sIdx + 2];
+          const r = visualPixels[sIdx], g = visualPixels[sIdx + 1], b = visualPixels[sIdx + 2];
           const val = Math.round(((r * 65536 + g * 256 + b) / 16777215) * 255);
-          img.data[dIdx] = val;
-          img.data[dIdx + 1] = val;
-          img.data[dIdx + 2] = val;
-          img.data[dIdx + 3] = 255;
+          img.data[dIdx] = val; img.data[dIdx + 1] = val; img.data[dIdx + 2] = val; img.data[dIdx + 3] = 255;
         }
       }
       ctx.putImageData(img, 0, 0);
     }
 
-    // E. Bake Splat / Biome map
+    // E. Union-wide splat / biome map
     let splatCanvas = null;
     if (exportHeightmap && options.exportSplat) {
       onToast('Baking splat map...');
-      const splatRT = new THREE.WebGLRenderTarget(texRes, texRes);
-      bakeUniforms.uBakeMode.value = 3;
-      renderer.setRenderTarget(splatRT);
-      renderer.render(quadScene, quadCam);
-      splatCanvas = rtToCanvas(renderer, splatRT, texRes, texRes);
-      renderer.setRenderTarget(null);
-      splatRT.dispose();
+      splatCanvas = bakeRegionCanvas(3, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
     }
 
-    // Cleanup quad resources
-    bakeMat.dispose();
-    quadMesh.geometry.dispose();
-    heightRT.dispose();
+    // Union-wide color / normal canvases for the separate PNG zip entries. The
+    // GLB already embeds crisp per-cell textures; these are an overview of the
+    // whole assembly (== the single cell when there is one tile).
+    let colorCanvas = null, normalCanvas = null;
+    if (bakeColor) colorCanvas = bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    if (bakeNormal) normalCanvas = bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
 
-    // --- 2. Construct 3D Mesh ---
-    const exportGroup = new THREE.Group();
-    exportGroup.name = 'Terrain_Board';
-
-    let colorTex = null;
-    let normalTex = null;
-    if (colorCanvas) {
-      colorTex = new THREE.CanvasTexture(colorCanvas);
-      colorTex.colorSpace = THREE.SRGBColorSpace;
-    }
-    if (normalCanvas) {
-      normalTex = new THREE.CanvasTexture(normalCanvas);
-    }
-
-    const terrainMaterial = new THREE.MeshStandardMaterial({
-      name: 'Terrain_Material',
-      map: colorTex,
-      normalMap: normalTex,
-      roughness: 0.85,
-      metalness: 0.05
-    });
-
-    if (includeMesh) {
-      onToast('Generating terrain geometry...');
-      const positions = [];
-      const uvs = [];
-      const indices = [];
-
-      for (let j = 0; j <= meshRes; j++) {
-        const z = (j / meshRes - 0.5) * boardSize;
-        const v = j / meshRes;
-        for (let i = 0; i <= meshRes; i++) {
-          const x = (i / meshRes - 0.5) * boardSize;
-          const u = i / meshRes;
-          const y = getHeightAt(i, j);
-
-          positions.push(x, y, z);
-          uvs.push(u, v);
-        }
-      }
-
-      for (let j = 0; j < meshRes; j++) {
-        for (let i = 0; i < meshRes; i++) {
-          const p0 = j * (meshRes + 1) + i;
-          const p1 = j * (meshRes + 1) + (i + 1);
-          const p2 = (j + 1) * (meshRes + 1) + i;
-          const p3 = (j + 1) * (meshRes + 1) + (i + 1);
-
-          // Winding CCW from top view
-          indices.push(p0, p2, p1);
-          indices.push(p1, p2, p3);
-        }
-      }
-
-      const terrainGeo = new THREE.BufferGeometry();
-      terrainGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-      terrainGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-      terrainGeo.setIndex(indices);
-      terrainGeo.computeVertexNormals();
-
-      const terrainMesh = new THREE.Mesh(terrainGeo, terrainMaterial);
-      terrainMesh.name = 'Terrain_Surface';
-      exportGroup.add(terrainMesh);
-
-      // Skirts & slab
-      if (includeSkirts) {
-        onToast('Generating borders/skirts...');
-        const slabPositions = [];
-        const slabUvs = [];
-        const slabIndices = [];
-
-        const skirtDepth = Math.max(24, heightScale * 0.08);
-        const baseHeight = -skirtDepth;
-
-        // Build list of boundary vertices
-        const perimeter = [];
-        // Bottom (j = 0)
-        for (let i = 0; i <= meshRes; i++) perimeter.push({ i, j: 0 });
-        // Right (i = meshRes)
-        for (let j = 1; j <= meshRes; j++) perimeter.push({ i: meshRes, j });
-        // Top (j = meshRes)
-        for (let i = meshRes - 1; i >= 0; i--) perimeter.push({ i, j: meshRes });
-        // Left (i = 0)
-        for (let j = meshRes - 1; j >= 1; j--) perimeter.push({ i: 0, j });
-
-        const lp = perimeter.length;
-        for (let k = 0; k < lp; k++) {
-          const { i, j } = perimeter[k];
-          const x = (i / meshRes - 0.5) * boardSize;
-          const z = (j / meshRes - 0.5) * boardSize;
-          const y = getHeightAt(i, j);
-
-          slabPositions.push(x, y, z);
-          slabPositions.push(x, baseHeight, z);
-
-          const u = i / meshRes;
-          const v = j / meshRes;
-          slabUvs.push(u, v);
-          slabUvs.push(u, v);
-        }
-
-        for (let k = 0; k < lp; k++) {
-          const next = (k + 1) % lp;
-          const tl = 2 * k;
-          const bl = 2 * k + 1;
-          const tr = 2 * next;
-          const br = 2 * next + 1;
-
-          // Outward facing quads
-          slabIndices.push(tl, bl, tr);
-          slabIndices.push(tr, bl, br);
-        }
-
-        // Slab bottom face
-        if (includeBase) {
-          const vOffset = slabPositions.length / 3;
-          for (let j = 0; j <= meshRes; j++) {
-            const z = (j / meshRes - 0.5) * boardSize;
-            const v = j / meshRes;
-            for (let i = 0; i <= meshRes; i++) {
-              const x = (i / meshRes - 0.5) * boardSize;
-              const u = i / meshRes;
-              slabPositions.push(x, baseHeight, z);
-              slabUvs.push(u, v);
-            }
-          }
-
-          for (let j = 0; j < meshRes; j++) {
-            for (let i = 0; i < meshRes; i++) {
-              const p0 = vOffset + j * (meshRes + 1) + i;
-              const p1 = vOffset + j * (meshRes + 1) + (i + 1);
-              const p2 = vOffset + (j + 1) * (meshRes + 1) + i;
-              const p3 = vOffset + (j + 1) * (meshRes + 1) + (i + 1);
-
-              // Downward facing triangles (clockwise)
-              slabIndices.push(p0, p1, p2);
-              slabIndices.push(p1, p3, p2);
-            }
-          }
-        }
-
-        const slabGeo = new THREE.BufferGeometry();
-        slabGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(slabPositions), 3));
-        slabGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(slabUvs), 2));
-        slabGeo.setIndex(slabIndices);
-        slabGeo.computeVertexNormals();
-
-        const slabMaterial = new THREE.MeshStandardMaterial({
-          name: 'Slab_Material',
-          color: 0x231e19,
-          roughness: 0.9,
-          metalness: 0.05
-        });
-
-        const slabMesh = new THREE.Mesh(slabGeo, slabMaterial);
-        slabMesh.name = 'Terrain_Base_Slab';
-        exportGroup.add(slabMesh);
-      }
-    }
-
-    // F. Add Water Mesh (separate named object for scene export)
+    // F. Add Water Mesh spanning the whole assembly
     if (exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
       onToast('Adding water plane...');
-      const waterGeo = new THREE.PlaneGeometry(boardSize, boardSize);
+      const waterGeo = new THREE.PlaneGeometry(unionSpanX, unionSpanZ);
       waterGeo.rotateX(-Math.PI / 2);
       const waterMat = new THREE.MeshStandardMaterial({
-        name: 'Water_Material',
-        color: 0x0f5e73,
-        roughness: 0.1,
-        metalness: 0.8,
-        transparent: true,
-        opacity: 0.6
+        name: 'Water_Material', color: 0x0f5e73, roughness: 0.1, metalness: 0.8,
+        transparent: true, opacity: 0.6,
       });
       const waterMesh = new THREE.Mesh(waterGeo, waterMat);
       waterMesh.name = 'Water';
-      waterMesh.position.y = seaLevel;
+      waterMesh.position.set(unionCenter.x, seaLevel, unionCenter.z);
       exportGroup.add(waterMesh);
     }
 
@@ -503,10 +451,11 @@ export class TerrainExporter {
         minFilter: THREE.NearestFilter,
         magFilter: THREE.NearestFilter
       });
+      setRegion(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
       bakeUniforms.uBakeMode.value = 0;
       renderer.setRenderTarget(colRT);
       renderer.render(quadScene, quadCam);
-      
+
       const colPixels = new Uint8Array(colHSize * colHSize * 4);
       renderer.readRenderTargetPixels(colRT, 0, 0, colHSize, colHSize, colPixels);
       renderer.setRenderTarget(null);
@@ -525,9 +474,9 @@ export class TerrainExporter {
       const colIndices = [];
 
       for (let j = 0; j <= collisionRes; j++) {
-        const z = (j / collisionRes - 0.5) * boardSize;
+        const z = unionCenter.z + (j / collisionRes - 0.5) * unionSpanZ;
         for (let i = 0; i <= collisionRes; i++) {
-          const x = (i / collisionRes - 0.5) * boardSize;
+          const x = unionCenter.x + (i / collisionRes - 0.5) * unionSpanX;
           const y = getColHeightAt(i, j);
           colPositions.push(x, y, z);
         }
@@ -554,6 +503,11 @@ export class TerrainExporter {
       collisionModel = new THREE.Mesh(colGeo, colMaterial);
       collisionModel.name = 'Collision_Mesh';
     }
+
+    // Cleanup bake resources (kept alive until here so the collision pass could
+    // re-render the quad).
+    bakeMat.dispose();
+    quadMesh.geometry.dispose();
 
     // --- 4. Serialize & Download ---
     const zipFiles = {};
