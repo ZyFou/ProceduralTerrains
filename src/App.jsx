@@ -61,6 +61,8 @@ export default function App() {
   const [paintState, setPaintState] = useState({ enabled: false });
   const [tileDebug, setTileDebug] = useState({ view: 'off', showLegend: true, opacity: 1, showPreview: true });
   const [tiles, setTiles] = useState([{ cx: 0, cz: 0 }]);
+  const [tileAssemblyShape, setTileAssemblyShape] = useState('square');
+  const [diskRadiusCells, setDiskRadiusCells] = useState(0);
   const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null });
 
   const [worldMode, setWorldMode] = useState('studio');
@@ -184,7 +186,15 @@ export default function App() {
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
           onTileDebug: (t) => { setTileDebug(t); scheduleRecordRef.current?.(); },
-          onTiles: (t) => { setTiles(t); scheduleRecordRef.current?.(); },
+          onTiles: (payload) => {
+            const list = Array.isArray(payload) ? payload : (payload?.tiles ?? [{ cx: 0, cz: 0 }]);
+            setTiles(list);
+            if (!Array.isArray(payload)) {
+              setTileAssemblyShape(payload?.tileAssemblyShape ?? 'square');
+              setDiskRadiusCells(payload?.diskRadiusCells ?? 0);
+            }
+            scheduleRecordRef.current?.();
+          },
           onImportedMaps: setImportedMaps,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
@@ -842,7 +852,8 @@ export default function App() {
     onExport, onExportScreenshot, onExportHeightmap,
     onNoiseStack: (stack) => engine().setNoiseStack(stack),
     tileDebug, importedMaps,
-    tiles, tileGridSize: 5, tileGridExtent: 2,
+    tiles, tileGridSize: 5, tileGridExtent: 2, tileAssemblyShape, diskRadiusCells,
+    onTileAssemblyShape: (shape) => engine().setTileAssemblyShape(shape),
     onRemoveTile: (cx, cz) => engine().removeTile(cx, cz),
     onTileDebug: (next) => engine().setTileDebug(next),
     onImportTileMap: (type, file) => engine().importTileMap(type, file),

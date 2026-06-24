@@ -133,6 +133,9 @@ function TerrainPanel({ ctx }) {
           {TERRAIN_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`terrain.${def.key}`} />
           ))}
+          <SelectRow label="Edge Falloff" value={params.edgeFalloffMode ?? 'island'}
+            options={[{ value: 'island', label: 'Island' }, { value: 'mountains', label: 'Mountains' }]}
+            onChange={(v) => onParam('edgeFalloffMode', v)} info="Island gives a gentle beach rim; Mountains keeps relief longer then drops more sharply at the edge." />
         </>
       )}
       {tab === 'noise' && (
@@ -602,6 +605,7 @@ function ExportPanel({ ctx }) {
   const set = (k, v) => setOpt((p) => ({ ...p, [k]: v }));
   const showTex = opt.bakeColor || opt.bakeNormal || opt.exportHeightmap;
   const multiTile = ctx.worldMode === 'studio' && (ctx.tiles?.length ?? 1) > 1;
+  const circleTiles = ctx.tileAssemblyShape === 'circle';
 
   const doExport = async () => {
     setBusy(true);
@@ -622,7 +626,7 @@ function ExportPanel({ ctx }) {
         <button type="button" className="action-btn" onClick={ctx.onExportHeightmap} disabled={busy}>Heightmap</button>
       </div>
 
-      {multiTile && (
+      {multiTile && !circleTiles && (
         <>
           <div className="subsection-label">Tile Assembly</div>
           <SelectRow
@@ -694,18 +698,24 @@ function TilesPanel({ ctx }) {
   const grid = ctx.tileGridSize ?? 5;
   const extent = ctx.tileGridExtent ?? 2;
   const gridCells = grid * grid;
-  const atGridEdge = tiles.length >= gridCells;
+  const shape = ctx.tileAssemblyShape ?? 'square';
+  const diskMaxCells = Array.from({ length: grid }, (_, ix) => ix - extent).flatMap((cx) => Array.from({ length: grid }, (_, iz) => ({ cx, cz: iz - extent }))).filter((t) => Math.hypot(t.cx, t.cz) <= extent + 1e-6).length;
+  const maxCells = shape === 'circle' ? diskMaxCells : gridCells;
+  const atGridEdge = tiles.length >= maxCells;
   return (
     <SidePanel title="Tiles" description="Grow the board into seamless adjacent tiles."
       onClose={ctx.onClose}>
       <div className="subsection-label">Assembly</div>
       <div className="settings-hint" style={{ marginBottom: 8 }}>
-        Hover near a board edge and click the highlighted square to add a tile that
+        Hover near a board edge and click the highlighted preview to add a tile that
         continues the terrain. Tiles share the same noise field and export together.
-        Placement is limited to a {grid}×{grid} grid centred on the origin
-        (coordinates ±{extent}).
+        Square uses a {grid}×{grid} grid; Circle masks the assembly to a radius of {extent} cells (~{diskMaxCells} cells).
       </div>
-      <div className="kv-row"><span>Tiles</span><span>{tiles.length}</span></div>
+      <SelectRow label="Shape" value={shape}
+        options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
+        onChange={ctx.onTileAssemblyShape} info="Circle keeps square chunks for placement but renders and exports a radial disk." />
+      <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
+      {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
       {atGridEdge && (
         <div className="settings-hint">All {gridCells} cells in the grid are occupied.</div>
       )}

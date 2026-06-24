@@ -23,7 +23,8 @@ export const DEFAULT_PARAMS = {
   lacunarity: 2.05,
   ridge: 0.65,             // ridged mountain intensity
   warp: 0.9,               // domain warp strength
-  falloff: 0.2,            // island edge falloff
+  falloff: 0.2,            // edge falloff width
+  edgeFalloffMode: 'island', // island | mountains rim profile
 
   // biome
   moistScale: 1.0,

@@ -73,6 +73,47 @@ export class TerrainHeightSampler {
 
   setStack(stack) { this.stack = stack; }
 
+  _rimFalloff(t) {
+    t = clamp(t, 0, 1);
+    const island = f(f(t * t) * f(3 - f(2 * t)));
+    const mountains = f(Math.pow(t, 1.6));
+    return (this.u.uEdgeFalloffMode?.value ?? 0) >= 0.5 ? mountains : island;
+  }
+
+  _tileOccAt(cx, cz) {
+    const tex = this.u.uTileOccupancy?.value;
+    const dim = this.u.uTileGridDim?.value;
+    const w = Math.max(1, Math.round(dim?.x ?? 1));
+    const h = Math.max(1, Math.round(dim?.y ?? 1));
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return 0;
+    return (tex?.image?.data?.[cz * w + cx] ?? 0) >= 128 ? 1 : 0;
+  }
+
+  _tileFalloff(x, z) {
+    const cs = f(this.u.uTileCellSize?.value ?? f(this.u.uBoardHalf.value * 2));
+    const ox = f(this.u.uTileGridOrigin?.value?.x ?? -f(cs * 0.5));
+    const oz = f(this.u.uTileGridOrigin?.value?.y ?? -f(cs * 0.5));
+    const rx = f(f(x - ox) / cs), rz = f(f(z - oz) / cs);
+    const cx = Math.floor(rx), cz = Math.floor(rz);
+    const lx = f(f(rx - cx) * 2 - 1), lz = f(f(rz - cz) * 2 - 1);
+    const band = Math.max(f(this.u.uFalloff.value), 1e-3);
+    const fXp = mix32(smoothstep32(0, band, f(1 - lx)), 1, this._tileOccAt(cx + 1, cz));
+    const fXn = mix32(smoothstep32(0, band, f(1 + lx)), 1, this._tileOccAt(cx - 1, cz));
+    const fZp = mix32(smoothstep32(0, band, f(1 - lz)), 1, this._tileOccAt(cx, cz + 1));
+    const fZn = mix32(smoothstep32(0, band, f(1 + lz)), 1, this._tileOccAt(cx, cz - 1));
+    return f(f(fXp * fXn) * f(fZp * fZn));
+  }
+
+  _assemblyFalloff(x, z) {
+    if ((this.u.uTileShape?.value ?? 0) >= 0.5) {
+      const radius = f(this.u.uTileDiskRadius?.value ?? this.u.uBoardHalf.value);
+      const band = f(Math.max(f(this.u.uFalloff.value), 1e-3) * f(this.u.uTileCellSize?.value ?? f(this.u.uBoardHalf.value * 2)));
+      return smoothstep32(f(radius + band), f(radius - band), f(Math.hypot(x, z)));
+    }
+    return this._tileFalloff(x, z);
+  }
+
+
   _fbm(px, py, octaves) {
     const pers = f(this.u.uPersistence.value);
     const lac = f(this.u.uLacunarity.value);
@@ -188,11 +229,15 @@ export class TerrainHeightSampler {
 
     // island falloff (studio board only) + clamp + world height scale
     if (!env.infinite) {
-      const half = f(u.uBoardHalf.value);
-      const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
-      const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
-      const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
-      h = f(h * f(f(t * t) * f(3 - f(2 * t))));
+      if ((u.uUseTiles?.value ?? 0) > 0.5) {
+        h = f(h * this._assemblyFalloff(x, z));
+      } else {
+        const half = f(u.uBoardHalf.value);
+        const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
+        const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
+        const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
+        h = f(h * this._rimFalloff(t));
+      }
     }
     return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
   }

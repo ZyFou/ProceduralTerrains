@@ -17,7 +17,8 @@ uniform float uPersistence;    // FBM gain
 uniform float uLacunarity;     // FBM frequency multiplier
 uniform float uRidge;          // ridged-mountain intensity
 uniform float uWarp;           // domain warp strength
-uniform float uFalloff;        // island edge falloff width (0..1)
+uniform float uFalloff;        // edge falloff width (0..1)
+uniform float uEdgeFalloffMode; // 0 island, 1 mountains
 uniform float uBoardHalf;      // half board size in world units
 uniform float uChunkSize;      // internal chunk size in world units
 uniform vec3  uSunDir;         // normalized, pointing FROM surface TO sun
@@ -78,6 +79,25 @@ uniform vec2  uTileGridOrigin;      // world XZ of the min-cell corner (cell 0,0
 uniform vec2  uTileGridDim;         // grid size in cells (cols, rows)
 uniform float uTileCellSize;        // one cell's world size (== single board)
 uniform float uUseTiles;            // 0 = legacy single board, 1 = tile assembly
+uniform float uTileShape;           // 0 = square, 1 = circle
+uniform float uTileDiskRadius;      // world-space disk outer radius
+
+float rimFalloff(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float island = t * t * (3.0 - 2.0 * t);
+  float mountains = pow(t, 1.6);
+  return mix(island, mountains, step(0.5, uEdgeFalloffMode));
+}
+
+float diskMask(vec2 xz) {
+  float band = max(uFalloff, 1e-3) * uTileCellSize;
+  return smoothstep(uTileDiskRadius + band, uTileDiskRadius - band, length(xz));
+}
+
+float diskWall(vec2 xz) {
+  float e = max(2.0, uTileCellSize * 0.002);
+  return step(abs(length(xz) - uTileDiskRadius), e);
+}
 
 float tileOccAt(vec2 cell) {
   if (cell.x < 0.0 || cell.y < 0.0 ||
@@ -141,7 +161,14 @@ float tileInteriorSeam(vec2 xz) {
 float tileOccupiedAt(vec2 xz) {
   if (uUseTiles < 0.5) return 1.0;
   vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
-  return tileOccAt(floor(rel));
+  float occ = tileOccAt(floor(rel));
+  if (uTileShape > 0.5) occ *= step(0.5, diskMask(xz));
+  return occ;
+}
+
+float assemblyFalloff(vec2 xz) {
+  if (uTileShape < 0.5) return tileFalloff(xz);
+  return diskMask(xz);
 }
 `;
 
@@ -329,13 +356,13 @@ float shapeHeight(vec2 xz, Climate c) {
 #ifndef INFINITE_MODE
   if (uUseTiles > 0.5) {
     // multi-cell assembly: fade only at the outer rim (seamless interior seams)
-    h *= tileFalloff(xz);
+    h *= assemblyFalloff(xz);
   } else {
     // island/continent falloff toward board edges (square+radial blend)
     vec2 e = abs(xz) / uBoardHalf;
     float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
     float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
-    h *= t * t * (3.0 - 2.0 * t);
+    h *= rimFalloff(t);
   }
 #endif
   float finalH = clamp(h, 0.0, 1.35) * uHeightScale;

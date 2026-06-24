@@ -170,7 +170,10 @@ export class TerrainExporter {
     const cellSize = boardSize;
     const tiles = (Array.isArray(options.tiles) && options.tiles.length)
       ? options.tiles : [{ cx: 0, cz: 0 }];
-    const tileMode = options.exportTileMode === 'separate' ? 'separate' : 'merged';
+    const tileShape = options.tileAssemblyShape === 'circle' ? 'circle' : 'square';
+    const tileMode = tileShape === 'circle' ? 'merged' : (options.exportTileMode === 'separate' ? 'separate' : 'merged');
+    const diskRadiusWorld = ((Number(options.diskRadiusCells) || 0) + 0.5) * cellSize;
+    const inExportDisk = (x, z) => tileShape !== 'circle' || Math.hypot(x, z) <= diskRadiusWorld + 1e-6;
     const tileSet = new Set(tiles.map((t) => `${t.cx},${t.cz}`));
     const hasNeighbor = (cx, cz) => tileSet.has(`${cx},${cz}`);
     const cellCenter = (cx, cz) => ({ x: cx * cellSize, z: cz * cellSize });
@@ -310,7 +313,12 @@ export class TerrainExporter {
           for (let i = 0; i < meshRes; i++) {
             const p0 = j * (meshRes + 1) + i, p1 = p0 + 1;
             const p2 = (j + 1) * (meshRes + 1) + i, p3 = p2 + 1;
-            indices.push(p0, p2, p1, p1, p2, p3);
+            const ax = positions[p0 * 3], az = positions[p0 * 3 + 2];
+            const bx = positions[p1 * 3], bz = positions[p1 * 3 + 2];
+            const cx = positions[p2 * 3], cz = positions[p2 * 3 + 2];
+            const dx = positions[p3 * 3], dz = positions[p3 * 3 + 2];
+            if (inExportDisk(ax, az) && inExportDisk(cx, cz) && inExportDisk(bx, bz)) indices.push(p0, p2, p1);
+            if (inExportDisk(bx, bz) && inExportDisk(cx, cz) && inExportDisk(dx, dz)) indices.push(p1, p2, p3);
           }
         }
         const terrainGeo = new THREE.BufferGeometry();
@@ -325,7 +333,7 @@ export class TerrainExporter {
         // walls + base. 'separate' gives every tile all four walls (standalone
         // diorama pieces); 'merged' walls only outward-facing edges so adjacent
         // tiles fuse into one continuous landscape.
-        if (includeSkirts) {
+        if (includeSkirts && tileShape !== 'circle') {
           const sides = (multi && tileMode === 'merged')
             ? {
                 bottom: !hasNeighbor(cell.cx, cell.cz - 1),
@@ -374,6 +382,26 @@ export class TerrainExporter {
             exportGroup.add(slabMesh);
           }
         }
+      }
+      if (includeSkirts && tileShape === 'circle') {
+        const seg = Math.max(64, meshRes * 2);
+        const sp = [], si = [];
+        for (let k = 0; k <= seg; k++) {
+          const a = (k / seg) * Math.PI * 2;
+          const x = Math.cos(a) * diskRadiusWorld;
+          const z = Math.sin(a) * diskRadiusWorld;
+          sp.push(x, seaLevel, z, x, baseHeight, z);
+        }
+        for (let k = 0; k < seg; k++) {
+          const tl = k * 2, bl = tl + 1, tr = (k + 1) * 2, br = tr + 1;
+          si.push(tl, bl, tr, tr, bl, br);
+        }
+        const wallGeo = new THREE.BufferGeometry();
+        wallGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sp), 3));
+        wallGeo.setIndex(si); wallGeo.computeVertexNormals();
+        const wallMesh = new THREE.Mesh(wallGeo, slabMaterial);
+        wallMesh.name = 'Circular_Base_Skirt';
+        exportGroup.add(wallMesh);
       }
     }
 
@@ -427,7 +455,7 @@ export class TerrainExporter {
     // F. Add Water Mesh spanning the whole assembly
     if (exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
       onToast('Adding water plane...');
-      const waterGeo = new THREE.PlaneGeometry(unionSpanX, unionSpanZ);
+      const waterGeo = tileShape === 'circle' ? new THREE.CircleGeometry(diskRadiusWorld, 96) : new THREE.PlaneGeometry(unionSpanX, unionSpanZ);
       waterGeo.rotateX(-Math.PI / 2);
       const waterMat = new THREE.MeshStandardMaterial({
         name: 'Water_Material', color: 0x0f5e73, roughness: 0.1, metalness: 0.8,
@@ -435,7 +463,7 @@ export class TerrainExporter {
       });
       const waterMesh = new THREE.Mesh(waterGeo, waterMat);
       waterMesh.name = 'Water';
-      waterMesh.position.set(unionCenter.x, seaLevel, unionCenter.z);
+      waterMesh.position.set(tileShape === 'circle' ? 0 : unionCenter.x, seaLevel, tileShape === 'circle' ? 0 : unionCenter.z);
       exportGroup.add(waterMesh);
     }
 

@@ -10,7 +10,7 @@ import { DEFAULT_PLANET_STYLE } from './style/PlanetStyleConfig.js';
 import { EARTH_PALETTE } from './style/ColorPalette.js';
 
 export const TERRAIN_RESET_KEYS = [
-  'preset', 'heightScale', 'seaLevel', 'falloff',
+  'preset', 'heightScale', 'seaLevel', 'falloff', 'edgeFalloffMode',
   'noiseScale', 'noiseStrength', 'octaves', 'persistence', 'lacunarity', 'ridge', 'warp',
   'noisePreset', 'normalStrength', 'aoStrength',
 ];

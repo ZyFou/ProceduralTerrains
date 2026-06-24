@@ -89,7 +89,7 @@ function mulberry32(a) {
 // off). Everything else (debug toggles, sun, fog…) always applies instantly.
 const SHAPE_KEYS = new Set([
   'seed', 'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
-  'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
+  'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
   'chunkCount', 'chunkSize',
 ]);
@@ -154,6 +154,7 @@ export class Engine {
     // continuous noise field, so adjacent cells meet seamlessly; only the
     // assembly's outer rim keeps the diorama edge falloff. tiles always holds
     // origin (0,0). A small R8 occupancy texture drives the shader falloff/wall.
+    this.tileAssemblyShape = 'square';
     this.tiles = [{ cx: 0, cz: 0 }];
     this._tileOccTex = null;
     // hover-to-add interaction (studio only)
@@ -493,21 +494,26 @@ export class Engine {
     u.uTileGridOrigin.value.set(b.minX * cs - cs * 0.5, b.minZ * cs - cs * 0.5);
     u.uTileGridDim.value.set(w, h);
     u.uTileCellSize.value = cs;
-    u.uUseTiles.value = this.tiles.length > 1 ? 1 : 0;
+    u.uUseTiles.value = this.tiles.length > 1 || this.tileAssemblyShape === 'circle' ? 1 : 0;
+    u.uTileShape.value = this.tileAssemblyShape === 'circle' ? 1 : 0;
+    u.uTileDiskRadius.value = (this.diskRadiusCells + 0.5) * cs;
     // studio height bake spans the whole tile union
     u.uBakeOrigin.value.set(b.minX * cs - cs * 0.5, b.minZ * cs - cs * 0.5);
     u.uBakeSpan.value.set(this._unionWidth(), this._unionDepth());
   }
 
   _studioBakeLayoutKey() {
-    return this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
+    return `${this.tileAssemblyShape}:${this.diskRadiusCells}:` + this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
   }
 
   get tileGridSize() { return 5; }           // 5×5 window centred on (0,0)
   get tileGridExtent() { return 2; }         // max |cx| / |cz| from origin (5 = 2+1+2)
-  _inTileGridBounds(cx, cz) {
+  get diskRadiusCells() {
+    return this.tiles.reduce((m, t) => Math.max(m, Math.hypot(t.cx, t.cz)), 0);
+  }
+  _inTilePlacementBounds(cx, cz, shape = this.tileAssemblyShape) {
     const e = this.tileGridExtent;
-    return Math.abs(cx) <= e && Math.abs(cz) <= e;
+    return shape === 'circle' ? Math.hypot(cx, cz) <= e + 1e-6 : Math.abs(cx) <= e && Math.abs(cz) <= e;
   }
   _hasTile(cx, cz) { return this.tiles.some((t) => t.cx === cx && t.cz === cz); }
 
@@ -521,7 +527,7 @@ export class Engine {
         const cx = Math.trunc(Number(t?.cx));
         const cz = Math.trunc(Number(t?.cz));
         if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
-        if (!this._inTileGridBounds(cx, cz)) continue;
+        if (!this._inTilePlacementBounds(cx, cz)) continue;
         const key = `${cx},${cz}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -536,7 +542,7 @@ export class Engine {
   // occupied cell (assembly stays connected). No cap on how many are placed.
   canAddTileAt(cx, cz) {
     if (this.worldMode !== 'studio') return false;
-    if (!this._inTileGridBounds(cx, cz)) return false;
+    if (!this._inTilePlacementBounds(cx, cz)) return false;
     if (this._hasTile(cx, cz)) return false;
     return this._hasTile(cx - 1, cz) || this._hasTile(cx + 1, cz)
         || this._hasTile(cx, cz - 1) || this._hasTile(cx, cz + 1);
@@ -583,8 +589,25 @@ export class Engine {
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._updateTileGhost();
-    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
+    this._notifyTiles();
     this._needsRender = true;
+  }
+
+  _notifyTiles() {
+    this.cb.onTiles?.({
+      tiles: this.tiles.map((t) => ({ ...t })),
+      tileAssemblyShape: this.tileAssemblyShape,
+      diskRadiusCells: this.diskRadiusCells,
+    });
+  }
+
+  setTileAssemblyShape(shape) {
+    const next = shape === 'circle' ? 'circle' : 'square';
+    if (next === this.tileAssemblyShape) return;
+    this.tileAssemblyShape = next;
+    this.tiles = this._sanitizeTiles(this.tiles);
+    this._tileGhostCell = null;
+    this._rebuildTiles();
   }
 
   // ---------------------------------------------------- hover-to-add tile UI
@@ -593,7 +616,7 @@ export class Engine {
     const group = new THREE.Group();
     group.name = 'tile-ghost';
     group.renderOrder = 20;
-    const plane = new THREE.PlaneGeometry(1, 1);
+    const plane = new THREE.CircleGeometry(0.5, 64);
     plane.rotateX(-Math.PI / 2);
     const fill = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({
       color: 0x2563eb, transparent: true, opacity: 0.16,
@@ -968,10 +991,11 @@ export class Engine {
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
+    this.tileAssemblyShape = 'square';
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
     this._tileGhostCell = null;
     this.applyAll({ force: true });
-    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
+    this._notifyTiles();
 
     const defaultStack = migrateStack(undefined);
     this.setNoiseStack(defaultStack);
@@ -1307,14 +1331,21 @@ export class Engine {
     const sea = this.params.seaLevel;
     const topY = sea > 0.5 ? sea : 0;
     const wall = this._wallThickness();
-    // One diorama box per occupied cell. Shared interior walls are buried
-    // between adjacent cells (DoubleSide, invisible); the outer walls cap the
-    // assembly rim. Works for any (even L-shaped) layout with no edge tracking.
-    const boxes = this.tiles.map((t) =>
-      buildBoardPlinthGeometry(size, skirtDepth, topY, wall, this._cellWorldCenter(t.cx, t.cz))
-    );
-    const geo = boxes.length > 1 ? mergeGeometries(boxes) : boxes[0];
-    if (boxes.length > 1) for (const b of boxes) b.dispose();
+    let geo;
+    if (this.tileAssemblyShape === 'circle') {
+      const radius = (this.diskRadiusCells + 0.5) * this.cellSize + wall;
+      geo = new THREE.CylinderGeometry(radius, radius, skirtDepth + topY, 96, 1, false);
+      geo.translate(0, topY - (skirtDepth + topY) * 0.5, 0);
+    } else {
+      // One diorama box per occupied cell. Shared interior walls are buried
+      // between adjacent cells (DoubleSide, invisible); the outer walls cap the
+      // assembly rim. Works for any (even L-shaped) layout with no edge tracking.
+      const boxes = this.tiles.map((t) =>
+        buildBoardPlinthGeometry(size, skirtDepth, topY, wall, this._cellWorldCenter(t.cx, t.cz))
+      );
+      geo = boxes.length > 1 ? mergeGeometries(boxes) : boxes[0];
+      if (boxes.length > 1) for (const b of boxes) b.dispose();
+    }
     this.plinth.geometry.dispose();
     this.plinth.geometry = geo;
   }
@@ -1339,6 +1370,7 @@ export class Engine {
     u.uRidge.value = p.ridge;
     u.uWarp.value = p.warp;
     u.uFalloff.value = p.falloff;
+    u.uEdgeFalloffMode.value = p.edgeFalloffMode === 'mountains' ? 1 : 0;
     u.uBoardHalf.value = size / 2;
     u.uChunkSize.value = p.chunkSize;
     this._applyTileUniforms();
@@ -2782,6 +2814,7 @@ export class Engine {
       savedAt: new Date().toISOString(),
       params: this.params,
       tiles: this.tiles.map((t) => ({ ...t })),
+      tileAssemblyShape: this.tileAssemblyShape,
     };
     // Only embed paint pixel data when something was actually painted —
     // serialize() returns null for an untouched canvas, which would otherwise
@@ -2818,12 +2851,13 @@ export class Engine {
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
     this._syncPlanetStyleToParams();
     // restore the tile assembly (old saves with no tiles -> single origin tile)
+    this.tileAssemblyShape = json?.tileAssemblyShape === 'circle' ? 'circle' : 'square';
     this.tiles = this._sanitizeTiles(json?.tiles);
     this.cb.onParams({ ...this.params });
     this.applyAll({ force: true });
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);
-    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
+    this._notifyTiles();
     if (json?.paint) this.paintMode?.load(json.paint);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
@@ -2851,6 +2885,7 @@ export class Engine {
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
       tiles: this.tiles.map((t) => ({ ...t })),
+      tileAssemblyShape: this.tileAssemblyShape,
     };
   }
 
@@ -2889,6 +2924,7 @@ export class Engine {
     if (snap.tileDebug) this.tileDebug = { ...this.tileDebug, ...snap.tileDebug };
 
     // tile assembly (so the board rebuild below lays out the right cells)
+    this.tileAssemblyShape = snap.tileAssemblyShape === 'circle' ? 'circle' : 'square';
     this.tiles = this._sanitizeTiles(snap.tiles);
 
     // push params → uniforms and rebuild board geometry (chunk layout may differ)
@@ -2896,7 +2932,7 @@ export class Engine {
     this.applyAll({ force: true });
     const uc = this._unionCenter();
     this.controls.goalTarget.set(uc.x, 0, uc.z);
-    this.cb.onTiles?.(this.tiles.map((t) => ({ ...t })));
+    this._notifyTiles();
     this._applyPerformance();
     this._notifyPerf();
 
@@ -3142,7 +3178,7 @@ export class Engine {
       } else {
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
-          { ...options, tiles: this.tiles.map((t) => ({ ...t })) }, onMsg, this._stackGLSL
+          { ...options, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
         );
       }
     } catch (e) {

@@ -49,8 +49,9 @@ void main() {
       // multi-cell assembly: only skirts on a cell edge facing empty space
       // become the plinth wall; interior seams between two tiles stay terrain.
       vec3 tw = tileWall(wp.xz);
+      if (uTileShape > 0.5) tw = vec3(diskWall(wp.xz), normalize(wp.xz + vec2(1e-5)));
       float onOuter = step(0.5, tw.x);
-      float interiorSeam = tileInteriorSeam(wp.xz);
+      float interiorSeam = (uTileShape > 0.5) ? 0.0 : tileInteriorSeam(wp.xz);
       skirt = aSkirt * (1.0 - interiorSeam);
       wall = aSkirt * onOuter;
       skirt *= 1.0 - onOuter;
@@ -292,6 +293,7 @@ export function createTerrainUniforms() {
     uRidge:          { value: 0.65 },
     uWarp:           { value: 0.9 },
     uFalloff:        { value: 0.5 },
+    uEdgeFalloffMode:{ value: 0.0 },
     uBoardHalf:      { value: 1024 },
     uChunkSize:      { value: 128 },
     // Tile mode (multi-cell studio assembly). Defaults reproduce a single
@@ -301,6 +303,8 @@ export function createTerrainUniforms() {
     uTileGridDim:    { value: new THREE.Vector2(1, 1) },
     uTileCellSize:   { value: 2048 },
     uUseTiles:       { value: 0.0 },
+    uTileShape:      { value: 0.0 },
+    uTileDiskRadius: { value: 1024 },
     uMoistScale:     { value: 1.0 },
     uMoistBias:      { value: 0.0 },
     uBiomeScale:     { value: 1.0 },

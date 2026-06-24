@@ -9,7 +9,7 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.lacunarity', label: 'Lacunarity', keywords: 'height noise frequency fbm' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.ridge', label: 'Ridge Intensity', keywords: 'height noise ridge mountain alpine' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.warp', label: 'Domain Warp', keywords: 'height noise warp fold distortion' },
-  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.falloff', label: 'Island Falloff', keywords: 'height coast island edge falloff' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.falloff', label: 'Edge Falloff Width', keywords: 'height coast island edge falloff' },
   { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.normalStrength', label: 'Normal Strength', keywords: 'surface shading detail normals' },
   { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.aoStrength', label: 'Ambient Occlusion', keywords: 'surface shading crevice darkening' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.heightMap', label: 'Height Map', keywords: 'height import replace blend map' },
