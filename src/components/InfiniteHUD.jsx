@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { useState } from 'react';
+import { Compass } from 'lucide-react';
 import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
 import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';
 import { PLANET_PRESETS } from '../engine/style/PlanetPresets.js';
@@ -16,6 +17,8 @@ const PLAYER_STATE_LABELS = {
   falling: 'Falling',
   swimming: 'Swimming',
   underwater: 'Underwater',
+  flying: 'Flying',
+  stalling: 'Stalling',
 };
 
 const DockBtn = ({ active, onClick, title, children }) => (
@@ -32,7 +35,7 @@ const DockBtn = ({ active, onClick, title, children }) => (
 
 export default function InfiniteHUD({
   stats, onReturn, isPlanet,
-  playerMode, onPlayerMode,
+  exploreMode, onExploreMode,
   quality, onQualityChange,
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
@@ -44,6 +47,7 @@ export default function InfiniteHUD({
 
   const qualityKeys = getQualityKeys();
   const togglePerf = () => setPerfOpen((v) => !v);
+  const exploring = exploreMode === 'walk' || exploreMode === 'plane';
 
   return (
     <>
@@ -73,7 +77,7 @@ export default function InfiniteHUD({
             <span className="fps-info-dim"> / {stats.chunks}</span>
           </span>
         </div>
-        {playerMode && stats.playerState && (
+        {exploring && stats.playerState && (
           <div className="fps-info-row">
             <span className="fps-info-label">STATE</span>
             <span className={`fps-info-val player-state player-state-${stats.playerState}`}>
@@ -91,14 +95,26 @@ export default function InfiniteHUD({
 
       <div id="fps-settings-panel">
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Walk mode</span>
-          <button
-            type="button"
-            className={`toggle${playerMode ? ' on' : ''}`}
-            onClick={onPlayerMode}
-            aria-pressed={!!playerMode}
-            title="Player physics: gravity, walking, jumping, swimming"
-          />
+          <span className="fps-setting-label">Explore</span>
+          <div className="fps-explore-select" role="group" aria-label="Explore mode">
+            <button
+              type="button"
+              className={`fps-explore-option${exploreMode === 'walk' ? ' active' : ''}`}
+              onClick={() => onExploreMode?.('walk')}
+              title="Walk on the terrain"
+            >
+              <Compass aria-hidden size={12} strokeWidth={1.8} />
+              Walk
+            </button>
+            <button
+              type="button"
+              className={`fps-explore-option${exploreMode === 'plane' ? ' active' : ''}`}
+              onClick={() => onExploreMode?.('plane')}
+              title="Fly with throttle, lift, gravity, and stalls"
+            >
+              Plane
+            </button>
+          </div>
         </div>
         <div className="fps-setting-row">
           <span className="fps-setting-label">Quality</span>
@@ -213,7 +229,7 @@ export default function InfiniteHUD({
       )}
 
       <div id="fps-controls-hint">
-        {playerMode ? (
+        {exploreMode === 'walk' ? (
           <>
             <span>ZQSD</span> Move &nbsp;·&nbsp;
             <span>Mouse</span> Look &nbsp;·&nbsp;
@@ -221,6 +237,14 @@ export default function InfiniteHUD({
             <span>Space</span> Jump/Swim up &nbsp;·&nbsp;
             <span>Ctrl/C</span> Swim down &nbsp;·&nbsp;
             <span>Scroll</span> Speed &nbsp;·&nbsp;
+            Click to lock mouse
+          </>
+        ) : exploreMode === 'plane' ? (
+          <>
+            <span>Mouse</span> Pitch/bank &nbsp;/&nbsp;
+            <span>W/S</span> Throttle/brake &nbsp;/&nbsp;
+            <span>A/D</span> Bank &nbsp;/&nbsp;
+            <span>Scroll</span> Cruise speed &nbsp;/&nbsp;
             Click to lock mouse
           </>
         ) : (

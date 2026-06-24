@@ -37,6 +37,7 @@ import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
+import { PlaneController } from './player/PlaneController.js';
 import { defaultLegacyStack, migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
 import {
   TERRAIN_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
@@ -184,9 +185,11 @@ export class Engine {
     this.planetFaceGrid = 8;
     this._compiledKeys = new Set();   // mode:octave shader sets already compiled
 
-    // First-person player physics (optional, both modes)
+    // Explore controllers: walk or plane. playerMode remains a walk-only
+    // compatibility flag for existing UI/status paths.
     this.player = null;
     this.playerMode = false;
+    this.exploreMode = 'none';
     this.heightSampler = null;
     this._terrainGen = 0;   // bumped whenever the height field changes
     this._infiniteTerrainMat = null;
@@ -607,7 +610,7 @@ export class Engine {
   }
 
   _tileInteractionActive() {
-    return this.worldMode === 'studio' && !this.playerMode && !this.paintState?.enabled;
+    return this.worldMode === 'studio' && this.exploreMode === 'none' && !this.paintState?.enabled;
   }
 
   // Position/show the ghost for the current candidate cell, or hide it.
@@ -1793,7 +1796,81 @@ export class Engine {
    * Works in Infinite World and in Studio mode (walking on the board).
    * Free camera behavior is fully restored on disable.
    */
+  setExploreMode(mode) {
+    mode = mode === 'walk' || mode === 'plane' ? mode : 'none';
+    if (mode !== 'none' && this.paintMode?.state.enabled) this.setPaintMode(false);
+    if (mode === this.exploreMode) return;
+
+    const prev = this.exploreMode;
+    if (prev === 'walk') this._legacySetPlayerMode(false);
+    else if (prev === 'plane') this._setPlaneMode(false);
+
+    this.exploreMode = 'none';
+    this.playerMode = false;
+
+    if (mode === 'walk') {
+      this._legacySetPlayerMode(true);
+      this.exploreMode = 'walk';
+      this.playerMode = true;
+    } else if (mode === 'plane') {
+      this._setPlaneMode(true);
+      this.exploreMode = 'plane';
+      this.playerMode = false;
+    }
+
+    if (this.cb.onExploreMode) this.cb.onExploreMode(this.exploreMode);
+    if (this.cb.onPlayerMode) this.cb.onPlayerMode(this.playerMode);
+  }
+
   setPlayerMode(enabled) {
+    this.setExploreMode(enabled ? 'walk' : 'none');
+  }
+
+  _setPlaneMode(enabled) {
+    if (enabled) {
+      if (this.worldMode === 'studio') {
+        this.controls.enabled = false;
+      } else if (this.worldMode === 'infinite' && this.fpsControls) {
+        this.fpsControls.dispose();
+        this.fpsControls = null;
+      } else if (this.worldMode === 'planet' && this.planetControls) {
+        this.planetControls.dispose();
+        this.planetControls = null;
+      }
+
+      this.player = new PlaneController({
+        camera: this.camera,
+        domElement: this.canvas,
+        sampler: this.worldMode === 'planet' ? null : this._getHeightSampler(),
+        planetSampler: this.worldMode === 'planet' ? this._getPlanetSampler() : null,
+        config: {
+          gravity: this.worldMode === 'planet' ? 28 : 32,
+          spawnClearance: this.worldMode === 'planet' ? 90 : Math.max(28, this._maxHeight() * 0.08),
+          terrainClearance: this.worldMode === 'planet' ? 12 : 4,
+        },
+      });
+      this.cb.onToast('Plane mode - click to lock mouse · W throttle · S brake · A/D bank');
+      return;
+    }
+
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+    if (this.worldMode === 'studio') {
+      this.controls.enabled = true;
+      this.controls.reset(this.boardSize);
+    } else if (this.worldMode === 'infinite' && !this.fpsControls) {
+      this.fpsControls = new FPSControls(this.camera, this.canvas);
+    } else if (this.worldMode === 'planet' && !this.planetControls) {
+      this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
+      this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
+      this.planetControls.update(0.001);
+    }
+    this.cb.onToast('Free camera');
+  }
+
+  _legacySetPlayerMode(enabled) {
     enabled = !!enabled;
     if (enabled && this.paintMode?.state.enabled) this.setPaintMode(false);
     if (enabled === this.playerMode) return;
@@ -1885,7 +1962,7 @@ export class Engine {
   // -------------------------------------------------------------- paint mode
 
   setPaintMode(enabled) {
-    if (enabled && this.playerMode) this.setPlayerMode(false);
+    if (enabled && this.exploreMode !== 'none') this.setExploreMode('none');
     if (enabled && this.worldMode !== 'studio') {
       this.cb.onToast('Paint Mode is currently available in Studio mode');
       return;
@@ -1909,7 +1986,7 @@ export class Engine {
     if (mode === this.worldMode) return;
     if (this.paintMode?.state.enabled) this.setPaintMode(false);
     // player physics is per-mode — always leave it cleanly before switching
-    this.setPlayerMode(false);
+    this.setExploreMode('none');
 
     // tear down the mode we are leaving
     const prev = this.worldMode;
@@ -3169,9 +3246,11 @@ export class Engine {
 
   _tickStudio(dt, now) {
     // Input always runs (so inertia/look settle even when we skip drawing).
-    if (this.playerMode && this.player) {
+    if (this.exploreMode === 'walk' && this.player) {
       this.fpsControls.update(dt);   // mouse look
       this.player.update(dt);        // body physics
+    } else if (this.exploreMode === 'plane' && this.player) {
+      this.player.update(dt);
     } else {
       this.controls.update(dt);
     }
@@ -3194,7 +3273,7 @@ export class Engine {
       (this.params.cloudsEnabled && !!this.studioCloud) ||
       (this.water.visible && this.params.waterAnim) ||
       this.underwater.active ||
-      this.playerMode ||
+      this.exploreMode !== 'none' ||
       !!this.paintState?.enabled ||
       this.board._lodRebuildQueue.length > 0;
     const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;
@@ -3267,8 +3346,8 @@ export class Engine {
   }
 
   _tickInfinite(dt, now) {
-    if (this.fpsControls) this.fpsControls.update(dt);
-    if (this.playerMode && this.player) this.player.update(dt);
+    if (this.exploreMode !== 'plane' && this.fpsControls) this.fpsControls.update(dt);
+    if (this.exploreMode !== 'none' && this.player) this.player.update(dt);
 
     // Stream chunks around the camera (with culling)
     if (this.infiniteWorld) {
@@ -3315,8 +3394,8 @@ export class Engine {
   }
 
   _tickPlanet(dt, now) {
-    if (this.playerMode && this.player) {
-      this.player.update(dt);   // PlanetController owns look + spherical physics
+    if (this.exploreMode !== 'none' && this.player) {
+      this.player.update(dt);   // explore controller owns look + physics
     } else if (this.planetControls) {
       this.planetControls.update(dt);
     }

@@ -65,6 +65,7 @@ export default function App() {
 
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
+  const [exploreMode, setExploreMode] = useState('none');
   const [playerMode, setPlayerMode] = useState(false);
   const [playerState, setPlayerState] = useState(null);
 
@@ -175,6 +176,7 @@ export default function App() {
           },
           onFirstInteract: () => setHelpVisible(false),
           onInfiniteStats: setInfiniteStats,
+          onExploreMode: setExploreMode,
           onPlayerMode: setPlayerMode,
           onPlayerState: setPlayerState,
           onQualityChange: setQualityPreset,
@@ -360,7 +362,10 @@ export default function App() {
   const runModeSwitchRef = useRef(runModeSwitch);
   runModeSwitchRef.current = runModeSwitch;
 
-  const togglePlayerMode = () => engine().setPlayerMode(!playerMode);
+  const selectExploreMode = (mode) => {
+    const next = exploreMode === mode ? 'none' : mode;
+    engine().setExploreMode(next);
+  };
   const handleQualityChange = (key) => { engine().setQuality(key); setQualityPreset(key); };
   const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
   const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); scheduleRecordRef.current?.(); };
@@ -542,11 +547,13 @@ export default function App() {
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
-  const planetWalking = isPlanet && playerMode;
-  const fpsView = isInfinite || planetWalking;
-  const studioLike = isStudio || (isPlanet && !playerMode);
+  const exploring = exploreMode !== 'none';
+  const planetExploring = isPlanet && exploring;
+  const fpsView = isInfinite || planetExploring;
+  const touchExplore = isInfinite || exploring;
+  const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
-  const showToolPanels = !previewMode && !paintMode && !planetWalking;
+  const showToolPanels = !previewMode && !paintMode && !planetExploring;
   const searchEnabled = showToolPanels;
 
   const formatSearchValue = useCallback((item) => {
@@ -846,7 +853,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''} ${fpsView ? 'infinite-mode fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -942,8 +949,8 @@ export default function App() {
               onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
               onAngled={() => { engine().setCameraView('angled'); setCamMode('orbit'); }}
               onResetCamera={() => engine().resetView()}
-              playerMode={playerMode}
-              onTogglePlayer={togglePlayerMode}
+              exploreMode={exploreMode}
+              onExploreMode={selectExploreMode}
             />
           )}
 
@@ -953,8 +960,8 @@ export default function App() {
                 stats={infiniteStats}
                 isPlanet={isPlanet}
                 onReturn={() => selectWorldMode('studio')}
-                playerMode={playerMode}
-                onPlayerMode={togglePlayerMode}
+                exploreMode={exploreMode}
+                onExploreMode={selectExploreMode}
                 quality={qualityPreset}
                 onQualityChange={handleQualityChange}
                 timeOfDay={timeOfDay}
@@ -972,9 +979,10 @@ export default function App() {
                 onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
                 onPerfReset={() => engine().resetPerfSettings()}
               />
-              <TouchControls onInput={handleTouchInput} />
             </>
           )}
+
+          {touchExplore && <TouchControls mode={exploreMode} onInput={handleTouchInput} />}
 
           {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>
@@ -1000,6 +1008,7 @@ export default function App() {
         worldMode={worldMode}
         infiniteStats={infiniteStats}
         qualityPreset={fpsView ? qualityPreset : null}
+        exploreMode={exploreMode}
         playerMode={playerMode}
         playerState={fpsView ? infiniteStats?.playerState : playerState}
       />

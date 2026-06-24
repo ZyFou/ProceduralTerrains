@@ -1,4 +1,25 @@
-export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, playerMode, onTogglePlayer }) {
+import { useEffect, useRef, useState } from 'react';
+import { ChevronUp, Compass } from 'lucide-react';
+
+export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const exploring = exploreMode === 'walk' || exploreMode === 'plane';
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [open]);
+
+  const select = (mode) => {
+    onExploreMode(mode);
+    setOpen(false);
+  };
+
   return (
     <div className="viewport-camera-bar" role="toolbar" aria-label="Camera views">
       <button
@@ -40,20 +61,42 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
         </svg>
         <span className="camera-bar-label">Reset Camera</span>
       </button>
-      <button
-        type="button"
-        className={`camera-bar-btn${playerMode ? ' active' : ''}`}
-        onClick={onTogglePlayer}
-        aria-label={playerMode ? 'Exit walk mode' : 'Walk mode'}
-        title="Walk on the terrain: gravity, jumping, swimming (click viewport to lock mouse)"
-      >
-        <svg viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="3.2" r="1.6" fill="currentColor" />
-          <path d="M8 5v4M8 9l-2.5 4M8 9l2.5 4M5.5 6.6 8 6l2.5.6"
-            stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span className="camera-bar-label">{playerMode ? 'Exit Walk' : 'Walk'}</span>
-      </button>
+
+      <div className="explore-menu-wrap" ref={wrapRef}>
+        <button
+          type="button"
+          className={`camera-bar-btn explore-menu-trigger${exploring ? ' active' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-label="Explore mode"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Explore terrain by walking or flying a plane"
+        >
+          <Compass aria-hidden size={14} strokeWidth={1.9} />
+          <span className="camera-bar-label">Explore</span>
+          <ChevronUp className={`explore-chevron${open ? ' open' : ''}`} aria-hidden size={12} strokeWidth={2} />
+        </button>
+        {open && (
+          <div className="explore-menu" role="menu" aria-label="Explore modes">
+            <button
+              type="button"
+              className={`explore-menu-item${exploreMode === 'walk' ? ' active' : ''}`}
+              onClick={() => select('walk')}
+              role="menuitem"
+            >
+              Walk
+            </button>
+            <button
+              type="button"
+              className={`explore-menu-item${exploreMode === 'plane' ? ' active' : ''}`}
+              onClick={() => select('plane')}
+              role="menuitem"
+            >
+              Plane
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

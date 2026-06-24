@@ -77,8 +77,11 @@ function useJoystick(onChange) {
   return { baseRef, knobRef, onPointerDown, onPointerMove, onPointerUp };
 }
 
-export default function TouchControls({ onInput }) {
-  const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 });
+export default function TouchControls({ onInput, mode = 'none' }) {
+  const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: 0.35 });
+  const throttleRef = useRef(null);
+  const throttleFillRef = useRef(null);
+  const throttleActiveRef = useRef(null);
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
 
@@ -98,12 +101,58 @@ export default function TouchControls({ onInput }) {
     sync();
   }, [sync]);
 
+  const setThrottleFromPointer = useCallback((e) => {
+    if (!throttleRef.current) return;
+    const rect = throttleRef.current.getBoundingClientRect();
+    const t = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height));
+    stateRef.current.throttle = Math.max(0, Math.min(1, t));
+    if (throttleFillRef.current) {
+      throttleFillRef.current.style.height = `${stateRef.current.throttle * 100}%`;
+    }
+    sync();
+  }, [sync]);
+
+  const onThrottleDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    throttleActiveRef.current = e.pointerId;
+    throttleRef.current?.setPointerCapture(e.pointerId);
+    setThrottleFromPointer(e);
+  }, [setThrottleFromPointer]);
+
+  const onThrottleMove = useCallback((e) => {
+    if (throttleActiveRef.current !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setThrottleFromPointer(e);
+  }, [setThrottleFromPointer]);
+
+  const onThrottleUp = useCallback((e) => {
+    if (throttleActiveRef.current !== e.pointerId) return;
+    if (throttleRef.current?.hasPointerCapture(e.pointerId)) {
+      throttleRef.current.releasePointerCapture(e.pointerId);
+    }
+    throttleActiveRef.current = null;
+  }, []);
+
   const move = useJoystick(onMove);
   const look = useJoystick(onLook);
 
   useEffect(() => () => {
-    onInputRef.current?.({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 });
+    onInputRef.current?.({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: 0 });
   }, []);
+
+  useEffect(() => {
+    if (mode !== 'plane') {
+      stateRef.current.throttle = 0;
+      if (throttleFillRef.current) throttleFillRef.current.style.height = '0%';
+      sync();
+    } else if (stateRef.current.throttle <= 0) {
+      stateRef.current.throttle = 0.35;
+      if (throttleFillRef.current) throttleFillRef.current.style.height = '35%';
+      sync();
+    }
+  }, [mode, sync]);
 
   return (
     <div className="touch-controls">
@@ -129,6 +178,20 @@ export default function TouchControls({ onInput }) {
         <div ref={look.knobRef} className="touch-joystick-knob" />
         <span className="touch-joystick-label">Look</span>
       </div>
+      {mode === 'plane' && (
+        <div
+          ref={throttleRef}
+          className="touch-throttle"
+          onPointerDown={onThrottleDown}
+          onPointerMove={onThrottleMove}
+          onPointerUp={onThrottleUp}
+          onPointerCancel={onThrottleUp}
+          aria-label="Plane throttle"
+        >
+          <div ref={throttleFillRef} className="touch-throttle-fill" style={{ height: `${stateRef.current.throttle * 100}%` }} />
+          <span className="touch-throttle-label">Throttle</span>
+        </div>
+      )}
     </div>
   );
 }

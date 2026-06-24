@@ -9,9 +9,12 @@ const PLAYER_STATE_LABELS = {
   falling: 'Falling',
   swimming: 'Swimming',
   underwater: 'Underwater',
+  flying: 'Flying',
+  stalling: 'Stalling',
 };
 
-export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset, playerMode, playerState }) {
+export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState }) {
+  const exploring = playerMode || exploreMode === 'plane';
   return (
     <footer id="statusbar">
       <div className="sb-group sb-group-primary">
@@ -19,7 +22,7 @@ export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats
         <span className="sb-status">{status.text}</span>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <span className="sb-desktop-only">GPU: {gpu}</span>
-        {playerMode && playerState && (
+        {exploring && playerState && (
           <>
             <span className="sb-sep sb-desktop-only" aria-hidden="true" />
             <span className={`player-state player-state-${playerState} sb-desktop-only`}>
