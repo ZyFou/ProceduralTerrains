@@ -167,8 +167,9 @@ float tileOccupiedAt(vec2 xz) {
 }
 
 float assemblyFalloff(vec2 xz) {
-  if (uTileShape < 0.5) return tileFalloff(xz);
-  return diskMask(xz);
+  float squareFalloff = tileFalloff(xz);
+  float circleFalloff = diskMask(xz);
+  return mix(squareFalloff, circleFalloff, step(0.5, uTileShape));
 }
 `;
 

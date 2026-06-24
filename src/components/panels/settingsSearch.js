@@ -28,6 +28,7 @@ const SETTINGS_INDEX = [
   { panelId: 'world', settingId: 'world.chunkCount', label: 'Chunk Count', keywords: 'world grid streaming tiles' },
   { panelId: 'world', settingId: 'world.chunkSize', label: 'Chunk Size', keywords: 'world grid streaming tiles' },
   { panelId: 'world', settingId: 'world.chunkGrid', label: 'Chunk Grid', keywords: 'world grid debug overlay' },
+  { panelId: 'world', settingId: 'world.tileAssemblyShape', label: 'Tile Shape', keywords: 'tiles square circle assembly disk' },
   { panelId: 'world', settingId: 'world.planetRadius', label: 'Planet Radius', keywords: 'planet sphere radius curvature' },
   { panelId: 'world', settingId: 'world.planetFaceGrid', label: 'Surface Detail', keywords: 'planet face grid chunk detail' },
 

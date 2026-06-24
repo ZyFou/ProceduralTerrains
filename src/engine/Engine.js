@@ -616,7 +616,7 @@ export class Engine {
     const group = new THREE.Group();
     group.name = 'tile-ghost';
     group.renderOrder = 20;
-    const plane = new THREE.CircleGeometry(0.5, 64);
+    const plane = new THREE.PlaneGeometry(1, 1);
     plane.rotateX(-Math.PI / 2);
     const fill = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({
       color: 0x2563eb, transparent: true, opacity: 0.16,
@@ -633,7 +633,10 @@ export class Engine {
   }
 
   _tileInteractionActive() {
-    return this.worldMode === 'studio' && this.exploreMode === 'none' && !this.paintState?.enabled;
+    return this.worldMode === 'studio'
+      && this.tileAssemblyShape === 'square'
+      && this.exploreMode === 'none'
+      && !this.paintState?.enabled;
   }
 
   // Position/show the ghost for the current candidate cell, or hide it.

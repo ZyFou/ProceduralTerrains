@@ -120,6 +120,12 @@ const vec3 LOD_COLORS[4] = vec3[4](
 void main() {
   vec2 xz = vWorldPos.xz;
 
+#ifndef INFINITE_MODE
+  // Circular assemblies still use square chunk meshes. Remove every fragment
+  // outside the disk so the original board cannot show through at zero height.
+  if (uTileShape > 0.5 && tileOccupiedAt(xz) < 0.5) discard;
+#endif
+
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = paintBiomeAt(xz);

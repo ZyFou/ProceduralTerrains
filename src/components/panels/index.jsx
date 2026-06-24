@@ -5,6 +5,7 @@ import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
+import ControlSection from '../ui/ControlSection.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
 import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
@@ -26,9 +27,8 @@ import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 // ---- toolbar / panel metadata (single source for icons + labels) ----
 export const PANEL_META = {
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
-  tiles: { label: 'Tiles', title: 'Tiles', desc: 'Grow the board into seamless adjacent tiles.', icon: PANEL_ICONS.tiles, modes: ['studio'] },
   noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },
-  world: { label: 'World', title: 'World', desc: 'Chunking, streaming and grid.', icon: PANEL_ICONS.world },
+  world: { label: 'World', title: 'World', desc: 'Layout, tiles, chunking and grid.', icon: PANEL_ICONS.world },
   planet: {
     label: 'Planet',
     title: 'Planet',
@@ -51,7 +51,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'tiles', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -163,8 +163,9 @@ function TerrainPanel({ ctx }) {
 
 function WorldPanel({ ctx }) {
   return (
-    <SidePanel title="World" description="Chunking, streaming and grid." onClose={ctx.onClose}>
+    <SidePanel title="World" description="Layout, tiles, chunking and grid." onClose={ctx.onClose}>
       <WorldPanelInner params={ctx.params} worldMode={ctx.worldMode} onParam={ctx.onParam} />
+      {ctx.worldMode === 'studio' && <TilesContent ctx={ctx} />}
       <PanelResetButton label="Reset World Settings" onClick={() => ctx.onResetPanel?.('world')} settingId="world.reset" />
     </SidePanel>
   );
@@ -693,7 +694,7 @@ function ExportPanel({ ctx }) {
 }
 
 // --------------------------------------------------------------- tiles panel
-function TilesPanel({ ctx }) {
+function TilesContent({ ctx }) {
   const tiles = ctx.tiles ?? [{ cx: 0, cz: 0 }];
   const grid = ctx.tileGridSize ?? 5;
   const extent = ctx.tileGridExtent ?? 2;
@@ -703,21 +704,22 @@ function TilesPanel({ ctx }) {
   const maxCells = shape === 'circle' ? diskMaxCells : gridCells;
   const atGridEdge = tiles.length >= maxCells;
   return (
-    <SidePanel title="Tiles" description="Grow the board into seamless adjacent tiles."
-      onClose={ctx.onClose}>
+    <ControlSection id="inspector-tiles" title="TILES" defaultOpen={true} icon={PANEL_ICONS.tiles}>
       <div className="subsection-label">Assembly</div>
       <div className="settings-hint" style={{ marginBottom: 8 }}>
-        Hover near a board edge and click the highlighted preview to add a tile that
-        continues the terrain. Tiles share the same noise field and export together.
-        Square uses a {grid}×{grid} grid; Circle masks the assembly to a radius of {extent} cells (~{diskMaxCells} cells).
+        {shape === 'square'
+          ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
+          : 'Circle crops the current terrain assembly to a radial disk. Switch to Square to add more tiles.'}
+        {' '}Tiles share the same noise field and export together.
       </div>
       <SelectRow label="Shape" value={shape}
         options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
-        onChange={ctx.onTileAssemblyShape} info="Circle keeps square chunks for placement but renders and exports a radial disk." />
+        onChange={ctx.onTileAssemblyShape} settingId="world.tileAssemblyShape"
+        info="Square supports hover-to-add tiles. Circle crops the current square chunk assembly to a disk." />
       <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
       {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
       {atGridEdge && (
-        <div className="settings-hint">All {gridCells} cells in the grid are occupied.</div>
+        <div className="settings-hint">All {maxCells} available cells are occupied.</div>
       )}
 
       {tiles.length > 1 && (
@@ -738,7 +740,7 @@ function TilesPanel({ ctx }) {
           </div>
         </>
       )}
-    </SidePanel>
+    </ControlSection>
   );
 }
 
@@ -751,7 +753,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
-  terrain: TerrainPanel, tiles: TilesPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };
