@@ -2418,6 +2418,96 @@ export class Engine {
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
 
+  // ------------------------------------------------------- undo / redo state
+  // The App keeps a history stack of these snapshots and calls restoreState()
+  // on Ctrl+Z / Ctrl+Y. A snapshot captures every editable project setting
+  // (params, planet style, noise stack, performance, time-of-day, debug
+  // inspection toggles and paint layers) plus the current world mode. Imported
+  // image maps (heavy pixel data) and pure view state (camera) are excluded.
+
+  // Lightweight snapshot: every editable setting, but NO paint pixel data — the
+  // paint canvas is megabytes, so we record only a `paintRev` marker here and
+  // let the App fetch the heavy blob via serializePaint() once per revision.
+  serializeState() {
+    this._syncPlanetStyleToParams();
+    return {
+      params: JSON.parse(JSON.stringify(this.params)),
+      perf: { ...this.perf },
+      timeOfDay: this.timeOfDay,
+      worldMode: this.worldMode,
+      tileDebug: { ...this.tileDebug },
+      debug: { ...this._debug },
+      cullingEnabled: this.board?.cullingEnabled !== false,
+      behindCameraCulling: this.board?.behindCameraCulling !== false,
+      paintRev: this.paintMode?.layers?.revision ?? 0,
+    };
+  }
+
+  /** Heavy paint-layer blob (height/biome/props pixel arrays) for undo history. */
+  serializePaint() {
+    return this.paintMode?.serialize() ?? null;
+  }
+
+  /**
+   * Restore a snapshot produced by serializeState(). The caller is responsible
+   * for switching world mode first when snap.worldMode differs (that path is
+   * heavy + async and already wrapped in a loading overlay by the App). This
+   * re-applies all params, planet style, performance, noise stack, debug
+   * toggles and paint, then fires the React mirror callbacks so the panels
+   * reflect the restored values.
+   */
+  restoreState(snap) {
+    if (!snap || !snap.params) return;
+
+    // params: full replacement, but keep any newer default keys the snapshot
+    // predates so we never end up with undefined settings.
+    this.params = { ...DEFAULT_PARAMS, ...snap.params };
+
+    // planet style lives nested in params — re-import so the style manager and
+    // its uniforms match the restored palette/tuning exactly.
+    if (snap.params.planetStyle) {
+      this.planetStyle.importJSON({ planetStyle: snap.params.planetStyle });
+    }
+    this._syncPlanetStyleToParams();
+
+    if (snap.perf) {
+      this.perf = sanitizePerfSettings({ ...snap.perf });
+      this.qualityPreset = this.perf.preset;
+    }
+    if (snap.debug) this._debug = { ...this._debug, ...snap.debug };
+    if (snap.tileDebug) this.tileDebug = { ...this.tileDebug, ...snap.tileDebug };
+
+    // push params → uniforms and rebuild board geometry (chunk layout may differ)
+    this.cb.onParams(this._paramsSnapshot());
+    this.applyAll({ force: true });
+    this._applyPerformance();
+    this._notifyPerf();
+
+    // noise stack: structural edits recompile in the background, continuous
+    // edits just repack uniforms (setNoiseStack handles both + fires onParams).
+    this.setNoiseStack(migrateStack(snap.params.noiseStack));
+
+    // global culling toggles live on the board / world objects, not in params.
+    this.setCullingEnabled(snap.cullingEnabled !== false);
+    this.setBehindCameraCulling(snap.behindCameraCulling !== false);
+
+    // re-derive the tile-debug view uniform + notify the Debug panel.
+    this.setTileDebug({});
+
+    // time of day (fires onTimeOfDayChange → React sync).
+    this.setTimeOfDay(snap.timeOfDay ?? this.timeOfDay);
+
+    // paint layers (board-local height/biome/props overrides). The App injects
+    // the heavy blob into snap.paint before calling; a null blob means the
+    // restored state had no paint, so wipe the live layers (silent — no toast).
+    if (this.paintMode) {
+      if (snap.paint) this.paintMode.load(snap.paint);
+      else this.paintMode.layers.clear();
+    }
+
+    this._needsRender = true;
+  }
+
   /**
    * Cloud quality/perf knobs used to live in `params` and serialize with the
    * save. They now live in `perf`. Port any legacy keys from an old save into

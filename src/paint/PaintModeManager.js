@@ -135,8 +135,12 @@ export class PaintModeManager {
   }
 
   _onPointerUp() {
+    const wasPainting = this.isPainting;
     this.isPainting = false;
     this._lastPaintPoint = null;
+    // a finished stroke is one "stable action" — emit so the app can snapshot
+    // it into the undo history (the layer revision has advanced).
+    if (wasPainting) this._emit();
   }
 
   _onWheel(e) {

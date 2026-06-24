@@ -101,6 +101,21 @@ export default function App() {
   const bootedRef = useRef(false);
   const exportFailedRef = useRef(false);
 
+  // ---- undo / redo history ----
+  // Each entry is a JSON string from engine.serializeState() (every setting,
+  // minus heavy paint pixels — those are deduped by revision in paintBlobsRef).
+  // Rapid edits (dragging a slider 100→150) are coalesced by a debounce so one
+  // Ctrl+Z reverts the whole gesture back to the value before the drag (100),
+  // never the intermediate frames.
+  const historyRef = useRef({ past: [], future: [], present: null });
+  const paintBlobsRef = useRef(new Map());     // paintRev → heavy paint blob
+  const histSuppressRef = useRef(false);       // true while applying a restore
+  const histTimerRef = useRef(null);           // pending debounced record
+  const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
+  const worldModeRef = useRef('studio');
+  const [histState, setHistState] = useState({ canUndo: false, canRedo: false });
+  const HISTORY_LIMIT = 100;
+
   blockingActiveRef.current = !!blockingTask(loading.tasks);
 
   useEffect(() => {
@@ -128,6 +143,7 @@ export default function App() {
               ...next,
               planetStyle: next.planetStyle ? clonePlanetStyle(next.planetStyle) : next.planetStyle,
             });
+            scheduleRecordRef.current?.();
           },
           onStatus: (text, busy) => {
             setStatus({ text, busy });
@@ -161,10 +177,10 @@ export default function App() {
           onPlayerMode: setPlayerMode,
           onPlayerState: setPlayerState,
           onQualityChange: setQualityPreset,
-          onTimeOfDayChange: setTimeOfDay,
-          onPerfChange: setPerf,
-          onPaintState: setPaintState,
-          onTileDebug: setTileDebug,
+          onTimeOfDayChange: (v) => { setTimeOfDay(v); scheduleRecordRef.current?.(); },
+          onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
+          onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
+          onTileDebug: (t) => { setTileDebug(t); scheduleRecordRef.current?.(); },
           onImportedMaps: setImportedMaps,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
@@ -186,6 +202,8 @@ export default function App() {
     engine.setCullingEnabled(cullingEnabled);
     engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
+    // seed the undo history baseline from the freshly-built default project
+    try { historyRef.current = { past: [], future: [], present: JSON.stringify(engine.serializeState()) }; } catch { /* ignore */ }
     setGpu(engine.gpuName);
     if (landingRef.current?.visible && !landingRef.current?.exiting) {
       engine.setLandingShowcase(true);
@@ -282,14 +300,17 @@ export default function App() {
   const modeLockRef = useRef(false);
   const [modeLocked, setModeLocked] = useState(false);
   const BUILD_STEP = { studio: 'Building terrain board…', infinite: 'Streaming world chunks…', planet: 'Building spherical mesh…' };
-  const selectWorldMode = (next) => {
-    if (next === worldMode || modeLockRef.current) return;
+  // Returns a promise that resolves once the (heavy, async) mode switch has
+  // finished compiling. `silent` suppresses the success/info toasts — used by
+  // the undo/redo restore path so reverting across modes is quiet.
+  const runModeSwitch = (next, { silent = false } = {}) => {
+    if (next === worldMode || modeLockRef.current) return Promise.resolve();
     modeLockRef.current = true;
     setModeLocked(true);
     const label = MODE_LABEL[next] ?? next;
     if (!panelAvailable(activePanel, next)) setActivePanel(null);
 
-    loading.run('mode', { blocking: true, label: `Switching to ${label} mode…`, detail: 'Preparing scene…' }, async (update) => {
+    return loading.run('mode', { blocking: true, label: `Switching to ${label} mode…`, detail: 'Preparing scene…' }, async (update) => {
       blockingUpdateRef.current = update;
       update({ detail: BUILD_STEP[next] ?? 'Building scene…' });
       // yield so the overlay paints the build message before the sync build
@@ -315,31 +336,180 @@ export default function App() {
       });
       await new Promise((r) => setTimeout(r, 80));
     }).then(() => {
-      showToast(`Switched to ${label} mode`, 'success');
-      if (next === 'infinite') { setHelpVisible(false); showToast('Click to lock mouse', 'info'); }
-      else if (next === 'planet') { setHelpVisible(false); }
+      if (!silent) {
+        showToast(`Switched to ${label} mode`, 'success');
+        if (next === 'infinite') { setHelpVisible(false); showToast('Click to lock mouse', 'info'); }
+        else if (next === 'planet') { setHelpVisible(false); }
+      } else if (next !== 'studio') {
+        setHelpVisible(false);
+      }
     }).catch((e) => {
       console.error(e);
-      showToast('Mode switch failed', 'error');
+      if (!silent) showToast('Mode switch failed', 'error');
     }).finally(() => {
       blockingUpdateRef.current = null;
       modeLockRef.current = false;
       setModeLocked(false);
+      scheduleRecordRef.current?.();   // guarded no-op while a restore is suppressed
     });
   };
+
+  const selectWorldMode = (next) => { runModeSwitch(next); };
+  const runModeSwitchRef = useRef(runModeSwitch);
+  runModeSwitchRef.current = runModeSwitch;
 
   const togglePlayerMode = () => engine().setPlayerMode(!playerMode);
   const handleQualityChange = (key) => { engine().setQuality(key); setQualityPreset(key); };
   const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
-  const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); };
-  const handleCullingEnabled = (enabled) => { engine().setCullingEnabled(enabled); setCullingEnabled(enabled); };
+  const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); scheduleRecordRef.current?.(); };
+  const handleCullingEnabled = (enabled) => { engine().setCullingEnabled(enabled); setCullingEnabled(enabled); scheduleRecordRef.current?.(); };
   const handleDebugFlag = (key, value) => {
     engine().setDebugFlag(key, value);
     setDebugFlags((f) => ({ ...f, [key]: value }));
+    scheduleRecordRef.current?.();
   };
   const handleTouchInput = useCallback((input) => {
     engineRef.current?.setTouchInput(input);
   }, []);
+
+  // ---------------------------------------------------------- undo / redo
+  worldModeRef.current = worldMode;
+
+  const captureSnapshot = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return null;
+    try {
+      const state = eng.serializeState();
+      const rev = state.paintRev ?? 0;
+      // dedupe the heavy paint blob: store one copy per revision, referenced
+      // from the (tiny) snapshot string by its rev number.
+      if (rev > 0 && !paintBlobsRef.current.has(rev)) {
+        const blob = eng.serializePaint();
+        if (blob) paintBlobsRef.current.set(rev, blob);
+      }
+      return JSON.stringify(state);
+    } catch (err) {
+      console.warn('History snapshot failed', err);
+      return null;
+    }
+  }, []);
+
+  // Drop cached paint blobs no longer referenced by any history entry so the
+  // dedupe map can't grow without bound when the user paints many strokes.
+  const prunePaintBlobs = useCallback(() => {
+    const map = paintBlobsRef.current;
+    if (map.size <= 4) return;
+    const h = historyRef.current;
+    const live = new Set();
+    const collect = (s) => { try { const r = JSON.parse(s).paintRev; if (r) live.add(r); } catch { /* ignore */ } };
+    h.past.forEach(collect);
+    h.future.forEach(collect);
+    if (h.present) collect(h.present);
+    for (const key of map.keys()) if (!live.has(key)) map.delete(key);
+  }, []);
+
+  const recordHistory = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng || histSuppressRef.current) return;
+    const snap = captureSnapshot();
+    if (snap == null) return;
+    const h = historyRef.current;
+    if (h.present == null) { h.present = snap; return; }  // first run → baseline
+    if (snap === h.present) return;                        // nothing actually changed
+    h.past.push(h.present);
+    if (h.past.length > HISTORY_LIMIT) h.past.shift();
+    h.present = snap;
+    h.future.length = 0;
+    prunePaintBlobs();
+    setHistState({ canUndo: h.past.length > 0, canRedo: false });
+  }, [captureSnapshot, prunePaintBlobs]);
+
+  const scheduleRecord = useCallback(() => {
+    if (histSuppressRef.current) return;
+    if (!bootedRef.current || landingRef.current?.visible) return;
+    if (histTimerRef.current) clearTimeout(histTimerRef.current);
+    histTimerRef.current = setTimeout(() => {
+      histTimerRef.current = null;
+      recordHistory();
+    }, 350);
+  }, [recordHistory]);
+  scheduleRecordRef.current = scheduleRecord;
+
+  const flushRecord = useCallback(() => {
+    if (histTimerRef.current) { clearTimeout(histTimerRef.current); histTimerRef.current = null; }
+    recordHistory();
+  }, [recordHistory]);
+
+  const applySnapshot = useCallback(async (snapStr) => {
+    const eng = engineRef.current;
+    if (!eng || !snapStr) return;
+    let snap;
+    try { snap = JSON.parse(snapStr); } catch { return; }
+    histSuppressRef.current = true;
+    try {
+      // hydrate the heavy paint blob (kept out of the history string)
+      snap.paint = (snap.paintRev ?? 0) > 0
+        ? (paintBlobsRef.current.get(snap.paintRev) ?? null)
+        : null;
+      // a different world mode is a heavy, async rebuild — do it first (and
+      // quietly) through the same blocking-overlay path as the mode bar.
+      if (snap.worldMode && snap.worldMode !== worldModeRef.current) {
+        await runModeSwitchRef.current(snap.worldMode, { silent: true });
+      }
+      eng.restoreState(snap);
+      // sync the React mirrors the engine has no callback for
+      setDebugFlags({ ...DEFAULT_DEBUG_FLAGS, ...(snap.debug || {}) });
+      setCullingEnabled(snap.cullingEnabled !== false);
+      setBehindCameraCulling(snap.behindCameraCulling !== false);
+      // restoring paint bumps the live layer revision, so the live state now
+      // serialises with a newer paintRev than the snapshot we navigated to.
+      // Re-baseline `present` to the actual live state so the next edit diffs
+      // against it (and we don't log a spurious "paintRev-only" history entry).
+      const live = captureSnapshot();
+      if (live) historyRef.current.present = live;
+    } catch (err) {
+      console.warn('History restore failed', err);
+    } finally {
+      // release after the synchronous callbacks settle (a structural noise-stack
+      // change may fire onParams again on the next frame — keep it suppressed).
+      setTimeout(() => { histSuppressRef.current = false; }, 60);
+    }
+  }, [captureSnapshot]);
+
+  const undo = useCallback(() => {
+    if (histSuppressRef.current || modeLockRef.current) return;
+    flushRecord();
+    const h = historyRef.current;
+    if (!h.past.length) return;
+    h.future.push(h.present);
+    h.present = h.past.pop();
+    setHistState({ canUndo: h.past.length > 0, canRedo: true });
+    applySnapshot(h.present);
+  }, [flushRecord, applySnapshot]);
+
+  const redo = useCallback(() => {
+    if (histSuppressRef.current || modeLockRef.current) return;
+    flushRecord();
+    const h = historyRef.current;
+    if (!h.future.length) return;
+    h.past.push(h.present);
+    h.present = h.future.pop();
+    setHistState({ canUndo: true, canRedo: h.future.length > 0 });
+    applySnapshot(h.present);
+  }, [flushRecord, applySnapshot]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   // ---- export: blocking overlay, button disabled via panel busy state ----
   const onExport = (options) => {
@@ -594,6 +764,18 @@ export default function App() {
     eng.setLandingShowcase(landingActive);
   }, [landingActive]);
 
+  // Once the landing showcase finishes, re-baseline the undo history to the
+  // state the user actually starts editing from (so the first Ctrl+Z doesn't
+  // jump back into a showcase preset). Only while no edits have been made yet.
+  useEffect(() => {
+    if (landingActive || !bootedRef.current) return;
+    const h = historyRef.current;
+    if (h.past.length === 0 && h.future.length === 0) {
+      const snap = captureSnapshot();
+      if (snap) h.present = snap;
+    }
+  }, [landingActive, captureSnapshot]);
+
   useEffect(() => {
     if (!settingsTarget || !showToolPanels) return undefined;
     let cancelled = false;
@@ -678,6 +860,10 @@ export default function App() {
         onOpenPanel={togglePanel}
         activePanel={effectivePanel}
         loading={nonBlock}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={histState.canUndo}
+        canRedo={histState.canRedo}
         onOpenSettingsSearch={openSettingsSearch}
         settingsSearchOpen={settingsSearchOpen}
       />

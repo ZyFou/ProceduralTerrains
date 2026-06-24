@@ -15,6 +15,7 @@ export default function TopBar({
   onTogglePreview, onResetView, onToggleHelp, onSetWorldMode,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
+  onUndo, onRedo, canUndo, canRedo,
 }) {
   const fileRef = useRef(null);
 
@@ -54,6 +55,30 @@ export default function TopBar({
           </svg>
           <span className="tb-text">Search settings</span>
           <span className="tb-shortcut">Ctrl+K</span>
+        </button>
+        <button
+          className="tb-btn tb-icon-btn"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <path d="M5.5 4.5L2.5 7.5L5.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2.5 7.5H9.5a4 4 0 0 1 0 8H7" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          className="tb-btn tb-icon-btn"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+          aria-label="Redo"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <path d="M10.5 4.5L13.5 7.5L10.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M13.5 7.5H6.5a4 4 0 0 0 0 8H9" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
         <button className="tb-btn" onClick={onNew} title="Reset to default project">
           <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> <span className="tb-text">New</span>

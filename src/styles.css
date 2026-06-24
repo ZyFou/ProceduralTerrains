@@ -108,6 +108,8 @@ body {
 }
 .tb-btn svg { width: 14px; height: 14px; }
 .tb-btn .caret { width: 8px; height: 8px; }
+.tb-icon-btn { padding: 0 7px; }
+.tb-icon-btn:disabled:hover { background: transparent; color: var(--text-muted); border-color: transparent; }
 .tb-search-btn {
   padding: 0 12px;
   gap: 8px;
