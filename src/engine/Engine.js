@@ -1404,6 +1404,7 @@ export class Engine {
   setMinimapConfig(next) {
     this.minimap.setConfig(next);
     this._minimapDirtyAt = 0;
+    this._renderMinimapBase();
     this._needsRender = true;
   }
 

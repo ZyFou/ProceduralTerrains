@@ -192,37 +192,32 @@ export class Minimap {
   }
 
   _pixelForMode(sample) {
-    const base = this._colorForSample(sample);
     switch (this.config.mode) {
       case 'height': {
         const v = Math.round(clamp(sample.height / Math.max(1, this.maxHeight), 0, 1) * 255);
-        return mixColor(base, { r: v, g: v, b: v }, 0.72);
+        return { r: v, g: v, b: v };
       }
       case 'biome':
-        return mixColor(base, BIOME_COLORS[sample.biome] ?? BIOME_COLORS.Forest, 0.68);
+        return BIOME_COLORS[sample.biome] ?? BIOME_COLORS.Forest;
       case 'noise': {
         const v = Math.round(clamp(sample.noise / 1.35, 0, 1) * 255);
-        return mixColor(base, { r: v, g: v, b: v }, 0.64);
+        return { r: v, g: v, b: v };
       }
-      case 'water': {
-        const overlay = sample.water
-          ? hexToRgb(0x4aa8ff)
-          : mixColor(base, hexToRgb(0x101822), 0.35);
-        return mixColor(base, overlay, sample.water ? 0.78 : 0.35);
-      }
+      case 'water':
+        return sample.water ? hexToRgb(0x4aa8ff) : hexToRgb(0x101822);
       case 'slope': {
         const v = Math.round(clamp(sample.slope, 0, 1) * 255);
-        return mixColor(base, { r: v, g: v, b: v }, 0.66);
+        return { r: v, g: v, b: v };
       }
       case 'props': {
         const grass = Math.round(clamp(sample.propsMask.grass, 0, 1) * 255);
         const flowers = Math.round(clamp(sample.propsMask.flowers, 0, 1) * 255);
         const mixed = Math.round(clamp(sample.propsMask.mixed, 0, 1) * 255);
-        return mixColor(base, { r: flowers, g: Math.max(grass, mixed), b: mixed }, 0.72);
+        return { r: flowers, g: Math.max(grass, mixed), b: mixed };
       }
       case 'color':
       default:
-        return base;
+        return this._colorForSample(sample);
     }
   }
 
