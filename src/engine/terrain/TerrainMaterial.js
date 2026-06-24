@@ -32,11 +32,13 @@ uniform float uWallThickness;
 
 attribute float aSkirt;
 attribute float aLod;
+attribute float aWall;   // 1 on the dedicated circular radial-wall mesh, else 0
 
 varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
 varying float vWall;
+varying float vWallMesh;
 
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
@@ -47,12 +49,22 @@ void main() {
   #ifndef INFINITE_MODE
     if (uUseTiles > 0.5) {
       if (uTileShape > 0.5) {
-        // The disk clips through square chunks, so their border skirts can
-        // never represent its curved perimeter. Disable every chunk skirt and
-        // let the open-top circular plinth provide the outer wall instead.
-        // This also removes dark skirt strips at internal tile boundaries.
-        skirt = 0.0;
-        wall = 0.0;
+        if (aWall > 0.5) {
+          // Dedicated radial wall: its top ring (aSkirt 0) follows the terrain
+          // silhouette at the disk perimeter, its base ring (aSkirt 1) drops to
+          // the plinth base. Shaded as the plinth wall.
+          wall = aSkirt;
+          skirt = 0.0;
+        } else {
+          // Disk chunk: the curved perimeter is the radial wall's job, so chunk
+          // skirts survive ONLY as LOD crack fillers — full depth, terrain
+          // coloured, no darkening, no wall shading. Suppress the drop on cell
+          // boundaries between two occupied cells (interior seams), otherwise the
+          // vertical flap reads as a dark line between tiles.
+          float interiorSeam = tileInteriorSeam(wp.xz);
+          skirt = aSkirt * (1.0 - interiorSeam);
+          wall = 0.0;
+        }
       } else {
         // multi-cell square assembly: only skirts on a cell edge facing empty
         // space become the plinth wall; shared seams stay continuous terrain.
@@ -89,6 +101,7 @@ void main() {
   vLod = aLod;
   vSkirt = max(skirt, wall);
   vWall = wall;
+  vWallMesh = aWall;
 
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -117,6 +130,7 @@ varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
 varying float vWall;
+varying float vWallMesh;
 
 const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.90, 0.28, 0.30),
@@ -129,9 +143,10 @@ void main() {
   vec2 xz = vWorldPos.xz;
 
 #ifndef INFINITE_MODE
-  // Circular assemblies still use square chunk meshes. Remove every fragment
-  // outside the disk so the original board cannot show through at zero height.
-  if (uTileShape > 0.5 && tileOccupiedAt(xz) < 0.5) discard;
+  // Circular assemblies still use square chunk meshes. Remove every chunk
+  // fragment outside the disk so the original board cannot show through at zero
+  // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
+  if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 #endif
 
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
@@ -277,7 +292,13 @@ void main() {
     col = mix(col, LOD_COLORS[li], 0.55);
   }
 
-  col *= 1.0 - vSkirt * 0.55;
+  // Skirts darken to read as a recessed crack filler — except in circle mode,
+  // where they exist purely to plug LOD T-junctions and must stay terrain-toned.
+  float skirtDarken = vSkirt * 0.55;
+#ifndef INFINITE_MODE
+  if (uTileShape > 0.5) skirtDarken = 0.0;
+#endif
+  col *= 1.0 - skirtDarken;
 
   float dist = length(cameraPosition - vWorldPos);
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);

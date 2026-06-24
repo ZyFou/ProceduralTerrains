@@ -16,7 +16,7 @@ const CONTROL_SCHEMA = [
   { key: 'lacunarity', label: 'Lacunarity', min: 1.5, max: 3.5, step: 0.01, digits: 2 },
   { key: 'ridge', label: 'Ridge Intensity', min: 0, max: 1, step: 0.01, digits: 2 },
   { key: 'warp', label: 'Domain Warp', min: 0, max: 3, step: 0.05, digits: 2 },
-  { key: 'falloff', label: 'Edge Falloff Width', min: 0.05, max: 1, step: 0.01, digits: 2 },
+  { key: 'falloff', label: 'Edge Falloff Width', min: 0, max: 1, step: 0.01, digits: 2 },
 
   { section: 'BIOME' },
   { key: 'biomeScale', label: 'Biome Density', min: 0.3, max: 3, step: 0.05, digits: 2 },

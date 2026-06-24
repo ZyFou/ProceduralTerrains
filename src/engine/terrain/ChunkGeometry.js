@@ -73,6 +73,9 @@ export function buildChunkGeometry(res, lodIndex) {
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setAttribute('aSkirt', new THREE.BufferAttribute(skirt, 1));
   geo.setAttribute('aLod', new THREE.BufferAttribute(lod, 1));
+  // aWall stays 0 for terrain chunks; only the dedicated circular radial wall
+  // mesh sets it to 1 so the shared terrain shader can tell them apart.
+  geo.setAttribute('aWall', new THREE.BufferAttribute(new Float32Array(total), 1));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
   return geo;
 }

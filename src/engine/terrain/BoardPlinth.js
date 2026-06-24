@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Clean diorama base for the studio board: four outward walls + flat bottom.
 // Sits slightly outside the terrain perimeter so chunk skirts never overlap it.
@@ -55,22 +54,62 @@ export function buildBoardPlinthGeometry(boardSize, skirtDepth, topY = 0, outset
   return geo;
 }
 
-// Circular equivalent of buildBoardPlinthGeometry: an outer wall and a bottom,
-// deliberately without a top cap. A top cap sits directly below sea level and
-// shows through lakes as a solid dark floor.
-export function buildCircularPlinthGeometry(radius, skirtDepth, topY = 0) {
+// Circular equivalent of buildBoardPlinthGeometry: just the flat bottom cap at
+// the plinth base. The side wall is no longer a fixed-height cylinder — it is
+// the dedicated radial wall (buildDiskWallGeometry) rendered with the terrain
+// height shader, so its top follows the island/mountain silhouette. There is
+// deliberately no top cap (a cap below sea level shows through lakes as a dark
+// floor).
+export function buildCircularPlinthGeometry(radius, skirtDepth) {
   const baseY = -skirtDepth;
-  const height = topY - baseY;
-
-  const wall = new THREE.CylinderGeometry(radius, radius, height, 96, 1, true);
-  wall.translate(0, baseY + height * 0.5, 0);
-
   const bottom = new THREE.CircleGeometry(radius, 96);
   bottom.rotateX(-Math.PI / 2);
   bottom.translate(0, baseY, 0);
+  return bottom;
+}
 
-  const geo = mergeGeometries([wall, bottom]);
-  wall.dispose();
-  bottom.dispose();
+// Dedicated circular outer wall for the studio disk assembly. Rendered with the
+// SHARED terrain material: each top vertex (aSkirt 0, aWall 1) is displaced to
+// the terrain height at that perimeter point by the vertex shader, and each
+// base vertex (aSkirt 1, aWall 1) drops to the plinth base. This makes the wall
+// top trace the exact generated silhouette instead of a level cylinder rim.
+// Positions are world-space (the mesh has an identity transform at the disk
+// centre); the shader reads wp.y, so the Y stored here is irrelevant.
+export function buildDiskWallGeometry(radius, segments = 256) {
+  const segCount = Math.max(16, Math.round(segments));
+  const vertCount = (segCount + 1) * 2;
+  const positions = new Float32Array(vertCount * 3);
+  const uvs = new Float32Array(vertCount * 2);
+  const skirt = new Float32Array(vertCount);
+  const wall = new Float32Array(vertCount).fill(1);
+  const lod = new Float32Array(vertCount).fill(3);
+
+  for (let i = 0; i <= segCount; i++) {
+    const a = (i / segCount) * Math.PI * 2;
+    const x = Math.cos(a) * radius;
+    const z = Math.sin(a) * radius;
+    const top = i * 2;
+    const bot = top + 1;
+    positions[top * 3] = x; positions[top * 3 + 2] = z;     // top ring (terrain)
+    positions[bot * 3] = x; positions[bot * 3 + 2] = z;     // base ring (plinth)
+    uvs[top * 2] = i / segCount; uvs[top * 2 + 1] = 1;
+    uvs[bot * 2] = i / segCount; uvs[bot * 2 + 1] = 0;
+    skirt[top] = 0;
+    skirt[bot] = 1;
+  }
+
+  const indices = [];
+  for (let i = 0; i < segCount; i++) {
+    const t0 = i * 2, b0 = t0 + 1, t1 = (i + 1) * 2, b1 = t1 + 1;
+    indices.push(t0, b0, t1, t1, b0, b1);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setAttribute('aSkirt', new THREE.BufferAttribute(skirt, 1));
+  geo.setAttribute('aWall', new THREE.BufferAttribute(wall, 1));
+  geo.setAttribute('aLod', new THREE.BufferAttribute(lod, 1));
+  geo.setIndex(indices);
   return geo;
 }

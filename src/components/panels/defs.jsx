@@ -15,8 +15,8 @@ export const TERRAIN_SLIDERS = [
     icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M1 9c1.5-1 2.5-1 4 0s2.5 1 4 0 2.5-1 4 0 2.5 1 3 0" stroke="currentColor" strokeWidth="1.2" /></svg>),
   },
   {
-    key: 'falloff', label: 'Edge Falloff Width', min: 0.05, max: 1, step: 0.01, digits: 2,
-    info: 'Controls the edge attenuation band for island and mountain rim profiles',
+    key: 'falloff', label: 'Edge Falloff Width', min: 0, max: 1, step: 0.01, digits: 2,
+    info: 'Edge attenuation band for the island/mountain rim. 0 leaves the terrain unchanged to the boundary',
     icon: (<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" /></svg>),
   },
 ];

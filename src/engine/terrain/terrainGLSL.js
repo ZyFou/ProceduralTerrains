@@ -87,14 +87,20 @@ float rimFalloff(float t) {
   return t * t * (3.0 - 2.0 * t);
 }
 
+// Hard disk clip: 1 inside the rendered disk, 0 outside. Pure visibility mask —
+// it does NOT attenuate height, so it never produces a half-height boundary.
 float diskMask(vec2 xz) {
-  float band = max(uFalloff, 1e-3) * uTileCellSize;
-  return smoothstep(uTileDiskRadius + band, uTileDiskRadius - band, length(xz));
+  return step(length(xz), uTileDiskRadius);
 }
 
-float diskWall(vec2 xz) {
-  float e = max(2.0, uTileCellSize * 0.002);
-  return step(abs(length(xz) - uTileDiskRadius), e);
+// Inward island attenuation for the disk. 1 well inside the disk, fading to 0
+// EXACTLY at the perimeter over a band whose width is uFalloff cell-widths, so
+// the whole fade lives inside the boundary. uFalloff == 0 disables it entirely.
+float diskIsland(vec2 xz) {
+  float band = uFalloff * uTileCellSize;
+  if (band <= 0.0) return 1.0;
+  float t = clamp((uTileDiskRadius - length(xz)) / band, 0.0, 1.0);
+  return rimFalloff(t);
 }
 
 float tileOccAt(vec2 cell) {
@@ -108,10 +114,11 @@ float tileOccAt(vec2 cell) {
 // only when the neighbour across that edge is empty; a present neighbour keeps
 // the factor at 1 across the shared edge so both cells meet at full height.
 float tileFalloff(vec2 xz) {
+  if (uFalloff <= 0.0) return 1.0;            // no edge attenuation
   vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
   vec2 cell = floor(rel);
   vec2 lc = (rel - cell) * 2.0 - 1.0;        // [-1,1] within the cell
-  float band = max(uFalloff, 1e-3);
+  float band = uFalloff;
   float fXp = mix(smoothstep(0.0, band, 1.0 - lc.x), 1.0, tileOccAt(cell + vec2( 1.0, 0.0)));
   float fXn = mix(smoothstep(0.0, band, 1.0 + lc.x), 1.0, tileOccAt(cell + vec2(-1.0, 0.0)));
   float fZp = mix(smoothstep(0.0, band, 1.0 - lc.y), 1.0, tileOccAt(cell + vec2(0.0,  1.0)));
@@ -160,13 +167,16 @@ float tileOccupiedAt(vec2 xz) {
   if (uUseTiles < 0.5) return 1.0;
   vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
   float occ = tileOccAt(floor(rel));
-  if (uTileShape > 0.5) occ *= step(0.5, diskMask(xz));
+  if (uTileShape > 0.5) occ *= diskMask(xz);
   return occ;
 }
 
+// Inward island attenuation for the whole assembly (square per-cell rim or the
+// circular disk profile). Clipping/visibility is handled separately by
+// tileOccupiedAt / diskMask, so this never causes a half-height boundary.
 float assemblyFalloff(vec2 xz) {
   float squareFalloff = tileFalloff(xz);
-  float circleFalloff = diskMask(xz);
+  float circleFalloff = diskIsland(xz);
   return mix(squareFalloff, circleFalloff, step(0.5, uTileShape));
 }
 `;
@@ -353,27 +363,31 @@ float shapeHeight(vec2 xz, Climate c) {
   }
 #endif
 #ifndef INFINITE_MODE
+  // rim == 1 means the terrain is unaffected at this point (full height).
+  // uFalloff == 0 -> rim is 1 everywhere -> no island attenuation, no edge noise.
   float rim = 1.0;
   if (uUseTiles > 0.5) {
     // multi-cell assembly: affect only the outer rim (seamless interiors)
     rim = assemblyFalloff(xz);
-  } else {
-    // island/continent falloff toward board edges (square+radial blend)
+  } else if (uFalloff > 0.0) {
+    // island/continent falloff toward board edges (square+radial blend). The
+    // fade lives entirely inside the boundary: rim hits 0 exactly at the edge.
     vec2 e = abs(xz) / uBoardHalf;
     float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
-    float t = clamp((1.0 - edge) / max(uFalloff, 1e-3), 0.0, 1.0);
+    float t = clamp((1.0 - edge) / uFalloff, 0.0, 1.0);
     rim = rimFalloff(t);
   }
   if (uEdgeFalloffMode < 0.5) {
     h *= rim;
   } else {
     // Mountain edges preserve the existing terrain and add a noisy ridged
-    // perimeter whose strength rises toward the assembly boundary.
+    // perimeter. uFalloff controls BOTH the band width (via rim) and the noise
+    // amplitude, so a small value (0.05) is a subtle rim, not full-height peaks.
     float edgeMask = 1.0 - rim;
     vec2 edgeP = xz * uFrequency + uSeedOffset + vec2(173.7, 419.2);
     float edgeMountains = pow(ridgedFBM(edgeP * 2.35), 1.25);
     float edgeBreakup = vnoise(edgeP * 5.1 + vec2(61.4, 27.8));
-    h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude;
+    h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude * clamp(uFalloff, 0.0, 1.0);
   }
 #endif
   float finalH = clamp(h, 0.0, 1.35) * uHeightScale;

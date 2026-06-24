@@ -95,18 +95,28 @@ export class CloudSlabLayer {
   /**
    * @param {object} params engine params (cloud* keys)
    * @param {number} maxHeight terrain height ceiling (unused — kept for API parity)
-   * @param {number} boardSize world size of the board (drives horizontal scale)
+   * @param {number} boardSize world size of ONE cell (drives noise feature size)
    * @param {object} [perf] centralized performance settings
+   * @param {object} [layout] tile-assembly coverage: { extent, center:{x,z} }.
+   *   extent = world span the clouds must cover (union of cells); center =
+   *   world-space middle of that span. Defaults to a single origin-centred cell.
    */
-  applyParams(params, maxHeight, boardSize, perf) {
+  applyParams(params, maxHeight, boardSize, perf, layout = {}) {
     this._boardSize = boardSize || this._boardSize;
+    // Coverage tracks the whole tile assembly; feature size stays per-cell so a
+    // slider value keeps the same look as the assembly grows.
+    const extent = layout.extent || this._boardSize;
+    const cx = layout.center?.x ?? 0;
+    const cz = layout.center?.z ?? 0;
+    this._coverSize = extent;
+    this._center = { x: cx, z: cz };
 
     const config = perf ? { ...params, ...perf } : params;
     const q = resolveCloudQuality(config);
     this._enabled = !!params.cloudsEnabled && !q.disabled;
 
     const maxDistMult = config.cloudMaxDistance ?? 6;
-    this._maxDistance = maxDistMult * this._boardSize;
+    this._maxDistance = maxDistMult * extent;
 
     const u = this.material.uniforms;
     // Altitude is an ABSOLUTE world height (y=0 is the ground/sea base), so the
@@ -117,13 +127,13 @@ export class CloudSlabLayer {
     u.uCloudBottom.value = bottom;
     u.uCloudTop.value = top;
 
-    const radius = this._boardSize * 0.62;
+    const radius = extent * 0.62;
     u.uCloudRadius.value = radius;
-    u.uCloudFar.value = this._boardSize * 4.0;   // bound horizon marching
-    u.uCloudCenter.value.set(0, 0, 0);
+    u.uCloudFar.value = extent * 4.0;   // bound horizon marching
+    u.uCloudCenter.value.set(cx, 0, cz);
 
     // occupancy grid maps the square [center ± radius] (clouds are zero past it)
-    u.uOccCenter.value.set(0, 0);
+    u.uOccCenter.value.set(cx, cz);
     u.uOccExtent.value = radius;
 
     // size + place the enclosing box: horizontal extent just past the radial
@@ -132,7 +142,7 @@ export class CloudSlabLayer {
     const horiz = radius * 2.1;
     const height = Math.max(1, (top - bottom) * 1.04);
     this.mesh.scale.set(horiz, height, horiz);
-    this.mesh.position.set(0, (bottom + top) * 0.5, 0);
+    this.mesh.position.set(cx, (bottom + top) * 0.5, cz);
 
     // frequencies are user-relative; scale by board size so a slider value maps
     // to the same world feature size regardless of board dimensions.
@@ -328,7 +338,8 @@ export class CloudSlabLayer {
       if (this.mesh.visible) this.mesh.visible = false;
       return;
     }
-    const dist = cameraPos.length();
+    const c = this._center || { x: 0, z: 0 };
+    const dist = Math.hypot(cameraPos.x - c.x, cameraPos.y, cameraPos.z - c.z);
     this._inRange = dist <= this._maxDistance;
     this.mesh.visible = this._inRange;
     if (!this._inRange) return;
@@ -336,7 +347,7 @@ export class CloudSlabLayer {
     const u = this.material.uniforms;
     // step-LOD: ramp the effective march steps down to 0.4 toward the cull edge
     if (this._stepLOD && Number.isFinite(this._maxDistance)) {
-      const near = this._boardSize;
+      const near = this._coverSize || this._boardSize;
       const far = this._maxDistance;
       const f = far > near ? (dist - near) / (far - near) : 0;
       u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));

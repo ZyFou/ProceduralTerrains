@@ -31,7 +31,7 @@ import {
 import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { PlanetExporter } from './terrain/PlanetExporter.js';
-import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
+import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, buildDiskWallGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
@@ -335,6 +335,14 @@ export class Engine {
     );
     this.plinth.renderOrder = 5;
     this.scene.add(this.plinth);
+
+    // Dedicated circular outer wall (circle assembly only). Shares the terrain
+    // material so its top edge follows the generated island/mountain silhouette;
+    // geometry is rebuilt by _updatePlinth and visibility tracks the plinth.
+    this.diskWall = new THREE.Mesh(new THREE.BufferGeometry(), this.terrainMaterial);
+    this.diskWall.frustumCulled = false;
+    this.diskWall.visible = false;
+    this.scene.add(this.diskWall);
 
     // Ghost preview for the hover-to-add tile feature: a translucent accent
     // slab + outline shown over an empty cell adjacent to the assembly. Hidden
@@ -1465,6 +1473,13 @@ export class Engine {
   // far the plinth box is outset to cap it) — keeps the wall clear of the water.
   _wallThickness() { return Math.max(10, (this.boardSize || 0) * 0.006); }
 
+  // Visibility for the diorama base. The circular radial wall mirrors the
+  // plinth but only matters in circle mode.
+  _setPlinthVisible(v) {
+    this.plinth.visible = v;
+    if (this.diskWall) this.diskWall.visible = v && this.tileAssemblyShape === 'circle';
+  }
+
   _updatePlinth() {
     const size = this.boardSize;
     if (!size) return;
@@ -1474,8 +1489,16 @@ export class Engine {
     const wall = this._wallThickness();
     let geo;
     if (this.tileAssemblyShape === 'circle') {
-      const radius = (this.diskRadiusCells + 0.5) * this.cellSize + wall;
-      geo = buildCircularPlinthGeometry(radius, skirtDepth, topY);
+      // Disk radius matches the terrain clip (uTileDiskRadius) so the radial
+      // wall and the bottom cap line up exactly with the rendered terrain edge.
+      const radius = (this.diskRadiusCells + 0.5) * this.cellSize;
+      geo = buildCircularPlinthGeometry(radius, skirtDepth);
+      // Enough segments that the linear wall top tracks the silhouette without
+      // visible facets between mountain peaks at the perimeter.
+      const seg = Math.max(96, Math.min(2048,
+        Math.round((2 * Math.PI * radius) / Math.max(8, this.params.chunkSize / 16))));
+      this.diskWall.geometry.dispose();
+      this.diskWall.geometry = buildDiskWallGeometry(radius, seg);
     } else {
       // One diorama box per occupied cell. Shared interior walls are buried
       // between adjacent cells (DoubleSide, invisible); the outer walls cap the
@@ -1488,6 +1511,7 @@ export class Engine {
     }
     this.plinth.geometry.dispose();
     this.plinth.geometry = geo;
+    if (this.diskWall) this.diskWall.visible = this.plinth.visible && this.tileAssemblyShape === 'circle';
   }
 
   _applyUniforms() {
@@ -2187,7 +2211,7 @@ export class Engine {
 
     // Hide studio objects
     this.board.group.visible = false;
-    this.plinth.visible = false;
+    this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
     if (this._tileGhost) this._tileGhost.visible = false;
@@ -2319,7 +2343,7 @@ export class Engine {
   /** Restore the single-board studio scene + editor camera. */
   _enterStudioMode() {
     this.board.group.visible = true;
-    this.plinth.visible = true;
+    this._setPlinthVisible(true);
     this.water.visible = this.waterSystem?.isEnabled() && this.params.seaLevel > 0.5;
     if (this.studioCloud) {
       this.studioCloud.setInScene(true);
@@ -2475,7 +2499,7 @@ export class Engine {
 
     // hide studio objects + sleep the editor camera
     this.board.group.visible = false;
-    this.plinth.visible = false;
+    this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
     if (this._tileGhost) this._tileGhost.visible = false;
@@ -2570,7 +2594,11 @@ export class Engine {
       this.planetCloudLayer.applyParams(this.params, this._planetRadius(), this.perf);
     }
     if (this.studioCloud) {
-      this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize, this.perf);
+      // Cover the whole tile assembly (union of cells), not just the origin cell.
+      this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize, this.perf, {
+        extent: Math.max(this._unionWidth(), this._unionDepth()),
+        center: this._unionCenter(),
+      });
     }
   }
 
@@ -3293,7 +3321,7 @@ export class Engine {
     this.uniforms.uColorMode.value = 1;
     const waterWasVisible = this.water.visible;
     this.water.visible = false;
-    this.plinth.visible = false;
+    this._setPlinthVisible(false);
 
     this.renderer.setRenderTarget(rt);
     this.renderer.render(this.scene, cam);
@@ -3303,7 +3331,7 @@ export class Engine {
 
     this.uniforms.uColorMode.value = 0;
     this.water.visible = waterWasVisible;
-    this.plinth.visible = true;
+    this._setPlinthVisible(true);
     rt.dispose();
 
     const canvas = document.createElement('canvas');

@@ -87,7 +87,8 @@ export class TerrainHeightSampler {
     const mountains = f(Math.pow(this._ridgedFBM(f(px * 2.35), f(pz * 2.35), octaves), 1.25));
     const breakup = vnoise(f(f(px * 5.1) + 61.4), f(f(pz * 5.1) + 27.8));
     const added = f(f(f(mountains * 0.55) + f(breakup * 0.12)) * edgeMask);
-    return f(h + f(added * f(this.u.uAmplitude.value)));
+    const fall = clamp(f(this.u.uFalloff.value), 0, 1);
+    return f(h + f(f(added * f(this.u.uAmplitude.value)) * fall));
   }
 
   _tileOccAt(cx, cz) {
@@ -100,13 +101,14 @@ export class TerrainHeightSampler {
   }
 
   _tileFalloff(x, z) {
+    if (f(this.u.uFalloff.value) <= 0) return 1;   // no edge attenuation
     const cs = f(this.u.uTileCellSize?.value ?? f(this.u.uBoardHalf.value * 2));
     const ox = f(this.u.uTileGridOrigin?.value?.x ?? -f(cs * 0.5));
     const oz = f(this.u.uTileGridOrigin?.value?.y ?? -f(cs * 0.5));
     const rx = f(f(x - ox) / cs), rz = f(f(z - oz) / cs);
     const cx = Math.floor(rx), cz = Math.floor(rz);
     const lx = f(f(rx - cx) * 2 - 1), lz = f(f(rz - cz) * 2 - 1);
-    const band = Math.max(f(this.u.uFalloff.value), 1e-3);
+    const band = f(this.u.uFalloff.value);
     const fXp = mix32(smoothstep32(0, band, f(1 - lx)), 1, this._tileOccAt(cx + 1, cz));
     const fXn = mix32(smoothstep32(0, band, f(1 + lx)), 1, this._tileOccAt(cx - 1, cz));
     const fZp = mix32(smoothstep32(0, band, f(1 - lz)), 1, this._tileOccAt(cx, cz + 1));
@@ -116,9 +118,15 @@ export class TerrainHeightSampler {
 
   _assemblyFalloff(x, z) {
     if ((this.u.uTileShape?.value ?? 0) >= 0.5) {
+      // inward disk island profile: fades to 0 exactly at the perimeter (no
+      // half-height boundary), and uFalloff == 0 disables it entirely.
+      const fall = f(this.u.uFalloff.value);
+      if (fall <= 0) return 1;
       const radius = f(this.u.uTileDiskRadius?.value ?? this.u.uBoardHalf.value);
-      const band = f(Math.max(f(this.u.uFalloff.value), 1e-3) * f(this.u.uTileCellSize?.value ?? f(this.u.uBoardHalf.value * 2)));
-      return smoothstep32(f(radius + band), f(radius - band), f(Math.hypot(x, z)));
+      const cs = f(this.u.uTileCellSize?.value ?? f(this.u.uBoardHalf.value * 2));
+      const band = f(fall * cs);
+      const t = clamp(f(f(radius - f(Math.hypot(x, z))) / band), 0, 1);
+      return this._rimFalloff(t);
     }
     return this._tileFalloff(x, z);
   }
@@ -239,14 +247,14 @@ export class TerrainHeightSampler {
 
     // island falloff (studio board only) + clamp + world height scale
     if (!env.infinite) {
-      let rim;
+      let rim = 1;
       if ((u.uUseTiles?.value ?? 0) > 0.5) {
         rim = this._assemblyFalloff(x, z);
-      } else {
+      } else if (f(u.uFalloff.value) > 0) {
         const half = f(u.uBoardHalf.value);
         const ex = f(Math.abs(f(x)) / half), ey = f(Math.abs(f(z)) / half);
         const edge = mix32(Math.max(ex, ey), f(Math.hypot(ex, ey) * 0.7071), 0.5);
-        const t = clamp(f(f(1 - edge) / Math.max(f(u.uFalloff.value), 1e-3)), 0, 1);
+        const t = clamp(f(f(1 - edge) / f(u.uFalloff.value)), 0, 1);
         rim = this._rimFalloff(t);
       }
       h = this._applyEdgeProfile(h, x, z, rim, env.octaves);
