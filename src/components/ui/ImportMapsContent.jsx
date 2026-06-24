@@ -1,7 +1,8 @@
-import { useRef } from 'react';
-import { ImageUp, Mountain, Palette, Waves } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ImageUp, Mountain, Palette, Waves, Globe, Download } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
+import { CURATED_LOCATIONS, ELEVATION_SOURCE } from '../../engine/terrain/RealWorldHeightmap.js';
 
 const IMPORT_MODE_OPTIONS = [
   { value: 'disabled', label: 'Disabled' },
@@ -125,6 +126,58 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
   );
 }
 
+function RealWorldBrowser({ ctx }) {
+  const [busyId, setBusyId] = useState(null);
+  const [progress, setProgress] = useState(0);
+
+  const load = async (loc) => {
+    if (busyId) return;
+    setBusyId(loc.id);
+    setProgress(0);
+    try {
+      await ctx.onLoadRealWorldLocation?.(loc.id, { onProgress: (p) => setProgress(p) });
+    } finally {
+      setBusyId(null);
+      setProgress(0);
+    }
+  };
+
+  return (
+    <CollapsibleGroup
+      title="Real-World Locations"
+      icon={<Globe size={15} strokeWidth={1.75} />}
+      defaultOpen={false}
+    >
+      <p className="section-hint">
+        Loads real Earth elevation as the height map. Fetches public terrain tiles from the internet.
+      </p>
+      <div className="realworld-list">
+        {CURATED_LOCATIONS.map((loc) => {
+          const isBusy = busyId === loc.id;
+          return (
+            <button
+              key={loc.id}
+              type="button"
+              className="realworld-item"
+              disabled={!!busyId}
+              onClick={() => load(loc)}
+            >
+              <span className="realworld-text">
+                <span className="realworld-name">{loc.name}</span>
+                <span className="realworld-blurb">{loc.blurb}</span>
+              </span>
+              {isBusy
+                ? <span className="realworld-progress">{Math.round(progress * 100)}%</span>
+                : <Download size={14} strokeWidth={1.75} aria-hidden />}
+            </button>
+          );
+        })}
+      </div>
+      <p className="section-hint realworld-attribution">{ELEVATION_SOURCE}</p>
+    </CollapsibleGroup>
+  );
+}
+
 export default function ImportMapsContent({ ctx }) {
   const targetId = ctx.settingsTarget?.settingId ?? null;
   return (
@@ -132,7 +185,8 @@ export default function ImportMapsContent({ ctx }) {
       <p className="section-hint">
         Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.
       </p>
-      {['noise', 'height', 'biome'].map((type) => (
+      <RealWorldBrowser ctx={ctx} />
+      {['height', 'noise', 'biome'].map((type) => (
         <ImportMapSection
           key={type}
           type={type}

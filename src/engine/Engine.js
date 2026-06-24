@@ -12,6 +12,7 @@ import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/Plane
 import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
 import { PlanetHeightBaker } from './terrain/PlanetHeightBaker.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
+import { fetchLocationHeightmap, getLocation } from './terrain/RealWorldHeightmap.js';
 import { PlanetOrbitControls } from './PlanetOrbitControls.js';
 import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
@@ -440,6 +441,51 @@ export class Engine {
     }
   }
 
+  /**
+   * Fetch a curated real-world location's elevation and load it as the height
+   * map (Tile mode). Reuses the existing import pipeline — the decoded field is
+   * fed in as floatData so it deforms the mesh + GLB export like any height map.
+   */
+  async loadRealWorldLocation(locationId, { onProgress } = {}) {
+    if (this.worldMode !== 'studio') {
+      this.cb.onToast('Real-world heightmaps load in Tile (Studio) mode.');
+      return false;
+    }
+    const loc = getLocation(locationId);
+    if (!loc) { this.cb.onToast('Unknown location.'); return false; }
+    this._setImportState('height', { loading: true, error: '' });
+    try {
+      const result = await fetchLocationHeightmap(loc, { onProgress });
+      const previous = this.importedMaps.height;
+      if (previous?.texture) previous.texture.dispose();
+      this.importedMaps.height = {
+        fileName: result.fileName,
+        width: result.width,
+        height: result.height,
+        originalWidth: result.width,
+        originalHeight: result.height,
+        floatData: result.floatData,
+        preview: result.preview,
+        meta: result.meta,
+        // default to replacing the procedural shape so the location reads clearly
+        settings: { ...DEFAULT_IMPORT_SETTINGS, mode: 'replace', heightStrength: 1 },
+      };
+      this._rebuildImportedTexture('height');
+      this._setImportState('height', { loading: false });
+      this.applyAll({ force: false });
+      this.cb.onToast(`Loaded ${loc.name}`);
+      return true;
+    } catch (e) {
+      console.error(e);
+      const error = e?.name === 'AbortError'
+        ? 'Load cancelled.'
+        : 'Could not load elevation data (network or CORS blocked).';
+      this._setImportState('height', { loading: false, error });
+      this.cb.onToast(error);
+      return false;
+    }
+  }
+
   setTileMapSetting(type, key, value) {
     const entry = this.importedMaps[type];
     if (!entry) { this._setImportState(type, { error: 'Import a map before enabling this mode.' }); return; }
@@ -459,23 +505,41 @@ export class Engine {
   _rebuildImportedTexture(type) {
     const entry = this.importedMaps[type];
     if (!entry) return;
-    const data = entry.imageData.data;
+    const n = entry.width * entry.height;
     let min = 1, max = 0;
-    const vals = new Float32Array(entry.width * entry.height);
-    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-      let v = (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
-      if (entry.settings.invert) v = 1 - v;
-      vals[p] = v; min = Math.min(min, v); max = Math.max(max, v);
+    const vals = new Float32Array(n);
+    if (entry.floatData) {
+      // Pre-decoded data (e.g. real-world elevation tiles), already normalized 0..1.
+      for (let p = 0; p < n; p++) {
+        let v = entry.floatData[p];
+        if (entry.settings.invert) v = 1 - v;
+        vals[p] = v; if (v < min) min = v; if (v > max) max = v;
+      }
+    } else {
+      const data = entry.imageData.data;
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        let v = (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+        if (entry.settings.invert) v = 1 - v;
+        vals[p] = v; if (v < min) min = v; if (v > max) max = v;
+      }
     }
-    const out = new Uint8Array(entry.width * entry.height * 4);
-    for (let p = 0; p < vals.length; p++) {
+    // HalfFloat storage: ~11-bit mantissa kills the 8-bit terracing the old
+    // Uint8 path produced on real topography. importedMapValue() reads rgb as
+    // luminance, so (v,v,v) round-trips exactly — no GLSL change. Half-float +
+    // LinearFilter is core in WebGL2 (three r160), no extension guard needed.
+    const toHalf = THREE.DataUtils.toHalfFloat;
+    const halfOne = toHalf(1);
+    const span = max > min ? max - min : 1;
+    const out = new Uint16Array(n * 4);
+    for (let p = 0; p < n; p++) {
       let v = vals[p];
-      if (entry.settings.normalize && max > min) v = (v - min) / (max - min);
-      const b = Math.max(0, Math.min(255, Math.round(v * 255)));
-      out[p * 4] = out[p * 4 + 1] = out[p * 4 + 2] = b; out[p * 4 + 3] = 255;
+      if (entry.settings.normalize) v = (v - min) / span;
+      const h = toHalf(Math.max(0, Math.min(1, v)));
+      const o = p * 4;
+      out[o] = out[o + 1] = out[o + 2] = h; out[o + 3] = halfOne;
     }
     entry.texture?.dispose();
-    entry.texture = new THREE.DataTexture(out, entry.width, entry.height, THREE.RGBAFormat);
+    entry.texture = new THREE.DataTexture(out, entry.width, entry.height, THREE.RGBAFormat, THREE.HalfFloatType);
     entry.texture.colorSpace = THREE.NoColorSpace;
     entry.texture.wrapS = entry.texture.wrapT = THREE.ClampToEdgeWrapping;
     entry.texture.minFilter = entry.texture.magFilter = THREE.LinearFilter;

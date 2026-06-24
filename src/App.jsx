@@ -654,6 +654,7 @@ export default function App() {
     onTileDebug: (next) => engine().setTileDebug(next),
     onImportTileMap: (type, file) => engine().importTileMap(type, file),
     onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),
+    onLoadRealWorldLocation: (id, opts) => engine().loadRealWorldLocation(id, opts),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
   };
