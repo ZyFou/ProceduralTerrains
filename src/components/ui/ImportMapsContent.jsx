@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ImageUp, Mountain, Palette, Waves, Globe, Download } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
@@ -126,9 +126,22 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
   );
 }
 
+function filterLocations(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return CURATED_LOCATIONS;
+  return CURATED_LOCATIONS.filter(
+    (loc) =>
+      loc.name.toLowerCase().includes(q)
+      || loc.blurb.toLowerCase().includes(q)
+      || loc.id.toLowerCase().includes(q),
+  );
+}
+
 function RealWorldBrowser({ ctx }) {
   const [busyId, setBusyId] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => filterLocations(search), [search]);
 
   const load = async (loc) => {
     if (busyId) return;
@@ -151,8 +164,33 @@ function RealWorldBrowser({ ctx }) {
       <p className="section-hint">
         Loads real Earth elevation as the height map. Fetches public terrain tiles from the internet.
       </p>
+      <div className="settings-search-wrap realworld-search">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+          <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+          <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+        <input
+          type="search"
+          className="settings-search-input"
+          placeholder="Search locations…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <button
+            type="button"
+            className="settings-search-clear"
+            onClick={() => setSearch('')}
+            aria-label="Clear search"
+          >
+            ✕
+          </button>
+        )}
+      </div>
       <div className="realworld-list">
-        {CURATED_LOCATIONS.map((loc) => {
+        {filtered.length === 0 ? (
+          <p className="settings-search-empty">No locations match &ldquo;{search.trim()}&rdquo;</p>
+        ) : filtered.map((loc) => {
           const isBusy = busyId === loc.id;
           return (
             <button

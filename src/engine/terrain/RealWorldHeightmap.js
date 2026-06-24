@@ -40,6 +40,60 @@ export const CURATED_LOCATIONS = [
     bbox: { minLat: 19.30, maxLat: 19.90, minLon: -155.90, maxLon: -155.20 }, zoom: 10 },
   { id: 'vatnajokull', name: 'Vatnajökull', blurb: 'Glacial highlands, Iceland',
     bbox: { minLat: 64.20, maxLat: 64.62, minLon: -17.25, maxLon: -16.45 }, zoom: 10 },
+
+  // --- Swiss Alps (specific peaks) ---
+  { id: 'eiger', name: 'Eiger & Jungfrau', blurb: 'Bernese Alps north face, Switzerland',
+    bbox: { minLat: 46.50, maxLat: 46.62, minLon: 7.93, maxLon: 8.07 }, zoom: 12 },
+  { id: 'monte-rosa', name: 'Monte Rosa', blurb: 'Highest Swiss massif, Pennine Alps',
+    bbox: { minLat: 45.86, maxLat: 46.00, minLon: 7.80, maxLon: 7.94 }, zoom: 12 },
+  { id: 'piz-bernina', name: 'Piz Bernina', blurb: 'Bernina Range glaciers, Engadin',
+    bbox: { minLat: 46.32, maxLat: 46.44, minLon: 9.84, maxLon: 9.98 }, zoom: 12 },
+  { id: 'mont-blanc', name: 'Mont Blanc', blurb: 'Highest Alps summit, France / Italy',
+    bbox: { minLat: 45.78, maxLat: 45.92, minLon: 6.79, maxLon: 6.95 }, zoom: 12 },
+
+  // --- Iceland (more regions) ---
+  { id: 'landmannalaugar', name: 'Landmannalaugar', blurb: 'Rhyolite highlands, Iceland',
+    bbox: { minLat: 63.92, maxLat: 64.10, minLon: -19.20, maxLon: -18.95 }, zoom: 11 },
+  { id: 'askja', name: 'Askja', blurb: 'Caldera & lava desert, Highlands of Iceland',
+    bbox: { minLat: 65.00, maxLat: 65.12, minLon: -16.85, maxLon: -16.65 }, zoom: 11 },
+  { id: 'snaefellsjokull', name: 'Snæfellsjökull', blurb: 'Glacier-capped volcano, W Iceland',
+    bbox: { minLat: 64.74, maxLat: 64.86, minLon: -23.88, maxLon: -23.70 }, zoom: 11 },
+
+  // --- New Zealand (geothermal & alpine) ---
+  { id: 'taupo-volcanic', name: 'Taupō Volcanic Zone', blurb: 'Geothermal field & craters, NZ',
+    bbox: { minLat: -39.30, maxLat: -39.06, minLon: 175.55, maxLon: 175.82 }, zoom: 11 },
+  { id: 'mount-cook', name: 'Aoraki / Mount Cook', blurb: 'Southern Alps, New Zealand',
+    bbox: { minLat: -43.66, maxLat: -43.52, minLon: 170.05, maxLon: 170.23 }, zoom: 11 },
+  { id: 'fiordland', name: 'Milford Sound', blurb: 'Fiordland glacial valleys, NZ',
+    bbox: { minLat: -44.72, maxLat: -44.54, minLon: 167.78, maxLon: 168.02 }, zoom: 11 },
+
+  // --- Patagonia ---
+  { id: 'fitz-roy', name: 'Monte Fitz Roy', blurb: 'Granite spires, Patagonia, Argentina',
+    bbox: { minLat: -49.36, maxLat: -49.20, minLon: -73.10, maxLon: -72.92 }, zoom: 11 },
+  { id: 'torres-del-paine', name: 'Torres del Paine', blurb: 'Massif & lakes, Chilean Patagonia',
+    bbox: { minLat: -51.10, maxLat: -50.90, minLon: -73.10, maxLon: -72.80 }, zoom: 11 },
+
+  // --- Other famous ranges & volcanoes ---
+  { id: 'denali', name: 'Denali', blurb: 'Highest peak in North America, Alaska USA',
+    bbox: { minLat: 63.00, maxLat: 63.20, minLon: -151.18, maxLon: -150.80 }, zoom: 11 },
+  { id: 'kilimanjaro', name: 'Kilimanjaro', blurb: 'Highest peak in Africa, Tanzania',
+    bbox: { minLat: -3.15, maxLat: -2.97, minLon: 37.27, maxLon: 37.47 }, zoom: 11 },
+  { id: 'k2', name: 'K2', blurb: 'Karakoram, Pakistan / China',
+    bbox: { minLat: 35.79, maxLat: 35.97, minLon: 76.41, maxLon: 76.61 }, zoom: 11 },
+  { id: 'aconcagua', name: 'Aconcagua', blurb: 'Highest peak in the Americas, Argentina',
+    bbox: { minLat: -32.74, maxLat: -32.56, minLon: -70.10, maxLon: -69.90 }, zoom: 11 },
+  { id: 'annapurna', name: 'Annapurna', blurb: 'Deep Himalayan massif, Nepal',
+    bbox: { minLat: 28.50, maxLat: 28.68, minLon: 83.74, maxLon: 83.94 }, zoom: 11 },
+  { id: 'zion', name: 'Zion Canyon', blurb: 'Sandstone canyon, Utah USA',
+    bbox: { minLat: 37.18, maxLat: 37.36, minLon: -113.10, maxLon: -112.90 }, zoom: 11 },
+  { id: 'monument-valley', name: 'Monument Valley', blurb: 'Sandstone buttes, Arizona / Utah USA',
+    bbox: { minLat: 36.94, maxLat: 37.10, minLon: -110.20, maxLon: -110.00 }, zoom: 11 },
+  { id: 'dolomites', name: 'Dolomites', blurb: 'Limestone towers, Tre Cime, Italy',
+    bbox: { minLat: 46.58, maxLat: 46.70, minLon: 12.25, maxLon: 12.40 }, zoom: 12 },
+  { id: 'mount-rainier', name: 'Mount Rainier', blurb: 'Glaciated stratovolcano, Washington USA',
+    bbox: { minLat: 46.78, maxLat: 46.92, minLon: -121.83, maxLon: -121.65 }, zoom: 11 },
+  { id: 'etna', name: 'Mount Etna', blurb: 'Active volcano, Sicily, Italy',
+    bbox: { minLat: 37.68, maxLat: 37.82, minLon: 14.93, maxLon: 15.07 }, zoom: 11 },
 ];
 
 export function getLocation(id) {

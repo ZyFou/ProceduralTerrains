@@ -496,6 +496,9 @@ body {
 }
 .import-map-error { color: #ff8a8a; }
 
+.realworld-search {
+  margin: 6px 0 8px;
+}
 .realworld-list {
   display: flex;
   flex-direction: column;
