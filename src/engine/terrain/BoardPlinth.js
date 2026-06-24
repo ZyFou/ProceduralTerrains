@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Clean diorama base for the studio board: four outward walls + flat bottom.
 // Sits slightly outside the terrain perimeter so chunk skirts never overlap it.
@@ -51,5 +52,25 @@ export function buildBoardPlinthGeometry(boardSize, skirtDepth, topY = 0, outset
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  return geo;
+}
+
+// Circular equivalent of buildBoardPlinthGeometry: an outer wall and a bottom,
+// deliberately without a top cap. A top cap sits directly below sea level and
+// shows through lakes as a solid dark floor.
+export function buildCircularPlinthGeometry(radius, skirtDepth, topY = 0) {
+  const baseY = -skirtDepth;
+  const height = topY - baseY;
+
+  const wall = new THREE.CylinderGeometry(radius, radius, height, 96, 1, true);
+  wall.translate(0, baseY + height * 0.5, 0);
+
+  const bottom = new THREE.CircleGeometry(radius, 96);
+  bottom.rotateX(-Math.PI / 2);
+  bottom.translate(0, baseY, 0);
+
+  const geo = mergeGeometries([wall, bottom]);
+  wall.dispose();
+  bottom.dispose();
   return geo;
 }

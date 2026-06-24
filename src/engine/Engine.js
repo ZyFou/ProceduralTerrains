@@ -31,7 +31,7 @@ import {
 import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { PlanetExporter } from './terrain/PlanetExporter.js';
-import { buildBoardPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
+import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
@@ -1475,8 +1475,7 @@ export class Engine {
     let geo;
     if (this.tileAssemblyShape === 'circle') {
       const radius = (this.diskRadiusCells + 0.5) * this.cellSize + wall;
-      geo = new THREE.CylinderGeometry(radius, radius, skirtDepth + topY, 96, 1, false);
-      geo.translate(0, topY - (skirtDepth + topY) * 0.5, 0);
+      geo = buildCircularPlinthGeometry(radius, skirtDepth, topY);
     } else {
       // One diorama box per occupied cell. Shared interior walls are buried
       // between adjacent cells (DoubleSide, invisible); the outer walls cap the

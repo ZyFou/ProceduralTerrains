@@ -46,16 +46,24 @@ void main() {
   float wall = 0.0;   // outer-perimeter skirt -> plinth wall
   #ifndef INFINITE_MODE
     if (uUseTiles > 0.5) {
-      // multi-cell assembly: only skirts on a cell edge facing empty space
-      // become the plinth wall; interior seams between two tiles stay terrain.
-      vec3 tw = tileWall(wp.xz);
-      if (uTileShape > 0.5) tw = vec3(diskWall(wp.xz), normalize(wp.xz + vec2(1e-5)));
-      float onOuter = step(0.5, tw.x);
-      float interiorSeam = (uTileShape > 0.5) ? 0.0 : tileInteriorSeam(wp.xz);
-      skirt = aSkirt * (1.0 - interiorSeam);
-      wall = aSkirt * onOuter;
-      skirt *= 1.0 - onOuter;
-      wp.xz += tw.yz * (wall * uWallThickness);
+      if (uTileShape > 0.5) {
+        // The disk clips through square chunks, so their border skirts can
+        // never represent its curved perimeter. Disable every chunk skirt and
+        // let the open-top circular plinth provide the outer wall instead.
+        // This also removes dark skirt strips at internal tile boundaries.
+        skirt = 0.0;
+        wall = 0.0;
+      } else {
+        // multi-cell square assembly: only skirts on a cell edge facing empty
+        // space become the plinth wall; shared seams stay continuous terrain.
+        vec3 tw = tileWall(wp.xz);
+        float onOuter = step(0.5, tw.x);
+        float interiorSeam = tileInteriorSeam(wp.xz);
+        skirt = aSkirt * (1.0 - interiorSeam);
+        wall = aSkirt * onOuter;
+        skirt *= 1.0 - onOuter;
+        wp.xz += tw.yz * (wall * uWallThickness);
+      }
     } else {
       float bx = abs(wp.x);
       float bz = abs(wp.z);
