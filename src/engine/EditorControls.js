@@ -41,12 +41,34 @@ export class EditorControls {
     this._touches = new Map();      // active touch pointers for pan / pinch zoom
     this._pinch = null;             // { x, y, dist, radius }
 
-    domElement.addEventListener('pointerdown', (e) => this._onDown(e));
-    domElement.addEventListener('pointermove', (e) => this._onMove(e));
-    domElement.addEventListener('pointerup', (e) => this._onUp(e));
-    domElement.addEventListener('pointercancel', (e) => this._onUp(e));
-    domElement.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
-    domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+    // bound handlers kept so dispose() can detach them (the canvas DOM node
+    // outlives the engine across HMR / remounts — inline arrows would leak)
+    this._onPointerDown = (e) => this._onDown(e);
+    this._onPointerMove = (e) => this._onMove(e);
+    this._onPointerUp = (e) => this._onUp(e);
+    this._onContextMenu = (e) => e.preventDefault();
+    this._onWheelBound = (e) => this._onWheel(e);
+
+    domElement.addEventListener('pointerdown', this._onPointerDown);
+    domElement.addEventListener('pointermove', this._onPointerMove);
+    domElement.addEventListener('pointerup', this._onPointerUp);
+    domElement.addEventListener('pointercancel', this._onPointerUp);
+    domElement.addEventListener('wheel', this._onWheelBound, { passive: false });
+    domElement.addEventListener('contextmenu', this._onContextMenu);
+  }
+
+  dispose() {
+    const d = this.dom;
+    d.removeEventListener('pointerdown', this._onPointerDown);
+    d.removeEventListener('pointermove', this._onPointerMove);
+    d.removeEventListener('pointerup', this._onPointerUp);
+    d.removeEventListener('pointercancel', this._onPointerUp);
+    d.removeEventListener('wheel', this._onWheelBound);
+    d.removeEventListener('contextmenu', this._onContextMenu);
+    this._drag = null;
+    this._touches.clear();
+    this._pinch = null;
+    this.onFirstInteract = null;
   }
 
   setBoardSize(boardSize) {

@@ -2911,6 +2911,8 @@ export class Engine {
     this._warmGeo.dispose();
     if (this.terrainMaterial) this.terrainMaterial.dispose();
     if (this.waterMaterial) this.waterMaterial.dispose();
+    if (this.controls) { this.controls.dispose(); this.controls = null; }
+    if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     if (this.renderer) {
       loseRendererContext(this.renderer);
       this.renderer.dispose();
