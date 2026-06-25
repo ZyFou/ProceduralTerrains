@@ -52,7 +52,7 @@ import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainP
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
-import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack } from './water/WaterSettings.js';
+import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 import {
   detectRendererCapabilities,
@@ -3640,6 +3640,7 @@ export class Engine {
       u.uCausticBlend.value = causticsOn ? 1.0 : 0.0;
       u.uCausticScale.value = p.waterUnderwaterCausticScale ?? 1;
       u.uCausticSpeed.value = p.waterUnderwaterCausticSpeed ?? 1;
+      this._syncCausticWaveUniforms(p);
     }
 
     // sync the screen-space pass (no-op while dry)
@@ -3652,6 +3653,38 @@ export class Engine {
       sunScreen: sun,
       sunVisible: sun.visible,
     });
+  }
+
+  // Mirror active water ripple settings into terrain caustic uniforms so floor
+  // caustics drift with the surface waves.
+  _syncCausticWaveUniforms(p) {
+    const u = this.uniforms;
+    if (!u.uCausticWaveDir) return;
+
+    const perf = this.perf ?? {};
+    const realistic = isRealisticWaterMode(this.waterSystem?.getEffectiveMode() ?? 'legacy');
+    u.uCausticWaterAnim.value = p.waterAnim ? 1 : 0;
+    u.uCausticRippleLegacy.value = realistic ? 0 : 1;
+
+    if (realistic) {
+      const dirRad = (p.waterWaveDirection ?? 0) * Math.PI / 180;
+      u.uCausticWaveDir.value.set(Math.cos(dirRad), Math.sin(dirRad));
+      u.uCausticWaveSpeed.value = p.waterWaveSpeed ?? 1;
+      u.uCausticWaveScale.value = p.waterWaveScale ?? 1;
+      u.uCausticAnimSpeed.value = p.waterAnimSpeed ?? 1;
+      u.uCausticLargeWaveStr.value = p.waterLargeWaveStrength ?? 1;
+      u.uCausticSmallWaveStr.value = p.waterSmallWaveStrength ?? 0.65;
+      const ws = (p.waterWaveStrength ?? 1) * (perf.waterWaves ?? 1);
+      u.uCausticWaveStrength.value = 1.8 * (p.waterNormalIntensity ?? 1) * ws;
+    } else {
+      u.uCausticWaveDir.value.set(1, 0);
+      u.uCausticWaveSpeed.value = 1;
+      u.uCausticWaveScale.value = 1;
+      u.uCausticAnimSpeed.value = 1;
+      u.uCausticLargeWaveStr.value = 1;
+      u.uCausticSmallWaveStr.value = perf.waterDetail ?? 1;
+      u.uCausticWaveStrength.value = 1.6 * (perf.waterWaves ?? 1);
+    }
   }
 
   // Structured underwater diagnostics for the Performance Overlay.

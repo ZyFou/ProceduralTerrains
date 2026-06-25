@@ -132,12 +132,23 @@ uniform vec3  uPlinthColor;
 // Driven by the UnderwaterController: uCausticBlend ramps with camera submersion
 // so caustics only appear while diving (and fade in/out smoothly). World-XZ
 // projection keeps them seamless across chunks (Tile + Infinite).
+// Wave uniforms mirror the active water material so floor caustics drift with
+// the surface ripples (refraction through the wavy water plane).
 uniform float uCausticStrength;  // user strength (0 = off)
 uniform float uCausticBlend;     // camera-underwater activation 0..1
 uniform float uCausticScale;     // user scale multiplier
 uniform float uCausticSpeed;     // user speed multiplier
 uniform vec3  uCausticColor;
 uniform float uCausticDepthFade; // depth (world units) over which caustics fade
+uniform float uCausticWaterAnim;
+uniform float uCausticAnimSpeed;
+uniform float uCausticWaveSpeed;
+uniform float uCausticWaveScale;
+uniform float uCausticWaveStrength;
+uniform float uCausticLargeWaveStr;
+uniform float uCausticSmallWaveStr;
+uniform float uCausticRippleLegacy; // 1 = legacy water ripples, 0 = realistic
+uniform vec2  uCausticWaveDir;
 
 varying vec3  vWorldPos;
 varying float vLod;
@@ -155,13 +166,26 @@ const vec3 LOD_COLORS[4] = vec3[4](
 // Real caustic network — thin, bright, animated light filaments (the classic
 // distorted-wave-interference caustic). Fixed 5-iteration loop (static bound →
 // safe for the D3D11/ANGLE shader compiler), so it unrolls without a hang.
+// Each 1×1 uv cell gets a unique hash rotation/scale/phase so the mod-TAU wrap
+// no longer produces an identical grid of tiles.
 float causticTile(vec2 uv, float t) {
-  vec2 p = mod(uv * 6.28318, 6.28318) - 250.0;
+  vec2 id = floor(uv);
+  vec2 f = fract(uv) - 0.5;
+
+  float h0 = hash12(id);
+  float h1 = hash12(id + vec2(5.2, 1.7));
+  float ang = (h0 * 2.0 - 1.0) * 3.14159;
+  float cs = cos(ang);
+  float sn = sin(ang);
+  f = mat2(cs, -sn, sn, cs) * (f * (0.65 + h1 * 0.7));
+
+  vec2 p = mod((f + 0.5) * 6.28318, 6.28318) - 250.0;
+  float tLocal = t + (h0 + h1) * 6.0;
   vec2 i = p;
   float c = 1.0;
   const float inten = 0.005;
   for (int n = 0; n < 5; n++) {
-    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    float tt = tLocal * (1.0 - (3.5 / float(n + 1)));
     i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
     c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
   }
@@ -170,16 +194,58 @@ float causticTile(vec2 uv, float t) {
   return clamp(pow(abs(c), 8.0), 0.0, 1.0);
 }
 
-// Two rotated/offset layers at different scale+speed → hides the TAU tiling and
-// reads as evolving caustics rather than a scrolling texture.
-float causticPattern(vec2 xz, float t) {
+// Ripple height at the water surface — matches legacy or realistic water shaders.
+float causticRippleLayer(vec2 p, float t, float scale, float speed) {
+  vec2 drift = uCausticWaveDir * t * speed;
+  float h = vnoise(p * scale + drift);
+  h += 0.45 * vnoise(p * scale * 2.4 - drift * 1.3);
+  return h;
+}
+
+float causticRippleHeight(vec2 rp, float t) {
+  if (uCausticRippleLegacy > 0.5) {
+    float h = vnoise(rp + vec2(t * 0.6, t * 0.45));
+    h += 0.5 * uCausticSmallWaveStr * vnoise(rp * 2.7 - vec2(t * 0.8, t * 0.3));
+    return h;
+  }
+  return causticRippleLayer(rp, t, 1.0, uCausticWaveSpeed) * uCausticLargeWaveStr
+       + causticRippleLayer(rp, t, 2.6, uCausticWaveSpeed * 1.3) * uCausticSmallWaveStr;
+}
+
+// Surface slope refracts sunlight — shift caustic sampling to follow the waves.
+vec2 causticSurfaceRefraction(vec2 xz, float t) {
+  vec2 rp = xz * 0.055 * uCausticWaveScale;
+  float e = (uCausticRippleLegacy > 0.5)
+    ? 1.6
+    : (1.4 / max(uCausticWaveScale, 0.2));
+  float r0 = causticRippleHeight(rp, t);
+  float rX = causticRippleHeight(rp + vec2(e * 0.055, 0.0), t);
+  float rZ = causticRippleHeight(rp + vec2(0.0, e * 0.055), t);
+  return vec2(-(rX - r0), -(rZ - r0)) * uCausticWaveStrength;
+}
+
+// causticTile is periodic within each cell, but cells are no longer identical.
+// Domain warp + two layers break residual tiling; surface refraction ties motion
+// to the live water ripples.
+float causticPattern(vec2 xz, float t, vec2 refr, float depthSpread) {
   float s = 0.03 / max(uCausticScale, 0.05);
-  vec2 a = xz * s;
-  // rotate the second layer ~37deg so the two tilings never line up
-  vec2 b = mat2(0.80, -0.60, 0.60, 0.80) * (xz * s * 1.41) + vec2(4.7, 1.3);
-  float c1 = causticTile(a, t);
-  float c2 = causticTile(b, t * 1.27);
-  return min(c1 + c2, 1.0);
+  vec2 uv = xz * s;
+
+  // refract with the water surface — caustics slide as waves pass overhead
+  uv += refr * s * 2.8 * depthSpread;
+
+  vec2 warp = vec2(
+    fbm4(uv * 0.35 + refr * 0.12),
+    fbm4(uv * 0.35 + vec2(4.3, 2.1) + refr * 0.1)
+  ) - 0.5;
+  uv += warp * 1.6;
+
+  vec2 a = uv;
+  vec2 b = ROT2 * (uv * 1.618) + vec2(4.7, 1.3);
+  float c = min(causticTile(a, t) + causticTile(b, t * 1.27), 1.0);
+
+  float vary = 0.45 + 0.9 * fbm4(uv * 0.25 + refr * 0.06);
+  return clamp(c * vary, 0.0, 1.0);
 }
 
 // Project caustics onto the submerged, upward-facing sea floor. World-XZ space
@@ -204,7 +270,10 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
   float sunUp = clamp(uSunDir.y * 2.0, 0.0, 1.0);
   float light = (0.35 + 0.65 * sunFace) * sunUp;
 
-  float c = causticPattern(xz, uTime * 0.6 * uCausticSpeed);
+  float t = uTime * uCausticWaterAnim * uCausticAnimSpeed * uCausticSpeed;
+  vec2 refr = causticSurfaceRefraction(xz, t);
+  float depthSpread = 1.0 + below * 0.012;
+  float c = causticPattern(xz, t, refr, depthSpread);
 
   // additive light, plus a touch of multiplicative brightening so the floor
   // albedo shows through the bright filaments
@@ -478,6 +547,15 @@ export function createTerrainUniforms() {
     uCausticSpeed:    { value: 1.0 },
     uCausticColor:    { value: new THREE.Vector3(0.85, 0.95, 1.0) },
     uCausticDepthFade:{ value: 70.0 },
+    uCausticWaterAnim:     { value: 1.0 },
+    uCausticAnimSpeed:     { value: 1.0 },
+    uCausticWaveSpeed:     { value: 1.0 },
+    uCausticWaveScale:     { value: 1.0 },
+    uCausticWaveStrength:  { value: 1.6 },
+    uCausticLargeWaveStr:  { value: 1.0 },
+    uCausticSmallWaveStr:  { value: 0.65 },
+    uCausticRippleLegacy:  { value: 1.0 },
+    uCausticWaveDir:       { value: new THREE.Vector2(1, 0) },
     uPlanetRadius:   { value: 8000 },
     uPlanetEps:      { value: 0.0015 },
     uSunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },
