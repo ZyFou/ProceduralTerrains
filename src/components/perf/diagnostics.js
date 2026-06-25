@@ -22,6 +22,7 @@ export function buildDiagnosticsObject(snap) {
       qualityPreset: snap?.diag?.qualityPreset,
     },
     renderer: snap?.render,
+    rendererBackend: snap?.diag?.renderer,
     gpuTiming: snap?.gpu,
     memory: snap?.memory,
     timings: (snap?.sections || []).map((s) => ({ name: s.name, avg: round(s.avg), max: round(s.max) })),
@@ -51,6 +52,12 @@ export function buildDiagnosticsText(snap) {
   if (o.gpuTiming) {
     L.push('');
     L.push('[GPU]');
+    if (o.rendererBackend) {
+      L.push(`  Renderer backend: ${o.rendererBackend.requestedBackendLabel} (active ${o.rendererBackend.activeBackendLabel})`);
+      L.push(`  GPU preference: ${o.rendererBackend.requestedGpuPreferenceLabel} (applied ${o.rendererBackend.activeGpuPreferenceLabel})`);
+      L.push(`  Detected GPU: ${o.rendererBackend.capabilities?.detectedGpu || 'unavailable'}`);
+      L.push(`  WebGPU support: ${o.rendererBackend.capabilities?.webgpu?.supported ? 'available' : 'unavailable'}`);
+    }
     L.push(o.gpuTiming.supported ? `  Frame GPU: ${round(o.gpuTiming.frameMs)} ms` : '  GPU timing: unavailable');
   }
   if (o.memory) {

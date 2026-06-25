@@ -53,6 +53,12 @@ import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
+import {
+  detectRendererCapabilities,
+  getWebGpuSupport,
+  labelGpuPreference,
+  labelRendererBackend,
+} from './render/RendererCapabilities.js';
 import { profiler } from './perf/PerformanceProfiler.js';
 import { GPUProfiler } from './perf/GPUProfiler.js';
 import { APP_VERSION } from '../constants/app.js';
@@ -275,18 +281,43 @@ export class Engine {
   // ----------------------------------------------------------------- setup
 
   _initRenderer() {
-    this.renderer = createRendererForCanvas(this.canvas);
+    const requestedBackend = this.perf?.rendererBackend || 'auto';
+    const requestedGpuPreference = this.perf?.gpuPreference || 'default';
+    const webgpu = getWebGpuSupport();
+    this.renderer = createRendererForCanvas(this.canvas, {
+      rendererBackend: requestedBackend,
+      gpuPreference: requestedGpuPreference,
+    });
     this.renderer.setClearColor(0x0b0e14, 1);
 
     const gl = this.renderer.getContext();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-    let gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'WebGL2';
+    let gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'GPU info hidden by browser';
     const angle = /ANGLE \([^,]+,\s*(.+?),\s*[^,]*\)\s*$/.exec(gpu);
     if (angle) gpu = angle[1];
     gpu = gpu.replace(/\s*\(0x[0-9A-F]+\)/i, '').replace(/\s*Direct3D.*$/i, '').trim();
     if (gpu.length > 42) gpu = gpu.slice(0, 42) + '…';
     this.gpuName = gpu;
-    this.gpuNameFull = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'WebGL2';
+    this.gpuNameFull = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'GPU info hidden by browser';
+    this.rendererCapabilities = detectRendererCapabilities(this.renderer);
+    const actualOptions = this.renderer.userData?.terrainRendererOptions || {};
+    this.rendererConfig = {
+      requestedBackend,
+      requestedBackendLabel: labelRendererBackend(requestedBackend),
+      appliedRendererBackend: requestedBackend,
+      appliedRendererBackendLabel: labelRendererBackend(requestedBackend),
+      activeBackend: 'webgl',
+      activeBackendLabel: this.rendererCapabilities.detectedRenderer,
+      requestedGpuPreference,
+      requestedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
+      appliedGpuPreference: requestedGpuPreference,
+      appliedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
+      activeGpuPreference: actualOptions.powerPreference || 'default',
+      activeGpuPreferenceLabel: labelGpuPreference(actualOptions.powerPreference || 'default'),
+      webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.supported,
+      webgpuRequestedButNotActive: requestedBackend === 'webgpu',
+      reloadRequired: false,
+    };
 
     // Shared diagnostics profiler + optional non-blocking GPU timer.
     this.profiler = profiler;
@@ -2764,8 +2795,25 @@ export class Engine {
     if (!(key in this.perf)) return;
     const next = { ...this.perf, [key]: value };
     // meta toggles that don't change visual quality keep the current preset
-    if (key !== 'autoPerf' && key !== 'underwaterEffect' && key !== 'onDemandStudio') next.preset = 'custom';
+    const keepsPreset = key === 'autoPerf'
+      || key === 'underwaterEffect'
+      || key === 'onDemandStudio'
+      || key === 'rendererBackend'
+      || key === 'gpuPreference';
+    if (!keepsPreset) next.preset = 'custom';
     this.perf = sanitizePerfSettings(next);
+    if (key === 'rendererBackend' || key === 'gpuPreference') {
+      const cfg = this.rendererConfig || {};
+      this.rendererConfig = {
+        ...cfg,
+        requestedBackend: this.perf.rendererBackend,
+        requestedBackendLabel: labelRendererBackend(this.perf.rendererBackend),
+        requestedGpuPreference: this.perf.gpuPreference,
+        requestedGpuPreferenceLabel: labelGpuPreference(this.perf.gpuPreference),
+        reloadRequired: this.perf.rendererBackend !== cfg.appliedRendererBackend
+          || this.perf.gpuPreference !== cfg.appliedGpuPreference,
+      };
+    }
     if (key === 'autoPerf' && !this.perf.autoPerf) {
       this._autoScale = 1.0;   // leaving auto mode restores full render scale
     }
@@ -2802,6 +2850,17 @@ export class Engine {
     this.perf = createPerfSettings('high');
     this.qualityPreset = this.perf.preset;
     this._autoScale = 1.0;
+    if (this.rendererConfig) {
+      this.rendererConfig = {
+        ...this.rendererConfig,
+        requestedBackend: this.perf.rendererBackend,
+        requestedBackendLabel: labelRendererBackend(this.perf.rendererBackend),
+        requestedGpuPreference: this.perf.gpuPreference,
+        requestedGpuPreferenceLabel: labelGpuPreference(this.perf.gpuPreference),
+        reloadRequired: this.perf.rendererBackend !== this.rendererConfig.appliedRendererBackend
+          || this.perf.gpuPreference !== this.rendererConfig.appliedGpuPreference,
+      };
+    }
     this._applyPerformance();
     this._notifyPerf();
     this.cb.onToast('Performance settings reset');
@@ -3791,6 +3850,20 @@ export class Engine {
       qualityPreset: perf.preset,
       pixelRatio: this.renderer ? this.renderer.getPixelRatio() : 1,
       renderScale: perf.renderScale,
+      renderer: {
+        ...(this.rendererConfig || {}),
+        capabilities: this.rendererCapabilities || detectRendererCapabilities(this.renderer),
+        requestedBackend: perf.rendererBackend,
+        requestedBackendLabel: labelRendererBackend(perf.rendererBackend),
+        requestedGpuPreference: perf.gpuPreference,
+        requestedGpuPreferenceLabel: labelGpuPreference(perf.gpuPreference),
+        reloadRequired: !!(
+          this.rendererConfig && (
+            perf.rendererBackend !== this.rendererConfig.appliedRendererBackend
+            || perf.gpuPreference !== this.rendererConfig.appliedGpuPreference
+          )
+        ),
+      },
       drawingBuffer: this.renderer
         ? { w: this.renderer.domElement.width, h: this.renderer.domElement.height }
         : null,

@@ -1777,6 +1777,77 @@ input[type="color"].palette-color-input {
   border-radius: var(--radius-sm);
   font-family: var(--mono);
 }
+.gpu-renderer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gpu-renderer-section .subsection-label {
+  margin-top: 0;
+}
+.gpu-cap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-panel-soft);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.gpu-cap-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.gpu-cap-row strong {
+  min-width: 0;
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: right;
+}
+.gpu-apply-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--warning);
+  background: rgba(245, 165, 36, 0.08);
+  border: 1px solid rgba(245, 165, 36, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+}
+.gpu-apply-row span {
+  width: 100%;
+  line-height: 1.35;
+}
+.gpu-apply-btn {
+  width: 100%;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--warning);
+  background: rgba(245, 165, 36, 0.1);
+  border-color: rgba(245, 165, 36, 0.35);
+}
+.gpu-footnote {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .settings-search-hint {
   font-size: 10px;
   font-weight: 700;

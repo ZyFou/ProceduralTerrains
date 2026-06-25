@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { sanitizeGpuPreference } from './RendererCapabilities.js';
 
 /**
  * Probe whether WebGL is available in this browser / GPU stack.
@@ -37,26 +38,43 @@ export function releaseCanvasWebGLContext(canvas) {
   }
 }
 
-const RENDERER_ATTEMPTS = [
+const BASE_RENDERER_ATTEMPTS = [
   { antialias: true, alpha: false, powerPreference: 'high-performance', stencil: false },
   { antialias: false, alpha: false, powerPreference: 'default', stencil: false },
   { antialias: false, alpha: false, powerPreference: 'low-power', stencil: false, depth: true },
 ];
 
+function buildRendererAttempts(gpuPreference = 'default') {
+  const pref = sanitizeGpuPreference(gpuPreference);
+  const preferred = pref === 'default' ? 'default' : pref;
+  const first = { antialias: true, alpha: false, powerPreference: preferred, stencil: false };
+  const seen = new Set();
+  return [first, ...BASE_RENDERER_ATTEMPTS].filter((attempt) => {
+    const key = JSON.stringify(attempt);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Create a WebGLRenderer for the given canvas, trying progressively safer options.
  * @returns {THREE.WebGLRenderer}
  */
-export function createRendererForCanvas(canvas) {
+export function createRendererForCanvas(canvas, settings = {}) {
   if (!canvas) throw new Error('No canvas element was provided for WebGL initialization.');
 
   const probe = probeWebGL();
   if (!probe.ok) throw new Error(probe.reason);
 
   let lastError = null;
-  for (const options of RENDERER_ATTEMPTS) {
+  for (const options of buildRendererAttempts(settings.gpuPreference)) {
     try {
       const renderer = new THREE.WebGLRenderer({ canvas, ...options });
+      renderer.userData = {
+        ...(renderer.userData || {}),
+        terrainRendererOptions: { ...options },
+      };
       return renderer;
     } catch (err) {
       lastError = err;

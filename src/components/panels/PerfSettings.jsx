@@ -7,6 +7,10 @@ import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
   resolveLodSegments, resolveLodDistances, estimateTriangles,
 } from '../../engine/render/PerformanceSettings.js';
+import {
+  detectRendererCapabilities,
+  labelGpuPreference,
+} from '../../engine/render/RendererCapabilities.js';
 
 const lim = (key, label, step, opts = {}) => ({
   key, label, step, min: PERF_LIMITS[key].min, max: PERF_LIMITS[key].max, ...opts,
@@ -35,6 +39,12 @@ const WATER_QUALITY_OPTIONS = [
   { value: 0, label: 'Low' },
   { value: 1, label: 'Medium' },
   { value: 2, label: 'High' },
+];
+
+const GPU_PREFERENCE_OPTIONS = [
+  { value: 'default', label: 'Default' },
+  { value: 'high-performance', label: 'High Performance' },
+  { value: 'low-power', label: 'Low Power' },
 ];
 
 const TABS = [
@@ -121,7 +131,77 @@ function SettingNote({ tab, text, search, activeTab }) {
   return <p className="settings-note">{text}</p>;
 }
 
-export default function PerfSettings({ perf, onPerfPreset, onPerfSetting, onPerfReset, settingsTarget, onSettingsTargetHandled }) {
+function CapabilityRow({ label, value, title }) {
+  return (
+    <div className="gpu-cap-row">
+      <span>{label}</span>
+      <strong title={title || String(value)}>{value}</strong>
+    </div>
+  );
+}
+
+function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
+  const fallbackCaps = useMemo(() => detectRendererCapabilities(), []);
+  const caps = rendererInfo?.capabilities || fallbackCaps;
+  const webgpuSupported = !!caps.webgpu?.supported;
+  const backendOptions = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'webgl', label: 'WebGL' },
+    {
+      value: 'webgpu',
+      label: webgpuSupported ? 'WebGPU' : 'WebGPU unavailable',
+      disabled: !webgpuSupported,
+    },
+  ];
+  const activeGpuPreference = rendererInfo?.activeGpuPreference || 'default';
+  const reloadRequired = !!rendererInfo?.reloadRequired;
+  const gpuInfo = caps.gpuInfoAvailable
+    ? caps.detectedGpu
+    : (caps.gpuInfoReason || 'GPU info hidden by browser');
+
+  return (
+    <div className="gpu-renderer-section">
+      <div className="subsection-label">GPU / Renderer</div>
+      <SelectRow
+        label="Renderer Backend"
+        value={perf.rendererBackend}
+        options={backendOptions}
+        onChange={(v) => onPerfSetting('rendererBackend', v)}
+        info="Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build."
+        settingId="performance.rendererBackend"
+      />
+      <SelectRow
+        label="GPU Preference"
+        value={perf.gpuPreference}
+        options={GPU_PREFERENCE_OPTIONS}
+        onChange={(v) => onPerfSetting('gpuPreference', v)}
+        info="A browser hint only. The browser or OS may ignore this preference."
+        settingId="performance.gpuPreference"
+      />
+      <div className="gpu-cap-list">
+        <CapabilityRow label="Detected Renderer" value={rendererInfo?.activeBackendLabel || caps.detectedRenderer} />
+        <CapabilityRow label="Detected GPU" value={gpuInfo} title={caps.detectedGpu} />
+        <CapabilityRow label="GPU Timing" value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
+        <CapabilityRow label="Power Preference" value={labelGpuPreference(activeGpuPreference)} />
+        {perf.rendererBackend === 'webgpu' && !webgpuSupported && (
+          <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
+        )}
+      </div>
+      {reloadRequired ? (
+        <div className="gpu-apply-row">
+          <span>Reload required to apply GPU changes</span>
+          <button type="button" className="action-btn gpu-apply-btn" onClick={() => window.location.reload()}>
+            Reload &amp; Apply
+          </button>
+        </div>
+      ) : (
+        <p className="gpu-footnote">Browser may ignore GPU preference hints.</p>
+      )}
+    </div>
+  );
+}
+
+export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfSetting, onPerfReset, settingsTarget, onSettingsTargetHandled }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [search, setSearch] = useState('');
 
@@ -162,7 +242,7 @@ export default function PerfSettings({ perf, onPerfPreset, onPerfSetting, onPerf
   };
 
   const groupProps = { search, activeTab };
-  const body = renderSettings({ perf, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps });
+  const body = renderSettings({ perf, rendererInfo, presetOptions, segments, distances, estTris, setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps });
 
   return (
     <div className="perf-settings">
@@ -209,13 +289,17 @@ export default function PerfSettings({ perf, onPerfPreset, onPerfSetting, onPerf
 }
 
 function renderSettings({
-  perf, presetOptions, segments, distances, estTris,
+  perf, rendererInfo, presetOptions, segments, distances, estTris,
   setLodDistance, onPerfPreset, onPerfSetting, onPerfReset, groupProps,
 }) {
   return (
     <>
       <SettingGroup tab="overview" label="Performance Preset" keywords="preset quality profile" {...groupProps}>
         <SelectRow label="Preset" value={perf.preset} options={presetOptions} onChange={onPerfPreset} settingId="performance.preset" />
+      </SettingGroup>
+
+      <SettingGroup tab="overview" label="GPU Renderer" keywords="gpu renderer backend webgl webgpu power preference dedicated low power timing" {...groupProps}>
+        <GpuRendererSection perf={perf} rendererInfo={rendererInfo} onPerfSetting={onPerfSetting} />
       </SettingGroup>
 
       <SettingGroup tab="overview" label="Auto Performance Mode" keywords="automatic dynamic fps" {...groupProps}>

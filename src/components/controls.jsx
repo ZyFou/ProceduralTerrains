@@ -114,7 +114,7 @@ export function SelectRow({ label, value, options, format, onChange, icon, info,
       </div>
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => (
-          <option key={String(opt.value ?? opt)} value={opt.value ?? opt}>
+          <option key={String(opt.value ?? opt)} value={opt.value ?? opt} disabled={!!opt.disabled}>
             {opt.label ?? (format ? format(opt) : String(opt))}
           </option>
         ))}

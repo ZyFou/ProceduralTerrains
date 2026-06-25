@@ -15,6 +15,11 @@
 // (in chunk-size units) and `lodDistanceScale`.
 // ============================================================================
 
+import {
+  sanitizeGpuPreference,
+  sanitizeRendererBackend,
+} from './RendererCapabilities.js';
+
 export const BASE_LOD_SEGMENTS = [64, 32, 16, 8];   // quads per chunk side
 export const BASE_LOD_DISTANCES = [4, 8, 14];       // thresholds × chunkSize
 
@@ -118,6 +123,8 @@ export function createPerfSettings(presetKey = 'high') {
   const { label, ...values } = PERF_PRESETS[presetKey] || PERF_PRESETS.high;
   return sanitizePerfSettings({
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
+    rendererBackend: 'auto',
+    gpuPreference: 'default',
     autoPerf: false,
     underwaterEffect: true,
     lodSegments: [...BASE_LOD_SEGMENTS],
@@ -197,6 +204,9 @@ export function estimateTriangles(settings) {
  */
 export function sanitizePerfSettings(settings) {
   const s = { ...settings };
+
+  s.rendererBackend = sanitizeRendererBackend(s.rendererBackend);
+  s.gpuPreference = sanitizeGpuPreference(s.gpuPreference);
 
   s.renderScale = clamp(+s.renderScale || 1, PERF_LIMITS.renderScale);
   s.resolutionScale = clamp(+s.resolutionScale || 1, PERF_LIMITS.resolutionScale);

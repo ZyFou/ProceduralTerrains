@@ -48,6 +48,8 @@ const SETTINGS_INDEX = [
 
   // Performance
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.preset', label: 'Preset', keywords: 'quality profile performance' },
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.rendererBackend', label: 'Renderer Backend', keywords: 'gpu renderer backend webgl webgpu auto graphics' },
+  { panelId: 'performance', tabId: 'overview', settingId: 'performance.gpuPreference', label: 'GPU Preference', keywords: 'gpu power preference high performance low power dedicated battery' },
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.autoPerf', label: 'Auto Performance Mode', keywords: 'automatic fps performance' },
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.onDemandStudio', label: 'Pause When Idle', keywords: 'idle redraw battery performance' },
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.renderScale', label: 'Render Scale', keywords: 'resolution pixel dpr scale' },

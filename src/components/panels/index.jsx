@@ -357,7 +357,7 @@ function PerformancePanel({ ctx }) {
   return (
     <SidePanel title="Performance" description="Quality, LOD and budgets." onClose={ctx.onClose}>
       <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
-      <PerfSettings perf={ctx.perf} onPerfPreset={ctx.onPerfPreset}
+      <PerfSettings perf={ctx.perf} rendererInfo={ctx.rendererInfo} onPerfPreset={ctx.onPerfPreset}
         onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset}
         settingsTarget={ctx.settingsTarget}
         onSettingsTargetHandled={ctx.onSettingsTargetHandled} />

@@ -218,7 +218,13 @@ export default function PerformanceOverlay({
           )) : <Row label="No section data yet" value="…" />}
         </Section>
 
-        <Section id="gpu" title="GPU timing" collapsed={collapsed.gpu} onToggle={onToggleSection}>
+        <Section id="gpu" title="GPU / Renderer" collapsed={collapsed.gpu} onToggle={onToggleSection}>
+          <Row label="Renderer backend" value={diag?.renderer?.requestedBackendLabel || 'â€“'} />
+          <Row label="Active renderer" value={diag?.renderer?.activeBackendLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
+          <Row label="GPU preference" value={diag?.renderer?.requestedGpuPreferenceLabel || 'â€“'} />
+          <Row label="Applied preference" value={diag?.renderer?.activeGpuPreferenceLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
+          <Row label="Detected GPU" value={diag?.renderer?.capabilities?.detectedGpu || diag?.gpuName || 'â€“'} warn={diag?.renderer?.capabilities?.gpuInfoAvailable === false} />
+          <Row label="WebGPU support" value={diag?.renderer?.capabilities?.webgpu?.supported ? 'available' : 'unavailable'} />
           {gpu && gpu.supported ? (
             <>
               <Row label="Frame GPU" value={fmtMs(gpu.frameMs)} />
@@ -226,6 +232,7 @@ export default function PerformanceOverlay({
               {gpu.disjoint && <Row label="Note" value="disjoint — result unreliable" warn />}
             </>
           ) : <Row label="GPU timing" value="unavailable on this browser/device" />}
+          {diag?.renderer?.reloadRequired && <Row label="Apply required" value="reload renderer" warn />}
         </Section>
 
         <Section id="memory" title="Memory" collapsed={collapsed.memory} onToggle={onToggleSection}>

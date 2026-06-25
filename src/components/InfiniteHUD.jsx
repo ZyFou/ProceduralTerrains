@@ -40,7 +40,7 @@ export default function InfiniteHUD({
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
   planetPreset, onPlanetPreset, onGeneratePalette, onRandomPlanet,
-  perf, gpu, perfStats, onPerfPreset, onPerfSetting, onPerfReset,
+  perf, rendererInfo, gpu, perfStats, onPerfPreset, onPerfSetting, onPerfReset,
 }) {
   const [perfOpen, setPerfOpen] = useState(false);
   if (!stats) return null;
@@ -219,6 +219,7 @@ export default function InfiniteHUD({
               <PerformanceStats stats={perfStats} gpu={gpu} />
               <PerfSettings
                 perf={perf}
+                rendererInfo={rendererInfo}
                 onPerfPreset={onPerfPreset}
                 onPerfSetting={onPerfSetting}
                 onPerfReset={onPerfReset}

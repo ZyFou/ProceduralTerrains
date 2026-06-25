@@ -25,6 +25,7 @@ import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import PerformanceOverlay from './components/perf/PerformanceOverlay.jsx';
+import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 
@@ -621,6 +622,8 @@ export default function App() {
       case 'planet.paletteContrast': return num(paramsStyle.paletteContrast ?? 1, 2);
 
       case 'performance.preset': return perf?.preset ?? 'high';
+      case 'performance.rendererBackend': return labelRendererBackend(perf?.rendererBackend);
+      case 'performance.gpuPreference': return labelGpuPreference(perf?.gpuPreference);
       case 'performance.autoPerf': return yesNo(perf?.autoPerf);
       case 'performance.onDemandStudio': return yesNo(perf?.onDemandStudio);
       case 'performance.renderScale': return num(perf?.renderScale, 2, 'x');
@@ -850,6 +853,10 @@ export default function App() {
     debugFlags, onDebugFlag: handleDebugFlag,
     onResetPanel: (id) => engine().resetPanelSettings(id),
     stats, gpu, perf,
+    rendererInfo: engineRef.current ? {
+      ...(engineRef.current.rendererConfig || {}),
+      capabilities: engineRef.current.rendererCapabilities,
+    } : null,
     onPerfPreset: (key) => engine().setPerfPreset(key),
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
@@ -991,6 +998,10 @@ export default function App() {
                 onGeneratePalette={() => engine().generatePalette()}
                 onRandomPlanet={() => engine().randomizePlanetPreset()}
                 perf={perf}
+                rendererInfo={engineRef.current ? {
+                  ...(engineRef.current.rendererConfig || {}),
+                  capabilities: engineRef.current.rendererCapabilities,
+                } : null}
                 gpu={gpu}
                 perfStats={stats}
                 onPerfPreset={(key) => engine().setPerfPreset(key)}

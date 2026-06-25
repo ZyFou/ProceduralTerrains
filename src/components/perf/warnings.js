@@ -56,6 +56,21 @@ export function computeWarnings(snap, T = WARN_THRESHOLDS) {
   if (diag) {
     if (diag.pixelRatio > T.pixelRatio) add('warning', `Pixel ratio high: ${diag.pixelRatio.toFixed(2)}`);
 
+    const renderer = diag.renderer || {};
+    const caps = renderer.capabilities || {};
+    if (renderer.requestedGpuPreference && renderer.requestedGpuPreference !== 'default') {
+      add('info', `${renderer.requestedGpuPreferenceLabel || 'GPU'} preference requested; browser may ignore it`);
+    }
+    if (renderer.requestedBackend === 'webgpu' && caps.webgpu && !caps.webgpu.supported) {
+      add('warning', 'WebGPU selected but unavailable, falling back to WebGL');
+    } else if (renderer.requestedBackend === 'webgpu' && renderer.activeBackend !== 'webgpu') {
+      add('info', 'WebGPU selected, but this build is using WebGL');
+    }
+    if (caps.gpuInfoAvailable === false) {
+      add('info', 'GPU name unavailable because browser blocked debug renderer info');
+    }
+    if (renderer.reloadRequired) add('info', 'Renderer preference change requires reload');
+
     const total = diag.culling?.total ?? 0;
     if (total > T.chunks) add('warning', `Many chunks active: ${total}`);
 
