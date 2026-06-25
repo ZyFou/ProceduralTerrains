@@ -7,6 +7,7 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
   const [menuStyle, setMenuStyle] = useState(null);
   const wrapRef = useRef(null);
   const triggerRef = useRef(null);
+  const menuRef = useRef(null);
   const exploring = exploreMode === 'walk' || exploreMode === 'plane';
 
   useEffect(() => {
@@ -20,7 +21,10 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
       });
     };
     const onPointerDown = (e) => {
-      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+      const target = e.target;
+      if (!wrapRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
     };
     placeMenu();
     window.addEventListener('pointerdown', onPointerDown, true);
@@ -97,6 +101,7 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
         </button>
         {open && menuStyle && createPortal(
           <div
+            ref={menuRef}
             className="explore-menu"
             style={{ left: menuStyle.left, bottom: menuStyle.bottom }}
             role="menu"
