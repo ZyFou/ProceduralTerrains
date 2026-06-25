@@ -24,7 +24,6 @@ import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
-import PerformanceBadge from './components/perf/PerformanceBadge.jsx';
 import PerformanceOverlay from './components/perf/PerformanceOverlay.jsx';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
@@ -50,7 +49,7 @@ export default function App() {
   loadingRef.current = loading;
 
   // Developer Performance Overlay (diagnostics). Toggle: Ctrl/Cmd+Shift+P or
-  // the FPS badge. Lightweight when closed; detailed collection only while open.
+  // the FPS badge in the status bar. Detailed collection only while open.
   const perfOverlay = usePerfOverlay(engineRef, loading.tasks);
 
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
@@ -1032,24 +1031,19 @@ export default function App() {
         exploreMode={exploreMode}
         playerMode={playerMode}
         playerState={fpsView ? infiniteStats?.playerState : playerState}
+        perfOpen={perfOverlay.settings.open}
+        onPerfToggle={perfOverlay.toggleOpen}
       />
 
       <ToastContainer toasts={toasts} />
 
-      {(perfOverlay.settings.badge || perfOverlay.settings.open) && !previewMode && (
-        <PerformanceBadge
-          snapshot={perfOverlay.snapshot}
-          open={perfOverlay.settings.open}
-          onToggle={perfOverlay.toggleOpen}
-        />
-      )}
       {perfOverlay.settings.open && (
         <PerformanceOverlay
           snapshot={perfOverlay.snapshot}
+          history={perfOverlay.history}
           settings={perfOverlay.settings}
           onClose={perfOverlay.toggleOpen}
           onToggleSection={perfOverlay.toggleSection}
-          onSetBadge={perfOverlay.setBadge}
           onSetCompact={perfOverlay.setCompact}
           onSetShowWarnings={perfOverlay.setShowWarnings}
         />

@@ -1,14 +1,12 @@
 // ============================================================================
-// PerformanceOverlay — the expanded "engine diagnostics" panel.
-//
-// Reads a single merged snapshot (profiler + engine diagnostics + loading
-// tasks) provided by usePerfOverlay. Renders grouped, collapsible sections.
-// Purely presentational + a copy-diagnostics action; no per-frame work.
+// PerformanceOverlay — expanded engine diagnostics panel.
+// Reads a merged snapshot from usePerfOverlay; purely presentational.
 // ============================================================================
 
 import { useState } from 'react';
 import { computeWarnings } from './warnings.js';
 import { buildDiagnosticsText, buildDiagnosticsObject } from './diagnostics.js';
+import PerfSparkline from './PerfSparkline.jsx';
 
 function fmtNum(n) {
   if (n == null) return '–';
@@ -18,6 +16,12 @@ function fmtNum(n) {
 }
 const fmtMs = (v) => (v == null ? '–' : `${v.toFixed(1)} ms`);
 const mb = (b) => (b == null ? '–' : `${(b / 1048576).toFixed(0)} MB`);
+
+function fpsTone(fps) {
+  if (fps > 0 && fps < 30) return 'crit';
+  if (fps > 0 && fps < 45) return 'warn';
+  return 'good';
+}
 
 function Row({ label, value, warn }) {
   return (
@@ -32,7 +36,9 @@ function Section({ id, title, collapsed, onToggle, children }) {
   return (
     <div className="perf-section">
       <button type="button" className="perf-section-head" onClick={() => onToggle(id)}>
-        <span className={`perf-caret${collapsed ? ' closed' : ''}`}>▾</span>
+        <span className={`perf-caret${collapsed ? ' closed' : ''}`}>
+          <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        </span>
         {title}
       </button>
       {!collapsed && <div className="perf-section-body">{children}</div>}
@@ -40,15 +46,41 @@ function Section({ id, title, collapsed, onToggle, children }) {
   );
 }
 
+function GraphCard({ label, hint, children }) {
+  return (
+    <div className="perf-graph-card">
+      <div className="perf-graph-card-head">
+        <span className="perf-graph-card-label">{label}</span>
+        {hint && <span className="perf-graph-card-hint">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export default function PerformanceOverlay({
-  snapshot, settings, onClose, onToggleSection, onSetBadge, onSetCompact, onSetShowWarnings,
+  snapshot, history, settings, onClose, onToggleSection, onSetCompact, onSetShowWarnings,
 }) {
   const [copied, setCopied] = useState('');
-  if (!snapshot) return null;
+  if (!snapshot) {
+    return (
+      <div className="perf-overlay perf-overlay-loading" role="dialog" aria-label="Performance overlay">
+        <div className="perf-overlay-head">
+          <span className="perf-title">Performance</span>
+          <button type="button" className="perf-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="perf-loading-body">
+          <span className="perf-loading-dot" />
+          Collecting metrics…
+        </div>
+      </div>
+    );
+  }
 
   const { fps, frame, render, gpu, memory, sections, tasks, diag } = snapshot;
   const collapsed = settings.collapsed || {};
   const warnings = computeWarnings(snapshot);
+  const tone = fpsTone(fps);
 
   const copy = async (kind) => {
     const text = kind === 'json'
@@ -81,7 +113,76 @@ export default function PerformanceOverlay({
       </div>
 
       <div className="perf-overlay-body">
-        {/* ---------------- Summary ---------------- */}
+        {/* Hero + live graphs */}
+        <div className="perf-hero">
+          <div className="perf-hero-metrics">
+            <div className={`perf-hero-fps perf-hero-${tone}`}>
+              <span className="perf-hero-value">{fps}</span>
+              <span className="perf-hero-unit">fps</span>
+            </div>
+            <div className="perf-hero-secondary">
+              <div className="perf-hero-stat">
+                <span className="perf-hero-stat-label">Frame</span>
+                <span className={`perf-hero-stat-value${frame?.avg > 22 ? ' warn' : ''}`}>{fmtMs(frame?.avg)}</span>
+              </div>
+              <div className="perf-hero-stat">
+                <span className="perf-hero-stat-label">Draws</span>
+                <span className="perf-hero-stat-value">{render?.calls ?? '–'}</span>
+              </div>
+              <div className="perf-hero-stat">
+                <span className="perf-hero-stat-label">Tris</span>
+                <span className="perf-hero-stat-value">{fmtNum(render?.triangles)}</span>
+              </div>
+            </div>
+          </div>
+
+          <GraphCard label="Frame rate" hint="~24 s">
+            <PerfSparkline
+              data={history?.fps}
+              color="var(--success)"
+              fill="rgba(34, 197, 94, 0.12)"
+              minY={0}
+              maxY={Math.max(60, ...(history?.fps || []))}
+              reference={60}
+              referenceLabel="60 fps"
+              unit=" fps"
+            />
+          </GraphCard>
+
+          <GraphCard label="Frame time" hint="CPU ms">
+            <PerfSparkline
+              data={history?.frameMs}
+              color="var(--accent)"
+              fill="var(--accent-bg)"
+              minY={0}
+              maxY={Math.max(33, ...(history?.frameMs || []))}
+              reference={16.67}
+              referenceLabel="16.7 ms"
+              unit=" ms"
+            />
+          </GraphCard>
+
+          <div className="perf-graph-duo">
+            <GraphCard label="Draw calls">
+              <PerfSparkline
+                data={history?.drawCalls}
+                color="var(--accent)"
+                fill="var(--accent-bg)"
+                minY={0}
+              />
+            </GraphCard>
+            <GraphCard label="Triangles" hint="×1000">
+              <PerfSparkline
+                data={history?.triangles}
+                color="var(--text-muted)"
+                fill="rgba(163, 163, 163, 0.1)"
+                minY={0}
+                unit="K"
+              />
+            </GraphCard>
+          </div>
+        </div>
+
         <Section id="summary" title="Summary" collapsed={collapsed.summary} onToggle={onToggleSection}>
           <Row label="FPS" value={fps} warn={fps > 0 && fps < 45} />
           <Row label="Avg FPS" value={snapshot.fpsAvg} />
@@ -95,7 +196,6 @@ export default function PerformanceOverlay({
           <Row label="Camera" value={cam ? `${cam.x.toFixed(0)}, ${cam.y.toFixed(0)}, ${cam.z.toFixed(0)}` : '–'} />
         </Section>
 
-        {/* ---------------- Rendering ---------------- */}
         <Section id="rendering" title="Rendering" collapsed={collapsed.rendering} onToggle={onToggleSection}>
           {render ? (
             <>
@@ -109,28 +209,25 @@ export default function PerformanceOverlay({
               <Row label="Shadows" value={diag?.shadowsEnabled ? 'on' : 'off'} />
               <Row label="Underwater pass" value={diag?.postProcessing?.underwater ? 'active' : 'inactive'} />
             </>
-          ) : <Row label="Renderer" value="open overlay to collect" />}
+          ) : <Row label="Renderer" value="collecting…" />}
         </Section>
 
-        {/* ---------------- Frame timing ---------------- */}
         <Section id="timing" title="Frame timing (CPU)" collapsed={collapsed.timing} onToggle={onToggleSection}>
           {sections && sections.length ? sections.map((s) => (
             <Row key={s.name} label={s.name} value={`${s.avg.toFixed(2)} ms (max ${s.max.toFixed(1)})`} warn={s.avg > 8} />
           )) : <Row label="No section data yet" value="…" />}
         </Section>
 
-        {/* ---------------- GPU ---------------- */}
         <Section id="gpu" title="GPU timing" collapsed={collapsed.gpu} onToggle={onToggleSection}>
           {gpu && gpu.supported ? (
             <>
               <Row label="Frame GPU" value={fmtMs(gpu.frameMs)} />
-              <Row label="Per-pass" value="not separated (whole-frame only)" />
+              <Row label="Per-pass" value="whole-frame only" />
               {gpu.disjoint && <Row label="Note" value="disjoint — result unreliable" warn />}
             </>
           ) : <Row label="GPU timing" value="unavailable on this browser/device" />}
         </Section>
 
-        {/* ---------------- Memory ---------------- */}
         <Section id="memory" title="Memory" collapsed={collapsed.memory} onToggle={onToggleSection}>
           {memory && memory.supported ? (
             <>
@@ -143,7 +240,6 @@ export default function PerformanceOverlay({
           <Row label="Geometries" value={render?.geometries ?? '–'} />
         </Section>
 
-        {/* ---------------- Loading ---------------- */}
         <Section id="loading" title="Loading" collapsed={collapsed.loading} onToggle={onToggleSection}>
           {tasks && tasks.length ? tasks.map((t) => (
             <Row
@@ -155,12 +251,10 @@ export default function PerformanceOverlay({
           )) : <Row label="No active tasks" value="idle" />}
         </Section>
 
-        {/* ---------------- Terrain ---------------- */}
         <Section id="terrain" title="Terrain" collapsed={collapsed.terrain} onToggle={onToggleSection}>
           {diag && renderTerrain(diag)}
         </Section>
 
-        {/* ---------------- Culling / LOD ---------------- */}
         <Section id="culling" title="Culling & LOD" collapsed={collapsed.culling} onToggle={onToggleSection}>
           <Row label="Total chunks" value={cull.total ?? '–'} />
           <Row label="Visible" value={cull.visible ?? '–'} />
@@ -168,7 +262,6 @@ export default function PerformanceOverlay({
           {lod.map((c, i) => <Row key={i} label={`LOD${i}`} value={c} />)}
         </Section>
 
-        {/* ---------------- Clouds ---------------- */}
         <Section id="clouds" title="Clouds" collapsed={collapsed.clouds} onToggle={onToggleSection}>
           {diag?.clouds && (
             <>
@@ -188,7 +281,6 @@ export default function PerformanceOverlay({
           )}
         </Section>
 
-        {/* ---------------- Water ---------------- */}
         <Section id="water" title="Water" collapsed={collapsed.water} onToggle={onToggleSection}>
           {diag?.water && (
             <>
@@ -204,7 +296,6 @@ export default function PerformanceOverlay({
           )}
         </Section>
 
-        {/* ---------------- Warnings ---------------- */}
         {settings.showWarnings && (
           <Section id="warnings" title={`Warnings (${warnings.length})`} collapsed={collapsed.warnings} onToggle={onToggleSection}>
             {warnings.length ? warnings.map((w, i) => (
@@ -216,9 +307,7 @@ export default function PerformanceOverlay({
           </Section>
         )}
 
-        {/* ---------------- Overlay preferences ---------------- */}
         <div className="perf-prefs">
-          <label><input type="checkbox" checked={!!settings.badge} onChange={(e) => onSetBadge(e.target.checked)} /> FPS badge</label>
           <label><input type="checkbox" checked={!!settings.compact} onChange={(e) => onSetCompact(e.target.checked)} /> Compact</label>
           <label><input type="checkbox" checked={!!settings.showWarnings} onChange={(e) => onSetShowWarnings(e.target.checked)} /> Warnings</label>
         </div>

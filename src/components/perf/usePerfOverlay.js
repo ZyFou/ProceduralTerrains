@@ -14,9 +14,10 @@ import { profiler } from '../../engine/perf/PerformanceProfiler.js';
 
 const STORAGE_KEY = 'terrain-studio-perf-overlay-v1';
 
+const HISTORY_LEN = 120;
+
 const DEFAULT_SETTINGS = {
   open: false,
-  badge: true,          // small FPS badge entry point (cheap, default on)
   compact: false,
   showWarnings: true,
   collapsed: {},        // section id -> true when collapsed
@@ -33,6 +34,7 @@ function loadSettings() {
 export function usePerfOverlay(engineRef, loadingTasks) {
   const [settings, setSettings] = useState(loadSettings);
   const [snapshot, setSnapshot] = useState(null);
+  const [history, setHistory] = useState({ fps: [], frameMs: [], drawCalls: [], triangles: [] });
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const loadingRef = useRef(loadingTasks);
@@ -51,7 +53,6 @@ export function usePerfOverlay(engineRef, loadingTasks) {
 
   const patch = useCallback((p) => setSettings((s) => ({ ...s, ...p })), []);
   const toggleOpen = useCallback(() => setSettings((s) => ({ ...s, open: !s.open })), []);
-  const setBadge = useCallback((v) => setSettings((s) => ({ ...s, badge: v })), []);
   const setCompact = useCallback((v) => setSettings((s) => ({ ...s, compact: v })), []);
   const setShowWarnings = useCallback((v) => setSettings((s) => ({ ...s, showWarnings: v })), []);
   const toggleSection = useCallback((id) =>
@@ -70,11 +71,20 @@ export function usePerfOverlay(engineRef, loadingTasks) {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleOpen]);
 
-  // throttled poll — 5 Hz when open, 2 Hz when only the badge is visible
+  // throttled poll — 5 Hz while the overlay is open (detailed collection only then)
   useEffect(() => {
-    const active = settings.open || settings.badge;
-    if (!active) { setSnapshot(null); return undefined; }
-    const period = settings.open ? 200 : 500;
+    if (!settings.open) {
+      setSnapshot(null);
+      setHistory({ fps: [], frameMs: [], drawCalls: [], triangles: [] });
+      return undefined;
+    }
+    const period = 200;
+
+    const push = (arr, val) => {
+      const next = arr.length >= HISTORY_LEN ? arr.slice(1) : arr.slice();
+      next.push(val);
+      return next;
+    };
 
     const tick = () => {
       const base = profiler.snapshot();
@@ -83,7 +93,6 @@ export function usePerfOverlay(engineRef, loadingTasks) {
       if (eng && typeof eng.getPerfDiagnostics === 'function') {
         try { diag = eng.getPerfDiagnostics(); } catch { diag = null; }
       }
-      // merge app-level (React) loading tasks with engine profiler tasks
       const appTasks = (loadingRef.current || []).map((t) => ({
         id: `app-${t.id}`,
         name: t.label || t.id,
@@ -94,18 +103,24 @@ export function usePerfOverlay(engineRef, loadingTasks) {
       }));
       const tasks = [...appTasks, ...base.tasks];
       setSnapshot({ ...base, diag, tasks });
+      setHistory((h) => ({
+        fps: push(h.fps, base.fps ?? 0),
+        frameMs: push(h.frameMs, base.frame?.avg ?? 0),
+        drawCalls: push(h.drawCalls, base.render?.calls ?? 0),
+        triangles: push(h.triangles, (base.render?.triangles ?? 0) / 1000),
+      }));
     };
     tick();
     const h = setInterval(tick, period);
     return () => clearInterval(h);
-  }, [settings.open, settings.badge, engineRef]);
+  }, [settings.open, engineRef]);
 
   return {
     settings,
     snapshot,
+    history,
     patch,
     toggleOpen,
-    setBadge,
     setCompact,
     setShowWarnings,
     toggleSection,

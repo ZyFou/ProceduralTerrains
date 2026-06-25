@@ -13,7 +13,10 @@ const PLAYER_STATE_LABELS = {
   stalling: 'Stalling',
 };
 
-export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState }) {
+export default function StatusBar({
+  status, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState,
+  perfOpen, onPerfToggle,
+}) {
   const exploring = playerMode || exploreMode === 'plane';
   return (
     <footer id="statusbar">
@@ -66,7 +69,16 @@ export default function StatusBar({ status, gpu, stats, worldMode, infiniteStats
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <span className="sb-desktop-only">Draw Calls: {stats.drawCalls}</span>
         <span className="sb-sep" />
-        <span className={`fps-badge${stats.fps > 0 && stats.fps < 30 ? ' low' : ''}`}>{stats.fps} FPS</span>
+        <button
+          type="button"
+          className={`fps-badge fps-badge-btn${stats.fps > 0 && stats.fps < 30 ? ' low' : ''}${perfOpen ? ' is-open' : ''}`}
+          onClick={onPerfToggle}
+          title="Performance details (Ctrl/Cmd+Shift+P)"
+          aria-expanded={!!perfOpen}
+          aria-label={`${stats.fps} FPS — open performance details`}
+        >
+          {stats.fps} FPS
+        </button>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <a
           className="sb-github-link"
