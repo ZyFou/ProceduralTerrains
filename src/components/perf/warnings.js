@@ -1,0 +1,91 @@
+// ============================================================================
+// Performance warning system. Pure function: takes a merged snapshot and
+// returns a list of { level, label } where level ∈ 'info' | 'warning' |
+// 'critical'. Threshold-based, no side effects, no logging. The overlay
+// renders these as compact rows — never as popups/alerts.
+// ============================================================================
+
+export const WARN_THRESHOLDS = {
+  fpsWarning: 45,
+  fpsCritical: 30,
+  frameWarning: 22,      // ms
+  frameCritical: 33,     // ms
+  drawCalls: 1500,
+  triangles: 3_000_000,
+  textures: 120,
+  heapRatio: 0.85,       // used / limit
+  chunks: 400,
+  cloudSteps: 64,
+  pixelRatio: 2.5,
+  exportSeconds: 30,
+};
+
+export function computeWarnings(snap, T = WARN_THRESHOLDS) {
+  const out = [];
+  if (!snap) return out;
+  const add = (level, label) => out.push({ level, label });
+
+  const { fps, frame, render, gpu, memory, diag, tasks } = snap;
+
+  // --- frame rate / time ---
+  if (fps > 0 && fps < T.fpsCritical) add('critical', `FPS critical: ${fps}`);
+  else if (fps > 0 && fps < T.fpsWarning) add('warning', `FPS low: ${fps}`);
+
+  if (frame && frame.avg > T.frameCritical) add('critical', `Frame time ${frame.avg.toFixed(1)}ms (>${T.frameCritical}ms)`);
+  else if (frame && frame.avg > T.frameWarning) add('warning', `Frame time ${frame.avg.toFixed(1)}ms`);
+
+  // --- renderer load ---
+  if (render) {
+    if (render.calls > T.drawCalls) add('warning', `High draw calls: ${render.calls}`);
+    if (render.triangles > T.triangles) add('warning', `High triangle count: ${fmtNum(render.triangles)}`);
+    if (render.textures > T.textures) add('warning', `Many textures loaded: ${render.textures}`);
+  }
+
+  // --- memory ---
+  if (memory && memory.supported && memory.jsHeapLimit) {
+    const ratio = memory.usedJSHeap / memory.jsHeapLimit;
+    if (ratio > T.heapRatio) add('critical', `JS heap usage high: ${(ratio * 100).toFixed(0)}%`);
+  } else if (memory && !memory.supported) {
+    add('info', 'Memory API unavailable');
+  }
+
+  // --- gpu timing ---
+  if (gpu && !gpu.supported) add('info', 'GPU timing unavailable on this device');
+
+  // --- scene / mode specific ---
+  if (diag) {
+    if (diag.pixelRatio > T.pixelRatio) add('warning', `Pixel ratio high: ${diag.pixelRatio.toFixed(2)}`);
+
+    const total = diag.culling?.total ?? 0;
+    if (total > T.chunks) add('warning', `Many chunks active: ${total}`);
+
+    if (diag.clouds?.enabled) {
+      if (diag.clouds.steps > T.cloudSteps) add('warning', `Cloud raymarch steps high: ${diag.clouds.steps}`);
+      if (diag.clouds.lod === 'none') add('info', 'Cloud LOD disabled');
+      add('info', `Cloud culling: ${diag.clouds.cullingMode}`);
+    }
+
+    if (diag.water?.enabled) {
+      if (/realistic|volumetric/i.test(diag.water.mode || '')) add('info', `${diag.water.mode} water may be expensive`);
+      if (diag.water.underwater) add('info', 'Underwater effect active');
+    }
+  }
+
+  // --- long-running tasks ---
+  if (Array.isArray(tasks)) {
+    for (const t of tasks) {
+      if (t.status === 'running' && t.elapsed > T.exportSeconds * 1000) {
+        add('warning', `${t.name} running ${(t.elapsed / 1000).toFixed(0)}s`);
+      }
+      if (t.status === 'failed') add('critical', `${t.name} failed`);
+    }
+  }
+
+  return out;
+}
+
+function fmtNum(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}

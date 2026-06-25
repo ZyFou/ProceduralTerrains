@@ -23,6 +23,9 @@ import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
+import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
+import PerformanceBadge from './components/perf/PerformanceBadge.jsx';
+import PerformanceOverlay from './components/perf/PerformanceOverlay.jsx';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 
@@ -45,6 +48,10 @@ export default function App() {
   landingRef.current = landing;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
+
+  // Developer Performance Overlay (diagnostics). Toggle: Ctrl/Cmd+Shift+P or
+  // the FPS badge. Lightweight when closed; detailed collection only while open.
+  const perfOverlay = usePerfOverlay(engineRef, loading.tasks);
 
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
@@ -1028,6 +1035,25 @@ export default function App() {
       />
 
       <ToastContainer toasts={toasts} />
+
+      {(perfOverlay.settings.badge || perfOverlay.settings.open) && !previewMode && (
+        <PerformanceBadge
+          snapshot={perfOverlay.snapshot}
+          open={perfOverlay.settings.open}
+          onToggle={perfOverlay.toggleOpen}
+        />
+      )}
+      {perfOverlay.settings.open && (
+        <PerformanceOverlay
+          snapshot={perfOverlay.snapshot}
+          settings={perfOverlay.settings}
+          onClose={perfOverlay.toggleOpen}
+          onToggleSection={perfOverlay.toggleSection}
+          onSetBadge={perfOverlay.setBadge}
+          onSetCompact={perfOverlay.setCompact}
+          onSetShowWarnings={perfOverlay.setShowWarnings}
+        />
+      )}
     </div>
   );
 }

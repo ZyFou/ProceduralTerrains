@@ -53,6 +53,9 @@ import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
+import { profiler } from './perf/PerformanceProfiler.js';
+import { GPUProfiler } from './perf/GPUProfiler.js';
+import { APP_VERSION } from '../constants/app.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -283,6 +286,11 @@ export class Engine {
     gpu = gpu.replace(/\s*\(0x[0-9A-F]+\)/i, '').replace(/\s*Direct3D.*$/i, '').trim();
     if (gpu.length > 42) gpu = gpu.slice(0, 42) + '…';
     this.gpuName = gpu;
+    this.gpuNameFull = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'WebGL2';
+
+    // Shared diagnostics profiler + optional non-blocking GPU timer.
+    this.profiler = profiler;
+    try { profiler.gpu = new GPUProfiler(this.renderer); } catch { profiler.gpu = null; }
   }
 
   /**
@@ -2487,9 +2495,11 @@ export class Engine {
     const layoutKey = this._studioBakeLayoutKey();
     if (this._bakedStudioGen === this._terrainGen && this._bakedStudioLayout === layoutKey) return;
     const b = this._tileBounds();
+    const _t0 = performance.now();
     this.terrainHeightBaker.bake(
       Math.round(this.params.octaves), this._stackGLSL, b.cols, b.rows
     );
+    this.profiler.setMetric('lastBakeMs', performance.now() - _t0);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
@@ -3359,7 +3369,15 @@ export class Engine {
 
   async export3DTerrain(options) {
     this.cb.onStatus('Preparing export...', true);
-    const onMsg = (msg) => { this.cb.onStatus(msg, true); this.cb.onToast(msg); };
+    this._exporting = true;
+    const _exportTask = this.profiler.registerLoadingTask({
+      name: `Export GLB (${this.worldMode})`, details: 'preparing mesh',
+    });
+    const onMsg = (msg) => {
+      this.cb.onStatus(msg, true);
+      this.cb.onToast(msg);
+      this.profiler.updateLoadingTask(_exportTask, null, msg);
+    };
     try {
       if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask || options.exportFoamMask) {
         this.exportWaterMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
@@ -3376,7 +3394,10 @@ export class Engine {
     } catch (e) {
       console.error(e);
       this.cb.onToast('Export failed: ' + e.message);
+      this.profiler.failLoadingTask(_exportTask, e);
     } finally {
+      this._exporting = false;
+      this.profiler.finishLoadingTask(_exportTask);
       this.cb.onStatus('Ready', false);
     }
   }
@@ -3415,6 +3436,7 @@ export class Engine {
   _tickBody() {
     const dt = Math.min(this._clock.getDelta(), 0.05);
     const now = performance.now();
+    this.profiler.beginFrame(now);
     this.uniforms.uTime.value += dt;
 
     // free warm-up materials once the live materials hold their programs
@@ -3435,6 +3457,8 @@ export class Engine {
       } else {
         this.controls.update(dt);
       }
+      this.profiler.setMetric('sceneState', 'compiling');
+      this.profiler.endFrame();
       return;
     }
 
@@ -3470,6 +3494,8 @@ export class Engine {
     }
 
     this._autoPerfTick(now);
+    this.profiler.captureRenderer(this.renderer);
+    this.profiler.endFrame();
   }
 
   _tickStudio(dt, now) {
@@ -3519,19 +3545,25 @@ export class Engine {
       this._camQuat.copy(cam.quaternion);
 
       if (this.studioCloud) {
+        this.profiler.begin('clouds');
         this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+        this.profiler.end('clouds');
       }
 
       // Cull invisible chunks based on current camera frustum and facing
       // (Debug "Freeze Culling" holds the last computed visibility so you can
       // fly the camera out and inspect the frozen frustum from outside).
       this.camera.updateMatrixWorld(true);
+      this.profiler.begin('culling');
       if (!this._debug.freezeCulling) this.board.cull(this.camera);
+      this.profiler.end('culling');
 
       // LOD selection: throttled, distance-based, internal to the fixed board
       if (now - this._lastLodUpdate > 150 && !this._debug.freezeLod) {
         this._lastLodUpdate = now;
+        this.profiler.begin('lod');
         this.board.updateLOD(this.camera.position);
+        this.profiler.end('lod');
         this.cb.onLod(
           [...this.board.lodCounts],
           this.params.chunkCount,
@@ -3550,13 +3582,19 @@ export class Engine {
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
+      this.profiler.begin('render');
+      this.profiler.gpu?.frameBegin();
       this.underwater.render(this.renderer, this.scene, this.camera);
+      this.profiler.gpu?.frameEnd();
+      this.profiler.end('render');
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
 
       // minimap: re-render base only after params settle, marker every frame
+      this.profiler.begin('minimap');
       if (minimapDirty) this._renderMinimapBase();
       this.minimap.drawOverlay(this.controls);
+      this.profiler.end('minimap');
     }
 
     // HUD updates at ~6 Hz (uses last drawn triangle/draw-call counts)
@@ -3607,11 +3645,17 @@ export class Engine {
 
     // Stream chunks around the camera (with culling)
     if (this.infiniteWorld) {
+      this.profiler.begin('chunks');
       this.infiniteWorld.update(this.camera.position, this.camera);
+      this.profiler.end('chunks');
     }
 
     this._maybeWarmUnderwater();
+    this.profiler.begin('render');
+    this.profiler.gpu?.frameBegin();
     this.underwater.render(this.renderer, this.scene, this.camera);
+    this.profiler.gpu?.frameEnd();
+    this.profiler.end('render');
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
 
@@ -3646,12 +3690,20 @@ export class Engine {
       this.planetControls.update(dt);
     }
 
-    if (this.planetWorld) this.planetWorld.update(this.camera.position, this.camera, this._debug);
-    if (this.planetCloudChunks) {
-      this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
+    if (this.planetWorld) {
+      this.profiler.begin('chunks');
+      this.planetWorld.update(this.camera.position, this.camera, this._debug);
+      this.profiler.end('chunks');
     }
-    if (this.planetCloudLayer) {
-      this.planetCloudLayer.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+    if (this.planetCloudChunks || this.planetCloudLayer) {
+      this.profiler.begin('clouds');
+      if (this.planetCloudChunks) {
+        this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
+      }
+      if (this.planetCloudLayer) {
+        this.planetCloudLayer.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+      }
+      this.profiler.end('clouds');
     }
 
     // feed the studio LOD inspector (throttled) — same callback as studio
@@ -3679,7 +3731,11 @@ export class Engine {
     }
 
     // planet renders straight to the canvas — no underwater render-target pass
+    this.profiler.begin('render');
+    this.profiler.gpu?.frameBegin();
     this.renderer.render(this.scene, this.camera);
+    this.profiler.gpu?.frameEnd();
+    this.profiler.end('render');
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
@@ -3702,6 +3758,133 @@ export class Engine {
       }
       this.cb.onStats({ fps: this._fps, triangles, drawCalls });
     }
+  }
+
+  // ----------------------------------------------------------- diagnostics
+  // Snapshot of engine state for the Performance Overlay. Read-only, defensive:
+  // every world-mode system may be absent (mode not active / disabled). Never
+  // throws so the overlay can poll it safely at any time.
+  getPerfDiagnostics() {
+    const p = this.params || {};
+    const perf = this.perf || {};
+    const cam = this.camera?.position;
+
+    // current high-level scene state
+    let state = 'idle';
+    if (this._compiling) state = 'compiling';
+    else if (this._exporting) state = 'exporting';
+    else if (this._baking) state = 'baking';
+    else if (this._bootPending) state = 'loading';
+
+    const cloudLayer = this.worldMode === 'planet'
+      ? (this.planetCloudLayer || this.planetCloudChunks)
+      : this.studioCloud;
+    const cloudsActive = !!(p.cloudsEnabled && cloudLayer);
+
+    const waterEnabled = !!this.waterSystem?.isEnabled();
+
+    const diag = {
+      version: APP_VERSION,
+      mode: this.worldMode,
+      exploreMode: this.exploreMode,
+      state,
+      qualityPreset: perf.preset,
+      pixelRatio: this.renderer ? this.renderer.getPixelRatio() : 1,
+      renderScale: perf.renderScale,
+      drawingBuffer: this.renderer
+        ? { w: this.renderer.domElement.width, h: this.renderer.domElement.height }
+        : null,
+      camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : null,
+      gpuName: this.gpuName,
+      shadowsEnabled: !!(this.renderer && this.renderer.shadowMap && this.renderer.shadowMap.enabled),
+      postProcessing: { underwater: !!this.underwater?.active },
+
+      terrain: {},
+      culling: {},
+      lod: {},
+      clouds: {
+        enabled: cloudsActive,
+        mode: cloudsActive ? (this.worldMode === 'planet' ? 'volumetric shell' : 'planar slab') : 'off',
+        layers: cloudsActive ? 1 : 0,
+        steps: cloudLayer?._steps ?? perf.cloudSteps ?? 0,
+        lightSteps: perf.cloudLightSteps ?? 0,
+        octaves: perf.cloudOctaves ?? 0,
+        detailOctaves: perf.cloudDetailOctaves ?? 0,
+        coverage: p.cloudCoverage,
+        density: p.cloudDensity,
+        scale: p.cloudScale,
+        windSpeed: p.cloudWindSpeed,
+        evolveSpeed: p.cloudEvolveSpeed,
+        cullingMode: 'whole volume only',
+        chunked: 'not used by default',
+        lod: perf.cloudStepLOD ? 'distance step-LOD' : 'none',
+        ready: cloudLayer ? (cloudLayer._ready !== false) : true,
+        time: this.profiler.sections.get('clouds')?.stat.avg ?? null,
+      },
+      water: {
+        enabled: waterEnabled,
+        mode: this.waterSystem ? this.waterSystem.getEffectiveMode() : 'off',
+        quality: perf.waterQuality,
+        reflection: perf.waterReflection,
+        detail: perf.waterDetail,
+        waves: perf.waterWaves,
+        seaLevel: p.seaLevel,
+        underwater: !!this.underwater?.active,
+      },
+    };
+
+    if (this.worldMode === 'infinite' && this.infiniteWorld) {
+      const w = this.infiniteWorld;
+      diag.terrain = {
+        chunkSize: w.chunkSize,
+        viewRadius: w.viewRadius,
+        renderDistance: w.viewRadius * w.chunkSize,
+        lodThresholds: Array.isArray(w.lodThresholds) ? [...w.lodThresholds] : [],
+        lastChunkGenMs: this.profiler.getMetric('lastChunkGenMs') ?? null,
+      };
+      diag.culling = {
+        total: w.activeChunkCount,
+        visible: w.visibleChunkCount,
+        culled: w.culledChunkCount,
+      };
+      diag.lod = { counts: [...w.lodCounts] };
+    } else if (this.worldMode === 'planet' && this.planetWorld) {
+      const w = this.planetWorld;
+      diag.terrain = {
+        planetRadius: p.planetRadius,
+        faceGrid: this._planetFaceGrid ? this._planetFaceGrid() : this.planetFaceGrid,
+        bakedHeightTex: this._bakedTerrainGen >= 0,
+        lastRebuildMs: this.profiler.getMetric('lastPlanetRebuildMs') ?? null,
+      };
+      diag.culling = {
+        total: w.activeChunkCount,
+        visible: w.visibleChunkCount,
+        culled: w.culledChunkCount,
+      };
+      diag.lod = { counts: [...w.lodCounts] };
+    } else {
+      const b = this.board;
+      diag.terrain = {
+        resolution: Array.isArray(perf.lodSegments) ? perf.lodSegments[0] : null,
+        boardSize: this.boardSize,
+        tiles: Array.isArray(this.tiles) ? this.tiles.length : 1,
+        heightScale: p.heightScale,
+        octaves: p.octaves,
+        noiseLayers: Array.isArray(this.noiseStack?.layers) ? this.noiseStack.layers.length : null,
+        bakedHeightTex: this._bakedStudioGen >= 0,
+        lastGenMs: this.profiler.getMetric('lastTerrainGenMs') ?? null,
+        lastBakeMs: this.profiler.getMetric('lastBakeMs') ?? null,
+      };
+      diag.culling = b ? {
+        total: b.activeChunkCount ?? (Array.isArray(b.lodCounts) ? b.lodCounts.reduce((a, c) => a + c, 0) : 0),
+        visible: b.visibleChunkCount,
+        culled: b.culledChunkCount,
+      } : {};
+      diag.lod = { counts: b ? [...b.lodCounts] : [0, 0, 0, 0] };
+    }
+
+    this.profiler.setMetric('sceneState', state);
+    return diag;
   }
 
   dispose() {
