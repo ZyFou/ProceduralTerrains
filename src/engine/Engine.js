@@ -3781,11 +3781,14 @@ export class Engine {
       this.profiler.begin('render');
       this.profiler.gpu?.frameBegin();
       this.underwater.render(this.renderer, this.scene, this.camera);
+      // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
+      // renderer.info auto-resets each render(), so the fullscreen composite quad
+      // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
+      this._lastTris = this.renderer.info.render.triangles;
+      this._lastDraws = this.renderer.info.render.calls;
       if (this.studioCloud) this.studioCloud.compositeLowRes(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
-      this._lastTris = this.renderer.info.render.triangles;
-      this._lastDraws = this.renderer.info.render.calls;
 
       // minimap: re-render base only after params settle, marker every frame
       this.profiler.begin('minimap');
@@ -3934,11 +3937,13 @@ export class Engine {
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     this.renderer.render(this.scene, this.camera);
+    // capture scene tri/draw counts BEFORE the low-res cloud composite (its
+    // fullscreen quad would otherwise reset renderer.info to ~2 triangles).
+    const triangles = this.renderer.info.render.triangles;
+    const drawCalls = this.renderer.info.render.calls;
     if (this.planetCloudLayer) this.planetCloudLayer.compositeLowRes(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
-    const triangles = this.renderer.info.render.triangles;
-    const drawCalls = this.renderer.info.render.calls;
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
 
     this._frames++;
