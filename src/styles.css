@@ -3768,7 +3768,9 @@ input[type="color"].palette-color-input {
   position: fixed;
   bottom: 42px;
   right: 12px;
-  z-index: 60;
+  left: auto;
+  top: auto;
+  z-index: 200;
   width: 340px;
   max-height: min(72vh, calc(100vh - 90px));
   display: flex;
@@ -3781,12 +3783,32 @@ input[type="color"].palette-color-input {
   box-shadow: var(--shadow-panel);
   overflow: hidden;
   animation: perf-slide-up 0.2s ease;
+  transition: right 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    left 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    top 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    max-height 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Studio: slide left beside the open tools drawer instead of sitting under it */
+#app.side-drawer-open:not(.infinite-mode) .perf-overlay {
+  right: calc(min(340px, 92vw) + 16px);
+}
+/* Infinite walk: lift above the scroll speed bar */
+#app.infinite-mode:not(.plane-mode) .perf-overlay {
+  bottom: 76px;
+}
+/* Plane: anchor top-right — bottom HUD has throttle + gauges on the right */
+#app.plane-mode .perf-overlay {
+  top: 52px;
+  right: 12px;
+  bottom: auto;
+  left: auto;
+  max-height: min(52vh, calc(100vh - 120px));
 }
 @keyframes perf-slide-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.perf-overlay.compact { width: 280px; font-size: 10px; }
 .perf-overlay-loading { min-height: 120px; }
 
 .perf-overlay-head {
@@ -4071,6 +4093,12 @@ input[type="color"].palette-color-input {
 }
 .perf-prefs input { accent-color: var(--accent); }
 
+@media (max-width: 900px) {
+  #app.side-drawer-open:not(.infinite-mode) .perf-overlay {
+    right: calc(min(340px, 96vw) + 16px);
+  }
+}
+
 @media (max-width: 640px) {
   .perf-overlay {
     right: 8px;
@@ -4078,6 +4106,24 @@ input[type="color"].palette-color-input {
     width: auto;
     bottom: calc(40px + env(safe-area-inset-bottom));
     max-height: min(65vh, calc(100vh - 100px));
+  }
+  /* Full-width drawer on mobile — park overlay at top so it doesn't sit underneath */
+  #app.side-drawer-open:not(.infinite-mode) .perf-overlay {
+    top: 48px;
+    bottom: auto;
+    left: 8px;
+    right: 8px;
+    max-height: min(45vh, calc(100vh - 110px));
+  }
+  #app.infinite-mode:not(.plane-mode) .perf-overlay {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  #app.plane-mode .perf-overlay {
+    top: 48px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: min(48vh, calc(100vh - 110px));
   }
   .perf-graph-duo { grid-template-columns: 1fr; }
   .perf-hero-secondary { grid-template-columns: repeat(3, 1fr); }

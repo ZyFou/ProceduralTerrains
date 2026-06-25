@@ -18,7 +18,6 @@ const HISTORY_LEN = 120;
 
 const DEFAULT_SETTINGS = {
   open: false,
-  compact: false,
   showWarnings: true,
   collapsed: {},        // section id -> true when collapsed
 };
@@ -53,7 +52,6 @@ export function usePerfOverlay(engineRef, loadingTasks) {
 
   const patch = useCallback((p) => setSettings((s) => ({ ...s, ...p })), []);
   const toggleOpen = useCallback(() => setSettings((s) => ({ ...s, open: !s.open })), []);
-  const setCompact = useCallback((v) => setSettings((s) => ({ ...s, compact: v })), []);
   const setShowWarnings = useCallback((v) => setSettings((s) => ({ ...s, showWarnings: v })), []);
   const toggleSection = useCallback((id) =>
     setSettings((s) => ({ ...s, collapsed: { ...s.collapsed, [id]: !s.collapsed[id] } })), []);
@@ -121,7 +119,6 @@ export function usePerfOverlay(engineRef, loadingTasks) {
     history,
     patch,
     toggleOpen,
-    setCompact,
     setShowWarnings,
     toggleSection,
   };

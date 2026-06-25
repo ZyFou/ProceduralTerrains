@@ -59,7 +59,7 @@ function GraphCard({ label, hint, children }) {
 }
 
 export default function PerformanceOverlay({
-  snapshot, history, settings, onClose, onToggleSection, onSetCompact, onSetShowWarnings,
+  snapshot, history, settings, onClose, onToggleSection, onSetShowWarnings,
 }) {
   const [copied, setCopied] = useState('');
   if (!snapshot) {
@@ -98,7 +98,7 @@ export default function PerformanceOverlay({
   const lod = diag?.lod?.counts || [];
 
   return (
-    <div className={`perf-overlay${settings.compact ? ' compact' : ''}`} role="dialog" aria-label="Performance overlay">
+    <div className="perf-overlay" role="dialog" aria-label="Performance overlay">
       <div className="perf-overlay-head">
         <span className="perf-title">Performance</span>
         <div className="perf-head-actions">
@@ -308,7 +308,6 @@ export default function PerformanceOverlay({
         )}
 
         <div className="perf-prefs">
-          <label><input type="checkbox" checked={!!settings.compact} onChange={(e) => onSetCompact(e.target.checked)} /> Compact</label>
           <label><input type="checkbox" checked={!!settings.showWarnings} onChange={(e) => onSetShowWarnings(e.target.checked)} /> Warnings</label>
         </div>
       </div>

@@ -871,7 +871,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -1044,7 +1044,6 @@ export default function App() {
           settings={perfOverlay.settings}
           onClose={perfOverlay.toggleOpen}
           onToggleSection={perfOverlay.toggleSection}
-          onSetCompact={perfOverlay.setCompact}
           onSetShowWarnings={perfOverlay.setShowWarnings}
         />
       )}
