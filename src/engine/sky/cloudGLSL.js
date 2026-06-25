@@ -27,6 +27,17 @@ vec3 cl_hash33(vec3 p3) {
   return fract((p3.xxy + p3.yxx) * p3.zyx);
 }
 
+// Interleaved Gradient Noise (Jimenez) — a smooth, ordered dither in [0,1).
+// Used to offset the raymarch start so the fixed step lattice doesn't band.
+// Unlike a white-noise hash it is spatially CORRELATED (neighbouring pixels get
+// nearly the same value), so residual banding becomes a soft gradient instead
+// of salt-and-pepper grain. It is purely a function of the pixel coordinate (no
+// time term) so the pattern is frame-stable: it never crawls while the camera
+// moves or the cloud field animates.
+float cl_ign(vec2 pix) {
+  return fract(52.9829189 * fract(dot(pix, vec2(0.06711056, 0.00583715))));
+}
+
 // --- quintic trilinear value noise -------------------------------------------
 float cl_vnoise(vec3 p) {
   vec3 i = floor(p);
@@ -154,19 +165,37 @@ float cloudShape(vec3 q) {
     base = mix(filler, clamp(cell, 0.0, 1.0), 0.72);
   }
 
-  float n = base;
+  // Soft base coverage from the LARGE-scale shape first. This is the smooth
+  // volume; detail/erosion below are folded in only across the transition band
+  // so raw high-frequency noise never maps straight to opacity (that direct
+  // mapping was the source of the salt-and-pepper grain, and it compounded when
+  // a ray crossed several cloud masses).
+  // coverage: higher slider -> lower threshold -> more cloud
+  float threshold = 1.0 - uCloudCoverage;
+  float soft = max(uCloudSoftness, 0.06);
+  float cov = smoothstep(threshold, threshold + soft, base);
+  if (cov <= 0.0) return 0.0;
+
+  // Edge mask: ~1 across the soft transition band, ~0 in solid cores and in
+  // clear sky (cov*(1-cov) peaks at cov=0.5). Detail and erosion act ONLY here,
+  // so cloud cores stay smooth, clear sky stays empty, and the wisps live on the
+  // edges where they read as shape variation rather than visible pixels.
+  float edge = 4.0 * cov * (1.0 - cov);
+
+  float carve = 0.0;
   #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
+  // centered (detail - 0.5): redistributes density instead of biasing brightness
   float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7);
-  n += detail * uCloudDetailStrength;
+  carve += (detail - 0.5) * uCloudDetailStrength;
   #endif
   #if defined(CLOUD_USE_EROSION) && CLOUD_USE_EROSION > 0
   float ero = cl_worley(q * uCloudErosionScale);
-  n -= ero * uCloudErosionStrength;
+  carve -= ero * uCloudErosionStrength;
   #endif
-  n = clamp(n, 0.0, 1.0);
-  // coverage: higher slider -> lower threshold -> more cloud
-  float threshold = 1.0 - uCloudCoverage;
-  return smoothstep(threshold, threshold + uCloudSoftness, n);
+
+  float dens = clamp(cov + carve * edge, 0.0, 1.0);
+  // final soft ease so density ramps in gently — never a binary threshold
+  return dens * dens * (3.0 - 2.0 * dens);
 }
 `;
 

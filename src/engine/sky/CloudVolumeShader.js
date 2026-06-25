@@ -132,7 +132,10 @@ void main() {
   int effSteps = int(float(CLOUD_STEPS) * clamp(uCloudStepScale, 0.05, 1.0) + 0.5);
   effSteps = max(effSteps, 8);
   float stepLen = (shellEnd - shellStart) / float(effSteps);
-  float dither = cl_hash13(vec3(gl_FragCoord.xy, uCloudTime));
+  // Stable, ordered start-offset dither (see cl_ign). Spatial only — NO time
+  // term — so the sampling lattice is frame-stable: residual banding stays put
+  // as a soft gradient instead of crawling as grain when the camera moves.
+  float dither = cl_ign(gl_FragCoord.xy);
   float baseT = shellStart + stepLen * dither;
 
 #if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0

@@ -124,7 +124,9 @@ void main() {
   float segLen = t1 - t0;
   float stepLen = segLen / float(effSteps);
 
-  float dither = cl_hash13(vec3(gl_FragCoord.xy, uCloudTime));
+  // Stable, ordered start-offset dither (spatial only, no time term) so the
+  // sampling lattice never crawls — see cl_ign / the spherical shader.
+  float dither = cl_ign(gl_FragCoord.xy);
 
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
