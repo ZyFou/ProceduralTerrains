@@ -3766,6 +3766,10 @@ export class Engine {
 
       if (this.studioCloud) {
         this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
+        // low-res cloud mode: march the clouds into an offscreen half/quarter-res
+        // target now. The main scene render below skips them (the mesh lives on a
+        // dedicated camera layer) and compositeLowRes blends them back afterwards.
+        this.studioCloud.renderLowRes(this.renderer, this.camera);
       }
 
       // refresh the baked height/normal texture if the field changed (no-op on a
@@ -3777,6 +3781,7 @@ export class Engine {
       this.profiler.begin('render');
       this.profiler.gpu?.frameBegin();
       this.underwater.render(this.renderer, this.scene, this.camera);
+      if (this.studioCloud) this.studioCloud.compositeLowRes(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
       this._lastTris = this.renderer.info.render.triangles;
@@ -3920,12 +3925,16 @@ export class Engine {
     }
     if (this.planetCloudLayer) {
       this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera);
+      // low-res cloud mode: march clouds into the offscreen target; the main
+      // render skips them (offscreen layer) and we composite them back below.
+      this.planetCloudLayer.renderLowRes(this.renderer, this.camera);
     }
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     this.renderer.render(this.scene, this.camera);
+    if (this.planetCloudLayer) this.planetCloudLayer.compositeLowRes(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
     const triangles = this.renderer.info.render.triangles;

@@ -52,6 +52,12 @@ const FALLBACK_OPTIONS = [
   { value: 'off', label: 'Off' },
 ];
 
+const RENDER_SCALE_OPTIONS = [
+  { value: '1', label: 'Full res' },
+  { value: '0.5', label: 'Half res (denoise)' },
+  { value: '0.25', label: 'Quarter res' },
+];
+
 const COLOR_FIELDS = [
   { key: 'cloudColor', label: 'Cloud Color', info: 'Base color of sunlit clouds.', def: [1, 1, 1] },
   { key: 'cloudShadowColor', label: 'Shadow Color', info: 'Color of shadowed / underside cloud regions.', def: [0.42, 0.47, 0.6] },
@@ -209,6 +215,14 @@ export default function CloudPanel({
               onChange={handleResolutionChange}
               info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings."
               settingId="performance.cloudSteps"
+            />
+            <SelectRow
+              label="Render Scale"
+              value={String(p.cloudRenderScale ?? 1)}
+              options={RENDER_SCALE_OPTIONS}
+              onChange={(v) => onPerfSetting('cloudRenderScale', parseFloat(v))}
+              info="Render clouds at lower resolution, then upscale with a depth-aware (bilateral) filter. Big FPS win since clouds are fill-rate bound; edges stay crisp against terrain and noise is smoothed. Shared with Performance settings."
+              settingId="performance.cloudRenderScale"
             />
             <SelectRow
               label="Fallback Mode"

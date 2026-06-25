@@ -59,6 +59,7 @@ export const PERF_LIMITS = {
   cloudLightSteps:       { min: 1,       max: 12 },
   cloudOctaves:          { min: 1,       max: 6 },
   cloudDetailOctaves:    { min: 0,       max: 5 },
+  cloudRenderScale:      { min: 0.25,    max: 1.0 },
   cloudMaxDistance:      { min: 1.5,     max: 12.0 },
 };
 
@@ -80,7 +81,7 @@ export const PERF_PRESETS = {
     cloudSteps: 12, cloudLightSteps: 2, cloudSelfShadow: false,
     cloudOctaves: 3, cloudDetailOctaves: 0, cloudUseErosion: false,
     cloudMaxDistance: 3.0, cloudFallback: 'lite',
-    cloudLightMode: 1, cloudStepLOD: true,
+    cloudLightMode: 1, cloudStepLOD: true, cloudRenderScale: 0.5,
   },
   balanced: {
     label: 'Balanced',
@@ -97,7 +98,7 @@ export const PERF_PRESETS = {
     cloudSteps: 24, cloudLightSteps: 4, cloudSelfShadow: false,
     cloudOctaves: 4, cloudDetailOctaves: 2, cloudUseErosion: true,
     cloudMaxDistance: 4.5, cloudFallback: 'none',
-    cloudLightMode: 1, cloudStepLOD: true,
+    cloudLightMode: 1, cloudStepLOD: true, cloudRenderScale: 0.5,
   },
   high: {
     label: 'High',
@@ -114,7 +115,7 @@ export const PERF_PRESETS = {
     cloudSteps: 40, cloudLightSteps: 6, cloudSelfShadow: true,
     cloudOctaves: 5, cloudDetailOctaves: 4, cloudUseErosion: true,
     cloudMaxDistance: 6.0, cloudFallback: 'none',
-    cloudLightMode: 0, cloudStepLOD: false,
+    cloudLightMode: 0, cloudStepLOD: false, cloudRenderScale: 1.0,
   },
   ultra: {
     label: 'Ultra',
@@ -131,7 +132,7 @@ export const PERF_PRESETS = {
     cloudSteps: 72, cloudLightSteps: 8, cloudSelfShadow: true,
     cloudOctaves: 5, cloudDetailOctaves: 5, cloudUseErosion: true,
     cloudMaxDistance: 8.0, cloudFallback: 'none',
-    cloudLightMode: 0, cloudStepLOD: false,
+    cloudLightMode: 0, cloudStepLOD: false, cloudRenderScale: 1.0,
   },
 };
 
@@ -272,6 +273,7 @@ export function sanitizePerfSettings(settings) {
   s.cloudOctaves = Math.round(clamp(+s.cloudOctaves || 5, PERF_LIMITS.cloudOctaves));
   s.cloudDetailOctaves = Math.round(clamp(+s.cloudDetailOctaves || 4, PERF_LIMITS.cloudDetailOctaves));
   s.cloudUseErosion = s.cloudUseErosion !== false;
+  s.cloudRenderScale = clamp(+s.cloudRenderScale || 1.0, PERF_LIMITS.cloudRenderScale);
   s.cloudSelfShadow = s.cloudSelfShadow !== false;
   // cheap analytic self-shadow + distance step-LOD (default off → unchanged visuals)
   s.cloudLightMode = s.cloudLightMode ? 1 : 0;

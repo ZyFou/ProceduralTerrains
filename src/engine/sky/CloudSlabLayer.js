@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createCloudSlabMaterial } from './CloudSlabShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
+import { CloudLowResPass } from './CloudLowResPass.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
@@ -34,6 +35,8 @@ export class CloudSlabLayer {
     this._useErosion = true;
     this._lightMode = 0;
     this._stepLOD = false;
+    this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
+    this._lowResPass = new CloudLowResPass();
     this._enabled = false;
     this._inScene = true;       // gated off while another world mode is active
     this._inRange = true;
@@ -164,6 +167,12 @@ export class CloudSlabLayer {
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
     if (!this._stepLOD) u.uCloudStepScale.value = 1.0;
+
+    // low-res cloud render + depth-aware upscale (perf). scale 1.0 = off.
+    const lowResScale = config.cloudRenderScale ?? 1.0;
+    this._lowRes = lowResScale < 0.999 && !q.disabled;
+    this._lowResPass.scale = Math.max(0.25, Math.min(1.0, lowResScale));
+    this._lowResPass.setMeshLayer(this.mesh, this._lowRes);
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -406,6 +415,28 @@ export class CloudSlabLayer {
     return true;
   }
 
+  /** True while low-res cloud mode is active (mesh lives on the offscreen layer
+   *  and is composited rather than drawn inline). The engine uses this to know
+   *  it must call compositeLowRes after the main render. */
+  get usesLowRes() {
+    return this._lowRes && this.active;
+  }
+
+  /** Render the clouds into the low-res target (call after renderDepthPrepass,
+   *  before the main scene render). Returns true if it ran. */
+  renderLowRes(renderer, camera) {
+    if (!this.usesLowRes) return false;
+    this._lowResPass.renderCloud(renderer, this.scene, camera, this.mesh);
+    return true;
+  }
+
+  /** Composite the low-res clouds over the current target (call after the main
+   *  scene render). */
+  compositeLowRes(renderer) {
+    if (!this.usesLowRes) return;
+    this._lowResPass.composite(renderer, this._depthTexture);
+  }
+
   _ensureDepthTarget(renderer) {
     const size = renderer.getDrawingBufferSize(this._depthSize);
     const w = Math.max(1, Math.round(size.x));
@@ -433,6 +464,7 @@ export class CloudSlabLayer {
       this._depthTexture = null;
     }
     if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
+    if (this._lowResPass) { this._lowResPass.dispose(); this._lowResPass = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();
