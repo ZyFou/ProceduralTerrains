@@ -168,12 +168,22 @@ export class CloudSlabLayer {
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
 
+    // Wind drift in NOISE-SPACE units/sec (not world units): the pattern lives in
+    // baseP = q*uCloudScale + drift, so a drift of ~uCloudScale crosses the whole
+    // board. Keeping it board-independent (no fScale) means clouds traverse the
+    // visible area in a consistent time at any board size — and, crucially, makes
+    // the drift the same order as the evolution so clouds actually MOVE across the
+    // sky instead of only morphing in place. The old `0.6 * fScale` was ~100×
+    // weaker, so the motion read as static.
     const wa = (params.cloudWindDir ?? 45) * Math.PI / 180;
-    const wspeed = (params.cloudWindSpeed ?? 1.0) * 0.6 * fScale;
+    const wspeed = (params.cloudWindSpeed ?? 1.0) * 0.045;
     this._wind.set(Math.cos(wa), 0, Math.sin(wa)).multiplyScalar(wspeed);
     u.uCloudWind.value.copy(this._wind);
 
     this._rotSpeed = (params.cloudRotationSpeed ?? 0.35) * 0.01;
+
+    // evolution rate in noise-space units/sec (form/morph/dissipate in place)
+    u.uCloudEvolve.value = (params.cloudEvolveSpeed ?? 1.0) * 0.03;
 
     // recompile if the step counts or noise settings changed (quality / fallback)
     // We check and rebuild at the end so _rebuildMaterial can copy the fully updated uniforms to the new material.
@@ -270,6 +280,7 @@ export class CloudSlabLayer {
         coverage: u.uCloudCoverage.value,
         softness: u.uCloudSoftness.value,
         octaves: this._octaves,
+        evolve: u.uCloudEvolve.value,
         // conservative upper-bound margin for the detail noise the GPU adds
         boost: (u.uCloudDetailStrength.value || 0) + 0.12,
       }

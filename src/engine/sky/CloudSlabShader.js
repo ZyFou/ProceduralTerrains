@@ -119,9 +119,14 @@ void main() {
 
   // distance LOD: fewer effective steps when far (uCloudStepScale<1); loop
   // bound stays CLOUD_STEPS (static for ANGLE), extra iterations no-op.
-  int effSteps = int(float(CLOUD_STEPS) * clamp(uCloudStepScale, 0.05, 1.0) + 0.5);
-  effSteps = max(effSteps, 8);
+  // ADAPTIVE step spacing (see CloudVolumeShader): constant world-space sample
+  // spacing whatever the view angle, so the grazing/side view no longer stretches
+  // the samples into a hatch. Vertical crossings use few steps; long grazing rays
+  // use the full budget, still fully covered (stepLen ≤ seg/CLOUD_STEPS).
+  float slabSpan = max(uCloudTop - uCloudBottom, 1.0);
+  float targetStep = slabSpan / float(CLOUD_STEPS) / clamp(uCloudStepScale, 0.05, 1.0);
   float segLen = t1 - t0;
+  int effSteps = int(clamp(segLen / targetStep, 8.0, float(CLOUD_STEPS)) + 0.5);
   float stepLen = segLen / float(effSteps);
 
   // Stable, ordered start-offset dither (spatial only, no time term) so the
@@ -202,6 +207,7 @@ export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5,
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
       uCloudNoiseVariant:    { value: 0.0 },
       uCloudStepScale:       { value: 1.0 },
+      uCloudEvolve:          { value: 0.03 },
       tSceneDepth:           { value: null },
       uDepthResolution:      { value: new THREE.Vector2(1, 1) },
       uProjectionMatrixInverse: { value: new THREE.Matrix4() },

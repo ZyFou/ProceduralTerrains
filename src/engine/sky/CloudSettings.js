@@ -48,6 +48,7 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudWindDir: 45,           // wind heading in degrees (XZ plane)
   cloudWindSpeed: 1.0,        // domain drift speed
   cloudRotationSpeed: 0.35,   // slow planet-axis rotation of the cloud field
+  cloudEvolveSpeed: 1.0,      // how fast clouds form / morph / dissipate in place
 
   // lighting
   cloudLightAbsorption: 1.1,  // sun light extinction through the cloud
@@ -79,9 +80,9 @@ export function resolveCloudNoiseVariant(value) {
 // so changing quality swaps the define and recompiles in the background.
 export const CLOUD_QUALITY_PRESETS = {
   low:    { steps: 12, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
-  medium: { steps: 16, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
-  high:   { steps: 24, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
-  ultra:  { steps: 48, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
+  medium: { steps: 24, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
+  high:   { steps: 40, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
+  ultra:  { steps: 72, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
 };
 
 // Fallback modes for weaker devices. They clamp the resolved quality and can

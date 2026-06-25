@@ -30,6 +30,7 @@ const MOTION_SLIDERS = [
   { key: 'cloudWindDir', label: 'Wind Direction', min: 0, max: 360, step: 1, unit: '°', info: 'Heading the cloud field drifts toward.' },
   { key: 'cloudWindSpeed', label: 'Wind Speed', min: 0, max: 4, step: 0.05, digits: 2, info: 'Speed of the cloud drift.' },
   { key: 'cloudRotationSpeed', label: 'Rotation', min: 0, max: 3, step: 0.05, digits: 2, info: 'Slow rotation of the cloud field around the planet axis.' },
+  { key: 'cloudEvolveSpeed', label: 'Evolve', min: 0, max: 4, step: 0.05, digits: 2, info: 'How fast clouds form, morph and dissipate in place (0 = static shapes that only drift).' },
 ];
 
 const LIGHT_SLIDERS = [
@@ -39,11 +40,10 @@ const LIGHT_SLIDERS = [
 ];
 
 const RESOLUTION_OPTIONS = [
-  { value: 'low', label: 'Low (8 steps)' },
-  { value: 'medium', label: 'Medium (12 steps)' },
-  { value: 'quality', label: 'Quality (16 steps)' },
-  { value: 'high', label: 'High (24 steps)' },
-  { value: 'ultra', label: 'Ultra (48 steps)' },
+  { value: 'low', label: 'Low (12 steps)' },
+  { value: 'medium', label: 'Medium (24 steps)' },
+  { value: 'high', label: 'High (40 steps)' },
+  { value: 'ultra', label: 'Ultra (72 steps)' },
   { value: 'custom', label: 'Custom' },
 ];
 

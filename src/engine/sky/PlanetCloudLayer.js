@@ -147,13 +147,22 @@ export class PlanetCloudLayer {
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
 
-    // wind drift vector in the XZ plane (heading in degrees), scaled by speed
+    // wind drift vector in the XZ plane (heading in degrees), scaled by speed.
+    // NOISE-SPACE units/sec (not world units, no fScale): drift lives in baseP =
+    // q*uCloudScale + drift, so this is radius-independent and the same order as
+    // the evolution, making clouds actually traverse the sky rather than only
+    // morph in place. (The planet also drifts via uCloudRotation.) The old
+    // `0.6 * fScale` was ~100× weaker and read as static.
     const wa = (params.cloudWindDir ?? 45) * Math.PI / 180;
-    const wspeed = (params.cloudWindSpeed ?? 1.0) * 0.6 * fScale;
+    const wspeed = (params.cloudWindSpeed ?? 1.0) * 0.045;
     this._wind.set(Math.cos(wa), 0, Math.sin(wa)).multiplyScalar(wspeed);
     u.uCloudWind.value.copy(this._wind);
 
     this._rotSpeed = (params.cloudRotationSpeed ?? 0.35) * 0.01;
+
+    // evolution rate in noise-space units/sec (radius-independent — it scrolls
+    // the noise domain, not world space). Drives the form/morph/dissipate motion.
+    u.uCloudEvolve.value = (params.cloudEvolveSpeed ?? 1.0) * 0.03;
 
     // recompile if the step counts or noise settings changed (quality / fallback)
     // We check and rebuild at the end so _rebuildMaterial can copy the fully updated uniforms to the new material.
@@ -227,6 +236,7 @@ export class PlanetCloudLayer {
       coverage: u.uCloudCoverage.value,
       softness: u.uCloudSoftness.value,
       octaves: this._octaves,
+      evolve: u.uCloudEvolve.value,
       // conservative upper-bound margin for the detail noise the GPU adds
       boost: (u.uCloudDetailStrength.value || 0) + 0.12,
     });

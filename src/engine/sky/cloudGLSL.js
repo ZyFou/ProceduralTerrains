@@ -136,6 +136,9 @@ uniform float uCloudSelfShadow;    // 0/1 toggle
 uniform vec3  uCloudSunDir;        // normalized, surface -> sun
 uniform float uCloudNoiseVariant;  // 0 soft, 1 billowy, 2 wispy, 3 cellular
 uniform float uCloudStepScale;     // 0.4..1 — distance LOD on the primary march
+uniform float uCloudEvolve;        // noise-space units/sec: scroll through the
+                                   // field so clouds FORM / MORPH / DISSIPATE in
+                                   // place instead of only translating (wind).
 
 // rotate the sample domain slowly around the up (Y) axis (seamless — no UVs)
 vec3 cl_domain(vec3 P) {
@@ -147,7 +150,13 @@ vec3 cl_domain(vec3 P) {
 // (BEFORE altitude falloff — each shader applies its own).
 float cloudShape(vec3 q) {
   vec3 drift = uCloudWind * uCloudTime;
-  vec3 baseP = q * uCloudScale + drift;
+  // Evolution: scroll the sample point along a 3rd noise axis over time. Because
+  // the field is genuinely 3D, moving the sampled slice makes the 2D cloud
+  // pattern continuously re-form and dissipate (NOT just slide like wind does).
+  // The falloff in cloudDensity uses the REAL altitude, so this only morphs the
+  // shape — it never moves the shell.
+  float evoT = uCloudTime * uCloudEvolve;
+  vec3 baseP = q * uCloudScale + drift + vec3(0.0, evoT, 0.0);
   float base = cl_fbm_base(baseP);
   float variant = floor(uCloudNoiseVariant + 0.5);
 
@@ -182,14 +191,17 @@ float cloudShape(vec3 q) {
   // edges where they read as shape variation rather than visible pixels.
   float edge = 4.0 * cov * (1.0 - cov);
 
+  // Smaller features churn faster than the large masses → "boiling" edges. The
+  // detail/erosion octaves get their own, quicker evolution offset.
+  float evoD = uCloudTime * uCloudEvolve * 2.5;
   float carve = 0.0;
   #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
   // centered (detail - 0.5): redistributes density instead of biasing brightness
-  float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7);
+  float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7 + vec3(0.0, evoD, 0.0));
   carve += (detail - 0.5) * uCloudDetailStrength;
   #endif
   #if defined(CLOUD_USE_EROSION) && CLOUD_USE_EROSION > 0
-  float ero = cl_worley(q * uCloudErosionScale);
+  float ero = cl_worley(q * uCloudErosionScale + vec3(0.0, evoD, 0.0));
   carve -= ero * uCloudErosionStrength;
   #endif
 

@@ -83,8 +83,11 @@ export function cloudCoverageAt(x, y, z, f) {
   const qx = c * x + s * z;
   const qy = y;
   const qz = -s * x + c * z;
-  // baseP = q * scale + wind * time
-  const dx = f.windX * f.time, dy = f.windY * f.time, dz = f.windZ * f.time;
+  // baseP = q * scale + wind * time + evolution scroll (must match cloudShape so
+  // the occupancy map tracks the forming/dissipating field and never clips it)
+  const dx = f.windX * f.time;
+  const dy = f.windY * f.time + (f.evolve || 0) * f.time;
+  const dz = f.windZ * f.time;
   // `boost` is an UPPER-BOUND margin (≈ detail strength + softness): the GPU adds
   // detail noise on top of the base FBM, so a column that is empty in the base
   // can still grow cloud from detail. Adding the boost before thresholding makes

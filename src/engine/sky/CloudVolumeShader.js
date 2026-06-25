@@ -129,9 +129,18 @@ void main() {
   // given ray, so back-to-front "over" compositing reconstructs a seamless
   // single march. The depth clamp and chunk clip only narrow the marched range
   // — the step positions themselves never change.
-  int effSteps = int(float(CLOUD_STEPS) * clamp(uCloudStepScale, 0.05, 1.0) + 0.5);
-  effSteps = max(effSteps, 8);
-  float stepLen = (shellEnd - shellStart) / float(effSteps);
+  // ADAPTIVE step spacing: aim for a roughly CONSTANT world-space sample
+  // spacing (≈ one shell thickness split into CLOUD_STEPS) regardless of view
+  // angle. A near-vertical ray crosses ~one thickness and uses few steps; a
+  // grazing ray crosses a long chord and uses the full budget — so both sample
+  // at the same fine spacing and the start-offset jitter never stretches into a
+  // visible hatch. Long chords are still fully covered (effSteps caps at
+  // CLOUD_STEPS, so stepLen never exceeds seg/CLOUD_STEPS — no hard cutoff).
+  float shellSpan = max(uCloudOuter - uCloudInner, 1.0);
+  float targetStep = shellSpan / float(CLOUD_STEPS) / clamp(uCloudStepScale, 0.05, 1.0);
+  float seg = shellEnd - shellStart;
+  int effSteps = int(clamp(seg / targetStep, 8.0, float(CLOUD_STEPS)) + 0.5);
+  float stepLen = seg / float(effSteps);
   // Stable, ordered start-offset dither (see cl_ign). Spatial only — NO time
   // term — so the sampling lattice is frame-stable: residual banding stays put
   // as a soft gradient instead of crawling as grain when the camera moves.
@@ -261,6 +270,7 @@ export function createCloudMaterial(steps = 24, lightSteps = 6, octaves = 5, det
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
       uCloudNoiseVariant:    { value: 0.0 },
       uCloudStepScale:       { value: 1.0 },
+      uCloudEvolve:          { value: 0.03 },
       tSceneDepth:           { value: null },
       uDepthResolution:      { value: new THREE.Vector2(1, 1) },
       uProjectionMatrixInverse: { value: new THREE.Matrix4() },
