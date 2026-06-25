@@ -7,6 +7,7 @@ import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
+import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
 import { createPaletteUniforms } from '../style/PaletteUniforms.js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 import { applyPlanetStyleToUniforms } from '../style/PaletteUniforms.js';
@@ -117,6 +118,7 @@ ${heightGLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+${TERRAIN_DETAIL_GLSL}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -138,6 +140,19 @@ const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.96, 0.85, 0.04),
   vec3(0.23, 0.51, 0.96)
 );
+
+vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, float rockMask, float shoreMask) {
+  float strength = uTerrainDetailNormalStrength * fade * (0.45 + 0.55 * terrainDetailQualityFactor());
+  if (strength <= 0.0001) return n;
+  float scale = uTerrainDetailScale * mix(0.55, 1.25, terrainDetailQualityFactor());
+  float e = max(0.45, 0.55 / max(scale, 0.0001));
+  float c = terrainDetailNoise(worldPos, nGeo, scale);
+  float dx = terrainDetailNoise(worldPos + vec3(e, 0.0, 0.0), nGeo, scale) - c;
+  float dz = terrainDetailNoise(worldPos + vec3(0.0, 0.0, e), nGeo, scale) - c;
+  float matStrength = strength * (0.55 + rockMask * 1.05 + shoreMask * 0.25);
+  vec3 detailN = normalize(n + vec3(-dx * matStrength * 5.5, 0.0, -dz * matStrength * 5.5));
+  return normalize(mix(n, detailN, terrainDetailEnabled()));
+}
 
 void main() {
   vec2 xz = vWorldPos.xz;
@@ -263,6 +278,29 @@ void main() {
   float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
   TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
+  TerrainDetailResult td = applyTerrainDetailLayer(tc, cl, bw, vWorldPos, nGeo, hC, hRel, h01, slope, jitter);
+  n = applyTerrainDetailNormal2D(n, nGeo, vWorldPos, td.fade, td.rockMask, td.shoreMask);
+
+  if (uTerrainDetailDebug > 0.5) {
+    vec3 dbg = vec3(0.0);
+    if (uTerrainDetailDebug < 1.5) {
+      dbg = vec3(clamp(slope * 2.4, 0.0, 1.0));
+    } else if (uTerrainDetailDebug < 2.5) {
+      dbg = mix(vec3(0.08, 0.10, 0.12), vec3(0.70, 0.72, 0.68), td.rockMask);
+    } else if (uTerrainDetailDebug < 3.5) {
+      dbg = mix(vec3(0.04, 0.08, 0.10), vec3(0.82, 0.68, 0.40), td.shoreMask);
+    } else if (uTerrainDetailDebug < 4.5) {
+      dbg = vec3(td.fade);
+    } else if (uTerrainDetailDebug < 5.5) {
+      dbg = vec3(td.detail);
+    } else if (uTerrainDetailDebug < 6.5) {
+      dbg = td.albedo;
+    } else {
+      dbg = n * 0.5 + 0.5;
+    }
+    gl_FragColor = vec4(pow(max(dbg, vec3(0.0)), vec3(1.0 / 2.2)), 1.0);
+    return;
+  }
 
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
@@ -270,7 +308,7 @@ void main() {
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   vec3 col = terrainLighting(
-    tc.albedo, n, uSunDir, ao,
+    td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
     viewDir
   );
@@ -397,6 +435,18 @@ export function createTerrainUniforms() {
     uLayerMaskB:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
     uNoiseDebug:     { value: 0.0 },
     uTileDebugView:  { value: 0.0 },
+    uTerrainDetailQuality: { value: 3.0 },
+    uTerrainDetailScale: { value: 0.16 },
+    uTerrainDetailStrength: { value: 0.72 },
+    uTerrainDetailNormalStrength: { value: 0.42 },
+    uTerrainDetailNear: { value: 80.0 },
+    uTerrainDetailFar: { value: 190.0 },
+    uTerrainRockSlope: { value: 0.28 },
+    uTerrainRockSharpness: { value: 0.14 },
+    uTerrainTriplanar: { value: 1.0 },
+    uTerrainShoreRange: { value: 18.0 },
+    uTerrainShoreWetness: { value: 0.35 },
+    uTerrainDetailDebug: { value: 0.0 },
     uImportNoiseTex: { value: null },
     uImportHeightTex:{ value: null },
     uImportBiomeTex: { value: null },

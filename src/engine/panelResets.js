@@ -83,6 +83,7 @@ export const DEFAULT_DEBUG_FLAGS = {
   freezeLod: false,
   forceRender: false,
   disableHeightBake: false,
+  terrainDetailDebug: 'off',
 };
 
 export const DEFAULT_TILE_DEBUG = {

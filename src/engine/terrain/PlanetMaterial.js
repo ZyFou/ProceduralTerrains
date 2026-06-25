@@ -8,6 +8,7 @@ import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
+import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
 
@@ -76,6 +77,7 @@ ${PLANET_NOISE_GLSL}
 ${planetHeightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+${TERRAIN_DETAIL_GLSL}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -94,6 +96,19 @@ const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.96, 0.85, 0.04),
   vec3(0.23, 0.51, 0.96)
 );
+
+vec3 applyTerrainDetailNormalPlanet(vec3 n, vec3 nGeo, vec3 worldPos, vec3 t1, vec3 t2, float fade, float rockMask, float shoreMask) {
+  float strength = uTerrainDetailNormalStrength * fade * (0.45 + 0.55 * terrainDetailQualityFactor());
+  if (strength <= 0.0001) return n;
+  float scale = uTerrainDetailScale * mix(0.55, 1.25, terrainDetailQualityFactor());
+  float e = max(0.45, 0.55 / max(scale, 0.0001));
+  float c = terrainDetailNoise(worldPos, nGeo, scale);
+  float d1 = terrainDetailNoise(worldPos + t1 * e, nGeo, scale) - c;
+  float d2 = terrainDetailNoise(worldPos + t2 * e, nGeo, scale) - c;
+  float matStrength = strength * (0.55 + rockMask * 1.05 + shoreMask * 0.25);
+  vec3 detailN = normalize(n - t1 * d1 * matStrength * 5.5 - t2 * d2 * matStrength * 5.5);
+  return normalize(mix(n, detailN, terrainDetailEnabled()));
+}
 
 void main() {
   vec3 dir = normalize(vDir);
@@ -162,6 +177,29 @@ void main() {
   float microN = vnoiseTri(colP * 0.9, colBlend);
 
   TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, microN);
+  TerrainDetailResult td = applyTerrainDetailLayer(tc, cl, bw, vWorldPos, nGeo, hC, hRel, h01, slope, jitter);
+  n = applyTerrainDetailNormalPlanet(n, nGeo, vWorldPos, t1, t2, td.fade, td.rockMask, td.shoreMask);
+
+  if (uTerrainDetailDebug > 0.5) {
+    vec3 dbg = vec3(0.0);
+    if (uTerrainDetailDebug < 1.5) {
+      dbg = vec3(clamp(slope * 2.4, 0.0, 1.0));
+    } else if (uTerrainDetailDebug < 2.5) {
+      dbg = mix(vec3(0.08, 0.10, 0.12), vec3(0.70, 0.72, 0.68), td.rockMask);
+    } else if (uTerrainDetailDebug < 3.5) {
+      dbg = mix(vec3(0.04, 0.08, 0.10), vec3(0.82, 0.68, 0.40), td.shoreMask);
+    } else if (uTerrainDetailDebug < 4.5) {
+      dbg = vec3(td.fade);
+    } else if (uTerrainDetailDebug < 5.5) {
+      dbg = vec3(td.detail);
+    } else if (uTerrainDetailDebug < 6.5) {
+      dbg = td.albedo;
+    } else {
+      dbg = n * 0.5 + 0.5;
+    }
+    gl_FragColor = vec4(pow(max(dbg, vec3(0.0)), vec3(1.0 / 2.2)), 1.0);
+    return;
+  }
 
   // ambient occlusion from local concavity + low-altitude valleys
   float concave = clamp(((hA + hB) * 0.5 - hC) / (uHeightScale * 0.02 + 1.0), 0.0, 1.0);
@@ -174,7 +212,7 @@ void main() {
   vec3 sunCol = uTerrainSunCol * uTerrainSunIntensity;
   vec3 skyAmb = uTerrainSkyAmb * 0.50 * (up * 0.5 + 0.5);
   vec3 bounce = uTerrainBounce * 0.25 * (1.0 - up * 0.5);
-  vec3 col = tc.albedo * (sunCol * diff + skyAmb + bounce) * ao;
+  vec3 col = td.albedo * (sunCol * diff + skyAmb + bounce) * ao;
 
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 32.0);
   float shoreSheen = 1.0 - smoothstep(0.0, max(tc.sandBand, 0.5), abs(hRel));

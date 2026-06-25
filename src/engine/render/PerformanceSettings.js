@@ -45,6 +45,16 @@ export const PERF_LIMITS = {
   waterWaves:            { min: 0,       max: 1.5 },
   waterDistance:         { min: 0.25,    max: 1.0 },
   fogDistance:           { min: 0.4,     max: 2.0 },
+  terrainDetailQuality:  { min: 0,       max: 3 },
+  terrainDetailScale:    { min: 0.04,    max: 0.35 },
+  terrainDetailStrength: { min: 0,       max: 1.4 },
+  terrainDetailNormal:   { min: 0,       max: 1.0 },
+  terrainDetailNear:     { min: 10,      max: 180 },
+  terrainDetailFar:      { min: 40,      max: 420 },
+  terrainRockSlope:      { min: 0.08,    max: 0.72 },
+  terrainRockSharpness:  { min: 0.04,    max: 0.35 },
+  terrainShoreRange:     { min: 2,       max: 60 },
+  terrainShoreWetness:   { min: 0,       max: 1 },
   cloudSteps:            { min: 8,       max: 96 },
   cloudLightSteps:       { min: 1,       max: 12 },
   cloudOctaves:          { min: 1,       max: 6 },
@@ -63,6 +73,10 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.5,
     waterQuality: 0, waterReflection: 0.6, waterDetail: 0.4, waterWaves: 0.7,
     waterDistance: 0.6, fogDistance: 0.8,
+    terrainDetailQuality: 1, terrainDetailScale: 0.11, terrainDetailStrength: 0.38,
+    terrainDetailNormal: 0.18, terrainDetailNear: 52, terrainDetailFar: 128,
+    terrainRockSlope: 0.34, terrainRockSharpness: 0.16, terrainTriplanar: true,
+    terrainShoreRange: 12, terrainShoreWetness: 0.22,
     cloudSteps: 12, cloudLightSteps: 2, cloudSelfShadow: false,
     cloudOctaves: 3, cloudDetailOctaves: 0, cloudUseErosion: false,
     cloudMaxDistance: 3.0, cloudFallback: 'lite',
@@ -76,6 +90,10 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.2,
     waterQuality: 1, waterReflection: 0.85, waterDetail: 0.7, waterWaves: 0.85,
     waterDistance: 0.8, fogDistance: 0.9,
+    terrainDetailQuality: 2, terrainDetailScale: 0.14, terrainDetailStrength: 0.56,
+    terrainDetailNormal: 0.30, terrainDetailNear: 70, terrainDetailFar: 168,
+    terrainRockSlope: 0.30, terrainRockSharpness: 0.15, terrainTriplanar: true,
+    terrainShoreRange: 16, terrainShoreWetness: 0.30,
     cloudSteps: 24, cloudLightSteps: 4, cloudSelfShadow: false,
     cloudOctaves: 4, cloudDetailOctaves: 2, cloudUseErosion: true,
     cloudMaxDistance: 4.5, cloudFallback: 'none',
@@ -89,6 +107,10 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.0,
     waterQuality: 2, waterReflection: 1.0, waterDetail: 1.0, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.0,
+    terrainDetailQuality: 3, terrainDetailScale: 0.16, terrainDetailStrength: 0.72,
+    terrainDetailNormal: 0.42, terrainDetailNear: 80, terrainDetailFar: 190,
+    terrainRockSlope: 0.28, terrainRockSharpness: 0.14, terrainTriplanar: true,
+    terrainShoreRange: 18, terrainShoreWetness: 0.35,
     cloudSteps: 40, cloudLightSteps: 6, cloudSelfShadow: true,
     cloudOctaves: 5, cloudDetailOctaves: 4, cloudUseErosion: true,
     cloudMaxDistance: 6.0, cloudFallback: 'none',
@@ -102,6 +124,10 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 0.8,
     waterQuality: 2, waterReflection: 1.2, waterDetail: 1.2, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.2,
+    terrainDetailQuality: 3, terrainDetailScale: 0.18, terrainDetailStrength: 0.86,
+    terrainDetailNormal: 0.54, terrainDetailNear: 96, terrainDetailFar: 240,
+    terrainRockSlope: 0.25, terrainRockSharpness: 0.12, terrainTriplanar: true,
+    terrainShoreRange: 22, terrainShoreWetness: 0.42,
     cloudSteps: 72, cloudLightSteps: 8, cloudSelfShadow: true,
     cloudOctaves: 5, cloudDetailOctaves: 5, cloudUseErosion: true,
     cloudMaxDistance: 8.0, cloudFallback: 'none',
@@ -221,6 +247,20 @@ export function sanitizePerfSettings(settings) {
   s.waterWaves = clamp(+s.waterWaves || 0, PERF_LIMITS.waterWaves);
   s.waterDistance = clamp(+s.waterDistance || 1, PERF_LIMITS.waterDistance);
   s.fogDistance = clamp(+s.fogDistance || 1, PERF_LIMITS.fogDistance);
+  s.terrainDetailQuality = Math.round(clamp(+s.terrainDetailQuality || 0, PERF_LIMITS.terrainDetailQuality));
+  s.terrainDetailScale = clamp(+s.terrainDetailScale || 0.16, PERF_LIMITS.terrainDetailScale);
+  s.terrainDetailStrength = clamp(+s.terrainDetailStrength || 0, PERF_LIMITS.terrainDetailStrength);
+  s.terrainDetailNormal = clamp(+s.terrainDetailNormal || 0, PERF_LIMITS.terrainDetailNormal);
+  s.terrainDetailNear = clamp(+s.terrainDetailNear || 80, PERF_LIMITS.terrainDetailNear);
+  s.terrainDetailFar = clamp(+s.terrainDetailFar || 190, PERF_LIMITS.terrainDetailFar);
+  if (s.terrainDetailFar <= s.terrainDetailNear + 1) {
+    s.terrainDetailFar = Math.min(PERF_LIMITS.terrainDetailFar.max, s.terrainDetailNear + 1);
+  }
+  s.terrainRockSlope = clamp(+s.terrainRockSlope || 0.28, PERF_LIMITS.terrainRockSlope);
+  s.terrainRockSharpness = clamp(+s.terrainRockSharpness || 0.14, PERF_LIMITS.terrainRockSharpness);
+  s.terrainTriplanar = s.terrainTriplanar !== false;
+  s.terrainShoreRange = clamp(+s.terrainShoreRange || 18, PERF_LIMITS.terrainShoreRange);
+  s.terrainShoreWetness = clamp(+s.terrainShoreWetness || 0, PERF_LIMITS.terrainShoreWetness);
   s.autoPerf = !!s.autoPerf;
   // underwater camera effect — only costs anything while submerged
   s.underwaterEffect = s.underwaterEffect !== false;

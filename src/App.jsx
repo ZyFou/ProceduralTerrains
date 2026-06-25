@@ -83,9 +83,7 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState(0.38);
   const [cullingEnabled, setCullingEnabled] = useState(true);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
-  const [debugFlags, setDebugFlags] = useState({
-    freezeCulling: false, freezeLod: false, forceRender: false, disableHeightBake: false,
-  });
+  const [debugFlags, setDebugFlags] = useState({ ...DEFAULT_DEBUG_FLAGS });
   const [visibleChunks, setVisibleChunks] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkCount);
   const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
@@ -641,6 +639,18 @@ export default function App() {
       case 'performance.underwaterEffect': return yesNo(perf?.underwaterEffect !== false);
       case 'performance.waterDistance': return num(perf?.waterDistance, 2, 'x');
       case 'performance.fogDistance': return num(perf?.fogDistance, 2, 'x');
+      case 'performance.terrainDetailQuality':
+        return ({ 0: 'Off', 1: 'Low', 2: 'Medium', 3: 'High' }[perf?.terrainDetailQuality] ?? 'High');
+      case 'performance.terrainDetailScale': return num(perf?.terrainDetailScale, 2, 'x');
+      case 'performance.terrainDetailStrength': return num(perf?.terrainDetailStrength, 2, 'x');
+      case 'performance.terrainDetailNormal': return num(perf?.terrainDetailNormal, 2, 'x');
+      case 'performance.terrainDetailNear': return num(perf?.terrainDetailNear, 0, 'm');
+      case 'performance.terrainDetailFar': return num(perf?.terrainDetailFar, 0, 'm');
+      case 'performance.terrainRockSlope': return num(perf?.terrainRockSlope, 2);
+      case 'performance.terrainRockSharpness': return num(perf?.terrainRockSharpness, 2);
+      case 'performance.terrainTriplanar': return yesNo(perf?.terrainTriplanar !== false);
+      case 'performance.terrainShoreRange': return num(perf?.terrainShoreRange, 0, 'm');
+      case 'performance.terrainShoreWetness': return num(perf?.terrainShoreWetness, 2, 'x');
       case 'performance.cloudFallback': return perf?.cloudFallback ?? 'none';
       case 'performance.cloudSteps': return `${perf?.cloudSteps ?? '—'} steps`;
       case 'performance.cloudSelfShadow': return yesNo(perf?.cloudSelfShadow !== false);
@@ -692,6 +702,7 @@ export default function App() {
       case 'debug.freezeLod': return yesNo(!!debugFlags.freezeLod);
       case 'debug.forceRender': return yesNo(!!debugFlags.forceRender);
       case 'debug.disableHeightBake': return yesNo(!!debugFlags.disableHeightBake);
+      case 'debug.terrainDetailDebug': return String(debugFlags.terrainDetailDebug ?? 'off');
 
       case 'export.format': return 'GLB / GLTF';
       default:

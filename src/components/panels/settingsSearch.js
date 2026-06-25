@@ -56,6 +56,14 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.resolutionScale', label: 'Terrain Resolution', keywords: 'lod mesh detail' },
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.lodDistanceScale', label: 'LOD Distance Scale', keywords: 'lod distance scale' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.viewRadius', label: 'Chunk Load Radius', keywords: 'streaming load radius chunks' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailStrength', label: 'Detail Strength', keywords: 'terrain albedo biome close detail' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailNormal', label: 'Detail Normal Strength', keywords: 'terrain normal lighting bump close material' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailFar', label: 'Distance Detail Fade', keywords: 'terrain detail fade near far distance' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainRockSlope', label: 'Rock Slope Blend', keywords: 'terrain slope rock cliff blend triplanar' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainTriplanar', label: 'Triplanar Detail', keywords: 'terrain cliff projection stretching triplanar' },
+  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainShoreRange', label: 'Shoreline Detail', keywords: 'terrain shore wet sand mud coastline water edge' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterQuality', label: 'Water Quality', keywords: 'water quality reflection detail' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterReflection', label: 'Water Reflection', keywords: 'water specular reflection' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterDetail', label: 'Water Detail', keywords: 'water ripple detail' },
@@ -91,6 +99,7 @@ const SETTINGS_INDEX = [
   { panelId: 'debug', settingId: 'debug.freezeLod', label: 'Freeze LOD', keywords: 'debug lod freeze' },
   { panelId: 'debug', settingId: 'debug.forceRender', label: 'Force Render', keywords: 'debug render fps' },
   { panelId: 'debug', settingId: 'debug.disableHeightBake', label: 'Disable Height Bake', keywords: 'debug height bake' },
+  { panelId: 'debug', settingId: 'debug.terrainDetailDebug', label: 'Terrain Material Debug', keywords: 'debug terrain detail slope rock shoreline normal albedo' },
   { panelId: 'export', settingId: 'export.format', label: 'Format', keywords: 'export file glb obj' },
 ];
 

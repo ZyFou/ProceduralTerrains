@@ -28,6 +28,15 @@ const PERF_SLIDERS = {
   waterWaves: lim('waterWaves', 'Wave Complexity', 0.05, { digits: 2, unit: '×' }),
   waterDistance: lim('waterDistance', 'Water Distance', 0.05, { digits: 2, unit: '×' }),
   fogDistance: lim('fogDistance', 'Fog Distance', 0.05, { digits: 2, unit: '×' }),
+  terrainDetailScale: lim('terrainDetailScale', 'Detail Texture Scale', 0.01, { digits: 2, unit: 'x' }),
+  terrainDetailStrength: lim('terrainDetailStrength', 'Detail Strength', 0.05, { digits: 2, unit: 'x' }),
+  terrainDetailNormal: lim('terrainDetailNormal', 'Detail Normal Strength', 0.05, { digits: 2, unit: 'x' }),
+  terrainDetailNear: lim('terrainDetailNear', 'Full Detail Distance', 5, { unit: 'm' }),
+  terrainDetailFar: lim('terrainDetailFar', 'Detail Fade Distance', 5, { unit: 'm' }),
+  terrainRockSlope: lim('terrainRockSlope', 'Rock Slope Blend', 0.01, { digits: 2 }),
+  terrainRockSharpness: lim('terrainRockSharpness', 'Rock Blend Width', 0.01, { digits: 2 }),
+  terrainShoreRange: lim('terrainShoreRange', 'Shoreline Range', 1, { unit: 'm' }),
+  terrainShoreWetness: lim('terrainShoreWetness', 'Shoreline Wetness', 0.05, { digits: 2, unit: 'x' }),
   cloudSteps: lim('cloudSteps', 'Raymarch Steps', 4),
   cloudLightSteps: lim('cloudLightSteps', 'Shadow Steps', 1),
   cloudOctaves: lim('cloudOctaves', 'Base Noise Octaves', 1),
@@ -41,6 +50,13 @@ const WATER_QUALITY_OPTIONS = [
   { value: 2, label: 'High' },
 ];
 
+const TERRAIN_DETAIL_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 1, label: 'Low' },
+  { value: 2, label: 'Medium' },
+  { value: 3, label: 'High' },
+];
+
 const GPU_PREFERENCE_OPTIONS = [
   { value: 'default', label: 'Default' },
   { value: 'high-performance', label: 'High Performance' },
@@ -51,6 +67,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'lod', label: 'LOD' },
   { id: 'streaming', label: 'Streaming' },
+  { id: 'terrain', label: 'Terrain' },
   { id: 'water', label: 'Water' },
   { id: 'fog', label: 'Fog' },
   { id: 'clouds', label: 'Clouds' },
@@ -367,6 +384,41 @@ function renderSettings({
 
       <SettingGroup tab="streaming" label="Culling Aggressiveness" keywords="frustum behind camera cull" {...groupProps}>
         <PerfSlider perf={perf} id="cullingAggressiveness" onPerfSetting={onPerfSetting} settingId="performance.cullingAggressiveness" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Terrain Detail Quality" keywords="terrain material detail close walk first person texture quality" {...groupProps}>
+        <SelectRow label="Terrain Detail Quality" value={perf.terrainDetailQuality} options={TERRAIN_DETAIL_OPTIONS} onChange={(v) => onPerfSetting('terrainDetailQuality', parseInt(v, 10))} settingId="performance.terrainDetailQuality" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Detail Texture Scale" keywords="terrain close texture scale grain noise world space" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainDetailScale" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailScale" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Detail Strength" keywords="terrain albedo biome detail close strength" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainDetailStrength" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailStrength" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Detail Normal Strength" keywords="terrain normal material lighting bump close" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainDetailNormal" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailNormal" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Distance Detail Fade" keywords="terrain detail fade near far walk distance shimmer" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainDetailNear" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailNear" />
+        <PerfSlider perf={perf} id="terrainDetailFar" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailFar" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Slope Rock Blending" keywords="terrain slope rock cliff material blend" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainRockSlope" onPerfSetting={onPerfSetting} settingId="performance.terrainRockSlope" />
+        <PerfSlider perf={perf} id="terrainRockSharpness" onPerfSetting={onPerfSetting} settingId="performance.terrainRockSharpness" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Triplanar Detail" keywords="terrain triplanar cliff steep stretch projection" {...groupProps}>
+        <ToggleRow label="Triplanar Detail" value={perf.terrainTriplanar !== false} onChange={(v) => onPerfSetting('terrainTriplanar', v)} settingId="performance.terrainTriplanar" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Shoreline Detail" keywords="terrain shoreline shore wet sand mud coast water edge" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainShoreRange" onPerfSetting={onPerfSetting} settingId="performance.terrainShoreRange" />
+        <PerfSlider perf={perf} id="terrainShoreWetness" onPerfSetting={onPerfSetting} settingId="performance.terrainShoreWetness" />
       </SettingGroup>
 
       <SettingGroup tab="water" label="Water Quality" keywords="shader reflection detail waves" {...groupProps}>

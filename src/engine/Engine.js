@@ -43,7 +43,7 @@ import {
   TERRAIN_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
   LIGHTING_PARAM_KEYS, LIGHTING_STYLE_KEYS, DEBUG_PARAM_KEYS,
   patchParamsFromDefaults, resetWaterParams, resetCloudParams, resetSkyboxParams,
-  lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY,
+  lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY, DEFAULT_DEBUG_FLAGS,
 } from './panelResets.js';
 import { EARTH_PALETTE } from './style/ColorPalette.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
@@ -231,6 +231,7 @@ export class Engine {
       freezeLod: false,       // stop recomputing per-chunk LOD
       forceRender: false,     // bypass the on-demand gate — draw every frame
       disableHeightBake: false, // force the live per-pixel height field (studio bake off)
+      terrainDetailDebug: 'off',
     };
     this._landingShowcase = false;
 
@@ -1993,6 +1994,14 @@ export class Engine {
 
   setDebugFlag(key, value) {
     if (!(key in this._debug)) return;
+    if (key === 'terrainDetailDebug') {
+      const view = typeof value === 'string' ? value : 'off';
+      const modes = { off: 0, slope: 1, rock: 2, shoreline: 3, detailFade: 4, detail: 5, albedo: 6, normal: 7 };
+      this._debug.terrainDetailDebug = modes[view] == null ? 'off' : view;
+      this.uniforms.uTerrainDetailDebug.value = modes[this._debug.terrainDetailDebug] ?? 0;
+      this._needsRender = true;
+      return;
+    }
     this._debug[key] = !!value;
     this._needsRender = true;
     if (key === 'disableHeightBake') {
@@ -2321,6 +2330,7 @@ export class Engine {
 
     // Apply render scale + water quality uniforms to the fresh materials
     this._applyPixelRatio();
+    this._applyTerrainDetailPerf();
     this._applyWaterPerf();
 
     this.waterSystem.sync(p, 'infinite');
@@ -2883,6 +2893,7 @@ export class Engine {
     const distances = resolveLodDistances(s);
 
     this._applyPixelRatio();
+    this._applyTerrainDetailPerf();
     this._applyWaterPerf();
     this.underwater.enabled = s.underwaterEffect !== false;
 
@@ -2917,6 +2928,24 @@ export class Engine {
   }
 
   /** Water quality uniforms — per water material, never shared with terrain. */
+  _applyTerrainDetailPerf() {
+    const s = this.perf;
+    const u = this.uniforms;
+    if (!u?.uTerrainDetailQuality) return;
+    u.uTerrainDetailQuality.value = s.terrainDetailQuality ?? 3;
+    u.uTerrainDetailScale.value = s.terrainDetailScale ?? 0.16;
+    u.uTerrainDetailStrength.value = s.terrainDetailStrength ?? 0.72;
+    u.uTerrainDetailNormalStrength.value = s.terrainDetailNormal ?? 0.42;
+    u.uTerrainDetailNear.value = s.terrainDetailNear ?? 80;
+    u.uTerrainDetailFar.value = Math.max((s.terrainDetailFar ?? 190), (s.terrainDetailNear ?? 80) + 1);
+    u.uTerrainRockSlope.value = s.terrainRockSlope ?? 0.28;
+    u.uTerrainRockSharpness.value = s.terrainRockSharpness ?? 0.14;
+    u.uTerrainTriplanar.value = s.terrainTriplanar === false ? 0.0 : 1.0;
+    u.uTerrainShoreRange.value = s.terrainShoreRange ?? 18;
+    u.uTerrainShoreWetness.value = s.terrainShoreWetness ?? 0.35;
+    this._needsRender = true;
+  }
+
   _applyWaterPerf() {
     this.waterSystem?.applyPerf(this.perf);
     const s = this.perf;
@@ -3207,6 +3236,7 @@ export class Engine {
 
     // re-derive the tile-debug view uniform + notify the Debug panel.
     this.setTileDebug({});
+    this.setDebugFlag('terrainDetailDebug', this._debug.terrainDetailDebug ?? 'off');
 
     // time of day (fires onTimeOfDayChange → React sync).
     this.setTimeOfDay(snap.timeOfDay ?? this.timeOfDay);
@@ -3346,6 +3376,8 @@ export class Engine {
         break;
       case 'debug': {
         this.params = patchParamsFromDefaults(this.params, DEBUG_PARAM_KEYS);
+        this._debug = { ...DEFAULT_DEBUG_FLAGS };
+        this.uniforms.uTerrainDetailDebug.value = 0.0;
         this.cb.onParams({ ...this.params });
         this._afterParamChange(false);
         if (this.cb.onDebugReset) this.cb.onDebugReset();
