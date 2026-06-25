@@ -448,6 +448,22 @@ body {
 }
 .collapsible-group .panel-group-chevron.open { transform: rotate(180deg); }
 
+.panel-group.nested {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  background: transparent;
+}
+.panel-group.nested .panel-group-header {
+  padding: 7px 10px;
+}
+.panel-group.nested .panel-group-title {
+  font-size: 9.5px;
+  letter-spacing: 1.1px;
+}
+.panel-group.nested .panel-group-body {
+  padding: 8px 10px 10px;
+}
+
 .file-picker { margin-bottom: 10px; }
 .file-picker-input {
   position: absolute;
@@ -1948,6 +1964,18 @@ input[type="color"].palette-color-input {
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 0 2px;
+}
+.settings-search-group-title-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: color 0.12s ease;
+}
+.settings-search-group-title-btn:hover {
+  color: var(--text-main);
 }
 .settings-search-group-body {
   display: flex;

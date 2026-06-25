@@ -1,7 +1,6 @@
 import { createContext } from 'react';
 
-// When true, ControlSection renders as a plain, always-open labelled group
-// (no collapsable folder chrome). The side drawer provides this so the legacy
-// ControlSection-wrapped panels (World, Clouds, Environment, Camera, LOD…)
-// reuse cleanly without the dense folder navigation.
+// When true, ControlSection renders collapsible panel-group sections inside the
+// side drawer. The legacy right inspector uses the same component with folder
+// chrome tuned for the denser inspector layout.
 export const FlatPanelContext = createContext(false);

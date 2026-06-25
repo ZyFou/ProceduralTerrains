@@ -1,5 +1,6 @@
 import PlanetPresetPanel from './PlanetPresetPanel.jsx';
 import ColorPalettePanel from './ColorPalettePanel.jsx';
+import ControlSection from './ui/ControlSection.jsx';
 
 export default function PlanetStylePanel({
   planetStyle,
@@ -37,15 +38,17 @@ export default function PlanetStylePanel({
 
   const content = paletteOnly ? palettePanel : (
     <>
-      <div className="subsection-label">Preset</div>
-      <PlanetPresetPanel
-        planetPreset={planetPreset}
-        onSelect={onPlanetPreset}
-        onRandomize={onRandomPlanet}
-      />
+      <ControlSection id="planet-preset" title="Preset" defaultOpen settingId="planet.section.preset">
+        <PlanetPresetPanel
+          planetPreset={planetPreset}
+          onSelect={onPlanetPreset}
+          onRandomize={onRandomPlanet}
+        />
+      </ControlSection>
 
-      <div className="subsection-label">Palette</div>
-      {palettePanel}
+      <ControlSection id="planet-palette" title="Palette" defaultOpen settingId="planet.section.palette">
+        {palettePanel}
+      </ControlSection>
     </>
   );
 

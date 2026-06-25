@@ -1,4 +1,7 @@
+import { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
+import { FlatPanelContext } from '../panels/PanelContext.js';
+import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
 import { SliderCtl, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 
@@ -88,8 +91,97 @@ const ATMOSPHERE_COLORS = [
   },
 ];
 
-export default function EnvironmentPanel({ params, planetStyle, onParam, onTuning }) {
+export default function EnvironmentPanel({ params, planetStyle, onParam, onTuning, settingsTarget }) {
+  const flat = useContext(FlatPanelContext);
   const style = planetStyle ?? {};
+  const target = settingsTarget?.panelId === 'lighting' ? settingsTarget : null;
+  const forceSection = (sectionId, sectionLabel, prefixes = []) =>
+    shouldForceSectionOpen(target, sectionId, { sectionLabel, childPrefixes: prefixes });
+
+  const sections = (
+    <>
+      <ControlSection
+        id="inspector-environment-sun"
+        title="Sun"
+        defaultOpen
+        settingId="lighting.section.sun"
+        forceOpen={forceSection('lighting.section.sun', 'Sun', ['lighting.sun'])}
+      >
+        {SUN_SLIDERS.map((def) => (
+          <SliderCtl
+            key={def.key}
+            def={def}
+            value={params[def.key]}
+            onChange={(v) => onParam(def.key, v)}
+            settingId={`lighting.${def.key}`}
+          />
+        ))}
+        <div className="color-field" data-setting-id="lighting.sunColor">
+          <div className="label-with-icon" data-tooltip="Color tint of the direct sunlight">
+            <span className="setting-icon">
+              <svg viewBox="0 0 16 16" fill="none">
+                <path d="M8 2c-2.5 4-5 5-5 8a5 5 0 0 0 10 0c0-3-2.5-4-5-8z" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            </span>
+            <span className="setting-label">Sun Color</span>
+            <span className="info-icon-trigger">
+              <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          </div>
+          <ColorInput
+            value={colorToHex(style.sunColor ?? [1.0, 0.94, 0.82])}
+            onChange={(v) => onTuning('sunColor', parseColor(v))}
+          />
+        </div>
+        <SliderCtl
+          def={SUN_INTENSITY}
+          value={style.sunIntensity ?? 1.25}
+          onChange={(v) => onTuning('sunIntensity', v)}
+          settingId="lighting.sunIntensity"
+        />
+      </ControlSection>
+
+      <ControlSection
+        id="inspector-environment-atmosphere"
+        title="Atmosphere"
+        defaultOpen
+        settingId="lighting.section.atmosphere"
+        forceOpen={forceSection('lighting.section.atmosphere', 'Atmosphere', ['lighting.fog', 'lighting.skyAmbient', 'lighting.groundBounce'])}
+      >
+        <SliderCtl
+          def={FOG_SLIDER}
+          value={params.fogDensity}
+          onChange={(v) => onParam('fogDensity', v)}
+          settingId="lighting.fogDensity"
+        />
+        {ATMOSPHERE_COLORS.map(({ key, label, icon, info }) => (
+          <div className="color-field" key={key} data-setting-id={`lighting.${key}`}>
+            <div className="label-with-icon" data-tooltip={info}>
+              {icon && <span className="setting-icon">{icon}</span>}
+              <span className="setting-label">{label}</span>
+              {info && (
+                <span className="info-icon-trigger">
+                  <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
+                    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                    <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </span>
+              )}
+            </div>
+            <ColorInput
+              value={colorToHex(style[key] ?? [0.5, 0.5, 0.5])}
+              onChange={(v) => onTuning(key, parseColor(v))}
+            />
+          </div>
+        ))}
+      </ControlSection>
+    </>
+  );
+
+  if (flat) return sections;
 
   return (
     <ControlSection
@@ -103,70 +195,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         </svg>
       )}
     >
-      <div className="subsection-label">Sun</div>
-      {SUN_SLIDERS.map((def) => (
-        <SliderCtl
-          key={def.key}
-          def={def}
-          value={params[def.key]}
-          onChange={(v) => onParam(def.key, v)}
-          settingId={`lighting.${def.key}`}
-        />
-      ))}
-      <div className="color-field" data-setting-id="lighting.sunColor">
-        <div className="label-with-icon" data-tooltip="Color tint of the direct sunlight">
-          <span className="setting-icon">
-            <svg viewBox="0 0 16 16" fill="none">
-              <path d="M8 2c-2.5 4-5 5-5 8a5 5 0 0 0 10 0c0-3-2.5-4-5-8z" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
-          </span>
-          <span className="setting-label">Sun Color</span>
-          <span className="info-icon-trigger">
-            <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
-              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </span>
-        </div>
-        <ColorInput
-          value={colorToHex(style.sunColor ?? [1.0, 0.94, 0.82])}
-          onChange={(v) => onTuning('sunColor', parseColor(v))}
-        />
-      </div>
-      <SliderCtl
-        def={SUN_INTENSITY}
-        value={style.sunIntensity ?? 1.25}
-        onChange={(v) => onTuning('sunIntensity', v)}
-        settingId="lighting.sunIntensity"
-      />
-
-      <div className="subsection-label">Atmosphere</div>
-      <SliderCtl
-        def={FOG_SLIDER}
-        value={params.fogDensity}
-        onChange={(v) => onParam('fogDensity', v)}
-        settingId="lighting.fogDensity"
-      />
-      {ATMOSPHERE_COLORS.map(({ key, label, icon, info }) => (
-        <div className="color-field" key={key} data-setting-id={`lighting.${key}`}>
-          <div className="label-with-icon" data-tooltip={info}>
-            {icon && <span className="setting-icon">{icon}</span>}
-            <span className="setting-label">{label}</span>
-            {info && (
-              <span className="info-icon-trigger">
-                <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
-                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
-                  <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </span>
-            )}
-          </div>
-          <ColorInput
-            value={colorToHex(style[key] ?? [0.5, 0.5, 0.5])}
-            onChange={(v) => onTuning(key, parseColor(v))}
-          />
-        </div>
-      ))}
+      {sections}
     </ControlSection>
   );
 }

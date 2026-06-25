@@ -91,9 +91,10 @@ const SETTINGS_INDEX = [
   { panelId: 'lighting', settingId: 'lighting.groundBounce', label: 'Ground Bounce', keywords: 'bounce lighting shadow' },
 
   // Clouds / props / debug / export
-  { panelId: 'clouds', settingId: 'clouds.cloudCoverage', label: 'Coverage', keywords: 'cloud density cover sky' },
-  { panelId: 'clouds', settingId: 'clouds.cloudDensity', label: 'Density', keywords: 'cloud thickness opacity' },
-  { panelId: 'clouds', settingId: 'clouds.cloudSoftness', label: 'Softness', keywords: 'cloud edge softness' },
+  { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudCoverage', label: 'Coverage', keywords: 'cloud density cover sky shape' },
+  { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudDensity', label: 'Density', keywords: 'cloud thickness opacity shape' },
+  { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudSoftness', label: 'Softness', keywords: 'cloud edge softness shape' },
+  { panelId: 'clouds', settingId: 'clouds.cloudsEnabled', label: 'Enable Clouds', keywords: 'cloud volumetric sky enable' },
   { panelId: 'debug', settingId: 'debug.autoUpdate', label: 'Auto Update', keywords: 'debug generation rebuild' },
   { panelId: 'debug', settingId: 'debug.freezeCulling', label: 'Freeze Culling', keywords: 'debug culling freeze' },
   { panelId: 'debug', settingId: 'debug.freezeLod', label: 'Freeze LOD', keywords: 'debug lod freeze' },
@@ -102,6 +103,50 @@ const SETTINGS_INDEX = [
   { panelId: 'debug', settingId: 'debug.terrainDetailDebug', label: 'Terrain Material Debug', keywords: 'debug terrain detail slope rock shoreline normal albedo' },
   { panelId: 'export', settingId: 'export.format', label: 'Format', keywords: 'export file glb obj' },
 ];
+
+const SECTION_INDEX = [
+  // Water
+  { panelId: 'water', sectionLabel: 'Mode', settingId: 'water.section.mode', label: 'Mode', keywords: 'water mode enable sea level', isSection: true },
+  { panelId: 'water', sectionLabel: 'Shader Quality', settingId: 'water.section.shader', label: 'Shader Quality', keywords: 'water shader quality reflection detail waves', isSection: true },
+  { panelId: 'water', sectionLabel: 'Material', settingId: 'water.section.material', label: 'Material', keywords: 'water material animation colors', isSection: true },
+  { panelId: 'water', sectionLabel: 'Depth', settingId: 'water.section.depth', label: 'Depth', keywords: 'water depth absorption shallow deep', isSection: true },
+  { panelId: 'water', sectionLabel: 'Waves', settingId: 'water.section.waves', label: 'Waves', keywords: 'water waves animation motion', isSection: true },
+  { panelId: 'water', sectionLabel: 'Foam', settingId: 'water.section.foam', label: 'Foam', keywords: 'water foam shoreline', isSection: true },
+  { panelId: 'water', sectionLabel: 'Underwater', settingId: 'water.section.underwater', label: 'Underwater', keywords: 'water underwater fog caustics', isSection: true },
+
+  // Clouds
+  { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.section.shape', label: 'Shape', keywords: 'cloud shape coverage density softness', isSection: true },
+  { panelId: 'clouds', sectionLabel: 'Shell', settingId: 'clouds.section.shell', label: 'Shell', keywords: 'cloud altitude thickness shell layer', isSection: true },
+  { panelId: 'clouds', sectionLabel: 'Noise', settingId: 'clouds.section.noise', label: 'Noise', keywords: 'cloud noise erosion detail scale', isSection: true },
+  { panelId: 'clouds', sectionLabel: 'Motion', settingId: 'clouds.section.motion', label: 'Motion', keywords: 'cloud wind rotation evolve motion', isSection: true },
+  { panelId: 'clouds', sectionLabel: 'Lighting', settingId: 'clouds.section.lighting', label: 'Lighting', keywords: 'cloud lighting shadow scattering color', isSection: true },
+  { panelId: 'clouds', sectionLabel: 'Performance', settingId: 'clouds.section.performance', label: 'Performance', keywords: 'cloud performance resolution distance steps', isSection: true },
+
+  // Lighting
+  { panelId: 'lighting', sectionLabel: 'Sun', settingId: 'lighting.section.sun', label: 'Sun', keywords: 'sun lighting azimuth elevation color intensity', isSection: true },
+  { panelId: 'lighting', sectionLabel: 'Atmosphere', settingId: 'lighting.section.atmosphere', label: 'Atmosphere', keywords: 'atmosphere fog ambient bounce lighting', isSection: true },
+
+  // Skybox
+  { panelId: 'skybox', sectionLabel: 'Time of Day', settingId: 'skybox.section.time', label: 'Time of Day', keywords: 'sky time day night sun', isSection: true },
+  { panelId: 'skybox', sectionLabel: 'Appearance', settingId: 'skybox.section.appearance', label: 'Appearance', keywords: 'sky brightness haze stars appearance', isSection: true },
+
+  // Props
+  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.section.distribution', label: 'Distribution', keywords: 'props grass flowers density distribution', isSection: true },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.section.look', label: 'Look', keywords: 'props grass look scale', isSection: true },
+  { panelId: 'props', sectionLabel: 'Performance', settingId: 'props.section.performance', label: 'Performance', keywords: 'props cull lod performance distance', isSection: true },
+
+  // Export
+  { panelId: 'export', sectionLabel: 'Format & Resolution', settingId: 'export.section.format', label: 'Format & Resolution', keywords: 'export format mesh resolution glb', isSection: true },
+  { panelId: 'export', sectionLabel: 'Texture Baking', settingId: 'export.section.textures', label: 'Texture Baking', keywords: 'export texture bake color normal', isSection: true },
+  { panelId: 'export', sectionLabel: 'Additional Assets', settingId: 'export.section.assets', label: 'Additional Assets', keywords: 'export heightmap collision assets', isSection: true },
+  { panelId: 'export', sectionLabel: 'Water Maps', settingId: 'export.section.waterMaps', label: 'Water Maps', keywords: 'export water mask depth shoreline foam', isSection: true },
+
+  // Planet
+  { panelId: 'planet', sectionLabel: 'Preset', settingId: 'planet.section.preset', label: 'Preset', keywords: 'planet style preset', isSection: true },
+  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.section.palette', label: 'Palette', keywords: 'planet palette colors biomes', isSection: true },
+];
+
+const FULL_SETTINGS_INDEX = [...SETTINGS_INDEX, ...SECTION_INDEX];
 
 const normalizeText = (value) => String(value ?? '')
   .normalize('NFD')
@@ -130,6 +175,7 @@ function scoreEntry(entry, q, tokens) {
   if (label === q) score += 1200;
   if (label.startsWith(q)) score += 600;
   if (label.includes(q)) score += 300;
+  if (section && section === q) score += 500;
   if (section && section.includes(q)) score += 120;
   if (aliases && aliases.includes(q)) score += 180;
   if (haystack.startsWith(q)) score += 80;
@@ -148,7 +194,7 @@ export function searchSettings(query, isPanelAvailable = () => true) {
   if (!q) return [];
 
   const tokens = q.split(/\s+/).filter(Boolean);
-  return SETTINGS_INDEX
+  return FULL_SETTINGS_INDEX
     .map((entry) => {
       if (!isPanelAvailable(entry.panelId)) return null;
       const score = scoreEntry(entry, q, tokens);
@@ -159,4 +205,4 @@ export function searchSettings(query, isPanelAvailable = () => true) {
     .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
 }
 
-export { SETTINGS_INDEX };
+export { SETTINGS_INDEX, SECTION_INDEX, FULL_SETTINGS_INDEX };

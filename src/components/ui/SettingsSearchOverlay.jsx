@@ -18,6 +18,7 @@ export default function SettingsSearchOverlay({
   onChangeQuery,
   onSelectIndex,
   onConfirm,
+  onConfirmPanel,
   onClose,
 }) {
   const inputRef = useRef(null);
@@ -33,7 +34,7 @@ export default function SettingsSearchOverlay({
   const hint = useMemo(() => {
     if (!query.trim()) return 'Search terrain, water, biomes, lighting, performance...';
     if (!hasResults) return 'No matching settings. Try a broader keyword.';
-    return 'Enter opens the selected panel. Esc closes.';
+    return 'Enter opens the selected item. Click a category to open its panel. Esc closes.';
   }, [hasResults, query]);
 
   const handleKeyDown = (e) => {
@@ -94,10 +95,14 @@ export default function SettingsSearchOverlay({
             <div className="settings-search-results">
               {groupedResults.map((group) => (
                 <section className="settings-search-group" key={group.panelId}>
-                  <div className="settings-search-group-title">
+                  <button
+                    type="button"
+                    className="settings-search-group-title settings-search-group-title-btn"
+                    onClick={() => onConfirmPanel?.(group.panelId)}
+                  >
                     <span>{group.panelLabel}</span>
                     <span>{group.items.length}</span>
-                  </div>
+                  </button>
                   <div className="settings-search-group-body">
                     {group.items.map((item) => {
                       const isActive = flatResults[selectedIndex]?.settingId === item.settingId;
@@ -117,7 +122,9 @@ export default function SettingsSearchOverlay({
                                 {item.sectionLabel && <span>{item.sectionLabel}</span>}
                               </div>
                             </div>
-                            <span className="settings-search-item-value">{item.valueText ?? '-'}</span>
+                            <span className="settings-search-item-value">
+                              {item.isSection ? 'Section' : (item.valueText ?? '-')}
+                            </span>
                           </div>
                         </button>
                       );

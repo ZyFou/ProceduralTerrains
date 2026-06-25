@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 
@@ -7,27 +7,19 @@ export default function ControlSection({
   title,
   icon,
   defaultOpen = true,
+  forceOpen = false,
   statusDot,
+  settingId,
+  nested = false,
   children,
   onToggle,
 }) {
   const flat = useContext(FlatPanelContext);
   const [open, setOpen] = useState(defaultOpen);
 
-  // Inside a drawer panel: render a plain, always-open labelled group with no
-  // collapsable folder chrome.
-  if (flat) {
-    return (
-      <section className="panel-group" id={id} data-section={id}>
-        <div className="panel-group-header">
-          {icon && <span className="panel-group-icon">{icon}</span>}
-          <span className="panel-group-title">{title}</span>
-          {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
-        </div>
-        <div className="panel-group-body">{children}</div>
-      </section>
-    );
-  }
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
 
   const toggle = () => {
     const next = !open;
@@ -35,8 +27,35 @@ export default function ControlSection({
     onToggle?.(next);
   };
 
+  if (flat) {
+    const sectionKey = settingId ?? id;
+    return (
+      <section
+        className={`panel-group collapsible-group${open ? ' open' : ''}${nested ? ' nested' : ''}`}
+        id={id}
+        data-section={id}
+        data-setting-id={sectionKey}
+      >
+        <button
+          type="button"
+          className="panel-group-header panel-group-toggle"
+          onClick={toggle}
+          aria-expanded={open}
+        >
+          {icon && <span className="panel-group-icon">{icon}</span>}
+          <span className="panel-group-title">{title}</span>
+          {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
+          <span className={`panel-group-chevron${open ? ' open' : ''}`} aria-hidden>
+            <ChevronDown size={14} strokeWidth={2} />
+          </span>
+        </button>
+        {open && <div className="panel-group-body">{children}</div>}
+      </section>
+    );
+  }
+
   return (
-    <section className="control-section" id={id} data-section={id}>
+    <section className="control-section" id={id} data-section={id} data-setting-id={settingId ?? id}>
       <button type="button" className="control-section-header" onClick={toggle} aria-expanded={open}>
         <span className="control-section-left">
           {icon && <span className="control-section-icon">{icon}</span>}

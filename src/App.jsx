@@ -706,6 +706,7 @@ export default function App() {
 
       case 'export.format': return 'GLB / GLTF';
       default:
+        if (item?.isSection) return 'Section';
         return 'Set';
     }
   }, [params, perf, timeOfDay, debugFlags]);
@@ -753,7 +754,15 @@ export default function App() {
       sectionLabel: item.sectionLabel ?? null,
       settingId: item.settingId,
       label: item.label,
+      isSection: !!item.isSection,
     });
+    closeSettingsSearch();
+  };
+
+  const confirmSettingsSearchPanel = (panelId) => {
+    if (!panelAvailable(panelId, worldMode)) return;
+    setActivePanel(panelId);
+    setSettingsTarget(null);
     closeSettingsSearch();
   };
 
@@ -948,6 +957,7 @@ export default function App() {
               }}
               onSelectIndex={setSettingsSearchIndex}
               onConfirm={confirmSettingsSearch}
+              onConfirmPanel={confirmSettingsSearchPanel}
               onClose={closeSettingsSearch}
             />
           )}

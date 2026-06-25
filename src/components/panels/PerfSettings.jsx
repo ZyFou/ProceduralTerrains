@@ -2,6 +2,7 @@
 // Performance drawer panel. Extracted from the old SettingsModal so the same
 // controls live in one place.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ControlSection from '../ui/ControlSection.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
@@ -177,8 +178,12 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
     : (caps.gpuInfoReason || 'GPU info hidden by browser');
 
   return (
-    <div className="gpu-renderer-section">
-      <div className="subsection-label">GPU / Renderer</div>
+    <ControlSection
+      id="perf-gpu-renderer"
+      title="GPU / Renderer"
+      defaultOpen
+      settingId="performance.section.gpu"
+    >
       <SelectRow
         label="Renderer Backend"
         value={perf.rendererBackend}
@@ -214,7 +219,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
       ) : (
         <p className="gpu-footnote">Browser may ignore GPU preference hints.</p>
       )}
-    </div>
+    </ControlSection>
   );
 }
 

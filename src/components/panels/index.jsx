@@ -218,6 +218,7 @@ function WaterPanel({ ctx }) {
         planetStyleProps={ctx.planetStyleProps}
         onResetWaterSettings={() => ctx.onResetPanel?.('water')}
         onExportWaterMasks={ctx.onExportWaterMasks}
+        settingsTarget={ctx.settingsTarget}
       />
     </SidePanel>
   );
@@ -240,21 +241,24 @@ function PropsPanel({ ctx }) {
         info="Scatter lightweight procedural grass and flowers on valid terrain in Tile, Infinite World, and Planet modes." />
       {enabled && (
         <>
-          <div className="subsection-label">Distribution</div>
-          <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
-          <SliderCtl def={PROP_SLIDERS.propsFlowers} value={params.propsFlowers} onChange={(v) => onParam('propsFlowers', v)} />
+          <ControlSection id="props-distribution" title="Distribution" defaultOpen settingId="props.section.distribution">
+            <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsFlowers} value={params.propsFlowers} onChange={(v) => onParam('propsFlowers', v)} />
+          </ControlSection>
 
-          <div className="subsection-label">Look</div>
-          <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
+          <ControlSection id="props-look" title="Look" defaultOpen settingId="props.section.look">
+            <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
+          </ControlSection>
 
-          <div className="subsection-label">Performance</div>
-          <SliderCtl def={PROP_SLIDERS.propsCullDistance} value={params.propsCullDistance} onChange={(v) => onParam('propsCullDistance', v)} />
-          <SliderCtl def={PROP_SLIDERS.propsLodDistance} value={params.propsLodDistance} onChange={(v) => onParam('propsLodDistance', v)} />
-          <p className="section-hint">
-            {worldMode === 'studio'
-              ? 'Studio also reads the props mask painted in Paint Mode.'
-              : 'This mode uses deterministic procedural scattering from the current seed.'}
-          </p>
+          <ControlSection id="props-performance" title="Performance" defaultOpen settingId="props.section.performance">
+            <SliderCtl def={PROP_SLIDERS.propsCullDistance} value={params.propsCullDistance} onChange={(v) => onParam('propsCullDistance', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsLodDistance} value={params.propsLodDistance} onChange={(v) => onParam('propsLodDistance', v)} />
+            <p className="section-hint">
+              {worldMode === 'studio'
+                ? 'Studio also reads the props mask painted in Paint Mode.'
+                : 'This mode uses deterministic procedural scattering from the current seed.'}
+            </p>
+          </ControlSection>
         </>
       )}
       <PanelResetButton label="Reset Props Settings" onClick={() => ctx.onResetPanel?.('props')} settingId="props.reset" />
@@ -272,6 +276,7 @@ function CloudsPanel({ ctx }) {
         onPerfSetting={ctx.onPerfSetting}
         onCloudQuality={ctx.onCloudQuality}
         worldMode={ctx.worldMode}
+        settingsTarget={ctx.settingsTarget}
       />
       <PanelResetButton label="Reset Cloud Settings" onClick={() => ctx.onResetPanel?.('clouds')} settingId="clouds.reset" />
     </SidePanel>
@@ -312,17 +317,13 @@ function SkyboxPanel({ ctx }) {
         settingId="skybox.skyboxEnabled"
         info="Surround the scene with the procedural sky dome (Tile + Infinite World). When off, a flat backdrop and the manual Lighting sun angles are used." />
 
-      <div className="panel-group">
-        <div className="panel-group-header"><span className="panel-group-title">TIME OF DAY</span></div>
-        <div className="panel-group-body">
-          <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} settingId="skybox.timeOfDay" />
-          <p className="section-hint">Drives the sky colours, sun position and atmosphere. Shared across the Tile view and the Infinite World.</p>
-        </div>
-      </div>
+      <ControlSection id="skybox-time" title="Time of Day" defaultOpen settingId="skybox.section.time">
+        <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} settingId="skybox.timeOfDay" />
+        <p className="section-hint">Drives the sky colours, sun position and atmosphere. Shared across the Tile view and the Infinite World.</p>
+      </ControlSection>
 
       {enabled && (
-        <>
-          <div className="subsection-label">Appearance</div>
+        <ControlSection id="skybox-appearance" title="Appearance" defaultOpen settingId="skybox.section.appearance">
           <SliderCtl def={SKYBOX_SLIDERS.skyboxBrightness} value={params.skyboxBrightness ?? 1}
             onChange={(v) => onParam('skyboxBrightness', v)} settingId="skybox.skyboxBrightness" />
           <SliderCtl def={SKYBOX_SLIDERS.skyboxHaze} value={params.skyboxHaze ?? 0.55}
@@ -331,7 +332,7 @@ function SkyboxPanel({ ctx }) {
             onChange={(v) => onParam('skyboxStars', v)}
             settingId="skybox.skyboxStars"
             info="Show the procedural star field when the sun is below the horizon." />
-        </>
+        </ControlSection>
       )}
       <PanelResetButton label="Reset Skybox Settings" onClick={() => ctx.onResetPanel?.('skybox')} settingId="skybox.reset" />
     </SidePanel>
@@ -347,7 +348,7 @@ function LightingPanel({ ctx }) {
         <p className="section-hint">Time of day and the sky environment are configured in the <strong>Skybox</strong> tab. While the procedural sky is on, it drives the sun direction and atmosphere; the manual sun angles below apply when the sky is disabled.</p>
       )}
       <EnvironmentPanelInner params={params} planetStyle={params.planetStyle}
-        onParam={ctx.onParam} onTuning={ctx.onStyleTuning} />
+        onParam={ctx.onParam} onTuning={ctx.onStyleTuning} settingsTarget={ctx.settingsTarget} />
       <PanelResetButton label="Reset Lighting Settings" onClick={() => ctx.onResetPanel?.('lighting')} settingId="lighting.reset" />
     </SidePanel>
   );
@@ -646,8 +647,7 @@ function ExportPanel({ ctx }) {
       </div>
 
       {multiTile && !circleTiles && (
-        <>
-          <div className="subsection-label">Tile Assembly</div>
+        <ControlSection id="export-tile-assembly" title="Tile Assembly" defaultOpen settingId="export.section.tileAssembly">
           <SelectRow
             label="Tile Export"
             value={opt.exportTileMode}
@@ -661,52 +661,57 @@ function ExportPanel({ ctx }) {
             Merged = one continuous landscape. Separate = each tile as its own
             named object with its own walls.
           </div>
-        </>
+        </ControlSection>
       )}
 
-      <div className="subsection-label">Format &amp; Resolution</div>
-      <SelectRow label="Format" value={opt.format} options={FORMAT_OPTIONS} onChange={(v) => set('format', v)} />
-      <ToggleRow label="Include Terrain Mesh" value={opt.includeMesh} onChange={(v) => set('includeMesh', v)} />
-      {opt.includeMesh && (
-        <>
-          <SelectRow label="Mesh Resolution" value={opt.meshRes} options={RES_OPTIONS} onChange={(v) => set('meshRes', v)} />
-          <ToggleRow label="Include Side Skirts" value={opt.includeSkirts} onChange={(v) => set('includeSkirts', v)} />
-          {opt.includeSkirts && (
-            <ToggleRow label="Include Base Slab" value={opt.includeBase} onChange={(v) => set('includeBase', v)} />
-          )}
-        </>
-      )}
+      <ControlSection id="export-format" title="Format & Resolution" defaultOpen settingId="export.section.format">
+        <SelectRow label="Format" value={opt.format} options={FORMAT_OPTIONS} onChange={(v) => set('format', v)} />
+        <ToggleRow label="Include Terrain Mesh" value={opt.includeMesh} onChange={(v) => set('includeMesh', v)} />
+        {opt.includeMesh && (
+          <>
+            <SelectRow label="Mesh Resolution" value={opt.meshRes} options={RES_OPTIONS} onChange={(v) => set('meshRes', v)} />
+            <ToggleRow label="Include Side Skirts" value={opt.includeSkirts} onChange={(v) => set('includeSkirts', v)} />
+            {opt.includeSkirts && (
+              <ToggleRow label="Include Base Slab" value={opt.includeBase} onChange={(v) => set('includeBase', v)} />
+            )}
+          </>
+        )}
+      </ControlSection>
 
-      <div className="subsection-label">Texture Baking</div>
-      <ToggleRow label="Bake Color Texture" value={opt.bakeColor} onChange={(v) => set('bakeColor', v)} />
-      {opt.bakeColor && (
-        <ToggleRow label="Bake Lighting into Color" value={opt.bakeLighting} onChange={(v) => set('bakeLighting', v)} />
-      )}
-      <ToggleRow label="Bake Normal Map" value={opt.bakeNormal} onChange={(v) => set('bakeNormal', v)} />
-      {showTex && (
-        <SelectRow label="Texture Size" value={opt.texRes} options={TEX_OPTIONS} onChange={(v) => set('texRes', v)} />
-      )}
+      <ControlSection id="export-textures" title="Texture Baking" defaultOpen settingId="export.section.textures">
+        <ToggleRow label="Bake Color Texture" value={opt.bakeColor} onChange={(v) => set('bakeColor', v)} />
+        {opt.bakeColor && (
+          <ToggleRow label="Bake Lighting into Color" value={opt.bakeLighting} onChange={(v) => set('bakeLighting', v)} />
+        )}
+        <ToggleRow label="Bake Normal Map" value={opt.bakeNormal} onChange={(v) => set('bakeNormal', v)} />
+        {showTex && (
+          <SelectRow label="Texture Size" value={opt.texRes} options={TEX_OPTIONS} onChange={(v) => set('texRes', v)} />
+        )}
+      </ControlSection>
 
-      <div className="subsection-label">Additional Assets</div>
-      <ToggleRow label="Export Heightmap" value={opt.exportHeightmap} onChange={(v) => set('exportHeightmap', v)} />
-      {opt.exportHeightmap && (
-        <ToggleRow label="Include Biome Splat Map" value={opt.exportSplat} onChange={(v) => set('exportSplat', v)} />
-      )}
-      <ToggleRow label="Export Collision Mesh" value={opt.exportCollision} onChange={(v) => set('exportCollision', v)} />
-      {opt.exportCollision && (
-        <SelectRow label="Collision Resolution" value={opt.collisionRes} options={COLL_OPTIONS} onChange={(v) => set('collisionRes', v)} />
-      )}
-      <ToggleRow label="Include Water Plane" value={opt.exportWater} onChange={(v) => set('exportWater', v)} />
-      {opt.exportWater && (
-        <ToggleRow label="Exclude Water from Export" value={opt.excludeWaterFromExport} onChange={(v) => set('excludeWaterFromExport', v)} />
-      )}
-      <div className="subsection-label">Water Maps</div>
-      <ToggleRow label="Export Water Mask" value={opt.exportWaterMask} onChange={(v) => set('exportWaterMask', v)} />
-      <ToggleRow label="Export Depth Map" value={opt.exportDepthMap} onChange={(v) => set('exportDepthMap', v)} />
-      <ToggleRow label="Export Shoreline Mask" value={opt.exportShorelineMask} onChange={(v) => set('exportShorelineMask', v)} />
-      <ToggleRow label="Export Foam Mask" value={opt.exportFoamMask} onChange={(v) => set('exportFoamMask', v)} />
-      <ToggleRow label="Include Water Material Metadata" value={opt.exportWaterMetadata} onChange={(v) => set('exportWaterMetadata', v)} />
-      <ToggleRow label="Export Preset (JSON)" value={opt.exportPreset} onChange={(v) => set('exportPreset', v)} />
+      <ControlSection id="export-assets" title="Additional Assets" defaultOpen={false} settingId="export.section.assets">
+        <ToggleRow label="Export Heightmap" value={opt.exportHeightmap} onChange={(v) => set('exportHeightmap', v)} />
+        {opt.exportHeightmap && (
+          <ToggleRow label="Include Biome Splat Map" value={opt.exportSplat} onChange={(v) => set('exportSplat', v)} />
+        )}
+        <ToggleRow label="Export Collision Mesh" value={opt.exportCollision} onChange={(v) => set('exportCollision', v)} />
+        {opt.exportCollision && (
+          <SelectRow label="Collision Resolution" value={opt.collisionRes} options={COLL_OPTIONS} onChange={(v) => set('collisionRes', v)} />
+        )}
+        <ToggleRow label="Include Water Plane" value={opt.exportWater} onChange={(v) => set('exportWater', v)} />
+        {opt.exportWater && (
+          <ToggleRow label="Exclude Water from Export" value={opt.excludeWaterFromExport} onChange={(v) => set('excludeWaterFromExport', v)} />
+        )}
+      </ControlSection>
+
+      <ControlSection id="export-water-maps" title="Water Maps" defaultOpen={false} settingId="export.section.waterMaps">
+        <ToggleRow label="Export Water Mask" value={opt.exportWaterMask} onChange={(v) => set('exportWaterMask', v)} />
+        <ToggleRow label="Export Depth Map" value={opt.exportDepthMap} onChange={(v) => set('exportDepthMap', v)} />
+        <ToggleRow label="Export Shoreline Mask" value={opt.exportShorelineMask} onChange={(v) => set('exportShorelineMask', v)} />
+        <ToggleRow label="Export Foam Mask" value={opt.exportFoamMask} onChange={(v) => set('exportFoamMask', v)} />
+        <ToggleRow label="Include Water Material Metadata" value={opt.exportWaterMetadata} onChange={(v) => set('exportWaterMetadata', v)} />
+        <ToggleRow label="Export Preset (JSON)" value={opt.exportPreset} onChange={(v) => set('exportPreset', v)} />
+      </ControlSection>
     </SidePanel>
   );
 }
@@ -726,29 +731,29 @@ function TilesContent({ ctx }) {
   const maxCells = shape === 'circle' ? diskMaxCells : gridCells;
   const atGridEdge = tiles.length >= maxCells;
   return (
-    <ControlSection id="inspector-tiles" title="TILES" defaultOpen={true} icon={PANEL_ICONS.tiles}>
-      <div className="subsection-label">Assembly</div>
-      <div className="settings-hint" style={{ marginBottom: 8 }}>
-        {shape === 'square'
-          ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
-          : (ctx.diskRadiusCells < extent
-            ? 'Hover around the circular edge and click the highlighted ring to expand the disk.'
-            : 'The circular terrain has reached its maximum radius.')}
-        {' '}Tiles share the same noise field and export together.
-      </div>
-      <SelectRow label="Shape" value={shape}
-        options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
-        onChange={ctx.onTileAssemblyShape} settingId="world.tileAssemblyShape"
-        info="Square supports hover-to-add tiles. Circle crops the current square chunk assembly to a disk." />
-      <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
-      {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
-      {atGridEdge && (
-        <div className="settings-hint">All {maxCells} available cells are occupied.</div>
-      )}
+    <ControlSection id="inspector-tiles" title="Tiles" defaultOpen settingId="world.section.tiles" icon={PANEL_ICONS.tiles}>
+      <ControlSection id="inspector-tiles-assembly" title="Assembly" nested defaultOpen settingId="world.section.tilesAssembly">
+        <div className="settings-hint" style={{ marginBottom: 8 }}>
+          {shape === 'square'
+            ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
+            : (ctx.diskRadiusCells < extent
+              ? 'Hover around the circular edge and click the highlighted ring to expand the disk.'
+              : 'The circular terrain has reached its maximum radius.')}
+          {' '}Tiles share the same noise field and export together.
+        </div>
+        <SelectRow label="Shape" value={shape}
+          options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
+          onChange={ctx.onTileAssemblyShape} settingId="world.tileAssemblyShape"
+          info="Square supports hover-to-add tiles. Circle crops the current square chunk assembly to a disk." />
+        <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
+        {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
+        {atGridEdge && (
+          <div className="settings-hint">All {maxCells} available cells are occupied.</div>
+        )}
+      </ControlSection>
 
       {shape === 'square' && tiles.length > 1 && (
-        <>
-          <div className="subsection-label">Remove a tile</div>
+        <ControlSection id="inspector-tiles-remove" title="Remove a Tile" nested defaultOpen={false} settingId="world.section.tilesRemove">
           <div className="tile-chip-grid">
             {tiles.map((t) => (
               <button
@@ -762,7 +767,7 @@ function TilesContent({ ctx }) {
               </button>
             ))}
           </div>
-        </>
+        </ControlSection>
       )}
     </ControlSection>
   );

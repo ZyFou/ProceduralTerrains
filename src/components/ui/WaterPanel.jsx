@@ -1,6 +1,7 @@
 import { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
+import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { ColorField, WATER_COLORS, TERRAIN_SLIDERS } from '../panels/defs.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
@@ -137,9 +138,13 @@ export default function WaterPanelInner({
   planetStyleProps,
   onResetWaterSettings,
   onExportWaterMasks,
+  settingsTarget,
   id = 'inspector-water',
 }) {
   const flat = useContext(FlatPanelContext);
+  const target = settingsTarget?.panelId === 'water' ? settingsTarget : null;
+  const forceSection = (sectionId, sectionLabel, prefixes = []) =>
+    shouldForceSectionOpen(target, sectionId, { sectionLabel, childPrefixes: prefixes });
   const palette = params.planetStyle?.palette ?? {};
   const mode = val(params, 'waterMode');
   const enabled = val(params, 'waterEnabled');
@@ -194,7 +199,13 @@ export default function WaterPanelInner({
         )}
       </div>
 
-      <ControlSection id={`${id}-mode`} title="Mode" defaultOpen>
+      <ControlSection
+        id={`${id}-mode`}
+        title="Mode"
+        defaultOpen
+        settingId="water.section.mode"
+        forceOpen={forceSection('water.section.mode', 'Mode', ['water.water', 'water.seaLevel', 'performance.water'])}
+      >
         <ToggleRow
           label="Water Enabled"
           value={enabled && mode !== 'off'}
@@ -237,7 +248,13 @@ export default function WaterPanelInner({
       </ControlSection>
 
       {enabled && mode !== 'off' && (
-        <ControlSection id={`${id}-shader`} title="Shader Quality" defaultOpen>
+        <ControlSection
+          id={`${id}-shader`}
+          title="Shader Quality"
+          defaultOpen
+          settingId="water.section.shader"
+          forceOpen={forceSection('water.section.shader', 'Shader Quality', ['performance.water'])}
+        >
           <SelectRow
             label="Water Quality"
             value={String(p.waterQuality ?? 2)}
@@ -268,7 +285,13 @@ export default function WaterPanelInner({
         </ControlSection>
       )}
 
-      <ControlSection id={`${id}-material`} title="Material" defaultOpen={enabled}>
+      <ControlSection
+        id={`${id}-material`}
+        title="Material"
+        defaultOpen={enabled}
+        settingId="water.section.material"
+        forceOpen={forceSection('water.section.material', 'Material', ['water.waterAnim', 'planet.water', 'water.waterOpacity', 'water.waterRoughness', 'water.waterFresnel', 'water.waterRefraction', 'water.waterSpecular'])}
+      >
         <ToggleRow
           label="Water Animation"
           value={params.waterAnim}
@@ -276,17 +299,25 @@ export default function WaterPanelInner({
           settingId="water.waterAnim"
           info="Animate surface ripples and foam in all world modes."
         />
-        <div className="subsection-label">Water Colors</div>
-        {WATER_COLORS.map(({ key, label, icon, info }) => (
-          <ColorField
-            key={key}
-            label={label}
-            icon={icon}
-            info={info}
-            value={colorToHex(palette[key] ?? [0.05, 0.2, 0.35])}
-            onChange={(e) => planetStyleProps.onColorChange(key, parseColor(e.target.value))}
-          />
-        ))}
+        <ControlSection
+          id={`${id}-water-colors`}
+          title="Water Colors"
+          nested
+          defaultOpen
+          settingId="water.section.waterColors"
+          forceOpen={forceSection('water.section.waterColors', 'Water Colors', ['planet.water'])}
+        >
+          {WATER_COLORS.map(({ key, label, icon, info }) => (
+            <ColorField
+              key={key}
+              label={label}
+              icon={icon}
+              info={info}
+              value={colorToHex(palette[key] ?? [0.05, 0.2, 0.35])}
+              onChange={(e) => planetStyleProps.onColorChange(key, parseColor(e.target.value))}
+            />
+          ))}
+        </ControlSection>
         {selectedRealistic && MATERIAL_SLIDERS.map((def) => (
           <SliderCtl
             key={def.key}
@@ -304,7 +335,13 @@ export default function WaterPanelInner({
       </ControlSection>
 
       {selectedRealistic && (
-        <ControlSection id={`${id}-depth`} title="Depth" defaultOpen={isStudio}>
+        <ControlSection
+          id={`${id}-depth`}
+          title="Depth"
+          defaultOpen={isStudio}
+          settingId="water.section.depth"
+          forceOpen={forceSection('water.section.depth', 'Depth', ['water.waterDepth', 'water.waterMaxVisible', 'water.waterShallow', 'water.waterDeep', 'water.waterAbsorption'])}
+        >
           {!effectiveRealistic && (
             <p className="section-hint">
               Stored for Tile / Infinite World. {isPlanet ? 'Planet currently renders Legacy water.' : 'Effective mode differs from selected mode.'}
@@ -317,7 +354,13 @@ export default function WaterPanelInner({
       )}
 
       {enabled && (
-        <ControlSection id={`${id}-waves`} title="Waves" defaultOpen={false}>
+        <ControlSection
+          id={`${id}-waves`}
+          title="Waves"
+          defaultOpen={false}
+          settingId="water.section.waves"
+          forceOpen={forceSection('water.section.waves', 'Waves', ['water.waterWave', 'water.waterSmall', 'water.waterLarge', 'water.waterNormal', 'water.waterAnimSpeed', 'performance.waterWaves'])}
+        >
           {selectedRealistic
             ? WAVE_SLIDERS.map((def) => (
               <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
@@ -329,7 +372,13 @@ export default function WaterPanelInner({
       )}
 
       {selectedRealistic && (
-        <ControlSection id={`${id}-foam`} title="Foam" defaultOpen={false}>
+        <ControlSection
+          id={`${id}-foam`}
+          title="Foam"
+          defaultOpen={false}
+          settingId="water.section.foam"
+          forceOpen={forceSection('water.section.foam', 'Foam', ['water.waterFoam'])}
+        >
           <ToggleRow
             label="Enable Foam"
             value={!!val(params, 'waterFoamEnabled')}
@@ -348,7 +397,13 @@ export default function WaterPanelInner({
         const uwFellBack = underwaterModeFellBack(params, effectiveMode);
         const requested = val(params, 'waterUnderwaterMode');
         return (
-          <ControlSection id={`${id}-underwater`} title="Underwater" defaultOpen={false}>
+          <ControlSection
+            id={`${id}-underwater`}
+            title="Underwater"
+            defaultOpen={false}
+            settingId="water.section.underwater"
+            forceOpen={forceSection('water.section.underwater', 'Underwater', ['water.waterUnderwater', 'performance.underwater'])}
+          >
             <ToggleRow
               label="Enable Underwater Effect"
               value={uwEnabled}
@@ -381,8 +436,14 @@ export default function WaterPanelInner({
             ))}
 
             {uwEnabled && (
-              <>
-                <div className="subsection-label">Caustics</div>
+              <ControlSection
+                id={`${id}-caustics`}
+                title="Caustics"
+                nested
+                defaultOpen={false}
+                settingId="water.section.caustics"
+                forceOpen={forceSection('water.section.caustics', 'Caustics', ['water.waterUnderwaterCaustics'])}
+              >
                 <ToggleRow
                   label="Caustics Enabled"
                   value={val(params, 'waterUnderwaterCausticsEnabled') !== false}
@@ -393,12 +454,18 @@ export default function WaterPanelInner({
                 {val(params, 'waterUnderwaterCausticsEnabled') !== false && CAUSTIC_SLIDERS.map((def) => (
                   <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
                 ))}
-              </>
+              </ControlSection>
             )}
 
             {uwEnabled && (
-              <>
-                <div className="subsection-label">High Mode Extras</div>
+              <ControlSection
+                id={`${id}-high-extras`}
+                title="High Mode Extras"
+                nested
+                defaultOpen={false}
+                settingId="water.section.highExtras"
+                forceOpen={forceSection('water.section.highExtras', 'High Mode Extras', ['water.waterUnderwaterLight', 'water.waterUnderwaterParticles'])}
+              >
                 <ToggleRow
                   label="Light Shafts"
                   value={!!val(params, 'waterUnderwaterLightShafts')}
@@ -416,14 +483,14 @@ export default function WaterPanelInner({
                 {uwResolved !== 'high' && (val(params, 'waterUnderwaterLightShafts') || val(params, 'waterUnderwaterParticles')) && (
                   <p className="section-hint">Light shafts and particles only render in High mode.</p>
                 )}
-              </>
+              </ControlSection>
             )}
           </ControlSection>
         );
       })()}
 
       {enabled && isPlanet && (
-        <ControlSection id={`${id}-planet`} title="Planet Ocean" defaultOpen={false}>
+        <ControlSection id={`${id}-planet`} title="Planet Ocean" defaultOpen={false} settingId="water.section.planet">
           <p className="section-hint">
             Planet uses a spherical ocean shell at sea level. Water colors and animation apply immediately.
             Underwater post-processing is disabled on the planet (curved surface). Realistic depth/foam settings are saved for other modes.
@@ -432,7 +499,13 @@ export default function WaterPanelInner({
       )}
 
       {selectedRealistic && (
-        <ControlSection id={`${id}-performance`} title="Performance" defaultOpen={false}>
+        <ControlSection
+          id={`${id}-performance`}
+          title="Performance"
+          defaultOpen={false}
+          settingId="water.section.performance"
+          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterRefractionQuality', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterRender', 'water.waterDisable'])}
+        >
           {mode === 'cinematic' && isStudio && (
             <p className="section-hint warning">Cinematic mode is expensive — best for Tile mode screenshots.</p>
           )}
@@ -448,7 +521,13 @@ export default function WaterPanelInner({
         </ControlSection>
       )}
 
-      <ControlSection id={`${id}-debug`} title="Debug" defaultOpen={false}>
+      <ControlSection
+        id={`${id}-debug`}
+        title="Debug"
+        defaultOpen={false}
+        settingId="water.section.debug"
+        forceOpen={forceSection('water.section.debug', 'Debug', ['water.waterDebug', 'water.waterShow'])}
+      >
         <SelectRow
           label="Water Debug View"
           value={val(params, 'waterDebugView')}
@@ -475,7 +554,7 @@ export default function WaterPanelInner({
         )}
       </ControlSection>
 
-      <ControlSection id={`${id}-export`} title="Export" defaultOpen={false}>
+      <ControlSection id={`${id}-export`} title="Export" defaultOpen={false} settingId="water.section.export">
         <p className="section-hint">
           {isStudio
             ? 'Export water masks from the tile height field, or use the Export panel for GLB output.'
