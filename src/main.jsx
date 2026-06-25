@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import Root from './Root.jsx';
 import { LoadingProvider } from './state/loading.jsx';
+import './cursors.css';
 import './styles.css';
 
 // No StrictMode on purpose: its dev double-mount would create (and tear down)

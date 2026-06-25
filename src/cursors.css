@@ -1,0 +1,23 @@
+/* Windows 11 Light Theme cursor pack — https://www.rw-designer.com/cursor-set/windows-11-light-theme */
+:root {
+  --cursor-default: url('/cursors/windows-11-light-theme/pointer.cur'), default;
+  --cursor-pointer: url('/cursors/windows-11-light-theme/link.cur'), pointer;
+  --cursor-text: url('/cursors/windows-11-light-theme/beam.cur'), text;
+  --cursor-not-allowed: url('/cursors/windows-11-light-theme/unavailable.cur'), not-allowed;
+  --cursor-crosshair: url('/cursors/windows-11-light-theme/precision.cur'), crosshair;
+  --cursor-move: url('/cursors/windows-11-light-theme/move.cur'), move;
+  --cursor-grab: url('/cursors/windows-11-light-theme/move.cur'), grab;
+  --cursor-grabbing: url('/cursors/windows-11-light-theme/move.cur'), grabbing;
+  --cursor-help: url('/cursors/windows-11-light-theme/help.cur'), help;
+}
+
+html,
+body {
+  cursor: var(--cursor-default);
+}
+
+input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+textarea,
+[contenteditable='true'] {
+  cursor: var(--cursor-text);
+}

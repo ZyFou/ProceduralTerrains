@@ -148,7 +148,7 @@ body:has(.landing-overlay) {
   font-family: var(--font);
   font-size: 13.5px;
   font-weight: 600;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   box-shadow: 0 4px 24px rgba(37, 99, 235, 0.35);
 }
@@ -161,7 +161,7 @@ body:has(.landing-overlay) {
 .landing-cta:active:not(:disabled) { transform: translateY(0); }
 .landing-cta:disabled {
   opacity: 0.9;
-  cursor: default;
+  cursor: var(--cursor-default);
   transform: none;
   box-shadow: none;
 }

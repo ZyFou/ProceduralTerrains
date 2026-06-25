@@ -3,6 +3,8 @@ import {
   AUTHOR_NAME,
   AUTHOR_PORTFOLIO_URL,
   AUTHOR_X_URL,
+  CURSOR_PACK_AUTHOR,
+  CURSOR_PACK_URL,
   GITHUB_REPO_URL,
 } from '../constants/app.js';
 import { Logo, LandingVersionTile, LandingSeedTile, FEATURES, MODES } from './shared.jsx';
@@ -103,6 +105,12 @@ export default function Landing({ exiting, bootReady, onLaunch, sessionSeed }) {
               Made by{' '}
               <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">
                 {AUTHOR_NAME}
+              </a>
+            </p>
+            <p className="landing-site-credit">
+              Cursors by{' '}
+              <a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">
+                {CURSOR_PACK_AUTHOR}
               </a>
             </p>
             <nav className="landing-site-links" aria-label="Project links">

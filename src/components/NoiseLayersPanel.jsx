@@ -16,7 +16,7 @@ import {
 
 // ---- icons (inline SVGs) ---------------------------------------------------
 const GripIcon = () => (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style={{ cursor: 'grab', opacity: 0.45 }}>
+  <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style={{ cursor: 'var(--cursor-grab)', opacity: 0.45 }}>
     <circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" />
     <circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" />
     <circle cx="5" cy="13" r="1.2" /><circle cx="11" cy="13" r="1.2" />
