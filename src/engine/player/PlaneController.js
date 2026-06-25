@@ -6,19 +6,25 @@ const MAX_BANK = 70 * DEG;
 
 const DEFAULT_PLANE_CONFIG = {
   gravity: 32,
-  minSpeed: 18,
+  minSpeed: 25,
   cruiseSpeed: 95,
   maxSpeed: 240,
-  acceleration: 55,
-  drag: 0.34,
-  lift: 0.0008,
+  engineAccel: 45,
+  drag: 0.08,
+  diveGain: 1.2,
   pitchRate: 1.35,
   yawRate: 0.62,
   rollRate: 1.8,
   mouseSensitivity: 0.0019,
   terrainClearance: 4,
   spawnClearance: 28,
-  terminalVelocity: 170,
+  defaultThrottle: 0.65,
+  throttleUpRate: 1.05,
+  throttleDownRate: 0.75,
+  spawnSpeedFactor: 0.8,
+  spawnPitch: 0.08,
+  stallThrottle: 0.15,
+  groundRecoveryFactor: 0.45,
 };
 
 export class PlaneController {
@@ -30,9 +36,12 @@ export class PlaneController {
     this.cfg = { ...DEFAULT_PLANE_CONFIG, ...config };
     this.isPlanet = !!planetSampler;
 
-    this.throttle = 0.35;
+    this.throttle = this.cfg.defaultThrottle;
     this.speedMultiplier = 1;
+    this.airspeed = 0;
     this.state = 'flying';
+    this.altitude = 0;
+    this.verticalSpeed = 0;
     this.touch = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: this.throttle };
     this.touchActive = false;
 
@@ -97,6 +106,35 @@ export class PlaneController {
 
   get isLocked() { return this._locked; }
   get keys() { return this._keys; }
+  get pitchDeg() { return this._pitch * (180 / Math.PI); }
+  get rollDeg() { return (-this._roll) * (180 / Math.PI); }
+
+  getHudData() {
+    return {
+      throttle: this.throttle,
+      pitch: this.pitchDeg,
+      roll: this.rollDeg,
+      heading: this._headingDeg(),
+      altitude: this.altitude,
+      airspeed: this.airspeed,
+      speed: this._vel.length(),
+      verticalSpeed: this.verticalSpeed,
+      state: this.state,
+    };
+  }
+
+  _headingDeg() {
+    if (this.isPlanet) {
+      const fwd = this._tmp.copy(this._planetForward);
+      const east = this._tmp2.set(0, 1, 0).cross(this._up);
+      if (east.lengthSq() < 1e-6) east.set(1, 0, 0);
+      else east.normalize();
+      const north = this._tmp2.copy(this._up).cross(east).normalize();
+      const h = Math.atan2(fwd.dot(east), fwd.dot(north)) * (180 / Math.PI);
+      return ((h % 360) + 360) % 360;
+    }
+    return ((this._yaw * (180 / Math.PI) % 360) + 360) % 360;
+  }
 
   setTouchInput({ moveX = 0, moveY = 0, lookX = 0, lookY = 0, throttle = this.throttle } = {}) {
     this.touch.moveX = moveX;
@@ -116,7 +154,13 @@ export class PlaneController {
       this.camera.position.copy(this._up).multiplyScalar(r);
       const ref = Math.abs(this._up.y) < 0.95 ? this._tmp.set(0, 1, 0) : this._tmp.set(1, 0, 0);
       this._planetForward.copy(ref).addScaledVector(this._up, -ref.dot(this._up)).normalize();
-      this._vel.copy(this._planetForward).multiplyScalar(this.cfg.minSpeed * 1.25);
+      this._pitch = this.cfg.spawnPitch;
+      this.airspeed = this._spawnSpeed();
+      const lookDir = this._tmp2.copy(this._planetForward)
+        .multiplyScalar(Math.cos(this._pitch))
+        .addScaledVector(this._up, Math.sin(this._pitch))
+        .normalize();
+      this._vel.copy(lookDir).multiplyScalar(this.airspeed);
       this._syncPlanetCamera();
       return;
     }
@@ -126,14 +170,36 @@ export class PlaneController {
     const fwd = this.camera.getWorldDirection(this._tmp).normalize();
     this._yaw = Math.atan2(-fwd.x, -fwd.z);
     this._pitch = Math.asin(Math.max(-0.95, Math.min(0.95, fwd.y)));
+    this._pitch = Math.max(this._pitch, this.cfg.spawnPitch);
     this._roll = 0;
-    this._vel.copy(fwd).multiplyScalar(this.cfg.minSpeed * 1.25);
+    this.airspeed = this._spawnSpeed();
+    this._vel.copy(this._forward()).multiplyScalar(this.airspeed);
     this._syncFlatCamera();
   }
 
   update(dt) {
     if (this.isPlanet) this._updatePlanet(dt);
     else this._updateFlat(dt);
+  }
+
+  _integrateArcadeFlight(fwd, dt) {
+    const cfg = this.cfg;
+    const maxSpeed = Math.max(cfg.minSpeed, cfg.maxSpeed * this.speedMultiplier);
+    const idleSpeed = cfg.minSpeed * 0.3;
+    const targetSpeed = THREE.MathUtils.lerp(idleSpeed, maxSpeed, this.throttle);
+    const accelStep = cfg.engineAccel * dt;
+    const delta = targetSpeed - this.airspeed;
+    if (Math.abs(delta) <= accelStep) {
+      this.airspeed = targetSpeed;
+    } else {
+      this.airspeed += Math.sign(delta) * accelStep;
+    }
+
+    this.airspeed += cfg.gravity * Math.max(0, -Math.sin(this._pitch)) * cfg.diveGain * dt;
+    const dragRatio = this.airspeed / Math.max(1, maxSpeed);
+    this.airspeed -= cfg.drag * dragRatio * dragRatio * cfg.maxSpeed * dt;
+    this.airspeed = THREE.MathUtils.clamp(this.airspeed, 0, maxSpeed);
+    this._vel.copy(fwd).multiplyScalar(this.airspeed);
   }
 
   _updateFlat(dt) {
@@ -148,25 +214,23 @@ export class PlaneController {
     this._yaw += (-Math.sin(this._roll) * cfg.yawRate + input.yaw * 0.35) * dt;
 
     const fwd = this._forward();
-    const speed = this._vel.length();
-    const target = Math.max(cfg.minSpeed * 0.4, cfg.cruiseSpeed * this.throttle * this.speedMultiplier);
-    this._vel.addScaledVector(fwd, (target - speed) * cfg.acceleration * 0.015 * dt);
-    this._vel.addScaledVector(this._vel, -cfg.drag * dt);
-    const lift = Math.min(cfg.gravity * 1.35, speed * speed * cfg.lift * this.throttle);
-    this._vel.y += (lift - cfg.gravity) * dt;
-    if (this._vel.y < -cfg.terminalVelocity) this._vel.y = -cfg.terminalVelocity;
+    this._integrateArcadeFlight(fwd, dt);
 
     this.camera.position.addScaledVector(this._vel, dt);
     const ground = this._flatGround(this.camera.position.x, this.camera.position.z);
     const clearance = this.camera.position.y - ground;
-    const stall = speed < cfg.minSpeed || this.throttle < 0.08;
-    this.state = clearance <= cfg.terrainClearance + 0.2 ? 'grounded' : stall ? 'stalling' : (this._vel.y < -12 ? 'falling' : 'flying');
+    this.altitude = Math.max(0, clearance);
+    this.verticalSpeed = this._vel.y;
+    this.airspeed = this._vel.length();
+    const stall = this.airspeed < cfg.minSpeed && this.throttle < cfg.stallThrottle;
+    this.state = clearance <= cfg.terrainClearance + 0.2 ? 'grounded' : (stall ? 'stalling' : 'flying');
 
     if (clearance < cfg.terrainClearance) {
       this.camera.position.y = ground + cfg.spawnClearance;
-      this._vel.copy(fwd).multiplyScalar(Math.max(cfg.minSpeed * 1.1, speed * 0.35));
-      this._pitch = Math.max(0.04, this._pitch);
+      this.airspeed = Math.max(cfg.minSpeed * 1.1, this.airspeed * cfg.groundRecoveryFactor);
+      this._pitch = Math.max(cfg.spawnPitch, this._pitch);
       this._roll *= 0.3;
+      this._vel.copy(this._forward()).multiplyScalar(this.airspeed);
       this.state = 'grounded';
     }
     this._syncFlatCamera();
@@ -193,26 +257,27 @@ export class PlaneController {
 
     const right = this._tmp.copy(this._planetForward).cross(this._up).normalize();
     const fwd = this._tmp2.copy(this._planetForward).multiplyScalar(Math.cos(this._pitch)).addScaledVector(this._up, Math.sin(this._pitch)).normalize();
-    const speed = this._vel.length();
-    const target = Math.max(cfg.minSpeed * 0.4, cfg.cruiseSpeed * this.throttle * this.speedMultiplier);
-    this._vel.addScaledVector(fwd, (target - speed) * cfg.acceleration * 0.015 * dt);
-    this._vel.addScaledVector(this._vel, -cfg.drag * dt);
-    const lift = Math.min(cfg.gravity * 1.35, speed * speed * cfg.lift * this.throttle);
-    this._vel.addScaledVector(this._up, (lift - cfg.gravity) * dt);
-    const inward = this._vel.dot(this._up);
-    if (inward < -cfg.terminalVelocity) this._vel.addScaledVector(this._up, -cfg.terminalVelocity - inward);
+    this._integrateArcadeFlight(fwd, dt);
 
     pos.addScaledVector(this._vel, dt);
     this._up.copy(pos).normalize();
     const surface = this._surfaceRadius(this._up);
     const altitude = pos.length() - surface;
-    const stall = speed < cfg.minSpeed || this.throttle < 0.08;
-    this.state = altitude <= cfg.terrainClearance + 0.2 ? 'grounded' : stall ? 'stalling' : (this._vel.dot(this._up) < -12 ? 'falling' : 'flying');
+    this.altitude = Math.max(0, altitude);
+    this.verticalSpeed = this._vel.dot(this._up);
+    this.airspeed = this._vel.length();
+    const stall = this.airspeed < cfg.minSpeed && this.throttle < cfg.stallThrottle;
+    this.state = altitude <= cfg.terrainClearance + 0.2 ? 'grounded' : (stall ? 'stalling' : 'flying');
     if (altitude < cfg.terrainClearance) {
       pos.copy(this._up).multiplyScalar(surface + cfg.spawnClearance);
-      this._vel.copy(fwd).multiplyScalar(Math.max(cfg.minSpeed * 1.1, speed * 0.35));
-      this._pitch = Math.max(0.04, this._pitch);
+      this.airspeed = Math.max(cfg.minSpeed * 1.1, this.airspeed * cfg.groundRecoveryFactor);
+      this._pitch = Math.max(cfg.spawnPitch, this._pitch);
       this._roll *= 0.3;
+      const recoverDir = this._tmp2.copy(this._planetForward)
+        .multiplyScalar(Math.cos(this._pitch))
+        .addScaledVector(this._up, Math.sin(this._pitch))
+        .normalize();
+      this._vel.copy(recoverDir).multiplyScalar(this.airspeed);
       this.state = 'grounded';
     }
 
@@ -223,10 +288,10 @@ export class PlaneController {
     const canKeys = this._locked;
     if (canKeys) {
       if (this._keys.has('KeyW') || this._keys.has('KeyZ') || this._keys.has('ShiftLeft') || this._keys.has('ShiftRight')) {
-        this.throttle = Math.min(1, this.throttle + dt * 0.45);
+        this.throttle = Math.min(1, this.throttle + dt * this.cfg.throttleUpRate);
       }
       if (this._keys.has('KeyS') || this._keys.has('ControlLeft') || this._keys.has('ControlRight')) {
-        this.throttle = Math.max(0, this.throttle - dt * 0.55);
+        this.throttle = Math.max(0, this.throttle - dt * this.cfg.throttleDownRate);
       }
     }
     const t = this.touch;
@@ -240,6 +305,11 @@ export class PlaneController {
     this._mouseX *= Math.exp(-5 * dt);
     this._mouseY *= Math.exp(-5 * dt);
     return { roll, pitch, yaw, mouseX, mouseY };
+  }
+
+  _spawnSpeed() {
+    const cruise = this.cfg.cruiseSpeed * this.throttle * this.speedMultiplier;
+    return Math.min(this.cfg.maxSpeed * this.speedMultiplier, Math.max(this.cfg.minSpeed * 1.35, cruise * this.cfg.spawnSpeedFactor));
   }
 
   _flatGround(x, z) {
@@ -260,7 +330,7 @@ export class PlaneController {
   }
 
   _syncFlatCamera() {
-    this._euler.set(this._pitch, this._yaw, this._roll, 'YXZ');
+    this._euler.set(this._pitch, this._yaw, -this._roll, 'YXZ');
     this.camera.quaternion.setFromEuler(this._euler);
   }
 
@@ -272,7 +342,7 @@ export class PlaneController {
       .multiplyScalar(Math.cos(this._pitch))
       .addScaledVector(this._up, Math.sin(this._pitch))
       .normalize();
-    this.camera.up.copy(this._up).applyAxisAngle(lookDir, this._roll * 0.35);
+    this.camera.up.copy(this._up).applyAxisAngle(lookDir, -this._roll * 0.35);
     this.camera.lookAt(this.camera.position.clone().add(lookDir));
     void right;
   }

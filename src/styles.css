@@ -2578,6 +2578,285 @@ input[type="color"].palette-color-input {
   text-transform: capitalize;
 }
 
+/* ============ PLANE MODE HUD ============ */
+.plane-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 16;
+  pointer-events: none;
+  font-family: var(--mono);
+}
+.infinite-mode.plane-mode #fps-crosshair { display: none; }
+.fps-explore-mode.plane-mode #fps-crosshair { display: none; }
+
+.plane-hud-left {
+  position: absolute;
+  left: 18px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.plane-hud-right {
+  position: absolute;
+  right: 18px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.plane-ai {
+  width: 132px;
+  height: 132px;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.45));
+}
+.plane-ai-stall .plane-ai-ring { stroke: #f87171; stroke-width: 2.5; }
+.plane-ai-svg { width: 100%; height: 100%; display: block; }
+.plane-ai-bezel {
+  fill: #0a0c10;
+  stroke: #3a4254;
+  stroke-width: 2;
+}
+.plane-ai-sky { fill: #1e4d8c; }
+.plane-ai-ground { fill: #6b4a2e; }
+.plane-ai-horizon-line {
+  stroke: #f8fafc;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.plane-ai-ladder {
+  stroke: rgba(248, 250, 252, 0.72);
+  stroke-width: 1.4;
+}
+.plane-ai-ladder-label {
+  fill: rgba(248, 250, 252, 0.65);
+  font-size: 8px;
+  font-family: var(--mono);
+}
+.plane-ai-tick {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1.2;
+}
+.plane-ai-wings {
+  stroke: #fbbf24;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  fill: none;
+}
+.plane-ai-center { fill: #fbbf24; }
+.plane-ai-ring {
+  fill: none;
+  stroke: #64748b;
+  stroke-width: 1.6;
+}
+
+.plane-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(10, 12, 16, 0.82);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-panel);
+}
+.plane-heading-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+.plane-heading-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f8fafc;
+  min-width: 3.2em;
+  text-align: right;
+}
+
+.plane-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0.88;
+}
+
+.plane-throttle {
+  width: 58px;
+  background: rgba(10, 12, 16, 0.88);
+  border: 1px solid #3a4254;
+  border-radius: 8px;
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.plane-throttle-header {
+  text-align: center;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--accent);
+  padding: 5px 0 3px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.plane-throttle-body {
+  display: flex;
+  padding: 8px 6px 6px;
+  gap: 4px;
+}
+.plane-throttle-track {
+  position: relative;
+  width: 22px;
+  height: 148px;
+  border-radius: 4px;
+  background: #11151c;
+  border: 1px solid #2a3140;
+  overflow: hidden;
+}
+.plane-throttle-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.plane-throttle-zone-idle {
+  bottom: 0;
+  height: 28%;
+  background: linear-gradient(180deg, transparent, rgba(248, 113, 113, 0.12));
+}
+.plane-throttle-zone-cruise {
+  bottom: 28%;
+  height: 44%;
+  background: rgba(52, 211, 153, 0.08);
+}
+.plane-throttle-zone-max {
+  top: 0;
+  height: 28%;
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.14), transparent);
+}
+.plane-throttle-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  transform: translateY(50%);
+  pointer-events: none;
+}
+.plane-throttle-tick-mark {
+  width: 6px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  margin-left: 2px;
+}
+.plane-throttle-tick-label {
+  position: absolute;
+  left: 10px;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.plane-throttle-lever {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 0;
+  transform: translateY(50%);
+  z-index: 2;
+}
+.plane-throttle-handle {
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #4b5563, #1f2937);
+  border: 1px solid #9ca3af;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.plane-throttle-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.42);
+  padding: 2px 0;
+}
+.plane-throttle-readout {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f8fafc;
+  padding: 4px 0 7px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.plane-instruments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 72px;
+}
+.plane-gauge {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(10, 12, 16, 0.82);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-panel);
+}
+.plane-gauge-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+}
+.plane-gauge-val {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f8fafc;
+  text-align: right;
+}
+.plane-gauge-val.plane-gauge-warn { color: #f87171; }
+.plane-gauge-unit {
+  font-size: 8px;
+  color: var(--text-dim);
+}
+
+.plane-stall-banner {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 18px;
+  border-radius: 4px;
+  background: rgba(127, 29, 29, 0.88);
+  border: 1px solid #f87171;
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  animation: plane-stall-pulse 0.9s ease-in-out infinite;
+  box-shadow: 0 4px 18px rgba(248, 113, 113, 0.35);
+}
+@keyframes plane-stall-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (max-width: 640px) {
+  .plane-hud-left { left: 10px; bottom: calc(88px + env(safe-area-inset-bottom)); }
+  .plane-hud-right { right: 10px; bottom: calc(88px + env(safe-area-inset-bottom)); }
+  .plane-ai { width: 108px; height: 108px; }
+  .plane-throttle-track { height: 118px; }
+  .plane-instruments { display: none; }
+}
+
 /* ============ RESPONSIVE ============ */
 @media (max-width: 1180px) {
   /* collapse secondary top-bar button labels; keep icons */

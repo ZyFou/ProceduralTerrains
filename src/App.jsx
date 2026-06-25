@@ -16,6 +16,7 @@ import BottomToolbar from './components/BottomToolbar.jsx';
 import WorldModeBar from './components/WorldModeBar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
+import PlaneHUD from './components/PlaneHUD.jsx';
 import TouchControls from './components/TouchControls.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
@@ -864,7 +865,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -994,6 +995,8 @@ export default function App() {
           )}
 
           {touchExplore && <TouchControls mode={exploreMode} onInput={handleTouchInput} />}
+
+          {exploreMode === 'plane' && <PlaneHUD stats={infiniteStats} />}
 
           {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>

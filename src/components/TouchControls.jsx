@@ -78,7 +78,7 @@ function useJoystick(onChange) {
 }
 
 export default function TouchControls({ onInput, mode = 'none' }) {
-  const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: 0.35 });
+  const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: 0.65 });
   const throttleRef = useRef(null);
   const throttleFillRef = useRef(null);
   const throttleActiveRef = useRef(null);
@@ -148,8 +148,8 @@ export default function TouchControls({ onInput, mode = 'none' }) {
       if (throttleFillRef.current) throttleFillRef.current.style.height = '0%';
       sync();
     } else if (stateRef.current.throttle <= 0) {
-      stateRef.current.throttle = 0.35;
-      if (throttleFillRef.current) throttleFillRef.current.style.height = '35%';
+      stateRef.current.throttle = 0.65;
+      if (throttleFillRef.current) throttleFillRef.current.style.height = '65%';
       sync();
     }
   }, [mode, sync]);

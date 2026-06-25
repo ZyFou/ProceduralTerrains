@@ -580,7 +580,7 @@ export class Engine {
   // A cell can be added if empty, inside the 5×5 grid, and 4-adjacent to an
   // occupied cell (assembly stays connected). No cap on how many are placed.
   canAddTileAt(cx, cz) {
-    if (this.worldMode !== 'studio') return false;
+    if (this._landingShowcase || this.worldMode !== 'studio') return false;
     if (!this._inTilePlacementBounds(cx, cz)) return false;
     if (this._hasTile(cx, cz)) return false;
     return this._hasTile(cx - 1, cz) || this._hasTile(cx + 1, cz)
@@ -612,7 +612,8 @@ export class Engine {
   }
 
   canExpandCircle() {
-    return this.worldMode === 'studio'
+    return !this._landingShowcase
+      && this.worldMode === 'studio'
       && this.tileAssemblyShape === 'circle'
       && this.diskRadiusCells < this.tileGridExtent;
   }
@@ -716,7 +717,8 @@ export class Engine {
   }
 
   _tileInteractionActive() {
-    return this.worldMode === 'studio'
+    return !this._landingShowcase
+      && this.worldMode === 'studio'
       && this.exploreMode === 'none'
       && !this.paintState?.enabled;
   }
@@ -1894,6 +1896,10 @@ export class Engine {
   setLandingShowcase(active) {
     if (this._landingShowcase === active) return;
     this._landingShowcase = active;
+    if (active) {
+      this._tileGhostCell = null;
+      this._updateTileGhost();
+    }
     if (this.worldMode !== 'studio' || !this.controls) return;
     if (active) {
       this.controls.autoOrbit = true;
@@ -3564,7 +3570,35 @@ export class Engine {
       if (this.cb.onPlayerState) {
         this.cb.onPlayerState(this.player ? this.player.state : null);
       }
+      if (this.exploreMode === 'plane') {
+        this._emitExploreStats({
+          chunks: this.board?.activeChunkCount ?? 0,
+          visibleChunks: this.board?.visibleChunkCount ?? 0,
+          culledChunks: this.board?.culledChunkCount ?? 0,
+          lodCounts: this.board ? [...this.board.lodCounts] : [0, 0, 0, 0],
+        });
+      }
     }
+  }
+
+  _emitExploreStats(chunkStats = {}) {
+    if (!this.cb.onInfiniteStats) return;
+    const pos = this.camera.position;
+    const fps = this.fpsControls;
+    const stats = {
+      x: pos.x.toFixed(0),
+      y: pos.y.toFixed(0),
+      z: pos.z.toFixed(0),
+      speed: this.player
+        ? Math.hypot(this.player.vel.x, this.player.vel.y, this.player.vel.z).toFixed(1)
+        : (fps ? fps.moveSpeed.toFixed(0) : '0'),
+      playerState: this.player ? this.player.state : null,
+      ...chunkStats,
+    };
+    if (this.exploreMode === 'plane' && this.player?.getHudData) {
+      stats.plane = this.player.getHudData();
+    }
+    this.cb.onInfiniteStats(stats);
   }
 
   _tickInfinite(dt, now) {
@@ -3593,22 +3627,12 @@ export class Engine {
     }
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
-
-      const pos = this.camera.position;
-      const fps = this.fpsControls;
       if (this.cb.onInfiniteStats) {
-        this.cb.onInfiniteStats({
-          x: pos.x.toFixed(0),
-          y: pos.y.toFixed(0),
-          z: pos.z.toFixed(0),
-          speed: this.player
-            ? Math.hypot(this.player.vel.x, this.player.vel.y, this.player.vel.z).toFixed(1)
-            : (fps ? fps.moveSpeed.toFixed(0) : '0'),
-          playerState: this.player ? this.player.state : null,
+        this._emitExploreStats({
           chunks: this.infiniteWorld ? this.infiniteWorld.activeChunkCount : 0,
           visibleChunks: this.infiniteWorld ? this.infiniteWorld.visibleChunkCount : 0,
           culledChunks: this.infiniteWorld ? this.infiniteWorld.culledChunkCount : 0,
-          lodCounts: this.infiniteWorld ? [...this.infiniteWorld.lodCounts] : [0,0,0,0],
+          lodCounts: this.infiniteWorld ? [...this.infiniteWorld.lodCounts] : [0, 0, 0, 0],
         });
       }
       this.cb.onStats({ fps: this._fps, triangles, drawCalls });
@@ -3668,16 +3692,8 @@ export class Engine {
     }
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
-      const pos = this.camera.position;
       if (this.cb.onInfiniteStats) {
-        this.cb.onInfiniteStats({
-          x: pos.x.toFixed(0),
-          y: pos.y.toFixed(0),
-          z: pos.z.toFixed(0),
-          speed: this.player
-            ? Math.hypot(this.player.vel.x, this.player.vel.y, this.player.vel.z).toFixed(1)
-            : '0',
-          playerState: this.player ? this.player.state : null,
+        this._emitExploreStats({
           chunks: this.planetWorld ? this.planetWorld.activeChunkCount : 0,
           visibleChunks: this.planetWorld ? this.planetWorld.visibleChunkCount : 0,
           culledChunks: this.planetWorld ? this.planetWorld.culledChunkCount : 0,
