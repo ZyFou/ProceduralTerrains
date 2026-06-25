@@ -361,14 +361,9 @@ export class WaterSystem {
       applyWaterMaterialSettings(mat, params, this._effectiveMode, debug);
     }
 
-    const uw = this.engine.underwater;
-    if (uw) {
-      const perfOn = this.engine.perf?.underwaterEffect !== false;
-      uw.enabled = perfOn && params.waterUnderwaterEnabled !== false && this.isEnabled();
-      uw.intensity = params.waterUnderwaterFogDensity ?? 1;
-      uw.visibility = 140 / Math.max(0.25, params.waterUnderwaterVisibility ?? 1);
-      uw.blendBand = Math.max(0.3, (params.waterSurfaceTransition ?? 0.8) * 1.0);
-    }
+    // The underwater pass + caustics are driven centrally each frame by
+    // Engine._updateUnderwater (UnderwaterController is the single source of
+    // truth), so nothing to configure here on a settings change.
   }
 
   ownsMaterial(mat) {

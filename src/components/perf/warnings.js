@@ -82,7 +82,17 @@ export function computeWarnings(snap, T = WARN_THRESHOLDS) {
 
     if (diag.water?.enabled) {
       if (/realistic|volumetric/i.test(diag.water.mode || '')) add('info', `${diag.water.mode} water may be expensive`);
-      if (diag.water.underwater) add('info', 'Underwater effect active');
+    }
+
+    const uw = diag.underwater;
+    if (uw && uw.active) {
+      if (uw.mode === 'high') add('warning', 'High underwater mode active');
+      else add('info', 'Lite underwater mode active');
+      if (uw.fellBackToLite) add('info', 'High underwater requested — falling back to Lite (legacy water)');
+      if (uw.causticsEnabled) add('info', 'Underwater caustics enabled');
+      if (uw.lightShaftsEnabled) add('warning', 'Underwater light shafts enabled');
+      if (uw.particlesEnabled) add('info', 'Underwater particles enabled');
+      if (uw.depthTextureAvailable === false) add('warning', 'Depth texture unavailable — simplified underwater fog');
     }
   }
 

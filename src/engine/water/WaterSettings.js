@@ -42,6 +42,47 @@ export function isWaterActive(mode, seaLevel) {
   return mode !== 'off' && seaLevel > 0.5;
 }
 
+// ----------------------------------------------------------------------------
+// Underwater effect quality.
+//
+//  - 'off'   : no underwater post-process, no terrain caustics.
+//  - 'lite'  : cheap screen-space tint/fog/distortion + simple caustics.
+//              Compatible with the legacy (and any) water renderer.
+//  - 'high'  : depth-aware absorption, layered caustics, light shafts and
+//              optional particles. Requires the realistic water renderer; if
+//              selected without it, it transparently falls back to 'lite'.
+//  - 'auto'  : High with the realistic renderer, Lite with legacy water.
+// ----------------------------------------------------------------------------
+
+export const UNDERWATER_MODES = [
+  { value: 'off', label: 'Off' },
+  { value: 'lite', label: 'Lite' },
+  { value: 'high', label: 'High' },
+  { value: 'auto', label: 'Auto' },
+];
+
+/** Resolve the effective underwater quality ('off' | 'lite' | 'high'). */
+export function resolveUnderwaterMode(params, effectiveWaterMode, perfEnabled = true) {
+  if (perfEnabled === false) return 'off';
+  if (params.waterUnderwaterEnabled === false) return 'off';
+  if (!isWaterActive(effectiveWaterMode, params.seaLevel ?? 100)) return 'off';
+
+  const requested = params.waterUnderwaterMode ?? 'auto';
+  if (requested === 'off') return 'off';
+
+  const realistic = isRealisticWaterMode(effectiveWaterMode);
+  if (requested === 'lite') return 'lite';
+  if (requested === 'high') return realistic ? 'high' : 'lite';
+  // auto
+  return realistic ? 'high' : 'lite';
+}
+
+/** True when High was requested but the renderer forced a Lite fallback. */
+export function underwaterModeFellBack(params, effectiveWaterMode) {
+  const requested = params.waterUnderwaterMode ?? 'auto';
+  return requested === 'high' && !isRealisticWaterMode(effectiveWaterMode);
+}
+
 export const WATER_DEFAULT_PARAMS = {
   waterEnabled: true,
   waterMode: 'legacy',
@@ -84,12 +125,20 @@ export const WATER_DEFAULT_PARAMS = {
   waterSlopeFoam: 0.25,
   waterCliffFoam: 0.3,
 
-  // underwater (post-effect tuning — actual toggle lives in perf.underwaterEffect)
+  // underwater (post-effect tuning — actual master toggle lives in perf.underwaterEffect)
   waterUnderwaterEnabled: true,
+  // Off / Lite (legacy water, cheap) / High (realistic water, cinematic) / Auto.
+  // Auto picks High with the realistic renderer, Lite with legacy water.
+  waterUnderwaterMode: 'auto',
   waterUnderwaterFogDensity: 1.0,
   waterUnderwaterVisibility: 1.0,
   waterUnderwaterDistortion: 0.5,
   waterUnderwaterCaustics: 0.4,
+  waterUnderwaterCausticsEnabled: true,
+  waterUnderwaterCausticScale: 1.0,
+  waterUnderwaterCausticSpeed: 1.0,
+  waterUnderwaterParticles: false,
+  waterUnderwaterLightShafts: false,
   waterSurfaceTransition: 0.8,
 
   // performance (quality knobs — heavy ones also in perf)

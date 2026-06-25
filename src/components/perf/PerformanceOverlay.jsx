@@ -303,6 +303,30 @@ export default function PerformanceOverlay({
           )}
         </Section>
 
+        <Section id="underwater" title="Underwater" collapsed={collapsed.underwater} onToggle={onToggleSection}>
+          {diag?.underwater && (
+            <>
+              <Row label="Active" value={diag.underwater.active ? 'yes' : 'no'} />
+              <Row label="Mode" value={diag.underwater.mode} />
+              {diag.underwater.fellBackToLite && (
+                <Row label="Requested" value={`${diag.underwater.requestedMode} → lite`} />
+              )}
+              <Row label="Blend" value={fmtMaybe(diag.underwater.blend, 2)} />
+              <Row label="Depth below" value={fmtMaybe(diag.underwater.depth, 1)} />
+              <Row label="Caustics" value={diag.underwater.causticsEnabled ? 'on' : 'off'} />
+              <Row label="Light shafts" value={diag.underwater.lightShaftsEnabled ? 'on' : 'off'} />
+              <Row label="Particles" value={diag.underwater.particlesEnabled ? 'on' : 'off'} />
+              <Row label="Cost estimate" value={diag.underwater.costEstimate} />
+              {diag.underwater.postProcessApplies === false && (
+                <Row label="Post-process" value="n/a (planet)" />
+              )}
+              {diag.underwater.depthTextureAvailable === false && (
+                <Row label="Depth texture" value="unavailable" />
+              )}
+            </>
+          )}
+        </Section>
+
         {settings.showWarnings && (
           <Section id="warnings" title={`Warnings (${warnings.length})`} collapsed={collapsed.warnings} onToggle={onToggleSection}>
             {warnings.length ? warnings.map((w, i) => (

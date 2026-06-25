@@ -23,6 +23,7 @@ import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
 import { UnderwaterEffect } from './render/UnderwaterEffect.js';
+import { UnderwaterController } from './render/UnderwaterController.js';
 import {
   applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
@@ -51,7 +52,7 @@ import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainP
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { WaterSystem } from './water/WaterSystem.js';
-import { migrateWaterParams } from './water/WaterSettings.js';
+import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 import {
   detectRendererCapabilities,
@@ -398,8 +399,10 @@ export class Engine {
 
     this.minimap = new Minimap(this.renderer, this.scene, minimapBase, minimapOverlay);
 
-    // camera-underwater post effect (inactive above water — zero cost)
+    // camera-underwater post effect (inactive above water — zero cost) +
+    // centralized submersion detection / transition (single source of truth).
     this.underwater = new UnderwaterEffect();
+    this.underwaterController = new UnderwaterController();
 
     // studio/flat-board volumetric cloud slab (sits above the board; hidden
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
@@ -3553,15 +3556,12 @@ export class Engine {
       return;
     }
 
-    // underwater activation is smoothed inside the effect (no flicker at the
-    // surface); inactive when there is no water — works in studio + infinite.
-    // Planet has its own ocean shell and a curved "up", so the screen-space
-    // underwater pass does not apply there (waterLevel stays null → inactive).
-    const waterLevel = (this.worldMode !== 'planet' && this.waterSystem?.isEnabled())
-      ? this.params.seaLevel : null;
-    this.underwater.update(
-      dt, this.uniforms.uTime.value, this.camera.position.y, waterLevel, this.uniforms
-    );
+    // Centralized underwater detection + transition. Works in all world modes
+    // (flat for Tile/Infinite, spherical for Planet). The smoothed `blend`
+    // drives both the screen-space pass and the terrain caustics. Planet has a
+    // curved "up", so it detects submersion (diagnostics + caustics) but the
+    // screen-space pass is not applied in _tickPlanet (renders straight to canvas).
+    this._updateUnderwater(dt);
 
     this.waterSystem?.update(this._fps);
 
@@ -3587,6 +3587,107 @@ export class Engine {
     this._autoPerfTick(now);
     this.profiler.captureRenderer(this.renderer);
     this.profiler.endFrame();
+  }
+
+  // Centralized underwater state: resolve quality, drive the controller, push
+  // caustic + post-process uniforms. Called once per frame from _tickBody.
+  _updateUnderwater(dt) {
+    const p = this.params;
+    const ctrl = this.underwaterController;
+    const u = this.uniforms;
+    const perfOn = this.perf?.underwaterEffect !== false;
+    const effectiveMode = this.waterSystem ? this.waterSystem.getEffectiveMode() : 'off';
+    const waterActive = !!this.waterSystem?.isEnabled();
+    const quality = resolveUnderwaterMode(p, effectiveMode, perfOn);
+    const fellBack = underwaterModeFellBack(p, effectiveMode);
+
+    // configure the screen-space pass from settings
+    this.underwater.enabled = perfOn && p.waterUnderwaterEnabled !== false;
+    this.underwater.intensity = p.waterUnderwaterFogDensity ?? 1;
+    this.underwater.visibility = 140 / Math.max(0.25, p.waterUnderwaterVisibility ?? 1);
+
+    ctrl.enabled = this.underwater.enabled;
+    ctrl.depthTextureAvailable = this.underwater._depthSupported !== false;
+
+    ctrl.update(dt, {
+      worldMode: this.worldMode,
+      cameraPos: this.camera.position,
+      seaLevel: p.seaLevel,
+      waterActive,
+      waterMode: effectiveMode,
+      quality,
+      requestedQuality: p.waterUnderwaterMode ?? 'auto',
+      fellBack,
+      planetRadius: p.planetRadius ?? 0,
+      blendBand: Math.max(0.3, p.waterSurfaceTransition ?? 0.8),
+      transitionSpeed: 1.0,
+      causticsEnabled: p.waterUnderwaterCausticsEnabled !== false,
+      particlesEnabled: !!p.waterUnderwaterParticles,
+      lightShaftsEnabled: !!p.waterUnderwaterLightShafts,
+    });
+
+    // terrain caustics (shared uniforms; world-XZ projection → seamless across
+    // chunks). Cost is gated to a warp-coherent uniform branch in the shader, so
+    // this is free above water.
+    const causticUser = p.waterUnderwaterCaustics ?? 0.4;
+    const causticsOn = ctrl.causticsEnabled && quality !== 'off';
+    if (u.uCausticStrength) {
+      u.uCausticStrength.value = causticsOn ? causticUser : 0;
+      // Caustics live on the submerged sea floor and are visible from any
+      // viewpoint (above or below water), so they are NOT tied to the camera
+      // being underwater — only to water covering the terrain. Depth fade in
+      // the shader handles spatial falloff.
+      u.uCausticBlend.value = causticsOn ? 1.0 : 0.0;
+      u.uCausticScale.value = p.waterUnderwaterCausticScale ?? 1;
+      u.uCausticSpeed.value = p.waterUnderwaterCausticSpeed ?? 1;
+    }
+
+    // sync the screen-space pass (no-op while dry)
+    const sun = this._underwaterSunScreen();
+    this.underwater.update(ctrl, u.uTime.value, u, {
+      distortion: p.waterUnderwaterDistortion ?? 0.5,
+      caustics: causticUser,
+      particles: 0.6,
+      lightShafts: 0.7,
+      sunScreen: sun,
+      sunVisible: sun.visible,
+    });
+  }
+
+  // Structured underwater diagnostics for the Performance Overlay.
+  _underwaterDiagnostics() {
+    const ctrl = this.underwaterController;
+    const perfOn = this.perf?.underwaterEffect !== false;
+    if (!ctrl) {
+      return { available: false, active: false, mode: 'off', requestedMode: 'off' };
+    }
+    const snap = ctrl.snapshot();
+    // the screen-space pass does not run on the planet (curved up) — caustics +
+    // detection still report, but flag that post-processing is not applied there
+    const postApplies = this.worldMode !== 'planet';
+    return {
+      available: true,
+      enabled: perfOn && (this.params?.waterUnderwaterEnabled !== false),
+      postProcessApplies: postApplies,
+      // estimate of extra cost: the pass renders the scene into an RT + a
+      // fullscreen composite while submerged (0 above water)
+      costEstimate: snap.active && postApplies
+        ? (snap.mode === 'high' ? 'high' : 'low')
+        : 'none',
+      particleCount: snap.particlesEnabled ? 'screen-space (procedural)' : 0,
+      ...snap,
+    };
+  }
+
+  // Project the sun direction to screen UV for High-mode light shafts.
+  _underwaterSunScreen() {
+    const cam = this.camera;
+    const sunDir = this.uniforms.uSunDir.value;
+    const v = this._uwSunScratch || (this._uwSunScratch = new THREE.Vector3());
+    v.copy(cam.position).addScaledVector(sunDir, 1e6);
+    v.project(cam);
+    const visible = v.z > -1 && v.z < 1;
+    return { x: v.x * 0.5 + 0.5, y: v.y * 0.5 + 0.5, visible };
   }
 
   _tickStudio(dt, now) {
@@ -3936,6 +4037,7 @@ export class Engine {
         seaLevel: p.seaLevel,
         underwater: !!this.underwater?.active,
       },
+      underwater: this._underwaterDiagnostics(),
     };
 
     if (this.worldMode === 'infinite' && this.infiniteWorld) {

@@ -128,6 +128,17 @@ uniform float uColorMode;
 uniform float uEps;
 uniform vec3  uPlinthColor;
 
+// Underwater caustics — animated dappled light projected on submerged terrain.
+// Driven by the UnderwaterController: uCausticBlend ramps with camera submersion
+// so caustics only appear while diving (and fade in/out smoothly). World-XZ
+// projection keeps them seamless across chunks (Tile + Infinite).
+uniform float uCausticStrength;  // user strength (0 = off)
+uniform float uCausticBlend;     // camera-underwater activation 0..1
+uniform float uCausticScale;     // user scale multiplier
+uniform float uCausticSpeed;     // user speed multiplier
+uniform vec3  uCausticColor;
+uniform float uCausticDepthFade; // depth (world units) over which caustics fade
+
 varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
@@ -140,6 +151,66 @@ const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.96, 0.85, 0.04),
   vec3(0.23, 0.51, 0.96)
 );
+
+// Real caustic network — thin, bright, animated light filaments (the classic
+// distorted-wave-interference caustic). Fixed 5-iteration loop (static bound →
+// safe for the D3D11/ANGLE shader compiler), so it unrolls without a hang.
+float causticTile(vec2 uv, float t) {
+  vec2 p = mod(uv * 6.28318, 6.28318) - 250.0;
+  vec2 i = p;
+  float c = 1.0;
+  const float inten = 0.005;
+  for (int n = 0; n < 5; n++) {
+    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+    c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  return clamp(pow(abs(c), 8.0), 0.0, 1.0);
+}
+
+// Two rotated/offset layers at different scale+speed → hides the TAU tiling and
+// reads as evolving caustics rather than a scrolling texture.
+float causticPattern(vec2 xz, float t) {
+  float s = 0.03 / max(uCausticScale, 0.05);
+  vec2 a = xz * s;
+  // rotate the second layer ~37deg so the two tilings never line up
+  vec2 b = mat2(0.80, -0.60, 0.60, 0.80) * (xz * s * 1.41) + vec2(4.7, 1.3);
+  float c1 = causticTile(a, t);
+  float c2 = causticTile(b, t * 1.27);
+  return min(c1 + c2, 1.0);
+}
+
+// Project caustics onto the submerged, upward-facing sea floor. World-XZ space
+// → seamless across chunks (Tile + Infinite). Modulated by sun lighting and
+// water depth so it genuinely sits in the environment, not on the lens.
+vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
+  float amt = uCausticStrength * uCausticBlend;
+  if (amt < 0.001) return col;
+
+  float below = uSeaLevel - hC;          // >0 when terrain is under water
+  if (below <= 0.0) return col;
+
+  // shallow terrain near the shoreline catches the most light; deep fades out
+  float depthFade = 1.0 - clamp(below / max(uCausticDepthFade, 1.0), 0.0, 1.0);
+  depthFade = depthFade * depthFade;     // bias toward shallow water
+  // upward-facing surfaces catch the light; vertical cliffs stay dark
+  float upFace = clamp(nGeo.y * 1.1, 0.0, 1.0);
+  upFace *= upFace;
+  // sunlight drives the caustics — facets toward the sun are brightest, and the
+  // whole effect dims when the sun is low (no light = no caustics)
+  float sunFace = max(dot(lightN, uSunDir), 0.0);
+  float sunUp = clamp(uSunDir.y * 2.0, 0.0, 1.0);
+  float light = (0.35 + 0.65 * sunFace) * sunUp;
+
+  float c = causticPattern(xz, uTime * 0.6 * uCausticSpeed);
+
+  // additive light, plus a touch of multiplicative brightening so the floor
+  // albedo shows through the bright filaments
+  vec3 add = uCausticColor * c * amt * depthFade * upFace * light * 2.4;
+  return col * (1.0 + c * amt * depthFade * upFace * light * 0.6) + add;
+}
 
 vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, float rockMask, float shoreMask) {
   float strength = uTerrainDetailNormalStrength * fade * (0.45 + 0.55 * terrainDetailQualityFactor());
@@ -313,6 +384,10 @@ void main() {
     viewDir
   );
 
+  // underwater caustics on the submerged sea floor (no-op when dry: the
+  // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
+  col = applyTerrainCaustics(col, xz, hC, nGeo, n);
+
   if (uGrid > 0.001) {
     vec2 gw = fwidth(xz) + 1e-5;
     vec2 gp = abs(fract(xz / uChunkSize - 0.5) - 0.5) * uChunkSize / gw;
@@ -394,6 +469,15 @@ export function createTerrainUniforms() {
     uPlinthBaseY:    { value: -40 },
     uPlinthColor:    { value: new THREE.Color(0x14110d) },
     uWallThickness:  { value: 12 },
+    // Underwater caustics (shared by every terrain material — studio/infinite
+    // declare + use them; the planet material harmlessly ignores them). Default
+    // off; the engine raises uCausticBlend with camera submersion each frame.
+    uCausticStrength: { value: 0.0 },
+    uCausticBlend:    { value: 0.0 },
+    uCausticScale:    { value: 1.0 },
+    uCausticSpeed:    { value: 1.0 },
+    uCausticColor:    { value: new THREE.Vector3(0.85, 0.95, 1.0) },
+    uCausticDepthFade:{ value: 70.0 },
     uPlanetRadius:   { value: 8000 },
     uPlanetEps:      { value: 0.0015 },
     uSunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },

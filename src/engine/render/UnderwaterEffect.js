@@ -10,14 +10,19 @@ import * as THREE from 'three';
 // into an offscreen target (with depth) and composited through a fullscreen
 // underwater shader.
 //
-// The underwater look is derived entirely from the live shared uniforms —
-// uColShallow / uColDeep / uPaletteTint — so alien palettes produce alien
-// underwater colors automatically. Nothing here touches the water material
-// or the shared fog/terrain uniforms.
+// Two quality paths share ONE program (branched on a uniform, so switching
+// quality never recompiles):
+//   - Lite : tint + exponential fog + cheap distortion + vignette + a single
+//            screen-space caustic shimmer. Cheap enough for the legacy water
+//            renderer / low-end devices.
+//   - High : depth-aware absorption, layered caustic shimmer, sun light shafts,
+//            optional suspended particles and a brighter surface when looking
+//            up. Paired with the realistic water renderer.
 //
-// Flicker safety: the activation is a smooth function of submersion depth
-// (a ±blend band around the surface) followed by temporal smoothing, so
-// there is no binary on/off threshold to oscillate across.
+// Detection + the smoothed activation `blend` come from the UnderwaterController
+// (single source of truth). The underwater colors are derived from the live
+// shared uniforms (uColShallow / uColDeep / uPaletteTint) so alien palettes
+// produce alien underwater colors automatically.
 // ============================================================================
 
 const VERTEX = /* glsl */ `
@@ -44,10 +49,46 @@ uniform vec3  uWaterDeep;      // palette deep water color (tinted)
 uniform float uSubmergeDepth;  // how far below the surface the camera is
 uniform float uVisibility;     // underwater visibility distance (world units)
 uniform float uIntensity;      // user master intensity
+uniform float uDistortion;     // user distortion strength
+uniform float uHighMode;       // 0 = Lite, 1 = High
+uniform float uCausticStr;     // screen-space caustic shimmer strength
+uniform float uParticles;      // suspended particle density (High only)
+uniform float uLightShafts;    // sun light-shaft strength (High only)
+uniform vec2  uSunScreen;      // sun position in screen UV
+uniform float uSunVisible;     // 1 if the sun is in front of the camera
+uniform float uAspect;         // viewport aspect (w/h)
+uniform float uDepthValid;     // 1 if the depth texture is usable
 
 varying vec2 vUv;
 
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+// value noise (cheap, self-contained — the post pass has no NOISE include)
+float vn(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// animated caustic cells (two layers, different scale/speed → not a static tile)
+float caustic(vec2 p, float t) {
+  float a = vn(p + vec2(t * 0.7, t * 0.5));
+  float b = vn(p * 1.7 - vec2(t * 0.45, t * 0.62));
+  float c = 1.0 - clamp((abs(a - 0.5) + abs(b - 0.5)) * 2.3, 0.0, 1.0);
+  return pow(c, 2.5);
+}
+
 float viewDistance(vec2 uv) {
+  if (uDepthValid < 0.5) return uFar * 0.5;
   float fragZ = texture2D(tDepth, uv).x;
   float viewZ = perspectiveDepthToViewZ(fragZ, uNear, uFar);
   return min(-viewZ, uFar);
@@ -55,41 +96,88 @@ float viewDistance(vec2 uv) {
 
 void main() {
   float s = uStrength * uIntensity;
+  bool high = uHighMode > 0.5;
 
-  // subtle screen-space wave distortion (scaled down near the surface)
+  // screen-space distortion (scaled by user setting; gentler in Lite)
   vec2 uv = vUv;
-  float wob = s * 0.0035;
-  uv.x += sin(vUv.y * 28.0 + uTime * 1.7) * wob;
-  uv.y += cos(vUv.x * 23.0 - uTime * 1.3) * wob * 0.7;
+  float wob = s * 0.0035 * (0.4 + uDistortion);
+  if (high) {
+    // higher-frequency, sun-modulated wobble for the realistic renderer
+    uv.x += (sin(vUv.y * 30.0 + uTime * 1.9) + sin(vUv.y * 11.0 - uTime * 1.1)) * wob * 0.6;
+    uv.y += (cos(vUv.x * 26.0 - uTime * 1.4) + cos(vUv.x * 9.0 + uTime * 0.8)) * wob * 0.55;
+  } else {
+    uv.x += sin(vUv.y * 28.0 + uTime * 1.7) * wob;
+    uv.y += cos(vUv.x * 23.0 - uTime * 1.3) * wob * 0.7;
+  }
   uv = clamp(uv, vec2(0.001), vec2(0.999));
 
   vec3 col = texture2D(tDiffuse, uv).rgb;
 
-  // depth-based underwater fog: distant terrain dissolves into the water
-  // color. Deeper camera = murkier, biased toward the deep palette color.
   float dist = viewDistance(uv);
   float murk = clamp(uSubmergeDepth / 45.0, 0.0, 1.0);
   vec3 waterCol = mix(uWaterShallow, uWaterDeep, 0.35 + 0.65 * murk);
 
-  float density = (1.6 + murk * 1.4) / max(uVisibility, 10.0);
-  float fogF = 1.0 - exp(-density * density * dist * dist);
-  fogF = clamp(fogF, 0.0, 1.0);
+  // depth-aware fog (denser deeper). High mode shifts color with depth more
+  // aggressively (physically-inspired absorption: red goes first).
+  float densBase = high ? (1.4 + murk * 1.8) : (1.6 + murk * 1.4);
+  float density = densBase / max(uVisibility, 10.0);
+  float fogF = clamp(1.0 - exp(-density * density * dist * dist), 0.0, 1.0);
 
-  // light absorption: dim + shift everything toward the water color
   vec3 uw = col * (0.85 - 0.25 * murk);
-  uw = mix(uw, uw * waterCol * 2.2, 0.35);
+  uw = mix(uw, uw * waterCol * 2.2, high ? 0.45 : 0.35);
 
-  // slight desaturation + reduced contrast (soft underwater light)
+  if (high) {
+    // wavelength-dependent absorption — warm channels attenuate with distance
+    vec3 absorb = vec3(0.45, 0.16, 0.07) * (0.6 + 0.9 * murk);
+    uw *= exp(-absorb * dist / max(uVisibility, 10.0));
+  }
+
+  // desaturation + reduced contrast (soft underwater light)
   float luma = dot(uw, vec3(0.299, 0.587, 0.114));
-  uw = mix(uw, vec3(luma), 0.18);
+  uw = mix(uw, vec3(luma), high ? 0.12 : 0.18);
   uw = mix(vec3(0.5 * (uWaterShallow + uWaterDeep) * 0.4 + 0.18), uw, 0.88);
+
+  // NOTE: caustics are projected on the actual sea floor in the terrain shader
+  // (world-space, lighting-driven) — NOT faked as a screen overlay here, which
+  // read as noise stuck to the lens. The post pass only does water optics.
+
+  // ---- sun light shafts (High only) ----
+  if (high && uLightShafts > 0.001 && uSunVisible > 0.5) {
+    vec2 d = vUv - uSunScreen;
+    d.x *= uAspect;
+    float shaft = 0.0;
+    float ang = atan(d.y, d.x);
+    float r = length(d);
+    // streaky radial glow that breaks up with animated noise
+    float streak = vn(vec2(ang * 5.0, r * 6.0 - uTime * 0.6));
+    shaft = smoothstep(1.1, 0.0, r) * (0.4 + 0.6 * streak);
+    shaft *= smoothstep(0.0, 0.25, vUv.y);   // fade toward the seabed
+    uw += vec3(1.0, 0.97, 0.85) * shaft * uLightShafts * 0.5;
+  }
+
+  // ---- suspended particles (High only, opt-in, kept sparse + subtle) ----
+  if (high && uParticles > 0.001) {
+    vec2 pp = vec2(vUv.x * uAspect, vUv.y) * 70.0;
+    pp.y += uTime * 0.4;                 // slow upward drift
+    pp += vec2(sin(uTime * 0.3 + vUv.y * 10.0) * 0.5, 0.0);
+    float cell = hash21(floor(pp));
+    float spec = smoothstep(0.993, 1.0, cell);   // far fewer specks
+    uw += vec3(0.8, 0.9, 1.0) * spec * uParticles * 0.35;
+  }
+
+  // ---- brighter surface when looking up (suggest the surface from below) ----
+  if (high) {
+    float upLook = smoothstep(0.55, 1.0, vUv.y);
+    float shimmer = vn(vec2(vUv.x * 10.0 + uTime * 0.7, uTime * 0.4));
+    uw += waterCol * upLook * (0.05 + 0.05 * shimmer) * (1.0 - murk * 0.6);
+  }
 
   // fog last so the horizon fully closes into the water color
   uw = mix(uw, waterCol, fogF);
 
   // vignette
   float vig = smoothstep(1.25, 0.45, length(vUv - 0.5) * 1.6);
-  uw *= mix(0.78, 1.0, vig);
+  uw *= mix(high ? 0.72 : 0.78, 1.0, vig);
 
   gl_FragColor = vec4(mix(col, uw, s), 1.0);
 }
@@ -101,7 +189,9 @@ export class UnderwaterEffect {
     this.intensity = 1.0;      // master strength multiplier
     this.visibility = 140;     // underwater view distance, world units
     this.blendBand = 0.8;      // world units around the surface to fade over
-    this.strength = 0;         // smoothed activation 0..1
+    this.strength = 0;         // mirrored activation 0..1 (from controller)
+    this.highMode = false;     // Lite vs High
+    this._depthSupported = true;
 
     this._rt = null;
     this._quadScene = new THREE.Scene();
@@ -121,6 +211,15 @@ export class UnderwaterEffect {
         uSubmergeDepth: { value: 0 },
         uVisibility:    { value: 140 },
         uIntensity:     { value: 1 },
+        uDistortion:    { value: 0.5 },
+        uHighMode:      { value: 0 },
+        uCausticStr:    { value: 0.4 },
+        uParticles:     { value: 0 },
+        uLightShafts:   { value: 0 },
+        uSunScreen:     { value: new THREE.Vector2(0.5, 0.8) },
+        uSunVisible:    { value: 0 },
+        uAspect:        { value: 1.7 },
+        uDepthValid:    { value: 1 },
       },
       depthTest: false,
       depthWrite: false,
@@ -139,37 +238,34 @@ export class UnderwaterEffect {
   get active() { return this.strength > 0.002; }
 
   /**
-   * Advance the activation state. Call once per frame before render().
-   * @param {number} dt           — frame delta seconds
-   * @param {number} time         — shared shader time
-   * @param {number} cameraY      — camera world height
-   * @param {number|null} waterLevel — current sea level, or null if no water
-   * @param {Object} sharedUniforms  — shared terrain/water uniforms (live palette)
+   * Sync the pass from the centralized controller + live palette. Call once per
+   * frame before render(). Detection/smoothing live in the controller — this
+   * just mirrors its resolved state into the shader uniforms.
+   *
+   * @param {UnderwaterController} controller
+   * @param {number} time            shared shader time
+   * @param {Object} sharedUniforms  live terrain/water uniforms (palette)
+   * @param {Object} [opts]          { distortion, caustics, particles,
+   *                                   lightShafts, sunScreen{x,y}, sunVisible }
    */
-  update(dt, time, cameraY, waterLevel, sharedUniforms) {
-    let target = 0;
-    let submerge = 0;
-    if (this.enabled && waterLevel !== null && Number.isFinite(waterLevel)) {
-      submerge = waterLevel - cameraY;
-      // smooth ramp across a band around the surface — no hard threshold,
-      // so bobbing at the waterline cross-fades instead of flickering
-      target = THREE.MathUtils.clamp(
-        (submerge + this.blendBand * 0.5) / this.blendBand, 0, 1
-      );
-    }
-    // temporal smoothing for any residual jumps (e.g. teleports)
-    const k = 1 - Math.exp(-dt * 9);
-    this.strength += (target - this.strength) * k;
-    if (this.strength < 0.002 && target === 0) this.strength = 0;
-
+  update(controller, time, sharedUniforms, opts = {}) {
+    this.strength = controller.active ? Math.min(controller.underwaterBlend, 1) : 0;
+    this.highMode = controller.quality === 'high';
     if (!this.active) return;
 
     const u = this._material.uniforms;
-    u.uStrength.value = Math.min(this.strength, 1);
+    u.uStrength.value = this.strength;
     u.uTime.value = time;
-    u.uSubmergeDepth.value = Math.max(submerge, 0);
+    u.uSubmergeDepth.value = controller.underwaterDepth;
     u.uVisibility.value = this.visibility;
     u.uIntensity.value = this.intensity;
+    u.uHighMode.value = this.highMode ? 1 : 0;
+    u.uDistortion.value = opts.distortion ?? 0.5;
+    u.uCausticStr.value = controller.causticsEnabled ? (opts.caustics ?? 0.4) : 0;
+    u.uParticles.value = (this.highMode && controller.particlesEnabled) ? (opts.particles ?? 0.5) : 0;
+    u.uLightShafts.value = (this.highMode && controller.lightShaftsEnabled) ? (opts.lightShafts ?? 0.5) : 0;
+    if (opts.sunScreen) u.uSunScreen.value.set(opts.sunScreen.x, opts.sunScreen.y);
+    u.uSunVisible.value = opts.sunVisible ? 1 : 0;
 
     // live palette → underwater colors (alien water = alien underwater)
     const tint = sharedUniforms.uPaletteTint.value;
@@ -191,9 +287,12 @@ export class UnderwaterEffect {
 
     this._ensureTarget(renderer);
 
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const u = this._material.uniforms;
     u.uNear.value = camera.near;
     u.uFar.value = camera.far;
+    u.uAspect.value = size.x / Math.max(size.y, 1);
+    u.uDepthValid.value = this._depthSupported ? 1 : 0;
 
     renderer.setRenderTarget(this._rt);
     renderer.render(scene, camera);
@@ -211,16 +310,26 @@ export class UnderwaterEffect {
     if (this._rt && this._rt.width === w && this._rt.height === h) return;
 
     if (this._rt) this._rt.dispose();
-    const depthTexture = new THREE.DepthTexture(w, h);
-    depthTexture.type = THREE.UnsignedInt248Type;
-    depthTexture.format = THREE.DepthStencilFormat;
+    let depthTexture = null;
+    try {
+      depthTexture = new THREE.DepthTexture(w, h);
+      depthTexture.type = THREE.UnsignedInt248Type;
+      depthTexture.format = THREE.DepthStencilFormat;
+      this._depthSupported = true;
+    } catch (e) {
+      // No depth-texture support → fall back to a tint/fog-only look (uDepthValid
+      // off). The pass still renders; depth-aware fog uses a constant estimate.
+      depthTexture = null;
+      this._depthSupported = false;
+      console.warn('Underwater: depth texture unavailable, using simplified fog', e);
+    }
     // no MSAA: with samples > 0, three (r160) resolves depth into a
     // renderbuffer, leaving the sampled depth texture unpopulated. The
     // underwater image is fogged + distorted, so aliasing is not visible.
     this._rt = new THREE.WebGLRenderTarget(w, h, {
-      depthTexture,
+      depthTexture: depthTexture || undefined,
       depthBuffer: true,
-      stencilBuffer: true,
+      stencilBuffer: !!depthTexture,
     });
   }
 

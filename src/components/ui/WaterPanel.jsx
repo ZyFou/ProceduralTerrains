@@ -8,9 +8,12 @@ import { PERF_LIMITS } from '../../engine/render/PerformanceSettings.js';
 import {
   WATER_MODES,
   WATER_DEFAULT_PARAMS,
+  UNDERWATER_MODES,
   isRealisticWaterMode,
   resolveEffectiveWaterMode,
   isWaterModeDowngraded,
+  resolveUnderwaterMode,
+  underwaterModeFellBack,
   WORLD_MODE_WATER_LABELS,
   WORLD_MODE_WATER_HINTS,
 } from '../../engine/water/WaterSettings.js';
@@ -69,12 +72,18 @@ const FOAM_SLIDERS = [
   { key: 'waterCliffFoam', label: 'Cliff / Rock Foam', min: 0, max: 1.5, step: 0.05, digits: 2 },
 ];
 
+// Apply to both Lite and High underwater modes.
 const UNDERWATER_SLIDERS = [
-  { key: 'waterUnderwaterFogDensity', label: 'Underwater Fog Density', min: 0.2, max: 2.5, step: 0.05, digits: 2 },
-  { key: 'waterUnderwaterVisibility', label: 'Underwater Visibility', min: 0.25, max: 2, step: 0.05, digits: 2 },
-  { key: 'waterUnderwaterDistortion', label: 'Underwater Distortion', min: 0, max: 1.5, step: 0.05, digits: 2 },
-  { key: 'waterUnderwaterCaustics', label: 'Underwater Caustics', min: 0, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterUnderwaterFogDensity', label: 'Fog Density', min: 0.2, max: 2.5, step: 0.05, digits: 2 },
+  { key: 'waterUnderwaterVisibility', label: 'Visibility Distance', min: 0.25, max: 2, step: 0.05, digits: 2 },
+  { key: 'waterUnderwaterDistortion', label: 'Surface Distortion', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterSurfaceTransition', label: 'Surface Transition', min: 0.2, max: 2, step: 0.05, digits: 2 },
+];
+
+const CAUSTIC_SLIDERS = [
+  { key: 'waterUnderwaterCaustics', label: 'Caustics Strength', min: 0, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterUnderwaterCausticScale', label: 'Caustics Scale', min: 0.25, max: 3, step: 0.05, digits: 2 },
+  { key: 'waterUnderwaterCausticSpeed', label: 'Caustics Speed', min: 0, max: 3, step: 0.05, digits: 2 },
 ];
 
 const REALISTIC_PERF_SLIDERS = [
@@ -333,23 +342,85 @@ export default function WaterPanelInner({
         </ControlSection>
       )}
 
-      {enabled && !isPlanet && (
-        <ControlSection id={`${id}-underwater`} title="Underwater" defaultOpen={false}>
-          <ToggleRow
-            label="Enable Underwater Effect"
-            value={!!val(params, 'waterUnderwaterEnabled') && p.underwaterEffect !== false}
-            onChange={(v) => {
-              onParam('waterUnderwaterEnabled', v);
-              onPerfSetting?.('underwaterEffect', v);
-            }}
-            settingId="water.waterUnderwaterEnabled"
-            info="Camera submersion fog and tint in Tile and Infinite World."
-          />
-          {selectedRealistic && UNDERWATER_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
-          ))}
-        </ControlSection>
-      )}
+      {enabled && !isPlanet && (() => {
+        const uwEnabled = !!val(params, 'waterUnderwaterEnabled') && p.underwaterEffect !== false;
+        const uwResolved = resolveUnderwaterMode(params, effectiveMode, p.underwaterEffect !== false);
+        const uwFellBack = underwaterModeFellBack(params, effectiveMode);
+        const requested = val(params, 'waterUnderwaterMode');
+        return (
+          <ControlSection id={`${id}-underwater`} title="Underwater" defaultOpen={false}>
+            <ToggleRow
+              label="Enable Underwater Effect"
+              value={uwEnabled}
+              onChange={(v) => {
+                onParam('waterUnderwaterEnabled', v);
+                onPerfSetting?.('underwaterEffect', v);
+              }}
+              settingId="water.waterUnderwaterEnabled"
+              info="Camera submersion fog, tint and caustics in Tile and Infinite World."
+            />
+            <SelectRow
+              label="Underwater Mode"
+              value={requested}
+              options={UNDERWATER_MODES}
+              onChange={(v) => onParam('waterUnderwaterMode', v)}
+              settingId="water.waterUnderwaterMode"
+              info="Lite is cheap (any water). High is cinematic and needs the Realistic renderer. Auto picks High with Realistic water, Lite otherwise."
+            />
+            {uwEnabled && (
+              <p className={`section-hint${uwFellBack ? ' warning' : ''}`}>
+                {uwResolved === 'off'
+                  ? 'Underwater effects are off.'
+                  : `Active mode: ${uwResolved === 'high' ? 'High' : 'Lite'}`}
+                {uwFellBack ? ' — High requires the Realistic renderer, falling back to Lite.' : ''}
+              </p>
+            )}
+
+            {uwEnabled && UNDERWATER_SLIDERS.map((def) => (
+              <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
+            ))}
+
+            {uwEnabled && (
+              <>
+                <div className="subsection-label">Caustics</div>
+                <ToggleRow
+                  label="Caustics Enabled"
+                  value={val(params, 'waterUnderwaterCausticsEnabled') !== false}
+                  onChange={(v) => onParam('waterUnderwaterCausticsEnabled', v)}
+                  settingId="water.waterUnderwaterCausticsEnabled"
+                  info="Animated dappled light projected on the submerged sea floor."
+                />
+                {val(params, 'waterUnderwaterCausticsEnabled') !== false && CAUSTIC_SLIDERS.map((def) => (
+                  <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
+                ))}
+              </>
+            )}
+
+            {uwEnabled && (
+              <>
+                <div className="subsection-label">High Mode Extras</div>
+                <ToggleRow
+                  label="Light Shafts"
+                  value={!!val(params, 'waterUnderwaterLightShafts')}
+                  onChange={(v) => onParam('waterUnderwaterLightShafts', v)}
+                  settingId="water.waterUnderwaterLightShafts"
+                  info="Volumetric sun rays through the water. High mode only."
+                />
+                <ToggleRow
+                  label="Suspended Particles"
+                  value={!!val(params, 'waterUnderwaterParticles')}
+                  onChange={(v) => onParam('waterUnderwaterParticles', v)}
+                  settingId="water.waterUnderwaterParticles"
+                  info="Sparse floating specks for immersion. High mode only."
+                />
+                {uwResolved !== 'high' && (val(params, 'waterUnderwaterLightShafts') || val(params, 'waterUnderwaterParticles')) && (
+                  <p className="section-hint">Light shafts and particles only render in High mode.</p>
+                )}
+              </>
+            )}
+          </ControlSection>
+        );
+      })()}
 
       {enabled && isPlanet && (
         <ControlSection id={`${id}-planet`} title="Planet Ocean" defaultOpen={false}>
