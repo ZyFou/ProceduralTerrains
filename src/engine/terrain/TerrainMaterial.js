@@ -375,9 +375,13 @@ void main() {
   }
 
   if (uColorMode > 0.5) {
-    float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
+    // mode 3 packs the ACTUAL rendered (faceted) surface height — the
+    // interpolated displaced vertex Y — so prop placement matches the visible
+    // LOD mesh exactly, not the smooth analytic field that floats above crests.
+    float hSrc = (uColorMode > 2.5) ? vWorldPos.y : hC;
+    float h01 = clamp(hSrc / max(uHeightScale, 1e-3), 0.0, 1.0);
     if (uColorMode > 1.5) {
-      // mode 2: 16-bit height packed into RG (player collision tile)
+      // modes 2 & 3: 16-bit height packed into RG (collision / prop surface tile)
       float hi = floor(h01 * 255.0) / 255.0;
       float lo = fract(h01 * 255.0);
       gl_FragColor = vec4(hi, lo, 0.0, 1.0);

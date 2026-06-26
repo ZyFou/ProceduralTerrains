@@ -227,6 +227,7 @@ function WaterPanel({ ctx }) {
 const PROP_SLIDERS = {
   propsDensity: { label: 'Density', min: 0, max: 2, step: 0.05, digits: 2 },
   propsGrass: { label: 'Grass Scale', min: 0.2, max: 2, step: 0.05, digits: 2 },
+  propsWind: { label: 'Wind', min: 0, max: 1.5, step: 0.05, digits: 2 },
   propsFlowers: { label: 'Flower Mix', min: 0, max: 1, step: 0.01, digits: 2 },
   propsCullDistance: { label: 'Cull Distance', min: 120, max: 1800, step: 20, digits: 0, unit: ' u' },
   propsLodDistance: { label: 'LOD Distance', min: 60, max: 900, step: 10, digits: 0, unit: ' u' },
@@ -248,6 +249,7 @@ function PropsPanel({ ctx }) {
 
           <ControlSection id="props-look" title="Look" defaultOpen settingId="props.section.look">
             <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsWind} value={params.propsWind ?? 0.6} onChange={(v) => onParam('propsWind', v)} />
           </ControlSection>
 
           <ControlSection id="props-performance" title="Performance" defaultOpen settingId="props.section.performance">

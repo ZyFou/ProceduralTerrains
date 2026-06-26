@@ -279,6 +279,15 @@ export class TerrainHeightSampler {
     return this._dominantBiome(weights, overrides);
   }
 
+  /** Public climate at world (x,z): { temp, moist, cont, erosion, region }. */
+  climateAt(x, z) {
+    const u = this.u;
+    const freq = f(u.uFrequency.value);
+    const px = f(f(f(x) * freq) + f(u.uSeedOffset.value.x));
+    const py = f(f(f(z) * freq) + f(u.uSeedOffset.value.y));
+    return this._climateAt(px, py);
+  }
+
   /** Legacy biome-coupled recipe (layers 1-6), h in ~0..1.35 (pre falloff/scale). */
   _legacyShape2D(x, z) {
     const u = this.u;

@@ -34,7 +34,8 @@ export class GpuHeightSampler {
    * @param {function} opts.getGeneration     () => number — bumps on terrain change
    * @param {function} opts.getMaxHeight      () => number
    */
-  constructor({ renderer, scene, uniforms, cpuSampler, isTerrainMaterial, getGeneration, getMaxHeight }) {
+  constructor({ renderer, scene, uniforms, cpuSampler, isTerrainMaterial, getGeneration, getMaxHeight,
+    colorMode = 2, tileSize = 128, tileWorld = 256, edgeMargin = 48 }) {
     this.renderer = renderer;
     this.scene = scene;
     this.uniforms = uniforms;
@@ -42,10 +43,13 @@ export class GpuHeightSampler {
     this.isTerrainMaterial = isTerrainMaterial;
     this.getGeneration = getGeneration;
     this.getMaxHeight = getMaxHeight;
+    // colorMode 2 = smooth analytic height (player collision); 3 = the actual
+    // rendered faceted surface height (prop placement that hugs the LOD mesh).
+    this.colorMode = colorMode;
 
-    this.tileSize = 128;      // pixels
-    this.tileWorld = 256;     // world units covered by the tile
-    this.edgeMargin = 48;     // re-render when a sample gets this close to the edge
+    this.tileSize = tileSize;      // pixels
+    this.tileWorld = tileWorld;    // world units covered by the tile
+    this.edgeMargin = edgeMargin;  // re-render when a sample gets this close to the edge
 
     this._rt = null;
     this._data = null;        // Uint8Array RGBA readback
@@ -64,6 +68,10 @@ export class GpuHeightSampler {
   }
 
   invalidate() { this._valid = false; }
+
+  /** Render/center the tile on (x,z) up-front so a whole batch of samples in
+   *  that area hits one cached readback (no mid-loop re-renders). */
+  prime(x, z) { this._ensureTile(x, z); }
 
   // -------------------------------------------------------------- sampling
 
@@ -173,7 +181,7 @@ export class GpuHeightSampler {
     const prevClearAlpha = r.getClearAlpha();
     r.setClearColor(0x000000, 0);
 
-    this.uniforms.uColorMode.value = 2;
+    this.uniforms.uColorMode.value = this.colorMode;
     r.setRenderTarget(this._rt);
     r.clear();
     r.render(this.scene, cam);

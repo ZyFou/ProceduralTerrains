@@ -51,6 +51,7 @@ import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStack
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
+import { FlatPropSampler, PlanetPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
@@ -151,7 +152,10 @@ export class Engine {
     this.paintMode = null;
     this.paintState = null;
     this.propsManager = null;
-    this.propsTerrainSampler = null;
+    this.propSampler = null;
+    this.planetPropSampler = null;
+    this.propSurfaceField = null;
+    this._propCpuSampler = null;
 
     // World mode: 'studio' (single board), 'infinite' (streamed flat grid),
     // or 'planet' (cube-sphere world)
@@ -1442,6 +1446,7 @@ export class Engine {
       }
       this.waterSystem?.onStackRebuilt(sg, oct);
       if (this.heightSampler) this.heightSampler.invalidate();
+      if (this.propSurfaceField) this.propSurfaceField.invalidate();
       this._applyUniforms();
       if (!this._compiling) this.cb.onStatus('Ready', false);
       this._minimapDirtyAt = performance.now();
@@ -2682,31 +2687,60 @@ export class Engine {
     }
   }
 
-  _getPropsTerrainSampler() {
-    if (!this.propsTerrainSampler) {
+  // Rich prop-placement sampler (flat Tile/Infinite). Wraps the f32-exact
+  // TerrainHeightSampler so props land on the real rendered surface, and folds
+  // in the studio paint height/biome/props masks.
+  _getPropSampler() {
+    if (!this.propSampler) {
       const cpu = new TerrainHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
-      const heightAt = (x, z) => {
-        const base = cpu.heightAt(x, z);
-        if (this.worldMode !== 'studio') return base;
-        return base + (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
-      };
-      this.propsTerrainSampler = {
-        heightAt,
-        normalAt: (x, z, eps = 2) => {
-          const hL = heightAt(x - eps, z);
-          const hR = heightAt(x + eps, z);
-          const hD = heightAt(x, z - eps);
-          const hU = heightAt(x, z + eps);
-          const nx = hL - hR, ny = 2 * eps, nz = hD - hU;
-          const len = Math.hypot(nx, ny, nz) || 1;
-          return { x: nx / len, y: ny / len, z: nz / len };
-        },
-      };
+      this._propCpuSampler = cpu;
+      // GPU readback of the ACTUAL rendered (faceted) surface — props anchor to
+      // the visible LOD mesh, not the smooth analytic field (which floats above
+      // crests). colorMode 3 packs the interpolated vertex height.
+      this.propSurfaceField = new GpuHeightSampler({
+        renderer: this.renderer,
+        scene: this.scene,
+        uniforms: this.uniforms,
+        cpuSampler: cpu,
+        isTerrainMaterial: (m) => m === this.terrainMaterial || m === this._infiniteTerrainMat,
+        getGeneration: () => this._terrainGen,
+        getMaxHeight: () => this._maxHeight(),
+        colorMode: 3,
+        tileSize: 512,
+        tileWorld: 1400,
+        edgeMargin: 32,
+      });
+      this.propSampler = new FlatPropSampler({
+        cpu,
+        surfaceField: this.propSurfaceField,
+        getWaterLevel: () => this.params.seaLevel,
+        getHeightOffset: (x, z) => (this.worldMode === 'studio'
+          ? (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1)
+          : 0),
+        getPaintBiomeWeights: (x, z) => (this.worldMode === 'studio'
+          ? (this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null) : null),
+        getPaintMask: (x, z) => (this.worldMode === 'studio'
+          ? (this.paintMode?.layers?.samplePropsMask(x, z) ?? null) : null),
+      });
     }
-    return this.propsTerrainSampler;
+    // keep the custom-stack reference current
+    this._propCpuSampler?.setStack?.(this.noiseStack);
+    return this.propSampler;
+  }
+
+  // Rich prop-placement sampler for Planet mode (wraps PlanetHeightSampler).
+  _getPlanetPropSampler() {
+    if (!this.planetPropSampler) {
+      this.planetPropSampler = new PlanetPropSampler({
+        planet: this._getPlanetSampler(),
+        getWaterLevel: () => this.params.seaLevel,
+        getPlanetRadius: () => this.params.planetRadius,
+      });
+    }
+    return this.planetPropSampler;
   }
 
   /** Size + show/hide the water shell from the current radius + sea level. */
@@ -3566,13 +3600,14 @@ export class Engine {
     this.waterSystem?.update(this._fps);
 
     this.paintMode?.update(dt);
+    this.propsManager?.tickWind(now * 0.001, this.params);
     this.propsManager?.update({
       mode: this.worldMode,
       camera: this.camera,
       params: this.params,
       boardSize: this.boardSize,
-      heightSampler: this._getPropsTerrainSampler(),
-      planetSampler: this.worldMode === 'planet' ? this._getPlanetSampler() : null,
+      sampler: this.worldMode === 'planet' ? null : this._getPropSampler(),
+      planetSampler: this.worldMode === 'planet' ? this._getPlanetPropSampler() : null,
       paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
     });
 
@@ -4154,6 +4189,7 @@ export class Engine {
     if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
+    if (this.propSurfaceField) { this.propSurfaceField.dispose(); this.propSurfaceField = null; }
     if (this.worldMode === 'infinite') this._disposeInfinite();
     else if (this.worldMode === 'planet') this._disposePlanet();
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }

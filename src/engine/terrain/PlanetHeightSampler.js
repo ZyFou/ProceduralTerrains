@@ -173,6 +173,15 @@ export class PlanetHeightSampler {
     return f(f(Math.floor(t) + s) / steps);
   }
 
+  /**
+   * Public climate + biome weights for a unit direction (one climate eval):
+   * { climate:{temp,moist,cont,erosion,region}, weights:{desert,canyon,wetland,mountains} }.
+   */
+  biomeInfoAt3D(dx, dy, dz) {
+    const climate = this._climate(dx, dy, dz);
+    return { climate, weights: this._biomeWeights(climate) };
+  }
+
   /** Terrain height (world units) above the base radius, for a unit direction. */
   heightAt3D(dx, dy, dz) {
     const u = this.u;
