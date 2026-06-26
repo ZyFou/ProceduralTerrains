@@ -153,20 +153,27 @@ export class CloudLowResPass {
     renderer.getClearColor(this._prevClear);
     const prevBg = scene.background;
 
-    camera.layers.set(CLOUD_LOWRES_LAYER);   // only the cloud draws
-    scene.background = null;                  // keep the target transparent
-    renderer.autoClear = false;
-    renderer.setRenderTarget(this.rt);
-    renderer.setClearColor(0x000000, 0);
-    renderer.clear(true, false, false);
-    renderer.render(scene, camera);
-
-    renderer.setRenderTarget(prevRT);
-    renderer.setClearColor(this._prevClear, prevAlpha);
-    renderer.autoClear = prevAutoClear;
-    camera.layers.mask = savedMask;
-    scene.background = prevBg;
-    this._didRender = true;
+    // Mutating the shared renderer/camera state must be exception-safe: a throw
+    // mid-render (common while the cloud program is still linking right after a
+    // mode switch) would otherwise leave the camera stuck on the cloud-only
+    // layer and the render target stuck on this offscreen RT, so every later
+    // frame renders into nowhere and the scene appears frozen until a reload.
+    try {
+      camera.layers.set(CLOUD_LOWRES_LAYER);   // only the cloud draws
+      scene.background = null;                  // keep the target transparent
+      renderer.autoClear = false;
+      renderer.setRenderTarget(this.rt);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, false, false);
+      renderer.render(scene, camera);
+      this._didRender = true;
+    } finally {
+      renderer.setRenderTarget(prevRT);
+      renderer.setClearColor(this._prevClear, prevAlpha);
+      renderer.autoClear = prevAutoClear;
+      camera.layers.mask = savedMask;
+      scene.background = prevBg;
+    }
   }
 
   /** Composite the low-res clouds over the CURRENT render target (no clear). */
@@ -180,9 +187,12 @@ export class CloudLowResPass {
 
     const prevAutoClear = renderer.autoClear;
     renderer.autoClear = false;
-    renderer.render(this._quadScene, this._quadCam);
-    renderer.autoClear = prevAutoClear;
-    this._didRender = false;
+    try {
+      renderer.render(this._quadScene, this._quadCam);
+    } finally {
+      renderer.autoClear = prevAutoClear;
+      this._didRender = false;
+    }
   }
 
   dispose() {
