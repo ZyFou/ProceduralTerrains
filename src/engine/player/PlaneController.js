@@ -342,7 +342,7 @@ export class PlaneController {
       .multiplyScalar(Math.cos(this._pitch))
       .addScaledVector(this._up, Math.sin(this._pitch))
       .normalize();
-    this.camera.up.copy(this._up).applyAxisAngle(lookDir, -this._roll * 0.35);
+    this.camera.up.copy(this._up).applyAxisAngle(lookDir, this._roll * 0.35);
     this.camera.lookAt(this.camera.position.clone().add(lookDir));
     void right;
   }
