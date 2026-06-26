@@ -63,8 +63,12 @@ export const DEFAULT_PARAMS = {
   propsEnabled: false,
   propsDensity: 0.65,
   propsFlowers: 0.28,
-  propsGrass: 1.0,
+  propsGrass: 0.85,
+  propsRocks: 0.8,
+  propsRockScale: 0.65,
   propsWind: 0.6,
+  propsWindSpeed: 1.6,
+  propsGust: 0.45,
   propsCullDistance: 760,
   propsLodDistance: 280,
 

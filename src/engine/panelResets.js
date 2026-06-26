@@ -20,7 +20,8 @@ export const BIOME_RESET_KEYS = [
 ];
 
 export const PROPS_RESET_KEYS = [
-  'propsEnabled', 'propsDensity', 'propsFlowers', 'propsGrass', 'propsWind', 'propsCullDistance', 'propsLodDistance',
+  'propsEnabled', 'propsDensity', 'propsFlowers', 'propsGrass', 'propsRocks', 'propsRockScale',
+  'propsWind', 'propsWindSpeed', 'propsGust', 'propsCullDistance', 'propsLodDistance',
 ];
 
 export const WORLD_RESET_KEYS = [

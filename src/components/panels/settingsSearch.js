@@ -95,6 +95,14 @@ const SETTINGS_INDEX = [
   { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudDensity', label: 'Density', keywords: 'cloud thickness opacity shape' },
   { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudSoftness', label: 'Softness', keywords: 'cloud edge softness shape' },
   { panelId: 'clouds', settingId: 'clouds.cloudsEnabled', label: 'Enable Clouds', keywords: 'cloud volumetric sky enable' },
+  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsDensity', label: 'Density', keywords: 'props grass flowers rocks density scatter' },
+  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsFlowers', label: 'Flower Mix', keywords: 'props flowers meadow scatter' },
+  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsRocks', label: 'Rock Mix', keywords: 'props rocks boulders stones terrain color' },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.propsGrass', label: 'Grass Scale', keywords: 'props grass scale patch blades biome color' },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.propsRockScale', label: 'Rock Scale', keywords: 'props rocks scale boulders stones' },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.propsWind', label: 'Wind', keywords: 'props animation grass flower wind sway' },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.propsWindSpeed', label: 'Animation Speed', keywords: 'props animation speed wind sway' },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.propsGust', label: 'Gust Motion', keywords: 'props animation gust wind sway' },
   { panelId: 'debug', settingId: 'debug.autoUpdate', label: 'Auto Update', keywords: 'debug generation rebuild' },
   { panelId: 'debug', settingId: 'debug.freezeCulling', label: 'Freeze Culling', keywords: 'debug culling freeze' },
   { panelId: 'debug', settingId: 'debug.freezeLod', label: 'Freeze LOD', keywords: 'debug lod freeze' },
@@ -131,8 +139,8 @@ const SECTION_INDEX = [
   { panelId: 'skybox', sectionLabel: 'Appearance', settingId: 'skybox.section.appearance', label: 'Appearance', keywords: 'sky brightness haze stars appearance', isSection: true },
 
   // Props
-  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.section.distribution', label: 'Distribution', keywords: 'props grass flowers density distribution', isSection: true },
-  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.section.look', label: 'Look', keywords: 'props grass look scale', isSection: true },
+  { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.section.distribution', label: 'Distribution', keywords: 'props grass flowers rocks density distribution', isSection: true },
+  { panelId: 'props', sectionLabel: 'Look', settingId: 'props.section.look', label: 'Look', keywords: 'props grass rock look scale animation wind', isSection: true },
   { panelId: 'props', sectionLabel: 'Performance', settingId: 'props.section.performance', label: 'Performance', keywords: 'props cull lod performance distance', isSection: true },
 
   // Export

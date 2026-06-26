@@ -41,7 +41,7 @@ export const PANEL_META = {
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
-  props: { label: 'Props', title: 'Props', desc: 'Procedural grass and flowers.', icon: PANEL_ICONS.props },
+  props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
@@ -226,8 +226,12 @@ function WaterPanel({ ctx }) {
 
 const PROP_SLIDERS = {
   propsDensity: { label: 'Density', min: 0, max: 2, step: 0.05, digits: 2 },
-  propsGrass: { label: 'Grass Scale', min: 0.2, max: 2, step: 0.05, digits: 2 },
+  propsGrass: { label: 'Grass Scale', min: 0.05, max: 2, step: 0.05, digits: 2 },
+  propsRocks: { label: 'Rock Mix', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsRockScale: { label: 'Rock Scale', min: 0.05, max: 2.5, step: 0.05, digits: 2 },
   propsWind: { label: 'Wind', min: 0, max: 1.5, step: 0.05, digits: 2 },
+  propsWindSpeed: { label: 'Animation Speed', min: 0, max: 4, step: 0.05, digits: 2 },
+  propsGust: { label: 'Gust Motion', min: 0, max: 1.5, step: 0.05, digits: 2 },
   propsFlowers: { label: 'Flower Mix', min: 0, max: 1, step: 0.01, digits: 2 },
   propsCullDistance: { label: 'Cull Distance', min: 120, max: 1800, step: 20, digits: 0, unit: ' u' },
   propsLodDistance: { label: 'LOD Distance', min: 60, max: 900, step: 10, digits: 0, unit: ' u' },
@@ -237,19 +241,23 @@ function PropsPanel({ ctx }) {
   const { params, onParam, worldMode } = ctx;
   const enabled = !!params.propsEnabled;
   return (
-    <SidePanel title="Props" description="Procedural grass and flowers." onClose={ctx.onClose}>
+    <SidePanel title="Props" description="Procedural grass, flowers and rocks." onClose={ctx.onClose}>
       <ToggleRow label="Procedural Props" value={enabled} onChange={(v) => onParam('propsEnabled', v)}
-        info="Scatter lightweight procedural grass and flowers on valid terrain in Tile, Infinite World, and Planet modes." />
+        info="Scatter lightweight procedural grass patches, flowers and terrain-matched rocks in Tile, Infinite World, and Planet modes." />
       {enabled && (
         <>
           <ControlSection id="props-distribution" title="Distribution" defaultOpen settingId="props.section.distribution">
             <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
             <SliderCtl def={PROP_SLIDERS.propsFlowers} value={params.propsFlowers} onChange={(v) => onParam('propsFlowers', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsRocks} value={params.propsRocks ?? 0.8} onChange={(v) => onParam('propsRocks', v)} />
           </ControlSection>
 
           <ControlSection id="props-look" title="Look" defaultOpen settingId="props.section.look">
             <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsRockScale} value={params.propsRockScale ?? 0.65} onChange={(v) => onParam('propsRockScale', v)} />
             <SliderCtl def={PROP_SLIDERS.propsWind} value={params.propsWind ?? 0.6} onChange={(v) => onParam('propsWind', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsWindSpeed} value={params.propsWindSpeed ?? 1.6} onChange={(v) => onParam('propsWindSpeed', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsGust} value={params.propsGust ?? 0.45} onChange={(v) => onParam('propsGust', v)} />
           </ControlSection>
 
           <ControlSection id="props-performance" title="Performance" defaultOpen settingId="props.section.performance">

@@ -94,7 +94,7 @@ export function scoreProp(desc, sample) {
 }
 
 // ============================================================================
-// Stage 1 descriptors: grass + flowers, expressed in the full schema.
+// Stage 1 descriptors: grass + flowers + rocks, expressed in the full schema.
 // ============================================================================
 
 export const PROP_TYPES = [
@@ -106,10 +106,14 @@ export const PROP_TYPES = [
     slopeRange: [0.0, 0.30],    // soft ground; ~n.y >= 0.7
     heightRange: null,
     density: 1.0,
-    // green ground: avoid desert/canyon, prefer moist
-    biomeScore: (s) => (1 - s.biomeWeights.desert) * (1 - s.biomeWeights.canyon)
-      * (0.45 + 0.55 * s.moisture),
-    scaleRange: [2.4, 4.6],
+    // green ground: avoid dry biomes, thicken heavily in moist lowlands/forest.
+    biomeScore: (s) => {
+      const w = s.biomeWeights;
+      const dry = Math.max(w.desert, w.canyon);
+      const greenFallback = clamp01(1 - Math.max(w.desert, w.canyon, w.mountains * 0.55));
+      return (1 - dry) * (0.15 + 1.1 * s.moisture + 0.45 * greenFallback + 0.25 * w.wetland);
+    },
+    scaleRange: [0.55, 1.45],
     alignMode: ALIGN.BLEND,
     alignAmount: 0.55,
     rootDepth: 0.15,           // tiny ground bite (props anchor to faceted mesh)
@@ -126,12 +130,34 @@ export const PROP_TYPES = [
     density: 0.5,               // further scaled by params.propsFlowers
     biomeScore: (s) => (1 - s.biomeWeights.desert) * (1 - s.biomeWeights.canyon)
       * (1 - s.biomeWeights.mountains * 0.7) * smooth(0.30, 0.75, s.moisture),
-    scaleRange: [2.6, 5.0],
+    scaleRange: [0.85, 1.75],
     alignMode: ALIGN.UPRIGHT,
     alignAmount: 0.0,
     rootDepth: 0.1,
     windInfluence: 0.7,
     colorVar: 0.0,
+  },
+  {
+    id: 'rock',
+    render: 'rock',
+    waterRule: WATER_RULE.EXCLUDE,
+    waterClearance: 1.0,
+    slopeRange: [0.02, 0.62],
+    heightRange: null,
+    density: 0.62,
+    biomeScore: (s) => 0.08
+      + s.biomeWeights.desert * 1.2
+      + s.biomeWeights.canyon * 1.05
+      + s.biomeWeights.mountains * 0.75
+      + clamp01(s.slope * 1.6) * 0.35
+      - s.biomeWeights.wetland * 0.25
+      - s.moisture * 0.18,
+    scaleRange: [0.55, 2.85],
+    alignMode: ALIGN.NORMAL,
+    alignAmount: 0.85,
+    rootDepth: 0.55,
+    windInfluence: 0.0,
+    colorVar: 0.20,
   },
 ];
 
@@ -166,4 +192,25 @@ export function grassTint(sample) {
   const cold = clamp01(1 - smooth(0.18, 0.42, temp));
   c = mixRGB(c, [1.15, 1.22, 1.18], cold * 0.8);
   return c;   // [r,g,b] multiplier
+}
+
+// Approximate the terrain albedo around a prop sample so static props feel
+// embedded in the biome palette without needing a GPU readback from the terrain
+// material. The output is used as per-instance color for rocks.
+export function terrainRockTint(sample) {
+  const w = sample.biomeWeights;
+  const temp = sample.temperature;
+  const moist = sample.moisture;
+  const slope = sample.slope;
+  const dry = Math.max(w.desert, w.canyon);
+  const cold = clamp01(1 - smooth(0.18, 0.42, temp));
+  const high = clamp01((sample.height || 0) / Math.max(sample.heightScale || 560, 1));
+
+  let c = mixRGB([0.31, 0.29, 0.26], [0.48, 0.45, 0.39], clamp01(high * 0.9 + slope * 0.6));
+  c = mixRGB(c, [0.67, 0.47, 0.28], clamp01(w.canyon * 0.95));
+  c = mixRGB(c, [0.62, 0.52, 0.34], clamp01(w.desert * 0.75));
+  c = mixRGB(c, [0.23, 0.26, 0.20], clamp01(w.wetland * moist * 0.65));
+  c = mixRGB(c, [0.76, 0.78, 0.77], cold * (0.55 + 0.35 * high));
+  c = mixRGB(c, [0.40, 0.38, 0.36], clamp01(1 - dry) * 0.25);
+  return c;
 }

@@ -53,7 +53,10 @@ export function chooseCandidate(sample, params, rand) {
       s *= flowerBias;
     } else if (desc.id === 'grass') {
       const grassBias = clamp01(1 + (paint ? paint.grass + paint.mixed * 0.5 : 0));
-      s *= grassBias;
+      s *= grassBias * (0.85 + sample.moisture * 0.9 + sample.biomeWeights.wetland * 0.35);
+    } else if (desc.id === 'rock') {
+      const dryRockBias = 0.75 + sample.biomeWeights.desert * 1.35 + sample.biomeWeights.canyon * 1.1;
+      s *= clamp(params.propsRocks ?? 0.8, 0, 2) * dryRockBias;
     }
     if (s <= 0) continue;
     scored.push([desc, s]);
