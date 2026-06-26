@@ -191,10 +191,17 @@ export async function fetchLocationHeightmap(loc, { onProgress, signal } = {}) {
   }
 
   // Crop the stitched grid to the exact bounding box.
-  const cropX = Math.max(0, Math.round((fx0 - tx0) * TILE));
-  const cropY = Math.max(0, Math.round((fy0 - ty0) * TILE));
-  const cropW = Math.min(stitch.width - cropX, Math.max(1, Math.round((fx1 - fx0) * TILE)));
-  const cropH = Math.min(stitch.height - cropY, Math.max(1, Math.round((fy1 - fy0) * TILE)));
+  let cropX = Math.max(0, Math.round((fx0 - tx0) * TILE));
+  let cropY = Math.max(0, Math.round((fy0 - ty0) * TILE));
+  let cropW = Math.min(stitch.width - cropX, Math.max(1, Math.round((fx1 - fx0) * TILE)));
+  let cropH = Math.min(stitch.height - cropY, Math.max(1, Math.round((fy1 - fy0) * TILE)));
+  // Center-crop to a square: the board is square, so a non-square bbox would
+  // otherwise clamp-stretch its short-axis edge row into a smear. Trim the long
+  // axis instead (the strip that was getting smeared anyway).
+  const side = Math.min(cropW, cropH);
+  cropX += Math.floor((cropW - side) / 2);
+  cropY += Math.floor((cropH - side) / 2);
+  cropW = cropH = side;
   const id = sctx.getImageData(cropX, cropY, cropW, cropH);
 
   const W = id.width, H = id.height, data = id.data;
