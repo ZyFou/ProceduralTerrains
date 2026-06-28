@@ -127,3 +127,10 @@ export function downloadMaskPng(mask, resolution, filename, opts) {
   a.download = filename;
   a.click();
 }
+
+/** Encode a float mask as PNG bytes (Uint8Array) for bundling into a zip. */
+export async function maskToPngBytes(mask, resolution, opts) {
+  const url = maskToPngDataUrl(mask, resolution, opts);
+  const blob = await (await fetch(url)).blob();
+  return new Uint8Array(await blob.arrayBuffer());
+}

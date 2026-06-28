@@ -13,7 +13,7 @@ import {
   applyWaterMaterialSettings,
 } from './WaterMaterialFactory.js';
 import { applyWaterDebugToMaterials } from './WaterDebugViews.js';
-import { exportWaterMasks } from './WaterExport.js';
+import { buildWaterMaskFiles, buildWaterMetadata } from './WaterExport.js';
 
 // ============================================================================
 // WaterSystem — central controller for the scalable water pipeline.
@@ -175,21 +175,31 @@ export class WaterSystem {
     });
   }
 
-  exportMasks(options) {
+  /**
+   * Build the requested water masks (and optional metadata) as a
+   * { filename: Uint8Array } map for inclusion in the export zip. Lazily
+   * creates the minimap sampler so masks work even before the minimap renders.
+   */
+  async exportMasks(options) {
     const eng = this.engine;
     const sampleHeight = (x, z) => {
-      if (eng.heightSampler?.cpu) return eng.heightSampler.cpu.sample(x, z);
-      if (eng._minimapSampler) return eng._minimapSampler.sample(x, z);
-      return 0;
+      if (eng.heightSampler?.cpu) return eng.heightSampler.cpu.heightAt(x, z);
+      return eng._getMinimapSampler().heightAt(x, z);
     };
     const size = eng.boardSize ?? eng.params.chunkSize * eng.params.chunkCount;
-    return exportWaterMasks({
+    const files = await buildWaterMaskFiles({
       sampleHeight,
       seaLevel: eng.params.seaLevel,
       size,
       resolution: parseInt(options.maskRes ?? '512', 10),
       options: { ...options, waterMode: this._effectiveMode },
     });
+    if (options.exportWaterMetadata) {
+      files['water/water_metadata.json'] = new TextEncoder().encode(
+        JSON.stringify(buildWaterMetadata(eng.params), null, 2),
+      );
+    }
+    return files;
   }
 
   dispose() {

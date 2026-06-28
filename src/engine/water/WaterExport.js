@@ -3,13 +3,15 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { generateWaterMasks, downloadMaskPng } from './WaterMasks.js';
+import { generateWaterMasks, maskToPngBytes } from './WaterMasks.js';
 import { isWaterActive } from './WaterSettings.js';
 
 /**
- * Export water mask PNGs from a height sampler.
+ * Build the requested water mask PNGs as a { filename: Uint8Array } map so the
+ * caller can fold them into a single export zip (no separate downloads).
+ * Returns an empty map when water is inactive or nothing is requested.
  */
-export function exportWaterMasks({
+export async function buildWaterMaskFiles({
   sampleHeight,
   seaLevel,
   size,
@@ -17,27 +19,23 @@ export function exportWaterMasks({
   origin,
   options = {},
 }) {
-  if (!isWaterActive(options.waterMode ?? 'legacy', seaLevel)) return [];
+  if (!isWaterActive(options.waterMode ?? 'legacy', seaLevel)) return {};
+
+  const wantMask = !!options.exportWaterMask;
+  const wantDepth = !!options.exportDepthMap;
+  const wantShore = !!options.exportShorelineMask;
+  const wantFoam = !!options.exportFoamMask;
+  if (!wantMask && !wantDepth && !wantShore && !wantFoam) return {};
+
   const masks = generateWaterMasks({ sampleHeight, seaLevel, size, resolution, origin });
   const prefix = options.filenamePrefix ?? 'water';
-  const files = [];
+  const files = {};
 
-  if (options.exportWaterMask !== false) {
-    downloadMaskPng(masks.waterMask, masks.resolution, `${prefix}-water-mask.png`);
-    files.push('water-mask');
-  }
-  if (options.exportDepthMap) {
-    downloadMaskPng(masks.depthMap, masks.resolution, `${prefix}-depth-map.png`, { colorize: true });
-    files.push('depth-map');
-  }
-  if (options.exportShorelineMask) {
-    downloadMaskPng(masks.shorelineMask, masks.resolution, `${prefix}-shoreline-mask.png`);
-    files.push('shoreline-mask');
-  }
-  if (options.exportFoamMask) {
-    downloadMaskPng(masks.foamMask, masks.resolution, `${prefix}-foam-mask.png`);
-    files.push('foam-mask');
-  }
+  if (wantMask) files[`water/${prefix}-water-mask.png`] = await maskToPngBytes(masks.waterMask, masks.resolution);
+  if (wantDepth) files[`water/${prefix}-depth-map.png`] = await maskToPngBytes(masks.depthMap, masks.resolution, { colorize: true });
+  if (wantShore) files[`water/${prefix}-shoreline-mask.png`] = await maskToPngBytes(masks.shorelineMask, masks.resolution);
+  if (wantFoam) files[`water/${prefix}-foam-mask.png`] = await maskToPngBytes(masks.foamMask, masks.resolution);
+
   return files;
 }
 

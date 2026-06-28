@@ -633,6 +633,9 @@ function ExportPanel({ ctx }) {
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setOpt((p) => ({ ...p, [k]: v }));
+  // Turning on any water mask auto-enables the water plane (overridable: the
+  // user can still switch the plane back off afterwards).
+  const setMask = (k, v) => setOpt((p) => ({ ...p, [k]: v, ...(v && !p.exportWater ? { exportWater: true } : {}) }));
   const showTex = opt.bakeColor || opt.bakeNormal || opt.exportHeightmap;
   const multiTile = ctx.worldMode === 'studio' && (ctx.tiles?.length ?? 1) > 1;
   const circleTiles = ctx.tileAssemblyShape === 'circle';
@@ -715,10 +718,10 @@ function ExportPanel({ ctx }) {
       </ControlSection>
 
       <ControlSection id="export-water-maps" title="Water Maps" defaultOpen={false} settingId="export.section.waterMaps">
-        <ToggleRow label="Export Water Mask" value={opt.exportWaterMask} onChange={(v) => set('exportWaterMask', v)} />
-        <ToggleRow label="Export Depth Map" value={opt.exportDepthMap} onChange={(v) => set('exportDepthMap', v)} />
-        <ToggleRow label="Export Shoreline Mask" value={opt.exportShorelineMask} onChange={(v) => set('exportShorelineMask', v)} />
-        <ToggleRow label="Export Foam Mask" value={opt.exportFoamMask} onChange={(v) => set('exportFoamMask', v)} />
+        <ToggleRow label="Export Water Mask" value={opt.exportWaterMask} onChange={(v) => setMask('exportWaterMask', v)} />
+        <ToggleRow label="Export Depth Map" value={opt.exportDepthMap} onChange={(v) => setMask('exportDepthMap', v)} />
+        <ToggleRow label="Export Shoreline Mask" value={opt.exportShorelineMask} onChange={(v) => setMask('exportShorelineMask', v)} />
+        <ToggleRow label="Export Foam Mask" value={opt.exportFoamMask} onChange={(v) => setMask('exportFoamMask', v)} />
         <ToggleRow label="Include Water Material Metadata" value={opt.exportWaterMetadata} onChange={(v) => set('exportWaterMetadata', v)} />
         <ToggleRow label="Export Preset (JSON)" value={opt.exportPreset} onChange={(v) => set('exportPreset', v)} />
       </ControlSection>

@@ -637,6 +637,9 @@ export class TerrainExporter {
       zipFiles['collision.glb'] = exportedCollision;
     }
 
+    // Water masks (and any other caller-supplied files) ride along in the same zip.
+    if (options.extraZipFiles) Object.assign(zipFiles, options.extraZipFiles);
+
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing export package (ZIP)...');
       const zipped = zipSync(zipFiles);

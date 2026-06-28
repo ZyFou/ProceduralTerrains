@@ -302,6 +302,9 @@ export class PlanetExporter {
       }
     });
 
+    // Water masks (and any other caller-supplied files) ride along in the same zip.
+    if (options.extraZipFiles) Object.assign(zipFiles, options.extraZipFiles);
+
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing planet package (ZIP)…');
       const zipped = zipSync(zipFiles);

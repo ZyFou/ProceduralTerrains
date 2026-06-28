@@ -32,6 +32,7 @@ import {
 import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import { TerrainExporter } from './terrain/TerrainExporter.js';
 import { PlanetExporter } from './terrain/PlanetExporter.js';
+import { zipSync } from 'fflate';
 import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, buildDiskWallGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
@@ -3429,10 +3430,13 @@ export class Engine {
     }
   }
 
-  exportWaterMasks(options) {
-    const files = this.waterSystem.exportMasks(options);
-    if (files.length) this.cb.onToast(`Exported: ${files.join(', ')}`);
-    else this.cb.onToast('No water masks exported');
+  async exportWaterMasks(options) {
+    const files = await this.waterSystem.exportMasks(options);
+    const names = Object.keys(files);
+    if (!names.length) { this.cb.onToast('No water masks exported'); return; }
+    const zipped = zipSync(files);
+    this._download(URL.createObjectURL(new Blob([zipped])), `water_masks-${this.params.seed}.zip`);
+    this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
   }
 
   // --------------------------------------------------------------- exports
@@ -3510,16 +3514,20 @@ export class Engine {
       this.profiler.updateLoadingTask(_exportTask, null, msg);
     };
     try {
-      if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask || options.exportFoamMask) {
-        this.exportWaterMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
+      // Water masks are folded into the single export zip (not downloaded
+      // separately) via extraZipFiles, so the user gets one .zip with everything.
+      let extraZipFiles = {};
+      if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask
+        || options.exportFoamMask || options.exportWaterMetadata) {
+        extraZipFiles = await this.waterSystem.exportMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
       }
       if (this.worldMode === 'planet') {
         // export the full cube-sphere planet mesh
-        await PlanetExporter.export(this.renderer, this.params, this.uniforms, options, onMsg);
+        await PlanetExporter.export(this.renderer, this.params, this.uniforms, { ...options, extraZipFiles }, onMsg);
       } else {
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
-          { ...options, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
+          { ...options, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
         );
       }
     } catch (e) {
