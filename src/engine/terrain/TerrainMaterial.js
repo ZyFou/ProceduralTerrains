@@ -589,6 +589,12 @@ export function createTerrainUniforms() {
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
     uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
 
+    // Erosion height-offset field (signed world-unit delta over the bake region,
+    // R channel). Added in heightAt() so mesh/normals/collision/props/export all
+    // follow it. Disabled by default — a free no-op until an erosion bake runs.
+    uErosionOffsetTex:    { value: null },
+    uErosionEnabled:      { value: 0.0 },
+
     // Noise Stack per-layer continuous params (shared by every height material).
     // Packed each param change by Engine from the live NoiseStack; the GLSL
     // arrays in COMMON_UNIFORMS_GLSL read these.

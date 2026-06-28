@@ -69,6 +69,10 @@ export class TerrainHeightSampler {
     this.u = uniforms;
     this.getEnv = getEnv;
     this.stack = stack;
+    // Optional erosion height-offset field (CPU mirror of the GLSL
+    // erosionOffsetAt). When set and enabled, heightAt adds its signed
+    // world-unit delta so CPU physics/props track the eroded mesh. null = none.
+    this.erosion = null;
   }
 
   setStack(stack) { this.stack = stack; }
@@ -259,7 +263,14 @@ export class TerrainHeightSampler {
       }
       h = this._applyEdgeProfile(h, x, z, rim, env.octaves);
     }
-    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+    // World-unit height, then the erosion delta on top (matches GLSL heightAt:
+    // the offset is added after the clamp/scale, in world units).
+    return f(f(clamp(h, 0, 1.35) * f(u.uHeightScale.value)) + this._erosionOffset(x, z));
+  }
+
+  _erosionOffset(x, z) {
+    const e = this.erosion;
+    return (e && e.enabled) ? f(e.offsetAt(x, z)) : 0;
   }
 
   shapeAt(x, z) {

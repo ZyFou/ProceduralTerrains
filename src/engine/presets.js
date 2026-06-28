@@ -6,6 +6,7 @@
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
+import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
 
 export const DEFAULT_PARAMS = {
   seed: 1337,
@@ -87,6 +88,10 @@ export const DEFAULT_PARAMS = {
 
   // scalable water pipeline — old saves without waterMode migrate to legacy.
   ...WATER_DEFAULT_PARAMS,
+
+  // terrain erosion (Tile mode) — baked offset + masks. Old saves without these
+  // keys fall back to the erosion defaults on load.
+  ...EROSION_DEFAULT_PARAMS,
 };
 
 export const PRESETS = {

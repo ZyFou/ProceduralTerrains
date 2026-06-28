@@ -37,6 +37,8 @@ import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, buildDiskWallGeo
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
+import { ErosionField } from './terrain/erosion/ErosionField.js';
+import { EROSION_QUALITY, getErosionPreset } from './terrain/erosion/ErosionPresets.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
 import { PlaneController } from './player/PlaneController.js';
@@ -231,6 +233,11 @@ export class Engine {
     this.tileDebug = { view: 'off', showLegend: true, opacity: 1, showPreview: true };
     this.importedMaps = { noise: null, height: null, biome: null };
     this.importedMapState = { noise: null, height: null, biome: null };
+
+    // Erosion: additive world-space height-offset field applied in heightAt.
+    // Slice 1 ships the offset pipeline + a no-op identity bake; the simulation
+    // arrives in later slices.
+    this.erosionField = new ErosionField();
 
     this._debug = {
       freezeCulling: false,   // stop recomputing chunk visibility (fly out to inspect the frustum)
@@ -1081,6 +1088,20 @@ export class Engine {
     this.params[key] = value;
     this.cb.onParams({ ...this.params });
     this._needsRender = true;   // any param change → redraw (on-demand studio)
+
+    // erosion params: erosionEnabled is the live before/after toggle (applies
+    // the already-baked offset); every other erosion* knob only affects the
+    // NEXT bake, so it just stores. Never triggers a terrain rebuild.
+    if (key === 'erosionEnabled') {
+      this.erosionField.setEnabled(value);
+      this.erosionField.applyTo(this.uniforms);
+      this._onErosionChanged();
+      return;
+    }
+    if (key.startsWith('erosion')) {
+      if (key === 'erosionPreset') this.applyErosionPreset(value);
+      return;
+    }
 
     // Dynamic Noise Modifier Addition:
     // If the active noise stack doesn't have any enabled legacy layer, intercept adjustments
@@ -2032,6 +2053,7 @@ export class Engine {
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
+      cpu.erosion = this.erosionField;   // analytic fallback tracks erosion too
       this.heightSampler = new GpuHeightSampler({
         renderer: this.renderer,
         scene: this.scene,
@@ -2043,6 +2065,186 @@ export class Engine {
       });
     }
     return this.heightSampler;
+  }
+
+  // -------------------------------------------------------------- erosion
+  // Erosion is an additive, world-space height-offset field (delta = eroded -
+  // base) added in heightAt(), so mesh / normals / collision / props / export
+  // all follow it and the base terrain is never mutated. The hydraulic + thermal
+  // simulation runs in a Web Worker; the bake is a one-shot the user triggers.
+
+  /** No-op identity bake (zero delta): proves the offset pipeline without
+   *  changing the terrain. Dev/testing aid; the real bake is bakeErosion. */
+  bakeErosionIdentity(res = 256) {
+    const u = this.uniforms;
+    this.erosionField.bakeIdentity({
+      originX: u.uBakeOrigin.value.x,
+      originZ: u.uBakeOrigin.value.y,
+      sizeX: u.uBakeSpan.value.x,
+      sizeZ: u.uBakeSpan.value.y,
+    }, res);
+    this.erosionField.applyTo(u);
+    this._onErosionChanged();
+    return true;
+  }
+
+  /**
+   * Bake erosion (Tile mode): sample the base height field into a grid, run the
+   * worker simulation, then apply the resulting delta + masks. Returns a promise
+   * that resolves true on success.
+   * @param {{onProgress?:(p:number,phase:string)=>void}} [opts]
+   */
+  async bakeErosion({ onProgress } = {}) {
+    if (this.worldMode !== 'studio') {
+      this.cb.onToast?.('Erosion is available in Tile mode.');
+      return false;
+    }
+    if (this._erosionBaking) return false;
+    this._erosionBaking = true;
+    try {
+      const u = this.uniforms;
+      const q = EROSION_QUALITY[this.params.erosionQuality] || EROSION_QUALITY.balanced;
+      const res = q.res;
+      const originX = u.uBakeOrigin.value.x;
+      const originZ = u.uBakeOrigin.value.y;
+      const sizeX = u.uBakeSpan.value.x;
+      const sizeZ = u.uBakeSpan.value.y;
+
+      // sample the BASE field (erosion off → no feedback) at texel centres,
+      // yielding to the event loop so the UI/progress stay responsive
+      const sampler = this._getHeightSampler().cpu;
+      const prevEnabled = this.erosionField.enabled;
+      this.erosionField.enabled = false;
+      const base = new Float32Array(res * res);
+      for (let row = 0; row < res; row++) {
+        const z = originZ + ((row + 0.5) / res) * sizeZ;
+        const rowOff = row * res;
+        for (let col = 0; col < res; col++) {
+          const x = originX + ((col + 0.5) / res) * sizeX;
+          base[rowOff + col] = sampler.heightAt(x, z);
+        }
+        if ((row & 31) === 0) {
+          onProgress?.(0.08 * (row / res), 'sampling');
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+      this.erosionField.enabled = prevEnabled;
+
+      // cell size in world units → scale cell-relative knobs (talus / minSlope)
+      const cellWorld = Math.max(sizeX, sizeZ) / res;
+      const params = this._erosionSimParams(cellWorld);
+
+      const out = await this._runErosionWorker({
+        width: res, height: res, heightmap: base, params,
+        onProgress: (pr, phase) => onProgress?.(0.1 + pr * 0.85, phase),
+      });
+
+      this.erosionField.setRegion(originX, originZ, sizeX, sizeZ);
+      this.erosionField.setDelta(out.delta, res);
+      this.erosionField.setMasks({
+        flow: out.flow, erosionMask: out.erosionMask, depositionMask: out.depositionMask,
+        sedimentMap: out.sedimentMap, slopeMap: out.slopeMap,
+      }, res);
+      this.erosionField.setEnabled(true);
+      this.erosionField.applyTo(u);
+
+      if (this.params.erosionEnabled !== true) {
+        this.params.erosionEnabled = true;
+        this.cb.onParams?.({ ...this.params });
+      }
+      this._onErosionChanged();
+      onProgress?.(1, 'done');
+      this.cb.onToast?.('Erosion baked.');
+      return true;
+    } catch (err) {
+      this.cb.onToast?.(`Erosion failed: ${err?.message || err}`);
+      return false;
+    } finally {
+      this._erosionBaking = false;
+    }
+  }
+
+  /** Map the engine `erosion*` params to erosionSim params (cell-scaled). */
+  _erosionSimParams(cellWorld) {
+    const p = this.params;
+    return {
+      seed: (p.erosionSeed | 0) || 1,
+      strength: p.erosionStrength,
+      droplets: p.erosionDroplets,
+      maxLifetime: p.erosionLifetime,
+      inertia: p.erosionInertia,
+      sedimentCapacity: p.erosionSedimentCapacity,
+      minSlope: 0.01 * cellWorld,
+      depositionRate: p.erosionDeposition,
+      erosionRate: p.erosionErosionRate,
+      erosionRadius: p.erosionRadius,
+      evaporation: p.erosionEvaporation,
+      gravity: p.erosionGravity,
+      initialSpeed: 1.0,
+      initialWater: 1.0,
+      thermalIterations: p.erosionThermalIterations,
+      thermalStrength: p.erosionThermalStrength,
+      talus: p.erosionTalus * cellWorld,
+      smoothing: p.erosionSmoothing,
+    };
+  }
+
+  _runErosionWorker({ width, height, heightmap, params, onProgress }) {
+    return new Promise((resolve, reject) => {
+      if (!this._erosionWorker) {
+        this._erosionWorker = new Worker(
+          new URL('./terrain/erosion/erosion.worker.js', import.meta.url),
+          { type: 'module' },
+        );
+      }
+      const worker = this._erosionWorker;
+      const id = (this._erosionJobId = (this._erosionJobId || 0) + 1);
+      const onMsg = (e) => {
+        const m = e.data;
+        if (!m || m.id !== id) return;
+        if (m.type === 'progress') onProgress?.(m.progress, m.phase);
+        else if (m.type === 'result') { worker.removeEventListener('message', onMsg); resolve(m); }
+        else if (m.type === 'error') { worker.removeEventListener('message', onMsg); reject(new Error(m.message)); }
+      };
+      worker.addEventListener('message', onMsg);
+      worker.postMessage({ type: 'erode', id, width, height, heightmap, params }, [heightmap.buffer]);
+    });
+  }
+
+  /** Apply a named erosion preset to the engine params (does not rebake). */
+  applyErosionPreset(key) {
+    const preset = getErosionPreset(key);
+    this.params.erosionPreset = key;
+    Object.assign(this.params, preset.params);
+    this.cb.onParams?.({ ...this.params });
+  }
+
+  /** Live before/after toggle — only applies if a bake exists. */
+  setErosionEnabled(on) {
+    this.erosionField.setEnabled(on);
+    this.erosionField.applyTo(this.uniforms);
+    this._onErosionChanged();
+  }
+
+  /** Reset erosion: drop the baked offset + masks and disable. */
+  clearErosion() {
+    this.erosionField.clear();
+    this.erosionField.applyTo(this.uniforms);
+    if (this.params.erosionEnabled !== false) {
+      this.params.erosionEnabled = false;
+      this.cb.onParams?.({ ...this.params });
+    }
+    this._onErosionChanged();
+  }
+
+  /** Erosion edits change the height field: invalidate the studio bake + GPU
+   *  height readbacks and force a redraw, exactly like an import/paint edit. */
+  _onErosionChanged() {
+    this._bakedStudioGen = -1;
+    this._terrainGen++;
+    this.heightSampler?.invalidate?.();
+    this.propSurfaceField?.invalidate?.();
+    this._needsRender = true;
   }
 
   _waterLevel() {
@@ -2697,6 +2899,7 @@ export class Engine {
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
+      cpu.erosion = this.erosionField;   // props anchor to the eroded field too
       this._propCpuSampler = cpu;
       // GPU readback of the ACTUAL rendered (faceted) surface — props anchor to
       // the visible LOD mesh, not the smooth analytic field (which floats above
@@ -4189,6 +4392,9 @@ export class Engine {
 
   dispose() {
     for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
+    this.erosionField?.dispose();
+    this._erosionWorker?.terminate();
+    this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
     if (this._resizeObserver) this._resizeObserver.disconnect();

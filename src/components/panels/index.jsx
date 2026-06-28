@@ -10,6 +10,7 @@ import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
 import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
 import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
+import { EROSION_PRESETS, EROSION_QUALITY } from '../../engine/terrain/erosion/ErosionPresets.js';
 import { formatTimeOfDay } from '../../engine/sky/TimeOfDay.js';
 import { APP_VERSION } from '../../constants/app.js';
 import PlanetStylePanel from '../PlanetStylePanel.jsx';
@@ -40,6 +41,7 @@ export const PANEL_META = {
     modes: ['planet', 'studio'],
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
+  erosion: { label: 'Erosion', title: 'Erosion', desc: 'Hydraulic & thermal erosion (Tile mode).', icon: PANEL_ICONS.erosion, modes: ['studio'] },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
   props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
@@ -51,7 +53,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'erosion', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -187,6 +189,100 @@ function PlanetPanel({ ctx }) {
         <PlanetStylePanel {...ctx.planetStyleProps} settingsTarget={ctx.settingsTarget} embedded paletteOnly />
       )}
       <PanelResetButton label="Reset Planet / Colors Settings" onClick={() => ctx.onResetPanel?.('planet')} settingId="planet.reset" />
+    </SidePanel>
+  );
+}
+
+const EROSION_MAIN = [
+  { key: 'erosionStrength', label: 'Strength', min: 0, max: 1, step: 0.01, digits: 2, info: 'Master blend of the eroded result over the base terrain (0 = none).' },
+  { key: 'erosionDroplets', label: 'Droplets', min: 0, max: 200000, step: 5000, digits: 0, info: 'Rain droplets in the hydraulic pass. More = deeper valleys/ravines, slower bake.' },
+  { key: 'erosionLifetime', label: 'Droplet Lifetime', min: 5, max: 80, step: 1, digits: 0, info: 'Max steps each droplet travels before evaporating.' },
+  { key: 'erosionSeed', label: 'Seed', min: 1, max: 999, step: 1, digits: 0, info: 'Deterministic random seed for droplet spawn positions.' },
+];
+
+const EROSION_ADVANCED = [
+  { key: 'erosionRadius', label: 'Erosion Radius', min: 1, max: 6, step: 1, digits: 0, info: 'Brush radius for material removal (larger = smoother channels).' },
+  { key: 'erosionErosionRate', label: 'Erosion Strength', min: 0, max: 1, step: 0.01, digits: 2, info: 'How aggressively fast-moving water carves terrain.' },
+  { key: 'erosionDeposition', label: 'Deposition', min: 0, max: 1, step: 0.01, digits: 2, info: 'How readily carried sediment settles back out.' },
+  { key: 'erosionSedimentCapacity', label: 'Sediment Capacity', min: 1, max: 12, step: 0.5, digits: 1, info: 'How much material a droplet can carry before depositing.' },
+  { key: 'erosionEvaporation', label: 'Evaporation', min: 0, max: 0.1, step: 0.005, digits: 3, info: 'Water lost per step (higher = shorter drainage lines).' },
+  { key: 'erosionGravity', label: 'Gravity', min: 1, max: 12, step: 0.5, digits: 1, info: 'Downhill acceleration of droplets.' },
+  { key: 'erosionInertia', label: 'Inertia', min: 0, max: 0.95, step: 0.01, digits: 2, info: 'How much droplets keep their direction vs. follow the slope.' },
+  { key: 'erosionThermalStrength', label: 'Thermal Strength', min: 0, max: 1, step: 0.01, digits: 2, info: 'Strength of loose-material sliding off steep slopes.' },
+  { key: 'erosionThermalIterations', label: 'Thermal Iterations', min: 0, max: 100, step: 5, digits: 0, info: 'Relaxation passes for the thermal (talus) erosion.' },
+  { key: 'erosionTalus', label: 'Talus Angle', min: 0.1, max: 2, step: 0.05, digits: 2, info: 'Slope steepness (relative to cell size) above which material slides.' },
+  { key: 'erosionSmoothing', label: 'Smoothing', min: 0, max: 1, step: 0.01, digits: 2, info: 'Final low-pass blend to soften noise.' },
+];
+
+const EROSION_PHASE_LABEL = {
+  sampling: 'Sampling base terrain…',
+  hydraulic: 'Hydraulic pass',
+  thermal: 'Thermal pass',
+  done: 'Updating terrain…',
+  starting: 'Starting…',
+};
+
+function ErosionPanel({ ctx }) {
+  const { params, onParam } = ctx;
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState('');
+  const [baked, setBaked] = useState(!!ctx.erosionHasResult);
+
+  // Editing any knob detaches from the named preset (→ Custom) without clobbering.
+  const setKnob = (key, v) => {
+    onParam(key, v);
+    if (params.erosionPreset !== 'custom') onParam('erosionPreset', 'custom');
+  };
+
+  const bake = async () => {
+    setBusy(true); setProgress(0); setPhase('starting');
+    try {
+      const ok = await ctx.onErosionBake((p, ph) => { setProgress(p); setPhase(ph); });
+      if (ok) setBaked(true);
+    } finally { setBusy(false); }
+  };
+
+  const reset = () => { ctx.onErosionReset(); setBaked(false); setProgress(0); setPhase(''); };
+
+  const pct = Math.round(progress * 100);
+
+  return (
+    <SidePanel title="Erosion" description="Hydraulic & thermal erosion (Tile mode)." onClose={ctx.onClose}
+      footer={(
+        <div className="side-panel-quick" style={{ width: '100%' }}>
+          <button type="button" className="action-btn primary" onClick={bake} disabled={busy} style={{ flex: 2 }}>
+            {busy ? `${EROSION_PHASE_LABEL[phase] || 'Baking…'} ${pct}%` : (baked ? 'Re-bake Erosion' : 'Bake Erosion')}
+          </button>
+          <button type="button" className="action-btn" onClick={reset} disabled={busy || !baked} style={{ flex: 1 }}>
+            Reset
+          </button>
+        </div>
+      )}>
+      <ToggleRow label="Enable Erosion" value={!!params.erosionEnabled} onChange={(v) => onParam('erosionEnabled', v)}
+        info="Apply the baked erosion to the terrain. Toggle to compare Before / After. Disabled until you bake." />
+      {!baked && (
+        <p className="section-hint">No erosion baked yet. Pick a preset, then press <strong>Bake Erosion</strong>. The simulation runs in the background.</p>
+      )}
+
+      <SelectRow label="Preset" value={params.erosionPreset ?? 'natural'}
+        options={Object.entries(EROSION_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
+        onChange={(v) => ctx.onErosionPreset(v)} info="Erosion style. Editing any slider switches to Custom." />
+      <SelectRow label="Quality" value={params.erosionQuality ?? 'balanced'}
+        options={Object.entries(EROSION_QUALITY).map(([key, q]) => ({ value: key, label: `${q.label} (${q.res}²)` }))}
+        onChange={(v) => onParam('erosionQuality', v)} info="Grid resolution of the bake. Higher = finer channels but slower." />
+
+      {EROSION_MAIN.map((def) => (
+        <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => setKnob(def.key, v)} settingId={`erosion.${def.key}`} />
+      ))}
+
+      <ControlSection id="erosion-advanced" title="Advanced" defaultOpen={false} settingId="erosion.section.advanced">
+        {EROSION_ADVANCED.map((def) => (
+          <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => setKnob(def.key, v)} settingId={`erosion.${def.key}`} />
+        ))}
+      </ControlSection>
+
+      <p className="section-hint">Erosion also produces flow / rock / sediment / slope masks used by texturing &amp; props (wiring in progress). Exports already include the eroded terrain.</p>
     </SidePanel>
   );
 }
@@ -796,6 +892,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  erosion: ErosionPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

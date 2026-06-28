@@ -62,6 +62,14 @@ uniform float uImportBiomeBlend;
 uniform vec2 uBakeOrigin;
 uniform vec2 uBakeSpan;
 
+// Erosion height-offset field (studio / tile mode). The terrain height is fully
+// analytic — there is no stored heightmap to carve — so erosion is expressed as
+// an additive, world-space SIGNED height delta (eroded - base) over the bake
+// region, sampled in heightAt() exactly like the paint offset. R = delta in
+// world units. uErosionEnabled == 0 makes it a free no-op everywhere.
+uniform sampler2D uErosionOffsetTex;
+uniform float uErosionEnabled;
+
 vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
 float importedMapValue(sampler2D tex, vec2 uv) {
   vec3 c = texture2D(tex, clamp(uv, 0.0, 1.0)).rgb;
@@ -419,8 +427,19 @@ vec4 paintBiomeAt(vec2 xz) {
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
 }
 
+// Erosion height offset: signed world-unit delta added on top of the analytic
+// field, sampled over the studio bake region [uBakeOrigin, +uBakeSpan]. Mirrors
+// the paint-offset path; free and zero when disabled or outside the region. The
+// base field is never mutated, so erosion stays fully non-destructive.
+float erosionOffsetAt(vec2 xz) {
+  if (uErosionEnabled < 0.5) return 0.0;
+  vec2 uv = (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0));
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  return texture2D(uErosionOffsetTex, uv).r;
+}
+
 float heightAt(vec2 xz) {
-  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) + paintHeightOffsetAt(xz);
+  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) + paintHeightOffsetAt(xz) + erosionOffsetAt(xz);
 }
 
 // Moisture field for biome blending — now sourced from the climate system.
