@@ -2980,6 +2980,9 @@ export class Engine {
     u.uTerrainTriplanar.value = s.terrainTriplanar === false ? 0.0 : 1.0;
     u.uTerrainShoreRange.value = s.terrainShoreRange ?? 18;
     u.uTerrainShoreWetness.value = s.terrainShoreWetness ?? 0.35;
+    u.uTerrainDetailOpacity.value = s.terrainDetailOpacity ?? 1.0;
+    u.uTerrainMicroDetail.value = s.terrainMicroDetail ?? 0.6;
+    u.uTerrainMacroVariation.value = s.terrainMacroVariation ?? 0.5;
     this._needsRender = true;
   }
 

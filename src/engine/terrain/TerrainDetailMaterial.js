@@ -16,6 +16,9 @@ uniform float uTerrainRockSharpness;
 uniform float uTerrainTriplanar;
 uniform float uTerrainShoreRange;
 uniform float uTerrainShoreWetness;
+uniform float uTerrainDetailOpacity;        // 0..1 master mix over the whole detail layer
+uniform float uTerrainMicroDetail;          // 0..1 high-frequency close-up grain amount
+uniform float uTerrainMacroVariation;       // 0..1 large-scale weathering / patch breakup
 uniform float uTerrainDetailDebug;          // 0 off, 1 slope, 2 rock, 3 shore, 4 fade, 5 detail, 6 albedo, 7 normal
 
 float terrainDetailEnabled() {
@@ -25,7 +28,9 @@ float terrainDetailEnabled() {
 float terrainDetailFadeAt(vec3 worldPos) {
   float d = length(cameraPosition - worldPos);
   float fade = 1.0 - smoothstep(uTerrainDetailNear, max(uTerrainDetailNear + 1.0, uTerrainDetailFar), d);
-  return fade * terrainDetailEnabled();
+  // master opacity scales the whole layer — albedo strength and the normal pass
+  // both gate on this fade, so one dial fades the entire detail contribution.
+  return fade * terrainDetailEnabled() * clamp(uTerrainDetailOpacity, 0.0, 1.0);
 }
 
 float terrainDetailQualityFactor() {
@@ -64,6 +69,38 @@ float terrainDetailNoise(vec3 worldPos, vec3 n, float scale) {
   return mix(planar, tri, clamp(uTerrainTriplanar, 0.0, 1.0));
 }
 
+// Relief height for the normal pass — the broad fine band plus an optional
+// crisp micro band so close-up bumps gain high-frequency structure on top of
+// the larger shape. Shared by both the flat-board and planet normal helpers so
+// they read identical surface detail. Sampled 3x by the caller (center + 2
+// neighbours) to derive the gradient.
+float terrainDetailRelief(vec3 worldPos, vec3 n, float scale) {
+  float fine = terrainDetailNoise(worldPos, n, scale);
+  float micro = clamp(uTerrainMicroDetail, 0.0, 1.0);
+  if (micro <= 0.001) return fine;
+  float hi = terrainDetailNoise(worldPos + vec3(11.3, 5.7, 23.9), n, scale * 3.0);
+  return fine + (hi - 0.5) * micro * 0.55;
+}
+
+// Multi-octave detail sample: four decorrelated frequency bands reused across
+// every biome path so albedo variation has both crisp grain and large organic
+// patches without recomputing noise per material.
+struct DetailSample {
+  float fine;    // primary close grain
+  float coarse;  // broad clumping
+  float micro;   // high-frequency speckle / crisp detail
+  float macro;   // very low frequency weathering patches
+};
+
+DetailSample terrainDetailSampleAt(vec3 worldPos, vec3 n, float scale) {
+  DetailSample d;
+  d.fine   = terrainDetailNoise(worldPos, n, scale);
+  d.coarse = terrainDetailNoise(worldPos + vec3(53.0, 17.0, 29.0), n, scale * 0.33);
+  d.micro  = terrainDetailNoise(worldPos + vec3(11.3, 5.7, 23.9), n, scale * 3.0);
+  d.macro  = terrainDetailNoise(worldPos + vec3(127.0, 0.0, 211.0), n, scale * 0.085);
+  return d;
+}
+
 float terrainRockMask(float slope, float jitter) {
   float width = max(0.04, uTerrainRockSharpness);
   return smoothstep(uTerrainRockSlope - width, uTerrainRockSlope + width, slope + jitter * 0.06);
@@ -98,10 +135,18 @@ TerrainDetailResult applyTerrainDetailLayer(
   float quality = terrainDetailQualityFactor();
   float scale = uTerrainDetailScale * mix(0.55, 1.25, quality);
 
-  float fine = terrainDetailNoise(worldPos, normalGeo, scale);
-  float coarse = terrainDetailNoise(worldPos + vec3(53.0, 17.0, 29.0), normalGeo, scale * 0.33);
-  float grain = clamp(fine * 0.72 + coarse * 0.28, 0.0, 1.0);
+  DetailSample ds = terrainDetailSampleAt(worldPos, normalGeo, scale);
+  float fine = ds.fine;
+  float coarse = ds.coarse;
+  float micro = clamp(uTerrainMicroDetail, 0.0, 1.0);
+  float macroAmt = clamp(uTerrainMacroVariation, 0.0, 1.0);
+
+  // close bands form the base grain; the micro band adds crisp speckle that
+  // the Micro Detail slider dials up for sharper close-up texture.
+  float grain = clamp(fine * 0.60 + coarse * 0.26 + ds.micro * (0.14 + 0.10 * micro), 0.0, 1.0);
   float signedGrain = grain * 2.0 - 1.0;
+  float microSigned = ds.micro * 2.0 - 1.0;
+  float macroSigned = ds.macro * 2.0 - 1.0;   // -1..1 large weathering patch field
 
   float rockMask = max(tc.rockBlend, terrainRockMask(slope, jitter));
   float shoreMask = terrainShoreMask(hRel);
@@ -109,26 +154,49 @@ TerrainDetailResult applyTerrainDetailLayer(
   float wetGround = clamp(max(bw.wetland, shoreMask * 0.65), 0.0, 1.0);
   float vegGround = clamp((1.0 - desertGround) * (1.0 - bw.canyon) * (1.0 - tc.snow) * tc.flatness * smoothstep(0.20, 0.72, cl.moist), 0.0, 1.0);
 
+  // desert wind ripples: anisotropic crests along a fixed wind axis, meandered
+  // by the coarse/macro bands so they curve organically instead of striping.
+  vec2 windDir = normalize(vec2(0.86, 0.51));
+  float ripplePhase = dot(worldPos.xz, windDir) * scale * 7.5 + coarse * 6.5 + ds.macro * 3.0;
+  float ripple = sin(ripplePhase) * 0.5 + 0.5;
+  ripple *= ripple;                                   // sharpen crests
+  float dunes = (ripple - 0.5) * desertGround * (1.0 - rockMask);
+
+  // rock stratification + canyon banding driven by height with macro warble
+  float strata = 0.5 + 0.5 * sin(h01 * 120.0 + coarse * 4.0 + macroSigned * 2.0);
   float canyonBands = 0.5 + 0.5 * sin(h01 * 210.0 + coarse * 5.0);
+
+  // large-scale weathering: sign carries a faint hue drift, magnitude the value
+  float weather = macroSigned * macroAmt;
+
   vec3 sandTint = mix(uColSand * 0.78, uColDune * 1.12, grain);
+  sandTint *= 1.0 + dunes * 0.22;                     // ripple crest/trough shading
   vec3 grassTint = mix(uColDryGrass * 0.82, uColForest * 0.92, grain) * mix(0.96, 1.08, coarse);
+  grassTint = mix(grassTint, mix(uColDryGrass, uColGrass, grain),
+    smoothstep(0.40, 0.70, ds.macro) * 0.35);         // dry vs. lush clumps
   vec3 mudTint = mix(uColSwamp * 0.62, uColSand * 0.55, grain);
   vec3 rockTint = mix(uColRock * 0.68, uColRockHi * 1.10, grain);
+  rockTint = mix(rockTint, rockTint * mix(0.82, 1.12, strata), 0.55);  // strata banding
   vec3 canyonTint = mix(uColRedRock * 0.70, uColRedRock2 * 1.12, canyonBands);
   vec3 snowTint = mix(uColSnow * 0.84, vec3(0.90, 0.97, 1.0), grain);
 
-  vec3 materialTint = mix(tc.albedo, grassTint, vegGround * 0.40);
-  materialTint = mix(materialTint, sandTint, desertGround * (1.0 - rockMask) * 0.48);
+  vec3 materialTint = mix(tc.albedo, grassTint, vegGround * 0.42);
+  materialTint = mix(materialTint, sandTint, desertGround * (1.0 - rockMask) * 0.52);
   materialTint = mix(materialTint, mudTint, wetGround * (1.0 - rockMask) * 0.38);
-  materialTint = mix(materialTint, mix(rockTint, canyonTint, bw.canyon), rockMask * 0.62);
+  materialTint = mix(materialTint, mix(rockTint, canyonTint, bw.canyon), rockMask * 0.66);
   materialTint = mix(materialTint, snowTint, tc.snow * 0.42);
 
-  float crack = smoothstep(0.18, 0.02, abs(signedGrain)) * rockMask;
+  // weathering breakup so each biome shows organic patches, not a flat wash
+  materialTint *= 1.0 + weather * (0.16 + 0.10 * rockMask);
+  materialTint *= vec3(1.0 + weather * 0.05, 1.0, 1.0 - weather * 0.04);
+
+  float crack = smoothstep(0.16, 0.0, abs(microSigned)) * rockMask;
   float fleck = (vnoise(worldPos.xz * scale * 3.8 + uSeedOffset.yx) - 0.5) * 2.0;
   vec3 detailed = materialTint;
-  detailed *= 1.0 + signedGrain * (0.050 + 0.075 * rockMask + 0.025 * vegGround);
-  detailed *= 1.0 - crack * 0.18;
-  detailed += fleck * 0.025 * (desertGround + vegGround * 0.5) * (1.0 - rockMask);
+  detailed *= 1.0 + signedGrain * (0.055 + 0.085 * rockMask + 0.030 * vegGround);
+  detailed *= 1.0 + microSigned * micro * (0.05 + 0.06 * rockMask);   // crisp close grain
+  detailed *= 1.0 - crack * 0.22;
+  detailed += fleck * 0.028 * (desertGround + vegGround * 0.5) * (1.0 - rockMask);
   detailed = mix(detailed, detailed * mix(0.74, 0.92, grain), shoreMask * uTerrainShoreWetness);
 
   float strength = clamp(uTerrainDetailStrength, 0.0, 2.0) * fade;

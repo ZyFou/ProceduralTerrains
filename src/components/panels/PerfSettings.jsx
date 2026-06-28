@@ -29,9 +29,12 @@ const PERF_SLIDERS = {
   waterWaves: lim('waterWaves', 'Wave Complexity', 0.05, { digits: 2, unit: '×' }),
   waterDistance: lim('waterDistance', 'Water Distance', 0.05, { digits: 2, unit: '×' }),
   fogDistance: lim('fogDistance', 'Fog Distance', 0.05, { digits: 2, unit: '×' }),
+  terrainDetailOpacity: lim('terrainDetailOpacity', 'Detail Opacity', 0.05, { digits: 2, unit: 'x' }),
   terrainDetailScale: lim('terrainDetailScale', 'Detail Texture Scale', 0.01, { digits: 2, unit: 'x' }),
   terrainDetailStrength: lim('terrainDetailStrength', 'Detail Strength', 0.05, { digits: 2, unit: 'x' }),
   terrainDetailNormal: lim('terrainDetailNormal', 'Detail Normal Strength', 0.05, { digits: 2, unit: 'x' }),
+  terrainMicroDetail: lim('terrainMicroDetail', 'Micro Detail', 0.05, { digits: 2, unit: 'x' }),
+  terrainMacroVariation: lim('terrainMacroVariation', 'Macro Variation', 0.05, { digits: 2, unit: 'x' }),
   terrainDetailNear: lim('terrainDetailNear', 'Full Detail Distance', 5, { unit: 'm' }),
   terrainDetailFar: lim('terrainDetailFar', 'Detail Fade Distance', 5, { unit: 'm' }),
   terrainRockSlope: lim('terrainRockSlope', 'Rock Slope Blend', 0.01, { digits: 2 }),
@@ -395,6 +398,10 @@ function renderSettings({
         <SelectRow label="Terrain Detail Quality" value={perf.terrainDetailQuality} options={TERRAIN_DETAIL_OPTIONS} onChange={(v) => onPerfSetting('terrainDetailQuality', parseInt(v, 10))} settingId="performance.terrainDetailQuality" />
       </SettingGroup>
 
+      <SettingGroup tab="terrain" label="Detail Opacity" keywords="terrain detail opacity master mix amount overall fade blend close" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainDetailOpacity" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailOpacity" />
+      </SettingGroup>
+
       <SettingGroup tab="terrain" label="Detail Texture Scale" keywords="terrain close texture scale grain noise world space" {...groupProps}>
         <PerfSlider perf={perf} id="terrainDetailScale" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailScale" />
       </SettingGroup>
@@ -405,6 +412,11 @@ function renderSettings({
 
       <SettingGroup tab="terrain" label="Detail Normal Strength" keywords="terrain normal material lighting bump close" {...groupProps}>
         <PerfSlider perf={perf} id="terrainDetailNormal" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailNormal" />
+      </SettingGroup>
+
+      <SettingGroup tab="terrain" label="Micro & Macro Detail" keywords="terrain micro grain macro variation weathering patches biome speckle close up" {...groupProps}>
+        <PerfSlider perf={perf} id="terrainMicroDetail" onPerfSetting={onPerfSetting} settingId="performance.terrainMicroDetail" />
+        <PerfSlider perf={perf} id="terrainMacroVariation" onPerfSetting={onPerfSetting} settingId="performance.terrainMacroVariation" />
       </SettingGroup>
 
       <SettingGroup tab="terrain" label="Distance Detail Fade" keywords="terrain detail fade near far walk distance shimmer" {...groupProps}>

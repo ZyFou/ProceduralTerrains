@@ -286,9 +286,9 @@ vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, fl
   if (strength <= 0.0001) return n;
   float scale = uTerrainDetailScale * mix(0.55, 1.25, terrainDetailQualityFactor());
   float e = max(0.45, 0.55 / max(scale, 0.0001));
-  float c = terrainDetailNoise(worldPos, nGeo, scale);
-  float dx = terrainDetailNoise(worldPos + vec3(e, 0.0, 0.0), nGeo, scale) - c;
-  float dz = terrainDetailNoise(worldPos + vec3(0.0, 0.0, e), nGeo, scale) - c;
+  float c = terrainDetailRelief(worldPos, nGeo, scale);
+  float dx = terrainDetailRelief(worldPos + vec3(e, 0.0, 0.0), nGeo, scale) - c;
+  float dz = terrainDetailRelief(worldPos + vec3(0.0, 0.0, e), nGeo, scale) - c;
   float matStrength = strength * (0.55 + rockMask * 1.05 + shoreMask * 0.25);
   vec3 detailN = normalize(n + vec3(-dx * matStrength * 5.5, 0.0, -dz * matStrength * 5.5));
   return normalize(mix(n, detailN, terrainDetailEnabled()));
@@ -612,6 +612,9 @@ export function createTerrainUniforms() {
     uTerrainTriplanar: { value: 1.0 },
     uTerrainShoreRange: { value: 18.0 },
     uTerrainShoreWetness: { value: 0.35 },
+    uTerrainDetailOpacity: { value: 1.0 },
+    uTerrainMicroDetail: { value: 0.6 },
+    uTerrainMacroVariation: { value: 0.5 },
     uTerrainDetailDebug: { value: 0.0 },
     uImportNoiseTex: { value: null },
     uImportHeightTex:{ value: null },

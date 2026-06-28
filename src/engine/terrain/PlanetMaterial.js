@@ -102,9 +102,9 @@ vec3 applyTerrainDetailNormalPlanet(vec3 n, vec3 nGeo, vec3 worldPos, vec3 t1, v
   if (strength <= 0.0001) return n;
   float scale = uTerrainDetailScale * mix(0.55, 1.25, terrainDetailQualityFactor());
   float e = max(0.45, 0.55 / max(scale, 0.0001));
-  float c = terrainDetailNoise(worldPos, nGeo, scale);
-  float d1 = terrainDetailNoise(worldPos + t1 * e, nGeo, scale) - c;
-  float d2 = terrainDetailNoise(worldPos + t2 * e, nGeo, scale) - c;
+  float c = terrainDetailRelief(worldPos, nGeo, scale);
+  float d1 = terrainDetailRelief(worldPos + t1 * e, nGeo, scale) - c;
+  float d2 = terrainDetailRelief(worldPos + t2 * e, nGeo, scale) - c;
   float matStrength = strength * (0.55 + rockMask * 1.05 + shoreMask * 0.25);
   vec3 detailN = normalize(n - t1 * d1 * matStrength * 5.5 - t2 * d2 * matStrength * 5.5);
   return normalize(mix(n, detailN, terrainDetailEnabled()));
