@@ -44,7 +44,7 @@ import { PlayerController } from './player/PlayerController.js';
 import { PlaneController } from './player/PlaneController.js';
 import { defaultLegacyStack, migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
 import {
-  TERRAIN_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
+  TERRAIN_RESET_KEYS, EROSION_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
   LIGHTING_PARAM_KEYS, LIGHTING_STYLE_KEYS, DEBUG_PARAM_KEYS,
   patchParamsFromDefaults, resetWaterParams, resetCloudParams, resetSkyboxParams,
   lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY, DEFAULT_DEBUG_FLAGS,
@@ -1209,7 +1209,13 @@ export class Engine {
     this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
     this._tileGhostCell = null;
+    // Drop any baked erosion: its delta is anchored to the OLD board region, so
+    // keeping it would smear the previous (possibly larger / multi-tile) carve
+    // over the fresh small default board. params already reset erosion* knobs.
+    this.erosionField?.clear();
+    this.erosionField?.applyTo(this.uniforms);
     this.applyAll({ force: true });
+    this._onErosionChanged();
     this._notifyTiles();
 
     const defaultStack = migrateStack(undefined);
@@ -3563,15 +3569,20 @@ export class Engine {
     switch (panelId) {
       case 'terrain': {
         const keepSeed = this.params.seed;
-        this.params = patchParamsFromDefaults(this.params, TERRAIN_RESET_KEYS);
+        this.params = patchParamsFromDefaults(this.params, [...TERRAIN_RESET_KEYS, ...EROSION_RESET_KEYS]);
         this.params.seed = keepSeed;
         this.params.preset = 'highlands';
         const { params: noisePatch } = this.planetStyle.applyNoisePreset('default');
         this.params.noisePreset = 'default';
         for (const [k, v] of Object.entries(noisePatch)) this.params[k] = v;
         this._syncPlanetStyleToParams();
+        // Erosion is part of the Terrain panel — drop the baked delta too so it
+        // can't linger over the reset (default-size) terrain.
+        this.erosionField?.clear();
+        this.erosionField?.applyTo(this.uniforms);
         this.cb.onParams({ ...this.params });
         this._afterParamChange(true);
+        this._onErosionChanged();
         toast('Terrain settings reset');
         break;
       }

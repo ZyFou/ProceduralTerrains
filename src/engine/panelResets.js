@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { DEFAULT_PARAMS } from './presets.js';
+import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
@@ -14,6 +15,10 @@ export const TERRAIN_RESET_KEYS = [
   'noiseScale', 'noiseStrength', 'octaves', 'persistence', 'lacunarity', 'ridge', 'warp',
   'noisePreset', 'normalStrength', 'aoStrength',
 ];
+
+// Erosion now lives in the Terrain panel, so resetting Terrain settings also
+// restores the erosion knobs (the baked delta itself is dropped separately).
+export const EROSION_RESET_KEYS = Object.keys(EROSION_DEFAULT_PARAMS);
 
 export const BIOME_RESET_KEYS = [
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine', 'biomeDebug',
