@@ -145,6 +145,20 @@ export const PRESETS = {
       moistBias: -0.5, snowLine: 1.0, falloff: 0.3, tempBias: 0.35,
     },
   },
+  // Unified cartoon look: soft low-relief shape + the matching "Cartoon Terrain"
+  // colour palette and "Simple Cartoon" noise style, all applied in one click.
+  // palettePreset / noisePreset are picked up by Engine.applyPresetByKey.
+  cartoon: {
+    label: 'Cartoon',
+    palettePreset: 'cartoon',
+    noisePreset: 'cartoon',
+    params: {
+      heightScale: 260, seaLevel: 72, noiseScale: 72, noiseStrength: 0.72,
+      octaves: 4, persistence: 0.36, lacunarity: 1.85, ridge: 0.16, warp: 0.28,
+      falloff: 0.35, biomeScale: 0.7, moistScale: 0.8, snowLine: 0.82,
+      normalStrength: 0.8, aoStrength: 0.35,
+    },
+  },
 };
 
 export function applyPreset(params, presetKey) {
@@ -156,8 +170,14 @@ export function applyPreset(params, presetKey) {
     'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
     'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
     'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
+    'normalStrength', 'aoStrength',
   ]) next[key] = DEFAULT_PARAMS[key];
   Object.assign(next, preset.params);
   next.preset = presetKey;
+  // A preset may also declare a colour palette / noise style (e.g. Cartoon).
+  // Only set these when declared so plain shape presets never clobber a palette
+  // the user picked independently. Engine.applyPresetByKey applies the palette.
+  if (preset.palettePreset) next.palettePreset = preset.palettePreset;
+  if (preset.noisePreset) next.noisePreset = preset.noisePreset;
   return next;
 }

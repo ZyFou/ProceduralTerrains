@@ -1,4 +1,28 @@
 const SETTINGS_INDEX = [
+  // Terrain — presets (shape preset also carries the cartoon palette/noise)
+  { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.preset', label: 'Terrain Preset', keywords: 'preset style layout highlands alpine desert dunes canyon volcanic rolling archipelago cartoon', aliases: 'cartoon toon preset' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.noisePreset', label: 'Noise Preset', keywords: 'noise preset style cartoon simple flat low relief default', aliases: 'cartoon toon' },
+
+  // Terrain — erosion (Tile mode only)
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionEnabled', label: 'Enable Erosion', keywords: 'erosion hydraulic thermal weathering bake apply rivers valleys carve' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionPreset', label: 'Erosion Preset', keywords: 'erosion preset natural mountain canyon rain thermal lite dry' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionQuality', label: 'Erosion Quality', keywords: 'erosion quality resolution grid bake preview balanced high ultra' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionStrength', label: 'Erosion Strength', keywords: 'erosion strength blend amount master mix' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionDroplets', label: 'Droplets', keywords: 'erosion droplets rain hydraulic valleys ravines channels' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionLifetime', label: 'Droplet Lifetime', keywords: 'erosion droplet lifetime steps travel' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion', settingId: 'erosion.erosionSeed', label: 'Erosion Seed', keywords: 'erosion seed random droplet spawn deterministic' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionRadius', label: 'Erosion Radius', keywords: 'erosion radius brush channels smoothing advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionErosionRate', label: 'Erosion Rate', keywords: 'erosion rate carve aggressive water advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionDeposition', label: 'Deposition', keywords: 'erosion deposition sediment settle advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionSedimentCapacity', label: 'Sediment Capacity', keywords: 'erosion sediment capacity carry advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionEvaporation', label: 'Evaporation', keywords: 'erosion evaporation water drainage advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionGravity', label: 'Gravity', keywords: 'erosion gravity downhill droplet advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionInertia', label: 'Inertia', keywords: 'erosion inertia direction slope advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionThermalStrength', label: 'Thermal Strength', keywords: 'erosion thermal strength talus slide slope advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionThermalIterations', label: 'Thermal Iterations', keywords: 'erosion thermal iterations relaxation talus advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionTalus', label: 'Talus Angle', keywords: 'erosion talus angle slope slide steepness advanced' },
+  { panelId: 'terrain', tabId: 'erosion', sectionLabel: 'Erosion · Advanced', settingId: 'erosion.erosionSmoothing', label: 'Smoothing', keywords: 'erosion smoothing low pass soften noise advanced' },
+
   // Terrain
   { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.heightScale', label: 'Height Scale', keywords: 'height elevation mountain terrain amplitude', aliases: 'height map height noise' },
   { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.seaLevel', label: 'Sea Level', keywords: 'water ocean coast shoreline sea' },
@@ -35,11 +59,12 @@ const SETTINGS_INDEX = [
   // Water
   { panelId: 'water', settingId: 'water.waterEnabled', label: 'Water Enabled', keywords: 'water ocean enable disable' },
   { panelId: 'water', settingId: 'water.seaLevel', label: 'Sea Level', keywords: 'water ocean sea level height coast' },
-  { panelId: 'water', settingId: 'water.waterMode', label: 'Water Mode', keywords: 'water legacy realistic volumetric cinematic quality' },
+  { panelId: 'water', settingId: 'water.waterMode', label: 'Water Mode', keywords: 'water legacy realistic volumetric cinematic quality cartoon tropical ocean lake', aliases: 'cartoon toon' },
   { panelId: 'water', settingId: 'water.waterAnim', label: 'Water Animation', keywords: 'water waves ocean motion' },
   { panelId: 'water', settingId: 'water.waterDebugView', label: 'Water Debug View', keywords: 'water debug depth foam shoreline mask' },
 
   // Planet style / colors
+  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.palettePreset', label: 'Color Palette Preset', keywords: 'palette preset colors theme earth desert ice toxic neon volcanic cartoon pastel moon rust', aliases: 'cartoon toon colors palette' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.deep', label: 'Deep Water', keywords: 'water color ocean deep' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.shallow', label: 'Shallow', keywords: 'water color shore coast shallow' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.foam', label: 'Foam', keywords: 'water color waves foam shoreline' },

@@ -18,7 +18,7 @@ import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
-import { DEFAULT_PARAMS, applyPreset } from './presets.js';
+import { DEFAULT_PARAMS, applyPreset, PRESETS } from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
@@ -1191,6 +1191,13 @@ export class Engine {
     this.params = applyPreset(this.params, presetKey);
     const defaultStack = migrateStack(undefined);
     this.setNoiseStack(defaultStack);
+    // A preset may also carry a colour palette (e.g. Cartoon) — switch the
+    // terrain colours together with the shape so it's a single click.
+    const preset = PRESETS[presetKey];
+    if (preset?.palettePreset) {
+      this.planetStyle.applyPalettePreset(preset.palettePreset);
+      this._notifyPlanetStyle();
+    }
     this.cb.onParams({ ...this.params });
     this._afterParamChange(true);
   }

@@ -139,7 +139,7 @@ function TerrainPanel({ ctx }) {
       <PanelTabs active={tab} onChange={setTab} tabs={tabs} />
       {tab === 'shape' && (
         <>
-          <SelectRow label="Preset" value={params.preset}
+          <SelectRow label="Preset" value={params.preset} settingId="terrain.preset"
             options={Object.entries(PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
             onChange={ctx.onPreset} info="Global terrain layout preset." />
           <SeedRow seed={params.seed} onParam={onParam} onRandomizeSeed={ctx.onRandomizeSeed} />
@@ -153,7 +153,7 @@ function TerrainPanel({ ctx }) {
       )}
       {tab === 'noise' && (
         <>
-          <SelectRow label="Noise Preset" value={params.noisePreset ?? 'default'}
+          <SelectRow label="Noise Preset" value={params.noisePreset ?? 'default'} settingId="terrain.noisePreset"
             options={Object.entries(NOISE_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
             onChange={ctx.planetStyleProps.onNoisePreset} info="Baseline noise shape configuration." />
           {NOISE_SLIDERS.map((def) => (
@@ -286,18 +286,22 @@ function ErosionTabContent({ ctx, erosion }) {
     if (params.erosionPreset !== 'custom') onParam('erosionPreset', 'custom');
   };
 
+  // Open the Advanced section when search navigates to one of its knobs.
+  const advTarget = EROSION_ADVANCED.some((d) => ctx.settingsTarget?.settingId === `erosion.${d.key}`);
+
   return (
     <>
       <ToggleRow label="Enable Erosion" value={!!params.erosionEnabled} onChange={(v) => onParam('erosionEnabled', v)}
+        settingId="erosion.erosionEnabled"
         info="Apply the baked erosion to the terrain. Toggle to compare Before / After. Disabled until you bake." />
       {!baked && (
         <p className="section-hint">No erosion baked yet. Pick a preset, then press <strong>Bake Erosion</strong>. The simulation runs in the background.</p>
       )}
 
-      <SelectRow label="Preset" value={params.erosionPreset ?? 'natural'}
+      <SelectRow label="Preset" value={params.erosionPreset ?? 'natural'} settingId="erosion.erosionPreset"
         options={Object.entries(EROSION_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
         onChange={(v) => ctx.onErosionPreset(v)} info="Erosion style. Editing any slider switches to Custom." />
-      <SelectRow label="Quality" value={params.erosionQuality ?? 'balanced'}
+      <SelectRow label="Quality" value={params.erosionQuality ?? 'balanced'} settingId="erosion.erosionQuality"
         options={Object.entries(EROSION_QUALITY).map(([key, q]) => ({ value: key, label: `${q.label} (${q.res}²)` }))}
         onChange={(v) => onParam('erosionQuality', v)} info="Grid resolution of the bake. Higher = finer channels but slower." />
 
@@ -305,7 +309,7 @@ function ErosionTabContent({ ctx, erosion }) {
         <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => setKnob(def.key, v)} settingId={`erosion.${def.key}`} />
       ))}
 
-      <ControlSection id="erosion-advanced" title="Advanced" defaultOpen={false} settingId="erosion.section.advanced">
+      <ControlSection id="erosion-advanced" title="Advanced" defaultOpen={false} forceOpen={advTarget} settingId="erosion.section.advanced">
         {EROSION_ADVANCED.map((def) => (
           <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => setKnob(def.key, v)} settingId={`erosion.${def.key}`} />
         ))}

@@ -283,7 +283,7 @@ export default function ColorPalettePanel({
       </div>
 
       {/* Preset selector */}
-      <div className="row palette-preset-row">
+      <div className="row palette-preset-row" data-setting-id="planet.palettePreset">
         <div className="label-with-icon" data-tooltip="Select from pre-defined artist-designed color schemes">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
