@@ -164,6 +164,17 @@ const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.23, 0.51, 0.96)
 );
 
+// Merge-debug colour ramp keyed off aLod (4..8 = quadtree fold tier). Small
+// folds (2x2) read green, then yellow → orange → red → magenta as larger
+// blocks fold, so the nested quadtree structure is legible.
+vec3 mergeTierColor(float vlod) {
+  float t = clamp(vlod - 4.0, 0.0, 4.0);
+  if (t < 1.0)      return mix(vec3(0.18, 0.95, 0.45), vec3(0.95, 0.95, 0.15), t);
+  else if (t < 2.0) return mix(vec3(0.95, 0.95, 0.15), vec3(0.98, 0.55, 0.10), t - 1.0);
+  else if (t < 3.0) return mix(vec3(0.98, 0.55, 0.10), vec3(0.95, 0.20, 0.20), t - 2.0);
+  else              return mix(vec3(0.95, 0.20, 0.20), vec3(0.95, 0.20, 0.95), t - 3.0);
+}
+
 // Real caustic network — thin, bright, animated light filaments (the classic
 // distorted-wave-interference caustic). Fixed 5-iteration loop (static bound →
 // safe for the D3D11/ANGLE shader compiler), so it unrolls without a hang.
@@ -472,11 +483,9 @@ void main() {
     if (uUseTiles > 0.5) gridMul = 1.0 - tileInteriorSeam(xz);
 #endif
     // Grid lines recolour over folded terrain so the chunk grid also shows
-    // which chunks have merged: green over a merged group, magenta over the
-    // macro proxy, default blue over live detailed chunks.
-    vec3 gridCol = vec3(0.45, 0.80, 0.95);
-    if (vLod > 4.5)      gridCol = vec3(0.95, 0.30, 0.95);
-    else if (vLod > 3.5) gridCol = vec3(0.35, 0.95, 0.55);
+    // which chunks have merged, ramped by fold level (green = small fold →
+    // magenta = whole board); default blue over live detailed chunks.
+    vec3 gridCol = vLod > 3.5 ? mergeTierColor(vLod) : vec3(0.45, 0.80, 0.95);
     col = mix(col, gridCol, line * uGrid * 0.22 * (0.35 + 0.65 * gridFade) * gridMul);
   }
 
@@ -485,12 +494,10 @@ void main() {
     col = mix(col, LOD_COLORS[li], 0.55);
   }
 
-  // Merge debug: tint the surface of folded terrain — green = merged chunk
-  // group, magenta = full-board macro proxy. Detailed chunks stay untouched
-  // so the merged regions stand out.
-  if (uMergeDebug > 0.5) {
-    if (vLod > 4.5)      col = mix(col, vec3(0.95, 0.20, 0.95), 0.55);
-    else if (vLod > 3.5) col = mix(col, vec3(0.18, 0.95, 0.52), 0.50);
+  // Merge debug: tint folded terrain by fold level (green = small 2x2 fold →
+  // magenta = whole board). Detailed chunks stay untouched so folds stand out.
+  if (uMergeDebug > 0.5 && vLod > 3.5) {
+    col = mix(col, mergeTierColor(vLod), 0.55);
   }
 
   // Skirts darken to read as a recessed crack filler — except in circle mode,

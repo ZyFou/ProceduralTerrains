@@ -3464,10 +3464,9 @@ export class Engine {
     this.board.cullingAggressiveness = s.cullingAggressiveness;
     this.board.setMergeOptions({
       enabled: s.terrainMerge,
-      groupSize: s.terrainMergeGroupSize,
       quadsPerChunk: s.terrainMergeQuads,
+      mergeDistance: s.terrainMergeDistance,
       macroEnabled: s.terrainMacroProxy,
-      macroQuads: s.terrainMacroQuads,
     });
 
     if (this.infiniteWorld) {
@@ -4771,8 +4770,7 @@ export class Engine {
       if (b) {
         diag.merge = {
           enabled: b.mergeEnabled,
-          mergedGroups: b.mergedGroupCount,
-          macroActive: b.macroActive,
+          foldedNodes: b.mergedGroupCount,
           savedDrawCalls: b.savedDrawCalls,
         };
       }

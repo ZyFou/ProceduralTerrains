@@ -70,12 +70,6 @@ const GPU_PREFERENCE_OPTIONS = [
   { value: 'low-power', label: 'Low Power' },
 ];
 
-const MERGE_GROUP_OPTIONS = [
-  { value: 2, label: '2×2 chunks' },
-  { value: 4, label: '4×4 chunks' },
-  { value: 8, label: '8×8 chunks' },
-];
-
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'lod', label: 'LOD' },
@@ -402,16 +396,16 @@ function renderSettings({
         />
       </SettingGroup>
 
-      <SettingGroup tab="lod" label="Merge Group Size" keywords="merge group size 2x2 4x4 8x8 block chunks batch" {...groupProps}>
-        <SelectRow
-          label="Merge Group Size"
-          value={perf.terrainMergeGroupSize ?? 4}
-          options={MERGE_GROUP_OPTIONS}
-          onChange={(v) => onPerfSetting('terrainMergeGroupSize', parseInt(v, 10))}
-          info="How many chunks collapse into one merged mesh. Larger groups save more draw calls but pop in/out over bigger areas."
-          settingId="performance.terrainMergeGroupSize"
+      <SettingGroup tab="lod" label="Merge Distance" keywords="merge fold distance quadtree aggressiveness near far block size threshold" {...groupProps}>
+        <SliderCtl
+          def={{ label: 'Merge Distance', min: PERF_LIMITS.terrainMergeDistance.min, max: PERF_LIMITS.terrainMergeDistance.max, step: 0.5, digits: 1, unit: '× block' }}
+          value={perf.terrainMergeDistance ?? 4}
+          onChange={(v) => onPerfSetting('terrainMergeDistance', v)}
+          settingId="performance.terrainMergeDistance"
         />
       </SettingGroup>
+
+      <SettingNote tab="lod" text="A quadtree block folds into one mesh once the camera is farther than its width × this. Higher = keep detail (split) longer; lower = fold sooner for more savings." {...groupProps} />
 
       <SettingGroup tab="lod" label="Merge Density" keywords="merge density resolution quads detail far mesh quality" {...groupProps}>
         <SliderCtl
@@ -422,24 +416,15 @@ function renderSettings({
         />
       </SettingGroup>
 
-      <SettingNote tab="lod" text="Merge Density 8 matches the lowest chunk LOD — lossless. Lower it for extra savings at the cost of a slightly coarser far silhouette." {...groupProps} />
+      <SettingNote tab="lod" text="Merge Density 8 matches the lowest chunk LOD. Lower it for extra savings at the cost of a slightly coarser folded silhouette." {...groupProps} />
 
-      <SettingGroup tab="lod" label="Macro Proxy" keywords="macro proxy single mesh whole tile board zoom out far extreme distance" {...groupProps}>
+      <SettingGroup tab="lod" label="Full Board Merge" keywords="macro proxy single mesh whole tile board zoom out far extreme distance root fold" {...groupProps}>
         <ToggleRow
-          label="Macro Proxy"
+          label="Full Board Merge"
           value={perf.terrainMacroProxy !== false}
           onChange={(v) => onPerfSetting('terrainMacroProxy', v)}
-          info="At extreme distance (e.g. zoomed all the way out) the entire board collapses to a single low-poly mesh."
+          info="Allow the whole board to fold into a single mesh at extreme distance (the top of the quadtree). Off keeps it split one level below."
           settingId="performance.terrainMacroProxy"
-        />
-      </SettingGroup>
-
-      <SettingGroup tab="lod" label="Macro Proxy Resolution" keywords="macro proxy resolution quads whole board detail far" {...groupProps}>
-        <SliderCtl
-          def={{ label: 'Macro Proxy Resolution', min: PERF_LIMITS.terrainMacroQuads.min, max: PERF_LIMITS.terrainMacroQuads.max, step: 2, unit: 'quads' }}
-          value={perf.terrainMacroQuads ?? 48}
-          onChange={(v) => onPerfSetting('terrainMacroQuads', Math.round(v))}
-          settingId="performance.terrainMacroQuads"
         />
       </SettingGroup>
 

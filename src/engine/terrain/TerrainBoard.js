@@ -49,29 +49,31 @@ export class TerrainBoard {
     this.visibleChunkCount = 0;
     this.culledChunkCount = 0;
 
-    // --- Merge layer ---------------------------------------------------------
-    // Collapse far chunks into fewer, larger flat-grid meshes to cut draw
-    // calls, world-matrix updates and frustum checks. Height is GPU-driven, so
-    // a merged mesh is just one bigger unit grid using the same material; no
-    // baking, caching or async generation is needed. Merging only kicks in
-    // once a whole group is past the LOD3 boundary, so it replaces equal-density
-    // geometry — pure draw-call win, no silhouette change.
+    // --- Merge layer (quadtree chunked-LOD) ---------------------------------
+    // The chunks are the leaves of a quadtree. Each internal node covers a
+    // square block of chunks and can fold into ONE flat-grid mesh once the
+    // camera is far enough for its size. Folding happens 2x2 at a time as you
+    // descend/ascend the tree, so the visible set is always a smooth "cut":
+    // fine chunks near the camera, progressively larger merged blocks outward,
+    // never a hard jump from one mesh to many. Height is GPU-driven, so a
+    // merged node is just a bigger unit grid using the same material — no
+    // baking/cache/async needed. Cuts draw calls / matrix updates / frustum
+    // checks (the CPU cost), not GPU triangles.
     this.mergeEnabled = true;
-    this.mergeGroupSize = 4;        // GxG chunks per merged mesh
-    this.mergeQuadsPerChunk = 8;    // merged grid density (8 == LOD3, lossless)
-    this.macroProxyEnabled = true;
-    this.macroQuads = 48;           // single full-board proxy resolution
-    this._groups = [];
-    this._groupsDirty = true;
-    this._mergedGeo = new Map();    // res -> shared BufferGeometry
-    this._macroMesh = null;
+    this.mergeQuadsPerChunk = 8;    // merged grid density per chunk span (8 == LOD3)
+    this.mergeDistance = 4;         // a node folds when nearest > spanWorld × this
+    this.macroProxyEnabled = true;  // allow the root (whole board) to fold to 1 mesh
+    this._mergedGeo = new Map();    // "res:aLod" -> shared BufferGeometry
+    this._root = null;
+    this._treeDirty = true;
+    this._mergedNodes = [];         // nodes folded this frame (for culling/stats)
+    this._hiddenByMerge = 0;
     this._boardMin = new THREE.Vector3();
     this._boardMax = new THREE.Vector3();
-    this.macroActive = false;
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
 
-    // Debug: tint folded terrain via the shader's uMergeDebug branch.
+    // Debug: tint folded terrain by merge level via the shader's uMergeDebug.
     this._mergeDebug = false;
 
     this._tmp = new THREE.Vector3();
@@ -199,8 +201,8 @@ export class TerrainBoard {
         }
       }
       this.chunks = kept;
-      this._groupsDirty = true;
-      this._disposeMergedMeshes();
+      this._treeDirty = true;
+      this._disposeNodeMeshes();
     }
 
     if (addedCells.length) {
@@ -270,9 +272,9 @@ export class TerrainBoard {
       cellCz: job.cellCz,
       cellKey: job.cellKey,
       merged: false,
-      group: null,
+      node: null,
     });
-    this._groupsDirty = true;
+    this._treeDirty = true;
   }
 
   _recalcThresholds() {
@@ -327,9 +329,9 @@ export class TerrainBoard {
     }
   }
 
-  // Pick a LOD per chunk from camera distance, then (if enabled) collapse far
-  // groups into merged meshes and the whole board into a macro proxy. Pure
-  // view-dependent detail — the height field itself is never touched.
+  // Pick a LOD per chunk from camera distance, then (if enabled) walk the
+  // quadtree and fold far blocks into single meshes. Pure view-dependent
+  // detail — the height field itself is never touched.
   updateLOD(cameraPos) {
     this._processLodRebuild();
 
@@ -337,49 +339,41 @@ export class TerrainBoard {
       this._updateChunkLOD(cameraPos, false);
       return;
     }
-    if (this._groupsDirty) this._rebuildGroups();
+    if (this._treeDirty) this._rebuildTree();
 
-    const t2 = this.lodThresholds[2];
+    this._mergedNodes.length = 0;
+    this._hiddenByMerge = 0;
+    if (this._root) this._visitNode(this._root, cameraPos);
 
-    // Macro proxy: a single mesh for the whole board, only once the board's
-    // nearest point is well past the LOD3 boundary (with hysteresis). Distance
-    // is full 3D — including camera height — so a far overhead view also folds.
-    if (this.macroProxyEnabled && this._groups.length) {
-      const macroOn = t2 * 2.5;
-      const macroOff = t2 * 2.0;
-      const cx = (this._boardMin.x + this._boardMax.x) / 2;
-      const cz = (this._boardMin.z + this._boardMax.z) / 2;
-      const boardHalf = 0.5 * Math.hypot(
-        this._boardMax.x - this._boardMin.x,
-        this._boardMax.z - this._boardMin.z
-      );
-      const nearest = Math.hypot(cx - cameraPos.x, cameraPos.y, cz - cameraPos.z) - boardHalf;
-      const want = this.macroActive ? nearest > macroOff : nearest > macroOn;
-      if (want) { this._activateMacro(); return; }
-      this._deactivateMacro();
-    }
-
-    // Per-group merge decision: merge once the group's nearest point is past
-    // the LOD3 boundary (so it only ever replaces LOD3-density chunks). Uses
-    // full 3D distance so it matches per-chunk LOD and folds from overhead too.
-    const mergeOn = t2;
-    const mergeOff = t2 * 0.85;
-    let mergedGroups = 0, hiddenChunks = 0;
-    for (const g of this._groups) {
-      const nearest = Math.hypot(g.center.x - cameraPos.x, cameraPos.y, g.center.z - cameraPos.z) - g.half;
-      const want = g.merged ? nearest > mergeOff : nearest > mergeOn;
-      if (want) {
-        if (!g.merged) this._mergeGroup(g);
-        mergedGroups++;
-        hiddenChunks += g.chunks.length;
-      } else if (g.merged) {
-        this._splitGroup(g);
-      }
-    }
-    this.mergedGroupCount = mergedGroups;
-    this.savedDrawCalls = hiddenChunks - mergedGroups;
+    this.mergedGroupCount = this._mergedNodes.length;
+    this.savedDrawCalls = Math.max(0, this._hiddenByMerge - this._mergedNodes.length);
 
     this._updateChunkLOD(cameraPos, true);
+  }
+
+  // Recursively decide, per node, whether to fold it into one mesh or descend
+  // into its 4 children. A node folds once the camera's nearest distance to it
+  // exceeds its world span × mergeDistance (3D distance, so overhead views fold
+  // too), with hysteresis so it doesn't flicker at the boundary.
+  _visitNode(node, camPos) {
+    if (node.leaf) {
+      // single detailed chunk — hand it back to the per-chunk LOD pass
+      if (node.chunk.merged) { node.chunk.merged = false; node.chunk.mesh.visible = true; }
+      return;
+    }
+    const canFold = this.macroProxyEnabled || node.level > 0;
+    const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
+    const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
+    const want = canFold && (node.merged ? nearest > foldDist * 0.85 : nearest > foldDist);
+
+    if (want) {
+      if (!node.merged) this._foldNode(node);
+      this._mergedNodes.push(node);
+      this._hiddenByMerge += node.chunks.length;
+    } else {
+      if (node.merged) this._unfoldNode(node);
+      for (const child of node.children) this._visitNode(child, camPos);
+    }
   }
 
   // Distance-based geometry LOD for the detailed chunks. When skipMerged is
@@ -400,198 +394,202 @@ export class TerrainBoard {
     this.lodCounts = counts;
   }
 
-  // Tune the merge layer (performance settings). Layout/resolution changes drop
-  // existing merged meshes so they rebuild lazily with the new parameters.
-  setMergeOptions({ enabled, groupSize, quadsPerChunk, macroEnabled, macroQuads } = {}) {
-    let layoutChanged = false;
+  // Tune the merge layer (performance settings).
+  setMergeOptions({ enabled, quadsPerChunk, mergeDistance, macroEnabled } = {}) {
     if (enabled !== undefined && enabled !== this.mergeEnabled) {
       this.mergeEnabled = !!enabled;
-      if (!this.mergeEnabled) this._restoreAllChunks();
-    }
-    if (groupSize !== undefined) {
-      const v = Math.max(2, Math.round(groupSize));
-      if (v !== this.mergeGroupSize) { this.mergeGroupSize = v; layoutChanged = true; }
+      if (!this.mergeEnabled) this._restoreAll();
     }
     if (quadsPerChunk !== undefined) {
       const v = Math.max(2, Math.round(quadsPerChunk));
-      if (v !== this.mergeQuadsPerChunk) { this.mergeQuadsPerChunk = v; layoutChanged = true; }
-    }
-    if (macroEnabled !== undefined) {
-      this.macroProxyEnabled = !!macroEnabled;
-      if (!this.macroProxyEnabled) this._deactivateMacro();
-    }
-    if (macroQuads !== undefined) {
-      const v = Math.max(8, Math.round(macroQuads));
-      if (v !== this.macroQuads) { this.macroQuads = v; this._disposeMacro(); }
-    }
-    if (layoutChanged) {
-      this._groupsDirty = true;
-      this._disposeMergedMeshes();
-    }
-  }
-
-  // Bucket the current chunks into GxG world-space blocks and record each
-  // block's world extent plus the whole-board bounding box.
-  _rebuildGroups() {
-    this._groupsDirty = false;
-    const G = this.mergeGroupSize;
-    const cs = this.chunkSize;
-    const map = new Map();
-    const groups = [];
-    let bminX = Infinity, bminZ = Infinity, bmaxX = -Infinity, bmaxZ = -Infinity;
-
-    for (const chunk of this.chunks) {
-      const x0 = chunk.center.x - cs / 2;
-      const z0 = chunk.center.z - cs / 2;
-      const bx = Math.floor(Math.round(x0 / cs) / G);
-      const bz = Math.floor(Math.round(z0 / cs) / G);
-      const key = `${bx},${bz}`;
-      let g = map.get(key);
-      if (!g) {
-        g = {
-          chunks: [], merged: false, mesh: null, center: new THREE.Vector3(),
-          minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity,
-          spanX: 0, spanZ: 0, half: 0,
-        };
-        map.set(key, g);
-        groups.push(g);
+      if (v !== this.mergeQuadsPerChunk) {
+        this.mergeQuadsPerChunk = v;
+        this._disposeNodeMeshes();   // node resolution changed → rebuild lazily
       }
-      g.chunks.push(chunk);
-      chunk.group = g;
-      chunk.merged = false;
-      if (x0 < g.minX) g.minX = x0;
-      if (z0 < g.minZ) g.minZ = z0;
-      if (x0 + cs > g.maxX) g.maxX = x0 + cs;
-      if (z0 + cs > g.maxZ) g.maxZ = z0 + cs;
     }
-
-    for (const g of groups) {
-      g.spanX = g.maxX - g.minX;
-      g.spanZ = g.maxZ - g.minZ;
-      g.center.set((g.minX + g.maxX) / 2, 0, (g.minZ + g.maxZ) / 2);
-      g.half = 0.5 * Math.hypot(g.spanX, g.spanZ);
-      if (g.minX < bminX) bminX = g.minX;
-      if (g.minZ < bminZ) bminZ = g.minZ;
-      if (g.maxX > bmaxX) bmaxX = g.maxX;
-      if (g.maxZ > bmaxZ) bmaxZ = g.maxZ;
+    if (mergeDistance !== undefined) {
+      const v = Number(mergeDistance);
+      if (Number.isFinite(v)) this.mergeDistance = Math.max(0.5, v);
     }
-
-    this._groups = groups;
-    if (groups.length) {
-      this._boardMin.set(bminX, 0, bminZ);
-      this._boardMax.set(bmaxX, 0, bmaxZ);
-    }
+    if (macroEnabled !== undefined) this.macroProxyEnabled = !!macroEnabled;
   }
 
-  // Shared flat unit-grid geometry (with skirts) for a given resolution. The
-  // lodIndex tags the geometry's aLod attribute (4 = merged group, 5 = macro
-  // proxy) so the terrain shader can colour folded terrain in the debug views.
-  _mergedGeometry(res, lodIndex) {
-    const key = `${res}:${lodIndex}`;
+  // --- Quadtree ------------------------------------------------------------
+  // Build a spatial quadtree over the current chunks. Leaves are single chunks;
+  // internal nodes cover a square block and own a lazily-built merged mesh.
+  _rebuildTree() {
+    this._treeDirty = false;
+    this._disposeNodeMeshes();
+    if (!this.chunks.length) { this._root = null; return; }
+
+    const cs = this.chunkSize;
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (const c of this.chunks) {
+      const x0 = c.center.x - cs / 2, z0 = c.center.z - cs / 2;
+      if (x0 < minX) minX = x0;
+      if (z0 < minZ) minZ = z0;
+      if (x0 + cs > maxX) maxX = x0 + cs;
+      if (z0 + cs > maxZ) maxZ = z0 + cs;
+      c.node = null;
+      c.merged = false;
+      c.mesh.visible = true;   // folds below re-hide as needed; avoids a gap
+    }
+    this._boardMin.set(minX, 0, minZ);
+    this._boardMax.set(maxX, 0, maxZ);
+    const size = Math.max(maxX - minX, maxZ - minZ);
+    this._root = this._buildNode(this.chunks, minX, minZ, size, 0);
+  }
+
+  _buildNode(chunks, minX, minZ, size, level) {
+    if (chunks.length === 1) return this._leafNode(chunks[0], level);
+
+    const cs = this.chunkSize;
+    const half = size / 2;
+    if (half < cs * 0.75) {
+      // chunk scale reached: children are the individual chunks
+      return this._internalNode(chunks.map((c) => this._leafNode(c, level + 1)), chunks, level);
+    }
+
+    const midX = minX + half, midZ = minZ + half;
+    const q = [[], [], [], []];
+    for (const c of chunks) {
+      const ix = c.center.x < midX ? 0 : 1;
+      const iz = c.center.z < midZ ? 0 : 1;
+      q[iz * 2 + ix].push(c);
+    }
+    const offs = [[minX, minZ], [midX, minZ], [minX, midZ], [midX, midZ]];
+    const children = [];
+    for (let i = 0; i < 4; i++) {
+      if (!q[i].length) continue;
+      const child = this._buildNode(q[i], offs[i][0], offs[i][1], half, level + 1);
+      if (child) children.push(child);
+    }
+    if (children.length === 1) return children[0];   // collapse degenerate (sparse) node
+    return this._internalNode(children, chunks, level);
+  }
+
+  _leafNode(chunk, level) {
+    const cs = this.chunkSize;
+    const x0 = chunk.center.x - cs / 2, z0 = chunk.center.z - cs / 2;
+    const node = {
+      leaf: true, chunk, children: null, chunks: [chunk],
+      minX: x0, minZ: z0, spanX: cs, spanZ: cs, spanWorld: cs, spanChunks: 1,
+      center: new THREE.Vector3(chunk.center.x, 0, chunk.center.z),
+      half: cs * 0.7072, level, mesh: null, merged: false,
+    };
+    chunk.node = node;
+    return node;
+  }
+
+  _internalNode(children, chunks, level) {
+    const cs = this.chunkSize;
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (const c of chunks) {
+      const x0 = c.center.x - cs / 2, z0 = c.center.z - cs / 2;
+      if (x0 < minX) minX = x0;
+      if (z0 < minZ) minZ = z0;
+      if (x0 + cs > maxX) maxX = x0 + cs;
+      if (z0 + cs > maxZ) maxZ = z0 + cs;
+    }
+    const spanX = maxX - minX, spanZ = maxZ - minZ;
+    const spanWorld = Math.max(spanX, spanZ);
+    return {
+      leaf: false, chunk: null, children, chunks,
+      minX, minZ, spanX, spanZ, spanWorld,
+      spanChunks: Math.max(2, Math.round(spanWorld / cs)),
+      center: new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2),
+      half: 0.5 * Math.hypot(spanX, spanZ), level, mesh: null, merged: false,
+    };
+  }
+
+  // Shared flat unit-grid geometry (with skirts) for a given resolution. aLod
+  // encodes the merge tier so the shader can colour folded terrain by level.
+  _mergedGeometry(res, aLod) {
+    const key = `${res}:${aLod}`;
     let geo = this._mergedGeo.get(key);
     if (!geo) {
-      geo = buildChunkGeometry(res, lodIndex);
+      geo = buildChunkGeometry(res, aLod);
       this._mergedGeo.set(key, geo);
     }
     return geo;
   }
 
-  _mergeGroup(g) {
-    g.merged = true;
-    if (!g.mesh) {
-      const cs = this.chunkSize;
-      const chunksPerSide = Math.max(1, Math.round(Math.max(g.spanX, g.spanZ) / cs));
-      const res = Math.min(192, Math.max(8, chunksPerSide * this.mergeQuadsPerChunk));
-      const mesh = new THREE.Mesh(this._mergedGeometry(res, 4), this.material);
-      mesh.position.set(g.minX, 0, g.minZ);
-      mesh.scale.set(g.spanX, 1, g.spanZ);
+  // Fold a node into one mesh: show its merged mesh, hide every descendant
+  // (chunks + deeper node meshes). Tier (log2 of span in chunks) drives both
+  // mesh resolution and the debug colour.
+  _foldNode(node) {
+    node.merged = true;
+    if (!node.mesh) {
+      const tier = Math.max(1, Math.round(Math.log2(node.spanChunks)));
+      const res = Math.min(160, Math.max(8, node.spanChunks * this.mergeQuadsPerChunk));
+      const aLod = 3 + Math.min(5, tier);   // 4..8 → colour ramp in shader
+      const mesh = new THREE.Mesh(this._mergedGeometry(res, aLod), this.material);
+      mesh.position.set(node.minX, 0, node.minZ);
+      mesh.scale.set(node.spanX, 1, node.spanZ);
       mesh.matrixAutoUpdate = false;
       mesh.frustumCulled = false;
       mesh.updateMatrix();
       mesh.updateMatrixWorld(true);
       this.group.add(mesh);
-      g.mesh = mesh;
+      node.mesh = mesh;
     }
-    g.mesh.visible = true;
-    for (const chunk of g.chunks) { chunk.merged = true; chunk.mesh.visible = false; }
+    node.mesh.visible = true;
+    for (const c of node.chunks) { c.merged = true; c.mesh.visible = false; }
+    this._forEachDescendantInternal(node, (d) => {
+      d.merged = false;
+      if (d.mesh) d.mesh.visible = false;
+    });
   }
 
-  _splitGroup(g) {
-    g.merged = false;
-    if (g.mesh) g.mesh.visible = false;
-    // Reveal the chunks in the SAME pass we hide the merged mesh. Waiting for
-    // the next frame's cull leaves a one-frame gap where neither is drawn — the
-    // flicker. cull re-tightens frustum visibility on the following frame.
-    for (const chunk of g.chunks) { chunk.merged = false; chunk.mesh.visible = true; }
+  // Unfold a node: hide its mesh. Children are re-evaluated in the same
+  // updateLOD pass (so chunks/child meshes reappear with no one-frame blank).
+  _unfoldNode(node) {
+    node.merged = false;
+    if (node.mesh) node.mesh.visible = false;
   }
 
-  _activateMacro() {
-    if (!this._macroMesh) {
-      const mesh = new THREE.Mesh(this._mergedGeometry(this.macroQuads, 5), this.material);
-      mesh.matrixAutoUpdate = false;
-      mesh.frustumCulled = false;
-      this.group.add(mesh);
-      this._macroMesh = mesh;
+  _forEachDescendantInternal(node, fn) {
+    if (!node.children) return;
+    for (const child of node.children) {
+      if (child.leaf) continue;
+      fn(child);
+      this._forEachDescendantInternal(child, fn);
     }
-    const spanX = this._boardMax.x - this._boardMin.x;
-    const spanZ = this._boardMax.z - this._boardMin.z;
-    this._macroMesh.position.set(this._boardMin.x, 0, this._boardMin.z);
-    this._macroMesh.scale.set(spanX || 1, 1, spanZ || 1);
-    this._macroMesh.updateMatrix();
-    this._macroMesh.updateMatrixWorld(true);
-    this._macroMesh.visible = true;
-    this.macroActive = true;
-
-    for (const chunk of this.chunks) { chunk.merged = true; chunk.mesh.visible = false; }
-    for (const g of this._groups) { g.merged = false; if (g.mesh) g.mesh.visible = false; }
-    this.mergedGroupCount = 0;
-    this.savedDrawCalls = Math.max(0, this.chunks.length - 1);
-    this.lodCounts = [0, 0, 0, 0];
   }
 
-  _deactivateMacro() {
-    if (!this.macroActive) return;
-    this.macroActive = false;
-    if (this._macroMesh) this._macroMesh.visible = false;
-    // Reveal every chunk now (no one-frame blank); the group loop that runs
-    // right after this re-hides the ones that should re-merge.
-    for (const chunk of this.chunks) { chunk.merged = false; chunk.mesh.visible = true; }
+  _forEachInternal(fn) {
+    const rec = (n) => {
+      if (!n || n.leaf) return;
+      fn(n);
+      for (const c of n.children) rec(c);
+    };
+    rec(this._root);
   }
 
-  _restoreAllChunks() {
-    for (const chunk of this.chunks) chunk.merged = false;
-    for (const g of this._groups) { g.merged = false; if (g.mesh) g.mesh.visible = false; }
-    if (this._macroMesh) this._macroMesh.visible = false;
-    this.macroActive = false;
+  _restoreAll() {
+    for (const c of this.chunks) { c.merged = false; c.mesh.visible = true; }
+    this._forEachInternal((n) => { n.merged = false; if (n.mesh) n.mesh.visible = false; });
+    this._mergedNodes.length = 0;
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
   }
 
-  _disposeMergedMeshes() {
-    for (const g of this._groups) {
-      if (g.mesh) { this.group.remove(g.mesh); g.mesh = null; }
-      g.merged = false;
-    }
-    this._disposeMacro();
-  }
-
-  _disposeMacro() {
-    if (this._macroMesh) { this.group.remove(this._macroMesh); this._macroMesh = null; }
-    this.macroActive = false;
+  _disposeNodeMeshes() {
+    this._forEachInternal((n) => {
+      if (n.mesh) { this.group.remove(n.mesh); n.mesh = null; }
+      n.merged = false;
+    });
+    this._mergedNodes.length = 0;
   }
 
   *_activeChunks() {
     for (const chunk of this.chunks) if (!chunk.merged) yield chunk;
   }
 
-  *_activeMergedMeshes() {
-    for (const g of this._groups) if (g.merged && g.mesh) yield g;
-  }
-
   // --- Debug overlay -------------------------------------------------------
-  // Tint folded terrain directly on the surface (green = merged group, magenta
-  // = macro proxy) via the shared terrain shader. Merged meshes carry aLod 4/5
-  // so the shader's uMergeDebug branch can colour them.
+  // Colour folded terrain by merge level (green = small 2x2 fold → magenta =
+  // whole board) via the shared terrain shader's uMergeDebug branch. Merged
+  // meshes carry aLod 4..8 (the tier) so the shader can ramp the colour.
   setMergeDebug(on) {
     this._mergeDebug = !!on;
     const u = this.material?.uniforms?.uMergeDebug;
@@ -599,20 +597,11 @@ export class TerrainBoard {
   }
 
   // Cull invisible terrain meshes based on the camera frustum and facing
-  // direction. Detailed chunks and merged group meshes are culled separately;
-  // chunks hidden by an active merge/macro state are skipped (left invisible).
-  // visibleChunkCount / culledChunkCount are reported in draw calls (a merged
-  // mesh counts as one), which is the figure the merge layer is optimising.
+  // direction. Detailed chunks and folded node meshes are culled separately;
+  // chunks hidden by an active fold are skipped (left invisible).
+  // visibleChunkCount / culledChunkCount are reported in draw calls (a folded
+  // node counts as one), which is the figure the merge layer is optimising.
   cull(camera) {
-    // Macro proxy: the whole board is one mesh. Keep it visible (its bounding
-    // box spans the board, so it is effectively always on screen).
-    if (this.macroActive) {
-      if (this._macroMesh) this._macroMesh.visible = true;
-      this.visibleChunkCount = this._macroMesh ? 1 : 0;
-      this.culledChunkCount = this.chunks.length;
-      return;
-    }
-
     if (!this.cullingEnabled) {
       let visibleCount = 0;
       for (const chunk of this.chunks) {
@@ -620,9 +609,7 @@ export class TerrainBoard {
         if (!chunk.mesh.visible) chunk.mesh.visible = true;
         visibleCount++;
       }
-      for (const g of this._groups) {
-        if (g.merged && g.mesh) { g.mesh.visible = true; visibleCount++; }
-      }
+      for (const node of this._mergedNodes) { node.mesh.visible = true; visibleCount++; }
       this.visibleChunkCount = visibleCount;
       this.culledChunkCount = 0;
       return;
@@ -639,11 +626,13 @@ export class TerrainBoard {
     let visible = chunkResult.visibleCount;
     let culled = chunkResult.culledCount;
 
-    if (this.mergeEnabled && this.mergedGroupCount) {
+    if (this._mergedNodes.length) {
+      // Folded nodes vary in size; use the board span as a conservative
+      // bounding-sphere radius so big folded blocks are never wrongly culled.
       const mergeResult = cullChunks(
-        this._activeMergedMeshes(),
+        this._mergedNodes,
         camera,
-        this.chunkSize * this.mergeGroupSize,
+        this.boardSize,
         this._maxHeight,
         this.behindCameraCulling,
         this.cullingAggressiveness
@@ -657,11 +646,11 @@ export class TerrainBoard {
   }
 
   dispose() {
-    this._disposeMergedMeshes();
+    this._disposeNodeMeshes();
     for (const geo of this._mergedGeo.values()) geo.dispose();
     this._mergedGeo.clear();
-    this._groups = [];
-    this._groupsDirty = true;
+    this._root = null;
+    this._treeDirty = true;
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
     for (const chunk of this.chunks) this.group.remove(chunk.mesh);
