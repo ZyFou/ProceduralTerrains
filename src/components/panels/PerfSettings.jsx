@@ -187,41 +187,51 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
       defaultOpen
       settingId="performance.section.gpu"
     >
-      <SelectRow
-        label="Renderer Backend"
-        value={perf.rendererBackend}
-        options={backendOptions}
-        onChange={(v) => onPerfSetting('rendererBackend', v)}
-        info="Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build."
-        settingId="performance.rendererBackend"
-      />
-      <SelectRow
-        label="GPU Preference"
-        value={perf.gpuPreference}
-        options={GPU_PREFERENCE_OPTIONS}
-        onChange={(v) => onPerfSetting('gpuPreference', v)}
-        info="A browser hint only. The browser or OS may ignore this preference."
-        settingId="performance.gpuPreference"
-      />
-      <div className="gpu-cap-list">
-        <CapabilityRow label="Detected Renderer" value={rendererInfo?.activeBackendLabel || caps.detectedRenderer} />
-        <CapabilityRow label="Detected GPU" value={gpuInfo} title={caps.detectedGpu} />
-        <CapabilityRow label="GPU Timing" value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
-        <CapabilityRow label="Power Preference" value={labelGpuPreference(activeGpuPreference)} />
-        {perf.rendererBackend === 'webgpu' && !webgpuSupported && (
-          <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
+      <div className="gpu-renderer-section">
+        <SelectRow
+          label="Renderer Backend"
+          value={perf.rendererBackend}
+          options={backendOptions}
+          onChange={(v) => onPerfSetting('rendererBackend', v)}
+          info="Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build."
+          settingId="performance.rendererBackend"
+        />
+        <SelectRow
+          label="GPU Preference"
+          value={perf.gpuPreference}
+          options={GPU_PREFERENCE_OPTIONS}
+          onChange={(v) => onPerfSetting('gpuPreference', v)}
+          info="A browser hint only. The browser or OS may ignore this preference."
+          settingId="performance.gpuPreference"
+        />
+        <ToggleRow
+          label="Worker Renderer"
+          value={!!perf.useWorker}
+          onChange={(v) => onPerfSetting('useWorker', v)}
+          info="Experimental seam for moving rendering to OffscreenCanvas later. This build keeps the in-thread renderer active."
+          settingId="performance.useWorker"
+        />
+        <div className="gpu-cap-list">
+          <CapabilityRow label="Detected Renderer" value={rendererInfo?.activeBackendLabel || caps.detectedRenderer} />
+          <CapabilityRow label="Detected GPU" value={gpuInfo} title={caps.detectedGpu} />
+          <CapabilityRow label="GPU Timing" value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
+          <CapabilityRow label="Power Preference" value={labelGpuPreference(activeGpuPreference)} />
+          <CapabilityRow label="Worker Renderer" value={rendererInfo?.workerActive ? 'Active' : 'Inactive'} />
+          {perf.rendererBackend === 'webgpu' && !webgpuSupported && (
+            <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
+          )}
+        </div>
+        {reloadRequired ? (
+          <div className="gpu-apply-row">
+            <span>Reload required to apply GPU changes</span>
+            <button type="button" className="action-btn gpu-apply-btn" onClick={() => window.location.reload()}>
+              Reload &amp; Apply
+            </button>
+          </div>
+        ) : (
+          <p className="gpu-footnote">Browser may ignore GPU preference hints.</p>
         )}
       </div>
-      {reloadRequired ? (
-        <div className="gpu-apply-row">
-          <span>Reload required to apply GPU changes</span>
-          <button type="button" className="action-btn gpu-apply-btn" onClick={() => window.location.reload()}>
-            Reload &amp; Apply
-          </button>
-        </div>
-      ) : (
-        <p className="gpu-footnote">Browser may ignore GPU preference hints.</p>
-      )}
     </ControlSection>
   );
 }

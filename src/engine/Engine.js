@@ -3,18 +3,10 @@ import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMate
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
-import { PlanetWorld } from './terrain/PlanetWorld.js';
-import { PlanetCloudChunks } from './sky/PlanetCloudChunks.js';
-import { PlanetCloudLayer } from './sky/PlanetCloudLayer.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
-import { createPlanetMaterial, createPlanetWaterMaterial } from './terrain/PlanetMaterial.js';
-import { PlanetHeightSampler } from './terrain/PlanetHeightSampler.js';
-import { PlanetHeightBaker } from './terrain/PlanetHeightBaker.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
 import { fetchLocationHeightmap, getLocation } from './terrain/RealWorldHeightmap.js';
-import { PlanetOrbitControls } from './PlanetOrbitControls.js';
-import { PlanetController } from './player/PlanetController.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
@@ -30,9 +22,6 @@ import {
   hasStoredPerfSettings,
 } from './render/PerformanceSettings.js';
 import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
-import { TerrainExporter } from './terrain/TerrainExporter.js';
-import { PlanetExporter } from './terrain/PlanetExporter.js';
-import { zipSync } from 'fflate';
 import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, buildDiskWallGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
@@ -54,7 +43,7 @@ import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStack
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
-import { FlatPropSampler, PlanetPropSampler } from './props/TerrainPropSampler.js';
+import { FlatPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
@@ -99,6 +88,21 @@ function mulberry32(a) {
   };
 }
 
+function yieldTask() {
+  if (typeof MessageChannel !== 'undefined') {
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        channel.port2.close();
+        resolve();
+      };
+      channel.port2.postMessage(0);
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 // Parameter keys that change the terrain shape (deferred when Auto Update is
 // off). Everything else (debug toggles, sun, fog…) always applies instantly.
 const SHAPE_KEYS = new Set([
@@ -110,20 +114,12 @@ const SHAPE_KEYS = new Set([
 
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize', 'planetFaceGrid']);
 
-// Octave count the terrain/water programs are FIRST compiled at on cold boot.
-// The FBM loops are unrolled at the OCTAVES #define, so a low value makes the
-// program ANGLE has to translate (GLSL→HLSL, synchronous on the main thread)
-// small and fast — giving a quick first paint. The full-detail programs are then
-// compiled in the background and swapped in (see _upgradeBootOctaves), so the
-// terrain just sharpens a beat after it first appears instead of freezing the
-// tab while the heavy program translates up front.
-const BOOT_OCTAVES = 3;
-
 export class Engine {
   constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
     this._bootStart = performance.now();   // boot timing baseline (see [boot] logs)
     this.canvas = canvas;
     this.cb = callbacks;
+    this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams });
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
     // get the default single Classic-Terrain layer == bit-identical to before.
@@ -152,6 +148,10 @@ export class Engine {
     this._clock = new THREE.Clock();
     this._disposed = false;
     this._bootPending = true;
+    this._waterDeferred = true;
+    this._waterMaterialWarmed = false;
+    this._terrainHeightBakeDeferred = true;
+    this._postFirstPaintWarmupsStarted = false;
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
     this._compiling = 0;
@@ -204,6 +204,8 @@ export class Engine {
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
+    this._planetModules = null;
+    this._planetModulesPromise = null;
 
     // Studio (flat board) height/normal bake: replaces the per-pixel height
     // field in the studio terrain + water shaders with a single texture fetch.
@@ -292,18 +294,23 @@ export class Engine {
     };
     document.addEventListener('visibilitychange', this._onVisibility);
 
-    // Compile all shader programs in the background before the first render.
-    // The first frame would otherwise block the main thread for the full
-    // FXC/ANGLE compile of the terrain FBM shaders. Defer to idle time so it
-    // never competes with the app's first paint.
-    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1));
-    idle(() => { if (!this._disposed) this._warmupInitialShaders(); });
-
     console.info(`[boot] sync init (renderer+scene+board) ${(performance.now() - this._bootStart).toFixed(0)}ms · GPU tier ${this.gpuTier} · preset ${this.perf?.preset}`);
     this.renderer.setAnimationLoop(() => this._tick());
+    // Compile the first visible studio shaders immediately. Earlier idle/rAF gates
+    // could be throttled for tens of seconds by Chrome before first paint.
+    this._warmupInitialShaders();
   }
 
   // ----------------------------------------------------------------- setup
+
+  async _loadPlanetModules() {
+    if (this._planetModules) return this._planetModules;
+    if (!this._planetModulesPromise) {
+      this._planetModulesPromise = import('./planet/planetBundle.js');
+    }
+    this._planetModules = await this._planetModulesPromise;
+    return this._planetModules;
+  }
 
   _initRenderer() {
     const requestedBackend = this.perf?.rendererBackend || 'auto';
@@ -339,6 +346,8 @@ export class Engine {
       appliedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
       activeGpuPreference: actualOptions.powerPreference || 'default',
       activeGpuPreferenceLabel: labelGpuPreference(actualOptions.powerPreference || 'default'),
+      workerRequested: !!this.perf?.useWorker,
+      workerActive: false,
       webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.supported,
       webgpuRequestedButNotActive: requestedBackend === 'webgpu',
       reloadRequired: false,
@@ -362,6 +371,9 @@ export class Engine {
     const preset = presetForTier(this.gpuTier);
     this.perf = createPerfSettings(preset);
     this.qualityPreset = this.perf.preset;
+    if (this.gpuTier === 'low' && !this._initialParamKeys.has('chunkCount')) {
+      this.params.chunkCount = Math.min(this.params.chunkCount, 12);
+    }
     savePerfSettings(this.perf);
     if (preset !== 'high') {
       const label = preset === 'performance' ? 'Performance' : 'Balanced';
@@ -377,23 +389,20 @@ export class Engine {
 
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
-    // Boot with a low octave count so the first programs ANGLE translates are
-    // small (fast first paint); _upgradeBootOctaves swaps in the full-detail
-    // programs in the background once boot finishes.
-    const bootOct = Math.min(Math.round(this.params.octaves), BOOT_OCTAVES);
-    this.terrainMaterial = createTerrainMaterial(this.uniforms, bootOct, this._stackGLSL);
+    const oct = Math.round(this.params.octaves);
+    this.terrainMaterial = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
-    this.waterMaterial = createWaterMaterial(this.uniforms, bootOct, this._stackGLSL);
+    this.waterMaterial = createWaterMaterial(this.uniforms, oct, this._stackGLSL);
     this.water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.waterMaterial);
     this.water.geometry.rotateX(-Math.PI / 2);
     this.water.renderOrder = 10;
     this.water.frustumCulled = false;
+    this.water.visible = false;
     this.scene.add(this.water);
 
     this.waterSystem = new WaterSystem(this);
-    this.waterSystem.init();
 
     // clean diorama base: perimeter walls + flat bottom (no z-fight with chunk skirts)
     this.plinth = new THREE.Mesh(
@@ -713,16 +722,10 @@ export class Engine {
     return true;
   }
 
-  // Rebuild board geometry + plinth/water/camera for the current tile set, then
+  // Sync board geometry + plinth/water/camera for the current tile set, then
   // re-center the camera on the assembly and mirror the layout to the UI.
   _rebuildTiles() {
-    this._bakedStudioGen = -1;   // union bounds changed — re-bake height texture
-    this.applyAll({ force: true });
-    const c = this._unionCenter();
-    this.controls.goalTarget.set(c.x, 0, c.z);
-    this._updateTileGhost();
-    this._notifyTiles();
-    this._needsRender = true;
+    this._applyTileLayout();
   }
 
   _notifyTiles() {
@@ -1487,7 +1490,7 @@ export class Engine {
     }
 
     try {
-      // stagger: one program per frame so editing the noise stack never freezes.
+      // stagger: one program per yielded task so editing the noise stack never freezes.
       await this._compileMaterialVariants(warm, { stagger: true });
     } catch (e) {
       console.warn('Noise stack shader compile failed', e);
@@ -1512,6 +1515,71 @@ export class Engine {
     this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
   }
 
+  _applyStudioAssemblyLayout(maxHeight = this._maxHeight()) {
+    // The board, plinth and water span the whole tile assembly (= one cell
+    // when there is a single tile, keeping the classic centred diorama).
+    const wall = this._wallThickness();
+    const uw = this._unionWidth();
+    const ud = this._unionDepth();
+    const c = this._unionCenter();
+    // Extend the water out to the flared plinth wall so it meets the dark box
+    // with no gap.
+    this.water.scale.set(uw + 2 * wall, 1, ud + 2 * wall);
+    this.water.position.x = c.x;
+    this.water.position.z = c.z;
+    this._updatePlinth();
+    // Keep the next circular growth ring inside the camera's framing so the
+    // all-around hover target is visible and reachable before it is added.
+    const circlePreviewSize = this.tileAssemblyShape === 'circle' && this.canExpandCircle()
+      ? (this.diskRadiusCells + 1.5) * 2 * this.cellSize
+      : 0;
+    this.controls.setBoardSize(Math.max(uw, ud, circlePreviewSize), c);
+    this.minimap.setBoard(Math.max(uw, ud), maxHeight);
+    this.cb.onBoard(this.boardSize);
+  }
+
+  _refreshStudioChunkView(now = performance.now()) {
+    this.camera.updateMatrixWorld(true);
+    this.board.updateLOD(this.camera.position);
+    this.board.cull(this.camera);
+    this._lastLodUpdate = now;
+  }
+
+  _applyTileLayout() {
+    this._needsRender = true;
+    this._bakedStudioGen = -1;   // union bounds changed — re-bake height texture
+    const p = this.params;
+    const maxHeight = this._maxHeight();
+    const result = this.board.syncCells({
+      chunkCount: p.chunkCount,
+      chunkSize: p.chunkSize,
+      maxHeight,
+      skirtDepth: this._skirtDepth(),
+      lodSegments: resolveLodSegments(this.perf),
+      cells: this.tiles,
+      progressive: true,
+      initialBatchSize: this._studioInitialChunkBatch(),
+    });
+    if (result?.rebuilt) {
+      this.appliedChunkCount = p.chunkCount;
+      this.appliedChunkSize = p.chunkSize;
+    }
+
+    this._applyStudioAssemblyLayout(maxHeight);
+    this._refreshStudioChunkView();
+    this._applyUniforms({ updatePlinth: false });
+    this._minimapDirtyAt = performance.now();
+    this.minimap.requestRedraw();
+
+    const c = this._unionCenter();
+    this.controls.goalTarget.set(c.x, 0, c.z);
+    this._updateTileGhost();
+    this._notifyTiles();
+    if (!this._bootPending) {
+      this.cb.onStatus(this.board?.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
+    }
+  }
+
   // Push every parameter into uniforms; rebuild the chunk grid if the world
   // layout changed.
   applyAll({ force }) {
@@ -1531,46 +1599,68 @@ export class Engine {
         skirtDepth: this._skirtDepth(),
         lodSegments: resolveLodSegments(this.perf),
         cells: this.tiles,
+        progressive: this.worldMode === 'studio',
+        initialBatchSize: this._studioInitialChunkBatch(),
       });
       this.appliedChunkCount = p.chunkCount;
       this.appliedChunkSize = p.chunkSize;
 
-      // The board, plinth and water span the whole tile assembly (= one cell
-      // when there is a single tile, keeping the classic centred diorama).
-      const wall = this._wallThickness();
-      const uw = this._unionWidth();
-      const ud = this._unionDepth();
-      const c = this._unionCenter();
-      // extend the water out to the flared plinth wall so it meets the dark box
-      // with no gap (otherwise you see under the map through the strip between
-      // the board edge and the outset wall).
-      this.water.scale.set(uw + 2 * wall, 1, ud + 2 * wall);
-      this.water.position.x = c.x;
-      this.water.position.z = c.z;
-      this._updatePlinth();
-      // Keep the next circular growth ring inside the camera's framing so the
-      // all-around hover target is visible and reachable before it is added.
-      const circlePreviewSize = this.tileAssemblyShape === 'circle' && this.canExpandCircle()
-        ? (this.diskRadiusCells + 1.5) * 2 * this.cellSize
-        : 0;
-      this.controls.setBoardSize(Math.max(uw, ud, circlePreviewSize), c);
-      this.minimap.setBoard(Math.max(uw, ud), maxHeight);
-      this.cb.onBoard(this.boardSize);
+      this._applyStudioAssemblyLayout(maxHeight);
 
       // build() starts every chunk at the coarse base LOD; resolve per-chunk
       // LOD + culling NOW so the first rendered frame already shows the finished
       // terrain at full detail. Without this the throttled updateLOD (~150ms
       // later) causes a visible "coarse → detailed" pop when a preset loads.
-      this.camera.updateMatrixWorld(true);
-      this.board.updateLOD(this.camera.position);
-      this.board.cull(this.camera);
-      this._lastLodUpdate = performance.now();
+      this._refreshStudioChunkView();
     }
 
-    this._applyUniforms();
+    this._applyUniforms({ updatePlinth: !rebuildNeeded });
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
-    if (!this._bootPending) this.cb.onStatus('Ready', false);
+    if (!this._bootPending) {
+      this.cb.onStatus(this.board?.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
+    }
+  }
+
+  _studioInitialChunkBatch() {
+    if (this.gpuTier === 'low') return 25;
+    if (this.gpuTier === 'medium') return 49;
+    return 64;
+  }
+
+  _studioChunkBuildBudget() {
+    const base = Math.max(1, Math.round(this.perf?.maxCreatesPerFrame || 6));
+    if (this.gpuTier === 'low') return { maxItems: Math.max(4, base), maxMs: 3 };
+    if (this.gpuTier === 'medium') return { maxItems: Math.max(6, base + 2), maxMs: 4 };
+    return { maxItems: Math.max(8, base * 2), maxMs: 6 };
+  }
+
+  _terrainBuildStatusText() {
+    const b = this.board;
+    if (!b?.targetChunkCount) return 'Loading terrain...';
+    return `Loading terrain ${b.activeChunkCount}/${b.targetChunkCount} chunks`;
+  }
+
+  _processTerrainBuildQueue(now = performance.now()) {
+    if (this.worldMode !== 'studio' || !this.board?.isBuilding) return 0;
+    const created = this.board.processBuildQueue(this._studioChunkBuildBudget());
+    if (!created) return 0;
+
+    this.camera.updateMatrixWorld(true);
+    this.board.updateLOD(this.camera.position);
+    this.board.cull(this.camera);
+    this._needsRender = true;
+    this._lastLodUpdate = now;
+    this.cb.onLod(
+      [...this.board.lodCounts],
+      this.params.chunkCount,
+      this.board.visibleChunkCount,
+      this.board.culledChunkCount
+    );
+    if (!this._bootPending) {
+      this.cb.onStatus(this.board.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
+    }
+    return created;
   }
 
   _maxHeight() { return this.params.heightScale * 1.35 + 2; }
@@ -1620,7 +1710,7 @@ export class Engine {
     if (this.diskWall) this.diskWall.visible = this.plinth.visible && this.tileAssemblyShape === 'circle';
   }
 
-  _applyUniforms() {
+  _applyUniforms({ updatePlinth = true } = {}) {
     this._needsRender = true;
     this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
@@ -1690,14 +1780,11 @@ export class Engine {
       u.uFogDensity.value = this.worldMode === 'planet' ? 0.0 : p.fogDensity * 0.0001;
     }
 
-    // octave count is a compile-time constant (keeps loop bounds static for
+    // Octave count is a compile-time constant (keeps loop bounds static for
     // the D3D11 shader compiler) — changing it requires new programs, which
-    // are compiled in the background and swapped in when ready (no freeze)
-    // While booting, the materials intentionally hold BOOT_OCTAVES — don't
-    // trigger the full-detail recompile here; _upgradeBootOctaves does it once
-    // the first frame is on screen.
+    // are compiled in the background and swapped in when ready.
     const oct = Math.round(p.octaves);
-    if (!this._bootPending && this.terrainMaterial.defines.OCTAVES !== oct) {
+    if (this.terrainMaterial.defines.OCTAVES !== oct) {
       this._setOctavesAsync(oct);
     }
 
@@ -1707,10 +1794,11 @@ export class Engine {
     this._updatePlanetWater();
     this.waterMaterial.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.water.position.y = p.seaLevel;
-    if (this.waterSystem) this.waterSystem.sync(p, this.worldMode);
+    if (this.waterSystem && !this._waterDeferred) this.waterSystem.sync(p, this.worldMode);
+    else if (this.water) this.water.visible = false;
 
     this.board.updateBounds(this._maxHeight(), this._skirtDepth());
-    this._updatePlinth();
+    if (updatePlinth) this._updatePlinth();
     this.planetStyle.applyToUniforms(u);
     this._applyStudioFogFromStyle();
     this._applyCloudSettings();   // slab altitude/scale track board height + size
@@ -1744,7 +1832,7 @@ export class Engine {
     if (stagger && list.length > 1) {
       for (const m of list) {
         await this._compileMaterialVariants([m], { canvasOnly, timeoutMs });
-        await new Promise((r) => requestAnimationFrame(r));
+        await yieldTask();
       }
       return;
     }
@@ -1796,10 +1884,10 @@ export class Engine {
           resolve();
           return;
         }
-        requestAnimationFrame(check);
+        yieldTask().then(check);
       };
 
-      requestAnimationFrame(check);
+      yieldTask().then(check);
     });
   }
 
@@ -1814,20 +1902,36 @@ export class Engine {
     }
   }
 
+  async _withBootDeferredObjectsDetached(task) {
+    const items = [this.studioCloud?.mesh].filter(Boolean)
+      .map((mesh) => ({ mesh, parent: mesh.parent || null }));
+    for (const { mesh, parent } of items) {
+      if (parent) parent.remove(mesh);
+    }
+    try {
+      return await task();
+    } finally {
+      for (const { mesh, parent } of items) {
+        if (parent && mesh && !mesh.parent) parent.add(mesh);
+      }
+      if (this._waterDeferred && this.water) this.water.visible = false;
+    }
+  }
+
   /**
-   * Compile every unique material currently in the scene, ONE per animation
-   * frame, then wait for all programs to finish linking.
+   * Compile every unique material currently in the scene, yielding between
+   * programs, then wait for all programs to finish linking.
    *
-   * Why one-per-frame: ANGLE (Chrome on Windows → D3D11) does the GLSL→HLSL
+   * Why one-per-task: ANGLE (Chrome on Windows → D3D11) does the GLSL→HLSL
    * translation for each program SYNCHRONOUSLY on the calling thread inside
    * renderer.compile(). KHR_parallel_shader_compile only moves the *D3D bytecode*
    * link onto a driver thread — the translation still blocks the main thread.
    * Compiling the whole scene in one call therefore freezes the tab for the SUM
    * of every shader's translation (several seconds with the heavy FBM terrain +
-   * volumetric materials). Initiating one material per rAF caps the worst stall
-   * at a single shader's translation and lets the browser stay responsive
-   * (overlay animates, input flows) in between, while the driver still links all
-   * the programs in parallel — so total wall-clock time does not regress.
+   * volumetric materials). Initiating one material per yielded browser task caps
+   * the worst stall at a single shader's translation and lets the browser stay
+   * responsive in between, while the driver still links all the programs in
+   * parallel — so total wall-clock time does not regress.
    *
    * The board shares one terrain material across all its chunks, so the Set
    * collapses hundreds of meshes down to a handful of unique programs.
@@ -1854,7 +1958,7 @@ export class Engine {
       const pending = this.renderer.compile(group, this.camera, this.scene);
       if (renderTarget) this.renderer.setRenderTarget(prevTarget);
       pending.forEach((m) => allPending.add(m));
-      await new Promise((r) => requestAnimationFrame(r));
+      await yieldTask();
     }
     await this._waitForMaterialsReady(allPending);
   }
@@ -1887,8 +1991,8 @@ export class Engine {
         });
     };
 
-    // Yield two frames so the UI can paint before kicking off GPU work.
-    requestAnimationFrame(() => requestAnimationFrame(run));
+    // Yield twice so the UI can paint before kicking off GPU work.
+    yieldTask().then(() => yieldTask().then(run));
   }
 
   /** Initial warmup: everything in the studio scene + the underwater pass. */
@@ -1904,12 +2008,13 @@ export class Engine {
       // never submerge, so this roughly halves the cold-boot compile burst that
       // otherwise saturates Chrome's shared GPU process and stalls other tabs.
       //
-      // Materials are compiled one-per-frame instead of all at once. On Windows
+      // Materials are compiled one-per-task instead of all at once. On Windows
       // ANGLE/FXC, calling gl.compileShader() for every material in one
       // synchronous burst freezes the main thread for several seconds even with
       // KHR_parallel_shader_compile. Spreading initiations across rAF frames
       // keeps each frame short while still letting the GPU compile in parallel.
-      await this._withStudioCloudDetached(() => this._compileSceneStaggered());
+      await this._withBootDeferredObjectsDetached(() => this._compileSceneStaggered());
+      this._waterMaterialWarmed = true;
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
@@ -1917,34 +2022,77 @@ export class Engine {
     this._compiling--;
     if (!this._disposed && !this._compiling) {
       this._bootPending = false;
-      // Compile + run the studio height bake now, while the boot overlay is
-      // still up. The baker's own ~full-octave FBM program would otherwise
-      // translate synchronously on the FIRST interactive tick and hitch it.
-      const _tBake0 = performance.now();
-      this._ensureTerrainHeightTex();
-      const _bakeMs = performance.now() - _tBake0;
+      // First paint uses canvas shaders already warmed; bake and water init are
+      // deferred below so the overlay can clear promptly.
+
+
       this._renderInitialStudioFrame();
-      console.info(`[boot] shader warmup ${_compileMs.toFixed(0)}ms · height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}²) · total ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+      console.info(`[boot] terrain+water warmup ${_compileMs.toFixed(0)}ms - height bake deferred - water init deferred - first paint ${(performance.now() - this._bootStart).toFixed(0)}ms`);
       this.cb.onStatus('Ready', false);
       // Surface the first-run GPU-tier notice now that the boot overlay is gone
       // (info toasts are suppressed while a blocking overlay is up).
       if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
-      // Upgrade the low-octave boot programs to full detail in the background.
-      this._upgradeBootOctaves();
+      // Finish terrain bake and show water after the first paint.
+      this._schedulePostFirstPaintWarmups();
     }
   }
 
-  /**
-   * After boot has painted a fast low-octave terrain, compile the full-detail
-   * (params.octaves) programs in the background and swap them in. Scheduled on
-   * idle so it never competes with the first interactive frames; _setOctavesAsync
-   * stagger-compiles, so the swap itself never freezes the tab.
-   */
-  _upgradeBootOctaves() {
+  _schedulePostFirstPaintWarmups() {
+    if (this._postFirstPaintWarmupsStarted) return;
+    this._postFirstPaintWarmupsStarted = true;
+    this._runPostFirstPaintWarmups()
+      .catch((e) => console.warn('Post-first-paint warmup failed', e));
+  }
+
+  async _runPostFirstPaintWarmups() {
+    if (this._disposed) return;
+    await Promise.all([
+      this._warmDeferredWater(),
+      this._warmDeferredTerrainBake(),
+    ]);
+  }
+
+  async _warmDeferredTerrainBake() {
+    if (this._disposed || !this._terrainHeightBakeDeferred || this.worldMode !== 'studio') return;
+    this._terrainHeightBakeDeferred = false;
+    const t0 = performance.now();
+    this.cb.onStatus('Baking terrain detail...', false);
+    await yieldTask();
+    this._ensureTerrainHeightTex();
+    console.info(`[boot] deferred terrain bake ${(performance.now() - t0).toFixed(0)}ms (${this._bakeBaseSize()}^2)`);
+    if (!this._waterDeferred) this.cb.onStatus('Ready', false);
+    this._needsRender = true;
+  }
+
+  async _warmDeferredWater() {
+    if (this._disposed || !this._waterDeferred || !this.waterMaterial) return;
+    const t0 = performance.now();
+    this.cb.onStatus('Preparing water...', false);
     const target = Math.round(this.params.octaves);
-    if (!this.terrainMaterial || this.terrainMaterial.defines.OCTAVES === target) return;
-    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
-    idle(() => { if (!this._disposed) this._setOctavesAsync(target); });
+    if (this.waterMaterial.defines.OCTAVES !== target) {
+      this.waterMaterial.defines.OCTAVES = target;
+      this.waterMaterial.needsUpdate = true;
+      this._waterMaterialWarmed = false;
+    }
+    if (!this._waterMaterialWarmed) {
+      try {
+        await this._compileMaterialVariants([this.waterMaterial], {
+          canvasOnly: true,
+          stagger: true,
+          timeoutMs: 20000,
+        });
+        this._waterMaterialWarmed = true;
+      } catch (e) {
+        console.warn('Deferred water warmup failed', e);
+      }
+    }
+    if (this._disposed) return;
+    this._waterDeferred = false;
+    this.waterSystem?.init();
+    this._applyWaterPerf();
+    this._needsRender = true;
+    console.info(`[boot] deferred water init ${(performance.now() - t0).toFixed(0)}ms${this._waterMaterialWarmed ? ' (precompiled)' : ''}`);
+    this.cb.onStatus('Ready', false);
   }
 
   /**
@@ -2021,29 +2169,34 @@ export class Engine {
 
     const warm = [
       createTerrainMaterial(this.uniforms, oct, this._stackGLSL),
-      createWaterMaterial(this.uniforms, oct, this._stackGLSL),
     ];
+    if (!this._waterDeferred) warm.push(createWaterMaterial(this.uniforms, oct, this._stackGLSL));
     if (this.worldMode === 'infinite') {
       warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL));
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
     const planetMode = this.worldMode === 'planet';
     if (planetMode) {
-      warm.push(createPlanetMaterial(this.uniforms, oct, this._stackGLSL));
-      warm.push(createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL));
+      const planet = await this._loadPlanetModules();
+      warm.push(planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL));
+      warm.push(planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
 
     try {
       // planet never uses the underwater RT variant — compile canvas-only there.
-      // stagger: one program per frame so changing octaves never freezes the tab.
+      // stagger: one program per yielded task so changing octaves never freezes the tab.
       await this._compileMaterialVariants(warm, { canvasOnly: planetMode, stagger: true });
     } catch (e) {
       console.warn('Octave shader compile failed', e);
     }
 
     if (token === this._octToken && !this._disposed) {
-      const live = [this.terrainMaterial, this.waterMaterial,
-        this._infiniteTerrainMat, this._infiniteWaterMat];
+      const live = [
+        this.terrainMaterial,
+        ...(this._waterDeferred ? [] : [this.waterMaterial]),
+        this._infiniteTerrainMat,
+        this._infiniteWaterMat,
+      ];
       for (const m of live) {
         if (m && m.defines.OCTAVES !== oct) {
           m.defines.OCTAVES = oct;
@@ -2355,6 +2508,7 @@ export class Engine {
   }
 
   _waterLevel() {
+    if (this._waterDeferred) return null;
     if (!this.waterSystem?.isEnabled()) return null;
     return this.params.seaLevel > 0.5 ? this.params.seaLevel : null;
   }
@@ -2431,7 +2585,9 @@ export class Engine {
     } else if (this.worldMode === 'infinite' && !this.fpsControls) {
       this.fpsControls = new FPSControls(this.camera, this.canvas);
     } else if (this.worldMode === 'planet' && !this.planetControls) {
-      this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
+      const planet = this._planetModules;
+      if (!planet) return;
+      this.planetControls = new planet.PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
       this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
       this.planetControls.update(0.001);
     }
@@ -2492,7 +2648,9 @@ export class Engine {
 
   _getPlanetSampler() {
     if (!this.planetSampler) {
-      this.planetSampler = new PlanetHeightSampler(this.uniforms, () => ({
+      const planet = this._planetModules;
+      if (!planet) return null;
+      this.planetSampler = new planet.PlanetHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
       }));
     }
@@ -2501,6 +2659,8 @@ export class Engine {
 
   /** Enter/leave the spherical-gravity walker (orbit camera ↔ surface walk). */
   _setPlanetPlayerMode(enabled) {
+    const planet = this._planetModules;
+    if (!planet) return;
     if (enabled) {
       // orbit camera sleeps while walking (frees the click for pointer lock)
       if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
@@ -2510,7 +2670,7 @@ export class Engine {
       // faceted mesh instead of sinking under it.
       const pw = this.planetWorld;
       const quadSize = pw ? pw.chunkSpan / (pw.lodSegments[0] || 64) : 62.5;
-      this.player = new PlanetController({
+      this.player = new planet.PlanetController({
         camera: this.camera,
         domElement: this.canvas,
         sampler: this._getPlanetSampler(),
@@ -2520,7 +2680,7 @@ export class Engine {
     } else {
       if (this.player) { this.player.dispose(); this.player = null; }
       // restore the orbit camera at a sensible distance
-      this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
+      this.planetControls = new planet.PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
       this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
       this.planetControls.update(0.001);
       this.cb.onToast('Orbit camera');
@@ -2550,11 +2710,12 @@ export class Engine {
 
   // -------------------------------------------------------------- world mode
 
-  setWorldMode(mode) {
+  async setWorldMode(mode) {
     if (mode === this.worldMode) return;
     if (this.paintMode?.state.enabled) this.setPaintMode(false);
     // player physics is per-mode — always leave it cleanly before switching
     this.setExploreMode('none');
+    if (mode === 'planet') await this._loadPlanetModules();
 
     // tear down the mode we are leaving
     const prev = this.worldMode;
@@ -2570,7 +2731,7 @@ export class Engine {
     this._underwaterWarmed = false;
 
     if (mode === 'infinite') this._enterInfiniteMode();
-    else if (mode === 'planet') this._enterPlanetMode();
+    else if (mode === 'planet') await this._enterPlanetMode();
     else this._enterStudioMode();
   }
 
@@ -2750,6 +2911,8 @@ export class Engine {
   /** (Re)build the cube-sphere world + water shell from the current params.
    *  Disposes any existing planet world/water first. */
   _buildPlanetWorld() {
+    const planet = this._planetModules;
+    if (!planet) return;
     if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
     if (this.planetWater) {
       this.scene.remove(this.planetWater);
@@ -2763,9 +2926,9 @@ export class Engine {
     // each chunk gets its own material instance that shares the engine's
     // uniform objects (so style/palette tweaks propagate) but owns its
     // per-chunk cube-face mapping uniforms
-    this.planetWorld = new PlanetWorld(
+    this.planetWorld = new planet.PlanetWorld(
       this.scene,
-      () => createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
+      () => planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
       {
         radius: this._planetRadius(),
         maxHeight: this._maxHeight(),
@@ -2781,7 +2944,7 @@ export class Engine {
 
     // water shell: a sphere at radius (planetRadius + seaLevel); the shader
     // discards over land so only basins fill. One mesh, one shared material.
-    this.planetWaterMat = createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL);
+    this.planetWaterMat = planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL);
     this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
     this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), this.planetWaterMat);
     this.planetWater.frustumCulled = false;
@@ -2804,7 +2967,9 @@ export class Engine {
       return;
     }
     if (!this.planetHeightBaker) {
-      this.planetHeightBaker = new PlanetHeightBaker({
+      const planet = this._planetModules;
+      if (!planet) return;
+      this.planetHeightBaker = new planet.PlanetHeightBaker({
         renderer: this.renderer,
         uniforms: this.uniforms,
         size: 1024,
@@ -2828,6 +2993,10 @@ export class Engine {
    */
   _ensureTerrainHeightTex() {
     if (this.worldMode !== 'studio') return;
+    if (this._terrainHeightBakeDeferred) {
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      return;
+    }
     if (this._debug.disableHeightBake) {   // debug: force the live per-pixel field
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       return;
@@ -2846,6 +3015,7 @@ export class Engine {
         renderer: this.renderer,
         uniforms: this.uniforms,
         size: this._bakeBaseSize(),
+        maxSize: this.gpuTier === 'low' ? 2048 : 4096,
       });
       this._bakedStudioGen = -1;
     }
@@ -2876,7 +3046,8 @@ export class Engine {
     return 2048;
   }
 
-  _enterPlanetMode() {
+  async _enterPlanetMode() {
+    const planet = await this._loadPlanetModules();
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
     this.uniforms.uPaintEnabled.value = 0;
@@ -2898,7 +3069,7 @@ export class Engine {
 
     // volumetric cloud shell (seamless single-mesh by default; chunked is opt-in)
     if (p.cloudChunksEnabled === true) {
-      this.planetCloudChunks = new PlanetCloudChunks(this.scene, {
+      this.planetCloudChunks = new planet.PlanetCloudChunks(this.scene, {
         planetRadius: this._planetRadius(),
         faceGrid: 4,
         compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
@@ -2906,7 +3077,7 @@ export class Engine {
       this.planetCloudChunks.warmup()
         .catch((e) => console.warn('Cloud shader warmup failed', e));
     } else {
-      this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
+      this.planetCloudLayer = new planet.PlanetCloudLayer(this.scene, {
         planetRadius: this._planetRadius(),
         compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
       });
@@ -2920,7 +3091,7 @@ export class Engine {
 
     this._applyPlanetCamera();
 
-    this.planetControls = new PlanetOrbitControls(this.camera, this.canvas, this._planetRadius());
+    this.planetControls = new planet.PlanetOrbitControls(this.camera, this.canvas, this._planetRadius());
     this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
     this.planetControls.update(0.001);   // place the camera immediately
 
@@ -2946,13 +3117,15 @@ export class Engine {
    *  its own world mode. */
   _applyCloudSettings() {
     if (this.worldMode === 'planet') {
+      const planet = this._planetModules;
+      if (!planet) return;
       const wantChunks = this.params.cloudChunksEnabled === true;
       if (wantChunks && !this.planetCloudChunks) {
         if (this.planetCloudLayer) {
           this.planetCloudLayer.dispose();
           this.planetCloudLayer = null;
         }
-        this.planetCloudChunks = new PlanetCloudChunks(this.scene, {
+        this.planetCloudChunks = new planet.PlanetCloudChunks(this.scene, {
           planetRadius: this._planetRadius(),
           faceGrid: 4,
           compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
@@ -2964,7 +3137,7 @@ export class Engine {
           this.planetCloudChunks.dispose();
           this.planetCloudChunks = null;
         }
-        this.planetCloudLayer = new PlanetCloudLayer(this.scene, {
+        this.planetCloudLayer = new planet.PlanetCloudLayer(this.scene, {
           planetRadius: this._planetRadius(),
           compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
         });
@@ -3056,7 +3229,9 @@ export class Engine {
   // Rich prop-placement sampler for Planet mode (wraps PlanetHeightSampler).
   _getPlanetPropSampler() {
     if (!this.planetPropSampler) {
-      this.planetPropSampler = new PlanetPropSampler({
+      const planet = this._planetModules;
+      if (!planet) return null;
+      this.planetPropSampler = new planet.PlanetPropSampler({
         planet: this._getPlanetSampler(),
         getWaterLevel: () => this.params.seaLevel,
         getPlanetRadius: () => this.params.planetRadius,
@@ -3091,9 +3266,10 @@ export class Engine {
     this.cb.onStatus('Compiling planet shaders…', true);
     // planet never uses the underwater pass → compile only the canvas variant
     // (skips the second, render-target colour-space program: ~half the work)
+    const planet = await this._loadPlanetModules();
     const warm = [
-      createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
-      createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
+      planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
+      planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
     ];
     try {
       await this._compileMaterialVariants(warm, { canvasOnly: true });
@@ -3168,10 +3344,11 @@ export class Engine {
       || key === 'underwaterEffect'
       || key === 'onDemandStudio'
       || key === 'rendererBackend'
-      || key === 'gpuPreference';
+      || key === 'gpuPreference'
+      || key === 'useWorker';
     if (!keepsPreset) next.preset = 'custom';
     this.perf = sanitizePerfSettings(next);
-    if (key === 'rendererBackend' || key === 'gpuPreference') {
+    if (key === 'rendererBackend' || key === 'gpuPreference' || key === 'useWorker') {
       const cfg = this.rendererConfig || {};
       this.rendererConfig = {
         ...cfg,
@@ -3179,8 +3356,11 @@ export class Engine {
         requestedBackendLabel: labelRendererBackend(this.perf.rendererBackend),
         requestedGpuPreference: this.perf.gpuPreference,
         requestedGpuPreferenceLabel: labelGpuPreference(this.perf.gpuPreference),
+        workerRequested: !!this.perf.useWorker,
+        workerActive: false,
         reloadRequired: this.perf.rendererBackend !== cfg.appliedRendererBackend
-          || this.perf.gpuPreference !== cfg.appliedGpuPreference,
+          || this.perf.gpuPreference !== cfg.appliedGpuPreference
+          || !!this.perf.useWorker !== !!cfg.workerActive,
       };
     }
     if (key === 'autoPerf' && !this.perf.autoPerf) {
@@ -3226,8 +3406,11 @@ export class Engine {
         requestedBackendLabel: labelRendererBackend(this.perf.rendererBackend),
         requestedGpuPreference: this.perf.gpuPreference,
         requestedGpuPreferenceLabel: labelGpuPreference(this.perf.gpuPreference),
+        workerRequested: !!this.perf.useWorker,
+        workerActive: false,
         reloadRequired: this.perf.rendererBackend !== this.rendererConfig.appliedRendererBackend
-          || this.perf.gpuPreference !== this.rendererConfig.appliedGpuPreference,
+          || this.perf.gpuPreference !== this.rendererConfig.appliedGpuPreference
+          || !!this.perf.useWorker !== !!this.rendererConfig.workerActive,
       };
     }
     this._applyPerformance();
@@ -3804,6 +3987,7 @@ export class Engine {
     const files = await this.waterSystem.exportMasks(options);
     const names = Object.keys(files);
     if (!names.length) { this.cb.onToast('No water masks exported'); return; }
+    const { zipSync } = await import('fflate');
     const zipped = zipSync(files);
     this._download(URL.createObjectURL(new Blob([zipped])), `water_masks-${this.params.seed}.zip`);
     this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
@@ -3893,8 +4077,10 @@ export class Engine {
       }
       if (this.worldMode === 'planet') {
         // export the full cube-sphere planet mesh
+        const { PlanetExporter } = await import('./terrain/PlanetExporter.js');
         await PlanetExporter.export(this.renderer, this.params, this.uniforms, { ...options, extraZipFiles }, onMsg);
       } else {
+        const { TerrainExporter } = await import('./terrain/TerrainExporter.js');
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
           { ...options, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
@@ -3952,6 +4138,8 @@ export class Engine {
     while (this._matTrash.length && now > this._matTrash[0].at) {
       for (const m of this._matTrash.shift().mats) m.dispose();
     }
+
+    this._processTerrainBuildQueue(now);
 
     // shaders still compiling in the background: keep input responsive but
     // don't render — that would force a blocking program link
@@ -4170,6 +4358,7 @@ export class Engine {
       this.underwater.active ||
       this.exploreMode !== 'none' ||
       !!this.paintState?.enabled ||
+      this.board?.isBuilding ||
       this.board._lodRebuildQueue.length > 0;
     const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;
     // Heartbeat safety net: redraw at least ~1 Hz so any state change that
@@ -4457,6 +4646,7 @@ export class Engine {
           this.rendererConfig && (
             perf.rendererBackend !== this.rendererConfig.appliedRendererBackend
             || perf.gpuPreference !== this.rendererConfig.appliedGpuPreference
+            || !!perf.useWorker !== !!this.rendererConfig.workerActive
           )
         ),
       },

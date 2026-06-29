@@ -1796,16 +1796,28 @@ input[type="color"].palette-color-input {
 .gpu-renderer-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .gpu-renderer-section .subsection-label {
   margin-top: 0;
 }
+.gpu-renderer-section .row,
+.gpu-renderer-section .toggle-row {
+  gap: 14px;
+  min-height: 30px;
+}
+.gpu-renderer-section .row select {
+  width: 128px;
+  min-width: 128px;
+}
+.gpu-renderer-section .label-with-icon {
+  min-width: 0;
+}
 .gpu-cap-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 10px 12px;
   background: var(--bg-panel-soft);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -1814,7 +1826,7 @@ input[type="color"].palette-color-input {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
+  gap: 14px;
   min-width: 0;
   font-size: 11.5px;
   color: var(--text-muted);

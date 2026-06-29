@@ -238,6 +238,24 @@ export class WaterSystem {
       this._waterCompileGen++;
       const gen = this._waterCompileGen;
       this._waterCompilePending = true;
+      // Keep the cheap legacy plane visible while the requested realistic
+      // material links. This matters on boot, where water was hidden until init.
+      if (eng.water && eng.waterMaterial) {
+        eng.water.material = eng.waterMaterial;
+        applyWaterMaterialSettings(eng.waterMaterial, p, 'legacy', debug);
+        applyWaterDebugToMaterials([eng.waterMaterial], debug);
+      }
+      if (wm === 'infinite') {
+        this._ensureLegacyInfiniteMaterial(oct);
+        if (eng.infiniteWorld?.waterPlane && eng._infiniteWaterMat) {
+          eng.infiniteWorld.waterPlane.material = eng._infiniteWaterMat;
+          eng.infiniteWorld.waterMaterial = eng._infiniteWaterMat;
+          applyWaterMaterialSettings(eng._infiniteWaterMat, p, 'legacy', debug);
+          applyWaterDebugToMaterials([eng._infiniteWaterMat], debug);
+        }
+      }
+      this._applyVisibility(p, wm);
+      this._updateBoundsHelper(p);
       eng.compileWaterMaterialsAsync(mats, () => {
         if (this._disposed || gen !== this._waterCompileGen) return;
         this._waterCompilePending = false;
@@ -343,7 +361,7 @@ export class WaterSystem {
 
   _applyVisibility(params, worldMode) {
     const eng = this.engine;
-    const active = isWaterActive(this._effectiveMode, params.seaLevel);
+    const active = isWaterActive(this._effectiveMode, params.seaLevel) && !eng._waterDeferred;
     const sea = params.seaLevel;
 
     if (eng.water) {

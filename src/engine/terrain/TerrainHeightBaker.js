@@ -71,12 +71,14 @@ export class TerrainHeightBaker {
    * @param {object} opts
    * @param {THREE.WebGLRenderer} opts.renderer
    * @param {object} opts.uniforms   shared terrain uniforms (live objects)
-   * @param {number} [opts.size]     texture resolution (default 2048)
+   * @param {number} [opts.size]     per-cell texture resolution (default 2048)
+   * @param {number} [opts.maxSize]  multi-cell atlas cap (default 4096)
    */
-  constructor({ renderer, uniforms, size = 2048 }) {
+  constructor({ renderer, uniforms, size = 2048, maxSize = 4096 }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
     this._baseSize = size;
+    this._maxSize = maxSize;
     this._texW = size;
     this._texH = size;
 
@@ -108,8 +110,9 @@ export class TerrainHeightBaker {
 
   /** Resize the bake target to cover a multi-cell union (cols × rows cells). */
   _ensureTargetSize(cols, rows) {
-    const w = Math.min(4096, this._baseSize * Math.max(1, cols));
-    const h = Math.min(4096, this._baseSize * Math.max(1, rows));
+    const cap = Math.max(this._baseSize, this._maxSize || 4096);
+    const w = Math.min(cap, this._baseSize * Math.max(1, cols));
+    const h = Math.min(cap, this._baseSize * Math.max(1, rows));
     if (w === this._texW && h === this._texH) return;
     this.target.dispose();
     this.target = this._makeTarget(w, h);

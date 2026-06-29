@@ -6,6 +6,26 @@ import { CloudLowResPass } from './CloudLowResPass.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
+const BOOT_CONFIG = {
+  steps: 8,
+  lightSteps: 1,
+  octaves: 2,
+  detailOctaves: 0,
+  useErosion: false,
+  lightMode: 1,
+};
+
+function scheduleFrames(fn, frames = 1) {
+  const raf = globalThis.requestAnimationFrame;
+  if (typeof raf !== 'function') return setTimeout(fn, Math.max(1, frames) * 16);
+  let remaining = Math.max(1, frames);
+  const step = () => {
+    remaining--;
+    if (remaining <= 0) fn();
+    else raf(step);
+  };
+  return raf(step);
+}
 
 // ============================================================================
 // CloudSlabLayer: studio/flat-board manager for the planar volumetric cloud
@@ -28,12 +48,12 @@ export class CloudSlabLayer {
     this.scene = scene;
     this._compile = opts.compile || null;
 
-    this._steps = 24;
-    this._lightSteps = 6;
-    this._octaves = 5;
-    this._detailOctaves = 4;
-    this._useErosion = true;
-    this._lightMode = 0;
+    this._steps = BOOT_CONFIG.steps;
+    this._lightSteps = BOOT_CONFIG.lightSteps;
+    this._octaves = BOOT_CONFIG.octaves;
+    this._detailOctaves = BOOT_CONFIG.detailOctaves;
+    this._useErosion = BOOT_CONFIG.useErosion;
+    this._lightMode = BOOT_CONFIG.lightMode;
     this._stepLOD = false;
     this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
     this._lowResPass = new CloudLowResPass();
@@ -52,6 +72,7 @@ export class CloudSlabLayer {
     this._prevClearColor = new THREE.Color();
     this._compileToken = 0;
     this._pendingCompile = null;
+    this._targetConfig = { ...BOOT_CONFIG };
 
     // planar occupancy grid (empty-space-skip acceleration), rebuilt on a throttle
     this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
@@ -203,13 +224,42 @@ export class CloudSlabLayer {
         q.useErosion !== this._useErosion ||
         q.lightMode !== this._lightMode;
     if (needsRebuild) {
-      this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
+      this._targetConfig = {
+        steps: q.steps,
+        lightSteps: q.lightSteps,
+        octaves: q.octaves,
+        detailOctaves: q.detailOctaves,
+        useErosion: q.useErosion,
+        lightMode: q.lightMode,
+      };
+      if (this._ready) {
+        this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
+      }
     }
 
     // warm the program in the background on first enable (no first-frame hang)
     if (this._enabled && !this._ready && !this._warming && this._compile) {
       this._compileCurrentMaterial();
     }
+  }
+
+  _configMatches(config) {
+    return !!config &&
+      config.steps === this._steps &&
+      config.lightSteps === this._lightSteps &&
+      config.octaves === this._octaves &&
+      config.detailOctaves === this._detailOctaves &&
+      config.useErosion === this._useErosion &&
+      config.lightMode === this._lightMode;
+  }
+
+  _upgradeToTargetConfig() {
+    const c = this._targetConfig;
+    if (!this._ready || this._warming || this._configMatches(c)) return;
+    scheduleFrames(() => {
+      if (!this._ready || this._warming || this._configMatches(c)) return;
+      this._rebuildMaterial(c.steps, c.lightSteps, c.octaves, c.detailOctaves, c.useErosion, c.lightMode);
+    }, 1);
   }
 
   // Compile a material in the background without touching the _ready/_warming
@@ -254,6 +304,7 @@ export class CloudSlabLayer {
       if (token === this._compileToken && this.material === material) {
         this._ready = true;
         this._warming = false;
+        this._upgradeToTargetConfig();
       }
     });
 

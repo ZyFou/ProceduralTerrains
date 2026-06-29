@@ -159,6 +159,7 @@ export function createPerfSettings(presetKey = 'high') {
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
     rendererBackend: 'auto',
     gpuPreference: 'default',
+    useWorker: false,
     autoPerf: true,
     underwaterEffect: true,
     lodSegments: [...BASE_LOD_SEGMENTS],
@@ -241,6 +242,7 @@ export function sanitizePerfSettings(settings) {
 
   s.rendererBackend = sanitizeRendererBackend(s.rendererBackend);
   s.gpuPreference = sanitizeGpuPreference(s.gpuPreference);
+  s.useWorker = !!s.useWorker;
 
   s.renderScale = clamp(+s.renderScale || 1, PERF_LIMITS.renderScale);
   s.resolutionScale = clamp(+s.resolutionScale || 1, PERF_LIMITS.resolutionScale);

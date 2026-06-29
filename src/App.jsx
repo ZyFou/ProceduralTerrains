@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Engine } from './engine/Engine.js';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createEngineProxy } from './engine/EngineProxy.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
@@ -24,10 +24,10 @@ import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
-import PerformanceOverlay from './components/perf/PerformanceOverlay.jsx';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
+const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
 
 const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
 const yesNo = (value) => (value ? 'On' : 'Off');
@@ -139,9 +139,13 @@ export default function App() {
 
     loadingRef.current.start('boot', { blocking: true, label: 'Loading Terrain Studio…', detail: 'Initializing engine' });
 
-    let engine;
+    let engine = null;
+    let bootTimer = null;
+    let cancelled = false;
+
+    const init = async () => {
     try {
-      engine = new Engine({
+      engine = await createEngineProxy({
         canvas,
         minimapBase: minimapBaseRef.current,
         minimapOverlay: minimapOverlayRef.current,
@@ -210,6 +214,7 @@ export default function App() {
         },
       });
     } catch (err) {
+      if (cancelled) return;
       console.error('WebGL initialization failed', err);
       const message = err?.message || 'Could not create a WebGL context.';
       setWebglError(message);
@@ -217,7 +222,12 @@ export default function App() {
       bootedRef.current = true;
       loadingRef.current.done('boot');
       landingRef.current?.setBootReady(true);
-      return undefined;
+      return;
+    }
+
+    if (cancelled) {
+      engine?.dispose();
+      return;
     }
 
     engine.setCullingEnabled(cullingEnabled);
@@ -232,7 +242,7 @@ export default function App() {
     if (import.meta.env.DEV) window.terrainStudio = engine;
     // safety: never leave the boot overlay stuck, but do not reveal the canvas
     // while the first studio frame is still being compiled/prepared.
-    const bootTimer = setTimeout(() => {
+    bootTimer = setTimeout(() => {
       const e = engineRef.current;
       if (!bootedRef.current && (!e || e._disposed || (!e._bootPending && !e._compiling))) {
         bootedRef.current = true;
@@ -240,9 +250,14 @@ export default function App() {
         landingRef.current?.setBootReady(true);
       }
     }, 30000);
+    };
+
+    init();
+
     return () => {
-      clearTimeout(bootTimer);
-      engine.dispose();
+      cancelled = true;
+      if (bootTimer) clearTimeout(bootTimer);
+      engine?.dispose();
       engineRef.current = null;
       if (import.meta.env.DEV && window.terrainStudio === engine) window.terrainStudio = null;
     };
@@ -336,7 +351,7 @@ export default function App() {
       update({ detail: BUILD_STEP[next] ?? 'Building scene…' });
       // yield so the overlay paints the build message before the sync build
       await new Promise((r) => setTimeout(r, 30));
-      engine().setWorldMode(next);      // sync build; kicks off async shader compile
+      await engine().setWorldMode(next);      // sync build; kicks off async shader compile
       setWorldMode(next);
 
       // wait for the engine to finish compiling shaders (it raises onStatus
@@ -642,6 +657,7 @@ export default function App() {
       case 'performance.preset': return perf?.preset ?? 'high';
       case 'performance.rendererBackend': return labelRendererBackend(perf?.rendererBackend);
       case 'performance.gpuPreference': return labelGpuPreference(perf?.gpuPreference);
+      case 'performance.useWorker': return yesNo(perf?.useWorker);
       case 'performance.autoPerf': return yesNo(perf?.autoPerf);
       case 'performance.onDemandStudio': return yesNo(perf?.onDemandStudio);
       case 'performance.renderScale': return num(perf?.renderScale, 2, 'x');
@@ -1100,14 +1116,16 @@ export default function App() {
       <ToastContainer toasts={toasts} />
 
       {perfOverlay.settings.open && (
-        <PerformanceOverlay
-          snapshot={perfOverlay.snapshot}
-          history={perfOverlay.history}
-          settings={perfOverlay.settings}
-          onClose={perfOverlay.toggleOpen}
-          onToggleSection={perfOverlay.toggleSection}
-          onSetShowWarnings={perfOverlay.setShowWarnings}
-        />
+        <Suspense fallback={null}>
+          <PerformanceOverlay
+            snapshot={perfOverlay.snapshot}
+            history={perfOverlay.history}
+            settings={perfOverlay.settings}
+            onClose={perfOverlay.toggleOpen}
+            onToggleSection={perfOverlay.toggleSection}
+            onSetShowWarnings={perfOverlay.setShowWarnings}
+          />
+        </Suspense>
       )}
     </div>
   );
