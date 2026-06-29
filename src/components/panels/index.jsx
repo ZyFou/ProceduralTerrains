@@ -38,7 +38,7 @@ export const PANEL_META = {
     studioTitle: 'Colors',
     studioDesc: 'Biome palette and terrain material colors.',
     icon: PANEL_ICONS.planet,
-    modes: ['planet', 'studio'],
+    modes: ['planet', 'studio', 'infinite'],
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
@@ -63,7 +63,7 @@ export function panelAvailable(id, worldMode) {
 export function getPanelDisplay(id, worldMode) {
   const meta = PANEL_META[id];
   if (!meta) return { label: id, title: id, desc: '' };
-  if (worldMode === 'studio' && meta.studioLabel) {
+  if (worldMode !== 'planet' && meta.studioLabel) {
     return {
       label: meta.studioLabel,
       title: meta.studioTitle ?? meta.studioLabel,

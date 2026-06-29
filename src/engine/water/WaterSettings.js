@@ -16,6 +16,7 @@ export const WATER_QUALITY_PRESETS = [
   { value: 'legacy', label: 'Legacy Low' },
   { value: 'balanced', label: 'Balanced Realistic' },
   { value: 'tropical', label: 'Clear Tropical' },
+  { value: 'cartoon', label: 'Cartoon Water' },
   { value: 'ocean', label: 'Deep Ocean' },
   { value: 'lake', label: 'Mountain Lake' },
   { value: 'swamp', label: 'Swamp Water' },

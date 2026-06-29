@@ -105,10 +105,10 @@ const SHAPE_KEYS = new Set([
   'seed', 'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
   'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
-  'chunkCount', 'chunkSize',
+  'chunkCount', 'chunkSize', 'planetFaceGrid',
 ]);
 
-const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize']);
+const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize', 'planetFaceGrid']);
 
 export class Engine {
   constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
@@ -1294,8 +1294,14 @@ export class Engine {
   }
 
   applyPlanetPresetByKey(key) {
-    const { style, params } = this.planetStyle.applyPlanetPreset(key);
+    const { style, params, perf } = this.planetStyle.applyPlanetPreset(key);
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    if (perf && Object.keys(perf).length) {
+      this.perf = sanitizePerfSettings({ ...this.perf, ...perf, preset: 'custom' });
+      this.qualityPreset = this.perf.preset;
+      this._applyPerformance();
+      this._notifyPerf();
+    }
     this.params.planetPreset = style.planetPreset;
     this.params.palettePreset = style.palettePreset;
     this.params.noisePreset = style.noisePreset;

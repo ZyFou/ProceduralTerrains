@@ -97,7 +97,7 @@ export class PlanetStyleManager {
       if (!(k in params)) params[k] = v;
     }
 
-    return { style: this.getStyle(), params };
+    return { style: this.getStyle(), params, perf: { ...(preset.perf ?? {}) } };
   }
 
   generatePalette(terrainSeed, options = {}) {

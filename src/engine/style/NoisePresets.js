@@ -57,6 +57,16 @@ export const NOISE_PRESETS = {
       noiseScale: 48, biomeScale: 1.4, moistBias: 0.1,
     },
   },
+
+  cartoon: {
+    label: 'Simple Cartoon',
+    params: {
+      ridge: 0.16, warp: 0.28, persistence: 0.36, lacunarity: 1.85,
+      noiseStrength: 0.72, noiseScale: 72, octaves: 4, heightScale: 260,
+      falloff: 0.35, biomeScale: 0.7, moistScale: 0.8, snowLine: 0.82,
+      normalStrength: 0.8, aoStrength: 0.35,
+    },
+  },
   flat: {
     label: 'Low Relief',
     params: {

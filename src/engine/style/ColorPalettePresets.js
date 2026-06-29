@@ -100,6 +100,20 @@ export const COLOR_PALETTE_PRESETS = {
       snow: [0.95, 0.98, 0.95], foam: [0.90, 0.98, 0.95],
     },
   },
+
+  cartoon: {
+    label: 'Cartoon Terrain',
+    palette: {
+      deep: [0.02, 0.18, 0.55], shallow: [0.02, 0.55, 0.85],
+      sand: [1.00, 0.86, 0.32], dune: [1.00, 0.68, 0.24],
+      dryGrass: [0.78, 0.86, 0.20], grass: [0.18, 0.78, 0.18],
+      forest: [0.02, 0.50, 0.16], jungle: [0.00, 0.40, 0.18],
+      swamp: [0.10, 0.44, 0.26], tundra: [0.62, 0.86, 0.82],
+      redRock: [0.90, 0.30, 0.18], redRock2: [1.00, 0.48, 0.22],
+      rock: [0.44, 0.42, 0.48], rockHi: [0.64, 0.62, 0.70],
+      snow: [0.98, 0.98, 0.92], foam: [1.00, 1.00, 0.92],
+    },
+  },
   neon: {
     label: 'Neon Sci-Fi',
     palette: {
