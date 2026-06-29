@@ -262,6 +262,7 @@ export class Engine {
       forceRender: false,     // bypass the on-demand gate — draw every frame
       disableHeightBake: false, // force the live per-pixel height field (studio bake off)
       terrainDetailDebug: 'off',
+      mergeDebug: false,      // wireframe boxes around merged groups / macro proxy
     };
     this._landingShowcase = false;
 
@@ -2309,6 +2310,9 @@ export class Engine {
     }
     this._debug[key] = !!value;
     this._needsRender = true;
+    if (key === 'mergeDebug') {
+      this.board.setMergeDebug(this._debug.mergeDebug);
+    }
     if (key === 'disableHeightBake') {
       // off → drop to the live field immediately; on → force a fresh bake next tick
       if (this._debug.disableHeightBake) {
@@ -3458,6 +3462,13 @@ export class Engine {
     this.board.setLodSegments(segments);
     this.board.setLodDistanceScale(s.lodDistanceScale);
     this.board.cullingAggressiveness = s.cullingAggressiveness;
+    this.board.setMergeOptions({
+      enabled: s.terrainMerge,
+      groupSize: s.terrainMergeGroupSize,
+      quadsPerChunk: s.terrainMergeQuads,
+      macroEnabled: s.terrainMacroProxy,
+      macroQuads: s.terrainMacroQuads,
+    });
 
     if (this.infiniteWorld) {
       this.infiniteWorld.setViewRadius(s.viewRadius);
@@ -3829,6 +3840,7 @@ export class Engine {
     // re-derive the tile-debug view uniform + notify the Debug panel.
     this.setTileDebug({});
     this.setDebugFlag('terrainDetailDebug', this._debug.terrainDetailDebug ?? 'off');
+    this.board.setMergeDebug(this._debug.mergeDebug);
 
     // time of day (fires onTimeOfDayChange → React sync).
     this.setTimeOfDay(snap.timeOfDay ?? this.timeOfDay);
@@ -3987,6 +3999,7 @@ export class Engine {
         this.params = patchParamsFromDefaults(this.params, DEBUG_PARAM_KEYS);
         this._debug = { ...DEFAULT_DEBUG_FLAGS };
         this.uniforms.uTerrainDetailDebug.value = 0.0;
+        this.board.setMergeDebug(this._debug.mergeDebug);
         this.cb.onParams({ ...this.params });
         this._afterParamChange(false);
         if (this.cb.onDebugReset) this.cb.onDebugReset();
@@ -4755,6 +4768,14 @@ export class Engine {
         visible: b.visibleChunkCount,
         culled: b.culledChunkCount,
       } : {};
+      if (b) {
+        diag.merge = {
+          enabled: b.mergeEnabled,
+          mergedGroups: b.mergedGroupCount,
+          macroActive: b.macroActive,
+          savedDrawCalls: b.savedDrawCalls,
+        };
+      }
       diag.lod = { counts: b ? [...b.lodCounts] : [0, 0, 0, 0] };
     }
 

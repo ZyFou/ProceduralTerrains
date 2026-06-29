@@ -37,6 +37,9 @@ export const PERF_LIMITS = {
   lodDistance:           { min: 0.5,     max: 30 },
   viewRadius:            { min: 3,       max: 20 },
   maxCreatesPerFrame:    { min: 0,       max: 16 },
+  terrainMergeGroupSize: { min: 2,       max: 8 },
+  terrainMergeQuads:     { min: 4,       max: 16 },
+  terrainMacroQuads:     { min: 16,      max: 96 },
   triangleBudget:        { min: 100_000, max: 3_000_000 },
   cullingAggressiveness: { min: 0,       max: 2 },
   waterQuality:          { min: 0,       max: 2 },
@@ -162,6 +165,14 @@ export function createPerfSettings(presetKey = 'high') {
     useWorker: false,
     autoPerf: true,
     underwaterEffect: true,
+    // Terrain merge layer (Tile mode): collapse far chunks / the whole board
+    // into fewer flat-grid meshes. Preset-independent — thresholds auto-scale
+    // with lodDistanceScale — so presets don't reset these.
+    terrainMerge: true,
+    terrainMergeGroupSize: 4,
+    terrainMergeQuads: 8,
+    terrainMacroProxy: true,
+    terrainMacroQuads: 48,
     lodSegments: [...BASE_LOD_SEGMENTS],
     lodDistances: [...BASE_LOD_DISTANCES],
     ...values,
@@ -278,6 +289,12 @@ export function sanitizePerfSettings(settings) {
   s.terrainMicroDetail = clamp(Number.isFinite(+s.terrainMicroDetail) ? +s.terrainMicroDetail : 0.6, PERF_LIMITS.terrainMicroDetail);
   s.terrainMacroVariation = clamp(Number.isFinite(+s.terrainMacroVariation) ? +s.terrainMacroVariation : 0.5, PERF_LIMITS.terrainMacroVariation);
   s.autoPerf = !!s.autoPerf;
+  // terrain merge layer (Tile mode)
+  s.terrainMerge = s.terrainMerge !== false;
+  s.terrainMergeGroupSize = Math.round(clamp(+s.terrainMergeGroupSize || 4, PERF_LIMITS.terrainMergeGroupSize));
+  s.terrainMergeQuads = Math.round(clamp(+s.terrainMergeQuads || 8, PERF_LIMITS.terrainMergeQuads));
+  s.terrainMacroProxy = s.terrainMacroProxy !== false;
+  s.terrainMacroQuads = Math.round(clamp(+s.terrainMacroQuads || 48, PERF_LIMITS.terrainMacroQuads));
   // underwater camera effect — only costs anything while submerged
   s.underwaterEffect = s.underwaterEffect !== false;
   // on-demand studio rendering — skip redraws when the studio scene is static

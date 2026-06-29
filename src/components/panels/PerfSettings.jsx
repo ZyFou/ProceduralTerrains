@@ -70,6 +70,12 @@ const GPU_PREFERENCE_OPTIONS = [
   { value: 'low-power', label: 'Low Power' },
 ];
 
+const MERGE_GROUP_OPTIONS = [
+  { value: 2, label: '2×2 chunks' },
+  { value: 4, label: '4×4 chunks' },
+  { value: 8, label: '8×8 chunks' },
+];
+
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'lod', label: 'LOD' },
@@ -385,6 +391,57 @@ function renderSettings({
       ))}
 
       <SettingNote tab="lod" text={`Effective distances: ${distances.map((d) => d.toFixed(1)).join(' / ')} × chunk size`} {...groupProps} />
+
+      <SettingGroup tab="lod" label="Chunk Merging" keywords="merge chunk group draw call batch far distant tile macro proxy combine" {...groupProps}>
+        <ToggleRow
+          label="Chunk Merging"
+          value={perf.terrainMerge !== false}
+          onChange={(v) => onPerfSetting('terrainMerge', v)}
+          info="Collapses far Tile-mode chunks into fewer larger meshes once they pass the lowest LOD band. Cuts draw calls / CPU with no change to the silhouette."
+          settingId="performance.terrainMerge"
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="Merge Group Size" keywords="merge group size 2x2 4x4 8x8 block chunks batch" {...groupProps}>
+        <SelectRow
+          label="Merge Group Size"
+          value={perf.terrainMergeGroupSize ?? 4}
+          options={MERGE_GROUP_OPTIONS}
+          onChange={(v) => onPerfSetting('terrainMergeGroupSize', parseInt(v, 10))}
+          info="How many chunks collapse into one merged mesh. Larger groups save more draw calls but pop in/out over bigger areas."
+          settingId="performance.terrainMergeGroupSize"
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="Merge Density" keywords="merge density resolution quads detail far mesh quality" {...groupProps}>
+        <SliderCtl
+          def={{ label: 'Merge Density', min: PERF_LIMITS.terrainMergeQuads.min, max: PERF_LIMITS.terrainMergeQuads.max, step: 1, unit: 'quads/chunk' }}
+          value={perf.terrainMergeQuads ?? 8}
+          onChange={(v) => onPerfSetting('terrainMergeQuads', Math.round(v))}
+          settingId="performance.terrainMergeQuads"
+        />
+      </SettingGroup>
+
+      <SettingNote tab="lod" text="Merge Density 8 matches the lowest chunk LOD — lossless. Lower it for extra savings at the cost of a slightly coarser far silhouette." {...groupProps} />
+
+      <SettingGroup tab="lod" label="Macro Proxy" keywords="macro proxy single mesh whole tile board zoom out far extreme distance" {...groupProps}>
+        <ToggleRow
+          label="Macro Proxy"
+          value={perf.terrainMacroProxy !== false}
+          onChange={(v) => onPerfSetting('terrainMacroProxy', v)}
+          info="At extreme distance (e.g. zoomed all the way out) the entire board collapses to a single low-poly mesh."
+          settingId="performance.terrainMacroProxy"
+        />
+      </SettingGroup>
+
+      <SettingGroup tab="lod" label="Macro Proxy Resolution" keywords="macro proxy resolution quads whole board detail far" {...groupProps}>
+        <SliderCtl
+          def={{ label: 'Macro Proxy Resolution', min: PERF_LIMITS.terrainMacroQuads.min, max: PERF_LIMITS.terrainMacroQuads.max, step: 2, unit: 'quads' }}
+          value={perf.terrainMacroQuads ?? 48}
+          onChange={(v) => onPerfSetting('terrainMacroQuads', Math.round(v))}
+          settingId="performance.terrainMacroQuads"
+        />
+      </SettingGroup>
 
       <SettingGroup tab="streaming" label="Chunk Load Radius" keywords="view radius streaming load" {...groupProps}>
         <PerfSlider perf={perf} id="viewRadius" onPerfSetting={onPerfSetting} settingId="performance.viewRadius" />

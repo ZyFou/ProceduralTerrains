@@ -738,6 +738,7 @@ export default function App() {
       case 'debug.freezeLod': return yesNo(!!debugFlags.freezeLod);
       case 'debug.forceRender': return yesNo(!!debugFlags.forceRender);
       case 'debug.disableHeightBake': return yesNo(!!debugFlags.disableHeightBake);
+      case 'debug.mergeDebug': return yesNo(!!debugFlags.mergeDebug);
       case 'debug.terrainDetailDebug': return String(debugFlags.terrainDetailDebug ?? 'off');
 
       case 'export.format': return 'GLB / GLTF';

@@ -90,6 +90,7 @@ export const DEFAULT_DEBUG_FLAGS = {
   forceRender: false,
   disableHeightBake: false,
   terrainDetailDebug: 'off',
+  mergeDebug: false,
 };
 
 export const DEFAULT_TILE_DEBUG = {

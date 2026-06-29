@@ -81,6 +81,11 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.renderScale', label: 'Render Scale', keywords: 'resolution pixel dpr scale' },
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.resolutionScale', label: 'Terrain Resolution', keywords: 'lod mesh detail' },
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.lodDistanceScale', label: 'LOD Distance Scale', keywords: 'lod distance scale' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMerge', label: 'Chunk Merging', keywords: 'merge chunk group draw call batch far distant combine tile performance' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMergeGroupSize', label: 'Merge Group Size', keywords: 'merge group size block 2x2 4x4 8x8 chunks batch' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMergeQuads', label: 'Merge Density', keywords: 'merge density resolution quads far mesh quality lossless' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMacroProxy', label: 'Macro Proxy', keywords: 'macro proxy single mesh whole tile board zoom out extreme distance far' },
+  { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMacroQuads', label: 'Macro Proxy Resolution', keywords: 'macro proxy resolution quads whole board far detail' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.viewRadius', label: 'Chunk Load Radius', keywords: 'streaming load radius chunks' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.maxCreatesPerFrame', label: 'Chunk Builds / Frame', keywords: 'streaming tile new cells chunk create spawn budget instant disable throttle' },
   { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close' },
@@ -139,6 +144,7 @@ const SETTINGS_INDEX = [
   { panelId: 'debug', settingId: 'debug.forceRender', label: 'Force Render', keywords: 'debug render fps' },
   { panelId: 'debug', settingId: 'debug.disableHeightBake', label: 'Disable Height Bake', keywords: 'debug height bake' },
   { panelId: 'debug', settingId: 'debug.terrainDetailDebug', label: 'Terrain Material Debug', keywords: 'debug terrain detail slope rock shoreline normal albedo' },
+  { panelId: 'debug', settingId: 'debug.mergeDebug', label: 'Show Chunk Merging', keywords: 'debug merge chunk group macro proxy color tint surface overlay viewport visualize fold unfold draw call' },
   { panelId: 'export', settingId: 'export.format', label: 'Format', keywords: 'export file glb obj' },
 ];
 

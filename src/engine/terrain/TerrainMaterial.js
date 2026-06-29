@@ -124,6 +124,7 @@ uniform float uNormalStrength;
 uniform float uAO;
 uniform float uGrid;
 uniform float uLodDebug;
+uniform float uMergeDebug;   // 1 = tint merged-group / macro-proxy meshes
 uniform float uColorMode;
 uniform float uEps;
 uniform vec3  uPlinthColor;
@@ -470,12 +471,26 @@ void main() {
 #ifndef INFINITE_MODE
     if (uUseTiles > 0.5) gridMul = 1.0 - tileInteriorSeam(xz);
 #endif
-    col = mix(col, vec3(0.45, 0.80, 0.95), line * uGrid * 0.22 * (0.35 + 0.65 * gridFade) * gridMul);
+    // Grid lines recolour over folded terrain so the chunk grid also shows
+    // which chunks have merged: green over a merged group, magenta over the
+    // macro proxy, default blue over live detailed chunks.
+    vec3 gridCol = vec3(0.45, 0.80, 0.95);
+    if (vLod > 4.5)      gridCol = vec3(0.95, 0.30, 0.95);
+    else if (vLod > 3.5) gridCol = vec3(0.35, 0.95, 0.55);
+    col = mix(col, gridCol, line * uGrid * 0.22 * (0.35 + 0.65 * gridFade) * gridMul);
   }
 
   if (uLodDebug > 0.5) {
     int li = int(clamp(vLod, 0.0, 3.0) + 0.5);
     col = mix(col, LOD_COLORS[li], 0.55);
+  }
+
+  // Merge debug: tint the surface of folded terrain — green = merged chunk
+  // group, magenta = full-board macro proxy. Detailed chunks stay untouched
+  // so the merged regions stand out.
+  if (uMergeDebug > 0.5) {
+    if (vLod > 4.5)      col = mix(col, vec3(0.95, 0.20, 0.95), 0.55);
+    else if (vLod > 3.5) col = mix(col, vec3(0.18, 0.95, 0.52), 0.50);
   }
 
   // Skirts darken to read as a recessed crack filler — except in circle mode,
@@ -536,6 +551,7 @@ export function createTerrainUniforms() {
     uAO:             { value: 0.75 },
     uGrid:           { value: 1.0 },
     uLodDebug:       { value: 0.0 },
+    uMergeDebug:     { value: 0.0 },
     uColorMode:      { value: 0.0 },
     uEps:            { value: 0.6 },
     uSkirtDepth:     { value: 40 },

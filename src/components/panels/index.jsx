@@ -642,7 +642,16 @@ function TerrainOverlayOptions({ ctx }) {
           label="Chunk Grid"
           value={params.chunkGrid}
           onChange={(v) => onParam('chunkGrid', v)}
-          info="Overlay borders along chunk boundaries."
+          info="Overlay borders along chunk boundaries. Lines turn green over merged chunk groups and magenta over the macro proxy."
+        />
+      )}
+      {isStudio && (
+        <ToggleRow
+          label="Show Chunk Merging"
+          value={!!ctx.debugFlags?.mergeDebug}
+          onChange={(v) => ctx.onDebugFlag?.('mergeDebug', v)}
+          info="Tint folded terrain on the surface: green = merged chunk group, magenta = full-board macro proxy. Watch regions colour in as terrain folds at distance."
+          settingId="debug.mergeDebug"
         />
       )}
       <ToggleRow
