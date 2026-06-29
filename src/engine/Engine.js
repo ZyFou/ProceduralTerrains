@@ -1563,7 +1563,7 @@ export class Engine {
       lodSegments: resolveLodSegments(this.perf),
       cells: this.tiles,
       progressive: true,
-      initialBatchSize: this._studioInitialChunkBatch(),
+      initialBatchSize: this._studioChunkCreatesPerFrame(),
     });
     if (result?.rebuilt) {
       this.appliedChunkCount = p.chunkCount;
@@ -1628,16 +1628,29 @@ export class Engine {
   }
 
   _studioInitialChunkBatch() {
+    if (this._studioChunkBuildInstant()) return Infinity;
     if (this.gpuTier === 'low') return 25;
     if (this.gpuTier === 'medium') return 49;
     return 64;
   }
 
+  _studioChunkCreatesPerFrame() {
+    const n = Number(this.perf?.maxCreatesPerFrame);
+    if (!Number.isFinite(n)) return 6;
+    if (n <= 0) return Infinity;
+    return Math.max(1, Math.round(n));
+  }
+
+  _studioChunkBuildInstant() {
+    return this._studioChunkCreatesPerFrame() === Infinity;
+  }
+
   _studioChunkBuildBudget() {
-    const base = Math.max(1, Math.round(this.perf?.maxCreatesPerFrame || 6));
-    if (this.gpuTier === 'low') return { maxItems: Math.max(4, base), maxMs: 3 };
-    if (this.gpuTier === 'medium') return { maxItems: Math.max(6, base + 2), maxMs: 4 };
-    return { maxItems: Math.max(8, base * 2), maxMs: 6 };
+    const maxItems = this._studioChunkCreatesPerFrame();
+    if (maxItems === Infinity) return { maxItems: Infinity, maxMs: Infinity };
+    if (this.gpuTier === 'low') return { maxItems, maxMs: 3 };
+    if (this.gpuTier === 'medium') return { maxItems, maxMs: 4 };
+    return { maxItems, maxMs: 6 };
   }
 
   _terrainBuildStatusText() {

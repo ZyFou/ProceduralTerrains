@@ -170,10 +170,17 @@ export class InfiniteWorld {
   }
 
   /**
-   * Change max chunk creates per frame (performance tuning).
+   * Change max chunk creates per frame (performance tuning). 0 = instant.
    */
   setMaxCreatesPerFrame(n) {
-    this.maxCreatesPerFrame = n;
+    const v = Number(n);
+    if (!Number.isFinite(v)) {
+      this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
+    } else if (v <= 0) {
+      this.maxCreatesPerFrame = Infinity;
+    } else {
+      this.maxCreatesPerFrame = Math.max(1, Math.round(v));
+    }
   }
 
   /**

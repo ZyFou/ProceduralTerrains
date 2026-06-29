@@ -82,6 +82,7 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.resolutionScale', label: 'Terrain Resolution', keywords: 'lod mesh detail' },
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.lodDistanceScale', label: 'LOD Distance Scale', keywords: 'lod distance scale' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.viewRadius', label: 'Chunk Load Radius', keywords: 'streaming load radius chunks' },
+  { panelId: 'performance', tabId: 'streaming', settingId: 'performance.maxCreatesPerFrame', label: 'Chunk Builds / Frame', keywords: 'streaming tile new cells chunk create spawn budget instant disable throttle' },
   { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close' },
   { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailOpacity', label: 'Detail Opacity', keywords: 'terrain detail opacity master mix amount overall fade blend' },
   { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space' },

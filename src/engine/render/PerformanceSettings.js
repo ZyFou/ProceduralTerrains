@@ -36,7 +36,7 @@ export const PERF_LIMITS = {
   lodSegment:            { min: 4,       max: 256 },
   lodDistance:           { min: 0.5,     max: 30 },
   viewRadius:            { min: 3,       max: 20 },
-  maxCreatesPerFrame:    { min: 1,       max: 16 },
+  maxCreatesPerFrame:    { min: 0,       max: 16 },
   triangleBudget:        { min: 100_000, max: 3_000_000 },
   cullingAggressiveness: { min: 0,       max: 2 },
   waterQuality:          { min: 0,       max: 2 },
@@ -248,7 +248,10 @@ export function sanitizePerfSettings(settings) {
   s.resolutionScale = clamp(+s.resolutionScale || 1, PERF_LIMITS.resolutionScale);
   s.lodDistanceScale = clamp(+s.lodDistanceScale || 1, PERF_LIMITS.lodDistanceScale);
   s.viewRadius = Math.round(clamp(+s.viewRadius || 12, PERF_LIMITS.viewRadius));
-  s.maxCreatesPerFrame = Math.round(clamp(+s.maxCreatesPerFrame || 6, PERF_LIMITS.maxCreatesPerFrame));
+  {
+    const creates = Number(s.maxCreatesPerFrame);
+    s.maxCreatesPerFrame = Math.round(clamp(Number.isFinite(creates) ? creates : 6, PERF_LIMITS.maxCreatesPerFrame));
+  }
   s.triangleBudget = Math.round(clamp(+s.triangleBudget || 1_500_000, PERF_LIMITS.triangleBudget));
   s.cullingAggressiveness = clamp(+s.cullingAggressiveness || 1, PERF_LIMITS.cullingAggressiveness);
   s.waterQuality = Math.round(clamp(+s.waterQuality || 0, PERF_LIMITS.waterQuality));

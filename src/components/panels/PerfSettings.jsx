@@ -22,7 +22,10 @@ const PERF_SLIDERS = {
   resolutionScale: lim('resolutionScale', 'Terrain Resolution', 0.05, { digits: 2, unit: '×' }),
   lodDistanceScale: lim('lodDistanceScale', 'LOD Distance Scale', 0.05, { digits: 2, unit: '×' }),
   viewRadius: lim('viewRadius', 'Chunk Load Radius', 1, { unit: 'chunks' }),
-  maxCreatesPerFrame: lim('maxCreatesPerFrame', 'Chunk Builds / Frame', 1),
+  maxCreatesPerFrame: lim('maxCreatesPerFrame', 'Chunk Builds / Frame', 1, {
+    unit: 'chunks',
+    info: 'Caps how many chunks are created per frame for Infinite World streaming and new Tile cells. Set to 0 to build all pending chunks instantly.',
+  }),
   cullingAggressiveness: lim('cullingAggressiveness', 'Culling Aggressiveness', 0.1, { digits: 1 }),
   waterReflection: lim('waterReflection', 'Water Reflection', 0.05, { digits: 2, unit: '×' }),
   waterDetail: lim('waterDetail', 'Water Detail', 0.05, { digits: 2, unit: '×' }),
@@ -387,7 +390,7 @@ function renderSettings({
         <PerfSlider perf={perf} id="viewRadius" onPerfSetting={onPerfSetting} settingId="performance.viewRadius" />
       </SettingGroup>
 
-      <SettingGroup tab="streaming" label="Chunk Builds Per Frame" keywords="create spawn streaming budget" {...groupProps}>
+      <SettingGroup tab="streaming" label="Chunk Builds Per Frame" keywords="create spawn streaming budget tile new cells add chunks" {...groupProps}>
         <PerfSlider perf={perf} id="maxCreatesPerFrame" onPerfSetting={onPerfSetting} settingId="performance.maxCreatesPerFrame" />
       </SettingGroup>
 
