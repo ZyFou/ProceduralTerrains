@@ -54,6 +54,107 @@ export function buildBoardPlinthGeometry(boardSize, skirtDepth, topY = 0, outset
   return geo;
 }
 
+function appendQuad(positions, indices, corners, order = [0, 1, 2, 0, 2, 3]) {
+  const base = positions.length / 3;
+  for (const p of corners) positions.push(p[0], p[1], p[2]);
+  for (const i of order) indices.push(base + i);
+}
+
+function normalizeCells(cells) {
+  const out = [];
+  const seen = new Set();
+  const src = Array.isArray(cells) && cells.length ? cells : [{ cx: 0, cz: 0 }];
+  for (const cell of src) {
+    const cx = Math.trunc(Number(cell?.cx));
+    const cz = Math.trunc(Number(cell?.cz));
+    if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+    const key = `${cx},${cz}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ cx, cz });
+  }
+  return out.length ? out : [{ cx: 0, cz: 0 }];
+}
+
+// Multi-tile plinth for square assemblies. Unlike one box per tile, this emits
+// side walls only where the neighbouring cell is empty, so shared tile edges do
+// not create visible dark strips through water or low terrain.
+export function buildTileAssemblyPlinthGeometry(cells, cellSize, skirtDepth, topY = 0, outset = OUTSET) {
+  const list = normalizeCells(cells);
+  const occupied = new Set(list.map((cell) => `${cell.cx},${cell.cz}`));
+  const has = (cx, cz) => occupied.has(`${cx},${cz}`);
+
+  const half = cellSize / 2;
+  const baseY = -skirtDepth;
+  const positions = [];
+  const indices = [];
+
+  for (const cell of list) {
+    const cx = cell.cx * cellSize;
+    const cz = cell.cz * cellSize;
+
+    const exposed = {
+      left: !has(cell.cx - 1, cell.cz),
+      right: !has(cell.cx + 1, cell.cz),
+      bottom: !has(cell.cx, cell.cz - 1),
+      top: !has(cell.cx, cell.cz + 1),
+    };
+
+    const x0 = cx - half - (exposed.left ? outset : 0);
+    const x1 = cx + half + (exposed.right ? outset : 0);
+    const z0 = cz - half - (exposed.bottom ? outset : 0);
+    const z1 = cz + half + (exposed.top ? outset : 0);
+
+    // Bottom cap under this occupied cell. Adjacent caps share an edge but have
+    // no vertical faces between them.
+    appendQuad(positions, indices, [
+      [x0, baseY, z0],
+      [x1, baseY, z0],
+      [x1, baseY, z1],
+      [x0, baseY, z1],
+    ], [0, 3, 2, 0, 2, 1]);
+
+    if (exposed.bottom) {
+      appendQuad(positions, indices, [
+        [x0, topY, z0],
+        [x1, topY, z0],
+        [x1, baseY, z0],
+        [x0, baseY, z0],
+      ]);
+    }
+    if (exposed.right) {
+      appendQuad(positions, indices, [
+        [x1, topY, z0],
+        [x1, topY, z1],
+        [x1, baseY, z1],
+        [x1, baseY, z0],
+      ]);
+    }
+    if (exposed.top) {
+      appendQuad(positions, indices, [
+        [x1, topY, z1],
+        [x0, topY, z1],
+        [x0, baseY, z1],
+        [x1, baseY, z1],
+      ]);
+    }
+    if (exposed.left) {
+      appendQuad(positions, indices, [
+        [x0, topY, z1],
+        [x0, topY, z0],
+        [x0, baseY, z0],
+        [x0, baseY, z1],
+      ]);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // Circular equivalent of buildBoardPlinthGeometry: just the flat bottom cap at
 // the plinth base. The side wall is no longer a fixed-height cylinder — it is
 // the dedicated radial wall (buildDiskWallGeometry) rendered with the terrain

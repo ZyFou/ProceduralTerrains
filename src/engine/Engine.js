@@ -22,8 +22,13 @@ import {
   hasStoredPerfSettings,
 } from './render/PerformanceSettings.js';
 import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
-import { buildBoardPlinthGeometry, buildCircularPlinthGeometry, buildDiskWallGeometry, createBoardPlinthMaterial } from './terrain/BoardPlinth.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  buildBoardPlinthGeometry,
+  buildCircularPlinthGeometry,
+  buildDiskWallGeometry,
+  buildTileAssemblyPlinthGeometry,
+  createBoardPlinthMaterial,
+} from './terrain/BoardPlinth.js';
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { ErosionField } from './terrain/erosion/ErosionField.js';
@@ -1696,14 +1701,11 @@ export class Engine {
       this.diskWall.geometry.dispose();
       this.diskWall.geometry = buildDiskWallGeometry(radius, seg);
     } else {
-      // One diorama box per occupied cell. Shared interior walls are buried
-      // between adjacent cells (DoubleSide, invisible); the outer walls cap the
-      // assembly rim. Works for any (even L-shaped) layout with no edge tracking.
-      const boxes = this.tiles.map((t) =>
-        buildBoardPlinthGeometry(size, skirtDepth, topY, wall, this._cellWorldCenter(t.cx, t.cz))
-      );
-      geo = boxes.length > 1 ? mergeGeometries(boxes) : boxes[0];
-      if (boxes.length > 1) for (const b of boxes) b.dispose();
+      // Single tiles keep the legacy box. Multi-tile assemblies get one plinth
+      // with walls only on exposed sides, so shared tile edges stay clear.
+      geo = this.tiles.length > 1
+        ? buildTileAssemblyPlinthGeometry(this.tiles, size, skirtDepth, topY, wall)
+        : buildBoardPlinthGeometry(size, skirtDepth, topY, wall, this._cellWorldCenter(this.tiles[0]?.cx ?? 0, this.tiles[0]?.cz ?? 0));
     }
     this.plinth.geometry.dispose();
     this.plinth.geometry = geo;
