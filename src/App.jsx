@@ -119,6 +119,7 @@ export default function App() {
   // never the intermediate frames.
   const historyRef = useRef({ past: [], future: [], present: null });
   const paintBlobsRef = useRef(new Map());     // paintRev → heavy paint blob
+  const erosionBlobsRef = useRef(new Map());   // erosionRev → heavy erosion blob
   const histSuppressRef = useRef(false);       // true while applying a restore
   const histTimerRef = useRef(null);           // pending debounced record
   const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
@@ -410,6 +411,12 @@ export default function App() {
         const blob = eng.serializePaint();
         if (blob) paintBlobsRef.current.set(rev, blob);
       }
+      // same dedupe for the heavy baked-erosion blob (delta grid + masks).
+      const erev = state.erosionRev ?? 0;
+      if (erev > 0 && !erosionBlobsRef.current.has(erev)) {
+        const blob = eng.serializeErosion();
+        if (blob) erosionBlobsRef.current.set(erev, blob);
+      }
       return JSON.stringify(state);
     } catch (err) {
       console.warn('History snapshot failed', err);
@@ -417,18 +424,27 @@ export default function App() {
     }
   }, []);
 
-  // Drop cached paint blobs no longer referenced by any history entry so the
-  // dedupe map can't grow without bound when the user paints many strokes.
+  // Drop cached paint / erosion blobs no longer referenced by any history entry
+  // so the dedupe maps can't grow without bound across many strokes / bakes.
   const prunePaintBlobs = useCallback(() => {
-    const map = paintBlobsRef.current;
-    if (map.size <= 4) return;
+    const paintMap = paintBlobsRef.current;
+    const erosionMap = erosionBlobsRef.current;
+    if (paintMap.size <= 4 && erosionMap.size <= 4) return;
     const h = historyRef.current;
-    const live = new Set();
-    const collect = (s) => { try { const r = JSON.parse(s).paintRev; if (r) live.add(r); } catch { /* ignore */ } };
+    const livePaint = new Set();
+    const liveErosion = new Set();
+    const collect = (s) => {
+      try {
+        const snap = JSON.parse(s);
+        if (snap.paintRev) livePaint.add(snap.paintRev);
+        if (snap.erosionRev) liveErosion.add(snap.erosionRev);
+      } catch { /* ignore */ }
+    };
     h.past.forEach(collect);
     h.future.forEach(collect);
     if (h.present) collect(h.present);
-    for (const key of map.keys()) if (!live.has(key)) map.delete(key);
+    for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
+    for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
   }, []);
 
   const recordHistory = useCallback(() => {
@@ -473,6 +489,10 @@ export default function App() {
       // hydrate the heavy paint blob (kept out of the history string)
       snap.paint = (snap.paintRev ?? 0) > 0
         ? (paintBlobsRef.current.get(snap.paintRev) ?? null)
+        : null;
+      // and the heavy baked-erosion blob (delta grid + masks)
+      snap.erosion = (snap.erosionRev ?? 0) > 0
+        ? (erosionBlobsRef.current.get(snap.erosionRev) ?? null)
         : null;
       // a different world mode is a heavy, async rebuild — do it first (and
       // quietly) through the same blocking-overlay path as the mode bar.
@@ -881,8 +901,14 @@ export default function App() {
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
     onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
-    onErosionBake: (onProgress) => engine().bakeErosion({ onProgress }),
-    onErosionReset: () => engine().clearErosion(),
+    // bake / clear change the baked delta (a heavy, non-param edit) — record a
+    // history entry afterwards so the whole bake is a single Ctrl+Z away.
+    onErosionBake: async (onProgress) => {
+      const ok = await engine().bakeErosion({ onProgress });
+      if (ok) flushRecord();
+      return ok;
+    },
+    onErosionReset: () => { engine().clearErosion(); flushRecord(); },
     onErosionPreset: (key) => engine().applyErosionPreset(key),
     erosionHasResult: engineRef.current?.erosionField?.hasResult?.() ?? false,
     onPerfReset: () => engine().resetPerfSettings(),

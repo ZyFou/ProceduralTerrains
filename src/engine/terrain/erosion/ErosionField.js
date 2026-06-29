@@ -25,6 +25,11 @@ export class ErosionField {
     this.delta = null;       // Float32Array, signed world-unit height delta
     this.texture = null;     // HalfFloat DataTexture, R = delta
     this.enabled = false;
+    // Bumped on every change to the baked result (delta replaced or cleared).
+    // The undo/redo history uses this as a dedupe key, exactly like the paint
+    // layer revision — the heavy delta grid is referenced by revision, not
+    // copied into every snapshot string.
+    this.revision = 0;
     // Analysis masks from the last bake (normalized [0,1] Float32 grids). Stored
     // for downstream texturing / prop placement (a later slice); null until a
     // real erosion bake runs. { flow, erosionMask, depositionMask, sedimentMap,
@@ -72,6 +77,7 @@ export class ErosionField {
     this.delta = delta;
     this._ensureTexture(this.res);
     this._upload();
+    this.revision++;
   }
 
   /** Store the analysis masks from a bake (for later texturing / props). */
@@ -102,6 +108,7 @@ export class ErosionField {
     this.delta.fill(0);
     this._upload();
     this.enabled = true;
+    this.revision++;
     return this;
   }
 
@@ -136,10 +143,41 @@ export class ErosionField {
 
   /** Fully drop the baked result (offset + masks). hasResult() → false. */
   clear() {
+    const had = this.hasResult();
     this.enabled = false;
     this.delta = null;
     this.masks = null;
     this.res = 0;
+    if (had) this.revision++;
+  }
+
+  /**
+   * Snapshot the baked result for the undo/redo history. The heavy delta /
+   * mask grids are referenced (not copied) — a new bake replaces the arrays
+   * rather than mutating them in place, so sharing the reference is safe and
+   * keeps history lightweight. Returns null when nothing is baked.
+   */
+  serialize() {
+    if (!this.hasResult()) return null;
+    return {
+      res: this.res,
+      delta: this.delta,
+      masks: this.masks,
+      enabled: this.enabled,
+      originX: this.originX,
+      originZ: this.originZ,
+      sizeX: this.sizeX,
+      sizeZ: this.sizeZ,
+    };
+  }
+
+  /** Restore a snapshot produced by serialize(). A null blob clears the field. */
+  restore(blob) {
+    if (!blob || !blob.delta) { this.clear(); return; }
+    this.setRegion(blob.originX, blob.originZ, blob.sizeX, blob.sizeZ);
+    this.setDelta(blob.delta, blob.res);
+    this.masks = blob.masks ?? null;
+    this.enabled = !!blob.enabled && this.hasResult();
   }
 
   /** Push the texture + enable flag into the shared terrain uniforms. */

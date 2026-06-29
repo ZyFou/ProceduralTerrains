@@ -41,7 +41,6 @@ export const PANEL_META = {
     modes: ['planet', 'studio'],
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
-  erosion: { label: 'Erosion', title: 'Erosion', desc: 'Hydraulic & thermal erosion (Tile mode).', icon: PANEL_ICONS.erosion, modes: ['studio'] },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
   props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
@@ -53,7 +52,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'erosion', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -112,19 +111,31 @@ function TerrainPanel({ ctx }) {
   const [tab, setTab] = useState('shape');
   const { params, onParam, worldMode } = ctx;
   const isStudio = worldMode === 'studio';
+  // Erosion lives as a tab here (Tile mode only). Its bake state is shared
+  // between the tab body and the footer's Bake / Reset buttons.
+  const erosion = useErosionBake(ctx);
   useEffect(() => {
     const targetTab = ctx.settingsTarget?.tabId;
     if (targetTab && targetTab !== tab) setTab(targetTab);
   }, [ctx.settingsTarget?.tabId, tab]);
+  // Leaving Tile mode hides the Erosion tab — fall back to Shape so we never
+  // render an unavailable tab.
+  useEffect(() => {
+    if (!isStudio && tab === 'erosion') setTab('shape');
+  }, [isStudio, tab]);
+  const onErosionTab = isStudio && tab === 'erosion';
   const tabs = [
     { id: 'shape', label: 'Shape' },
     { id: 'noise', label: 'Noise' },
     { id: 'surface', label: 'Surface' },
+    ...(isStudio ? [{ id: 'erosion', label: 'Erosion' }] : []),
     ...(isStudio ? [{ id: 'import', label: 'Import' }] : []),
   ];
   return (
     <SidePanel title="Terrain" description="Shape and surface generation." onClose={ctx.onClose}
-      footer={<RegenButton onRegenerate={ctx.onRegenerate} />}>
+      footer={onErosionTab
+        ? <ErosionTabFooter erosion={erosion} />
+        : <RegenButton onRegenerate={ctx.onRegenerate} />}>
       <PanelTabs active={tab} onChange={setTab} tabs={tabs} />
       {tab === 'shape' && (
         <>
@@ -157,8 +168,11 @@ function TerrainPanel({ ctx }) {
           ))}
         </>
       )}
+      {onErosionTab && <ErosionTabContent ctx={ctx} erosion={erosion} />}
       {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
-      <PanelResetButton label="Reset Terrain Settings" onClick={() => ctx.onResetPanel?.('terrain')} settingId="terrain.reset" />
+      {!onErosionTab && (
+        <PanelResetButton label="Reset Terrain Settings" onClick={() => ctx.onResetPanel?.('terrain')} settingId="terrain.reset" />
+      )}
     </SidePanel>
   );
 }
@@ -222,18 +236,17 @@ const EROSION_PHASE_LABEL = {
   starting: 'Starting…',
 };
 
-function ErosionPanel({ ctx }) {
-  const { params, onParam } = ctx;
+// Erosion bake state, shared between the Terrain panel's Erosion tab body and
+// its footer (bake / reset live in the footer, the body shows the controls).
+function useErosionBake(ctx) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [phase, setPhase] = useState('');
   const [baked, setBaked] = useState(!!ctx.erosionHasResult);
 
-  // Editing any knob detaches from the named preset (→ Custom) without clobbering.
-  const setKnob = (key, v) => {
-    onParam(key, v);
-    if (params.erosionPreset !== 'custom') onParam('erosionPreset', 'custom');
-  };
+  // Keep the "baked" flag in sync with the engine after undo / redo (which can
+  // add or drop the baked result without going through bake/reset here).
+  useEffect(() => { setBaked(!!ctx.erosionHasResult); }, [ctx.erosionHasResult]);
 
   const bake = async () => {
     setBusy(true); setProgress(0); setPhase('starting');
@@ -245,20 +258,36 @@ function ErosionPanel({ ctx }) {
 
   const reset = () => { ctx.onErosionReset(); setBaked(false); setProgress(0); setPhase(''); };
 
+  return { busy, progress, phase, baked, bake, reset };
+}
+
+function ErosionTabFooter({ erosion }) {
+  const { busy, progress, phase, baked, bake, reset } = erosion;
   const pct = Math.round(progress * 100);
+  return (
+    <div className="side-panel-quick" style={{ width: '100%' }}>
+      <button type="button" className="action-btn primary" onClick={bake} disabled={busy} style={{ flex: 2 }}>
+        {busy ? `${EROSION_PHASE_LABEL[phase] || 'Baking…'} ${pct}%` : (baked ? 'Re-bake Erosion' : 'Bake Erosion')}
+      </button>
+      <button type="button" className="action-btn" onClick={reset} disabled={busy || !baked} style={{ flex: 1 }}>
+        Reset
+      </button>
+    </div>
+  );
+}
+
+function ErosionTabContent({ ctx, erosion }) {
+  const { params, onParam } = ctx;
+  const { baked } = erosion;
+
+  // Editing any knob detaches from the named preset (→ Custom) without clobbering.
+  const setKnob = (key, v) => {
+    onParam(key, v);
+    if (params.erosionPreset !== 'custom') onParam('erosionPreset', 'custom');
+  };
 
   return (
-    <SidePanel title="Erosion" description="Hydraulic & thermal erosion (Tile mode)." onClose={ctx.onClose}
-      footer={(
-        <div className="side-panel-quick" style={{ width: '100%' }}>
-          <button type="button" className="action-btn primary" onClick={bake} disabled={busy} style={{ flex: 2 }}>
-            {busy ? `${EROSION_PHASE_LABEL[phase] || 'Baking…'} ${pct}%` : (baked ? 'Re-bake Erosion' : 'Bake Erosion')}
-          </button>
-          <button type="button" className="action-btn" onClick={reset} disabled={busy || !baked} style={{ flex: 1 }}>
-            Reset
-          </button>
-        </div>
-      )}>
+    <>
       <ToggleRow label="Enable Erosion" value={!!params.erosionEnabled} onChange={(v) => onParam('erosionEnabled', v)}
         info="Apply the baked erosion to the terrain. Toggle to compare Before / After. Disabled until you bake." />
       {!baked && (
@@ -282,8 +311,8 @@ function ErosionPanel({ ctx }) {
         ))}
       </ControlSection>
 
-      <p className="section-hint">Erosion also produces flow / rock / sediment / slope masks used by texturing &amp; props (wiring in progress). Exports already include the eroded terrain.</p>
-    </SidePanel>
+      <p className="section-hint">Erosion also produces flow / rock / sediment / slope masks used by texturing &amp; props (wiring in progress). Exports already include the eroded terrain. Bake / reset can be reverted with Ctrl+Z.</p>
+    </>
   );
 }
 
@@ -892,7 +921,6 @@ function NoiseLayersPanelWrapper({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
-  erosion: ErosionPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };

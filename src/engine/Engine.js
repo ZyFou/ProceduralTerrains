@@ -3409,6 +3409,7 @@ export class Engine {
       cullingEnabled: this.board?.cullingEnabled !== false,
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
+      erosionRev: this.erosionField?.revision ?? 0,
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
@@ -3418,6 +3419,11 @@ export class Engine {
   /** Heavy paint-layer blob (height/biome/props pixel arrays) for undo history. */
   serializePaint() {
     return this.paintMode?.serialize() ?? null;
+  }
+
+  /** Heavy erosion blob (baked delta grid + masks) for undo history. */
+  serializeErosion() {
+    return this.erosionField?.serialize() ?? null;
   }
 
   /**
@@ -3491,6 +3497,18 @@ export class Engine {
     if (this.paintMode) {
       if (snap.paint) this.paintMode.load(snap.paint);
       else this.paintMode.layers.clear();
+    }
+
+    // erosion offset field (baked delta + masks). The App injects the heavy
+    // blob into snap.erosion before calling, mirroring the paint path; a null
+    // blob means the restored state had no bake, so drop the live field. The
+    // live before/after toggle comes from the restored params.erosionEnabled.
+    if (this.erosionField) {
+      if (snap.erosion) this.erosionField.restore(snap.erosion);
+      else this.erosionField.clear();
+      this.erosionField.setEnabled(this.params.erosionEnabled === true);
+      this.erosionField.applyTo(this.uniforms);
+      this._onErosionChanged();
     }
 
     this._needsRender = true;
