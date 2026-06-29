@@ -310,10 +310,10 @@ void main() {
   vec2 xz = vWorldPos.xz;
 
 #ifndef INFINITE_MODE
-  // Circular assemblies still use square chunk meshes. Remove every chunk
-  // fragment outside the disk so the original board cannot show through at zero
-  // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
-  if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
+  // Multi-cell assemblies use square chunk meshes. Drop surface/skirt fragments
+  // outside occupied tiles / the disk. Perimeter walls (vWall) may extend into
+  // empty space by design; the dedicated radial wall mesh (vWallMesh) is exempt.
+  if (uUseTiles > 0.5 && vWallMesh < 0.5 && vWall < 0.02 && tileOccupiedAt(xz) < 0.5) discard;
 #endif
 
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);

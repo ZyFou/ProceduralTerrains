@@ -113,10 +113,36 @@ export class TerrainHeightSampler {
     const cx = Math.floor(rx), cz = Math.floor(rz);
     const lx = f(f(rx - cx) * 2 - 1), lz = f(f(rz - cz) * 2 - 1);
     const band = f(this.u.uFalloff.value);
-    const fXp = mix32(smoothstep32(0, band, f(1 - lx)), 1, this._tileOccAt(cx + 1, cz));
-    const fXn = mix32(smoothstep32(0, band, f(1 + lx)), 1, this._tileOccAt(cx - 1, cz));
-    const fZp = mix32(smoothstep32(0, band, f(1 - lz)), 1, this._tileOccAt(cx, cz + 1));
-    const fZn = mix32(smoothstep32(0, band, f(1 + lz)), 1, this._tileOccAt(cx, cz - 1));
+    // The "present neighbour keeps full height" rule only applies between two
+    // occupied cells. A vertex exactly on the shared edge with an empty cell is
+    // classified by floor() into the empty cell; gating by self occupancy makes
+    // that edge fade to 0 instead of staying full height regardless of falloff
+    // (which left an un-faded terrain ridge along angled tile boundaries). Keep
+    // in sync with tileFalloff() in terrainGLSL.js.
+    const keep = this._tileOccAt(cx, cz);
+    let fXp = mix32(smoothstep32(0, band, f(1 - lx)), 1, f(this._tileOccAt(cx + 1, cz) * keep));
+    let fXn = mix32(smoothstep32(0, band, f(1 + lx)), 1, f(this._tileOccAt(cx - 1, cz) * keep));
+    let fZp = mix32(smoothstep32(0, band, f(1 - lz)), 1, f(this._tileOccAt(cx, cz + 1) * keep));
+    let fZn = mix32(smoothstep32(0, band, f(1 + lz)), 1, f(this._tileOccAt(cx, cz - 1) * keep));
+    // Keep interior seams at full height near concave corners — see tileFalloff()
+    // in terrainGLSL.js.
+    const seamEps = 1e-4;
+    if (this._tileOccAt(cx - 1, cz) && lx < f(-1 + band)) {
+      if (lz < f(1 - seamEps)) fZp = 1;
+      if (lz > f(-1 + seamEps)) fZn = 1;
+    }
+    if (this._tileOccAt(cx + 1, cz) && lx > f(1 - band)) {
+      if (lz < f(1 - seamEps)) fZp = 1;
+      if (lz > f(-1 + seamEps)) fZn = 1;
+    }
+    if (this._tileOccAt(cx, cz - 1) && lz < f(-1 + band)) {
+      if (lx < f(1 - seamEps)) fXp = 1;
+      if (lx > f(-1 + seamEps)) fXn = 1;
+    }
+    if (this._tileOccAt(cx, cz + 1) && lz > f(1 - band)) {
+      if (lx < f(1 - seamEps)) fXp = 1;
+      if (lx > f(-1 + seamEps)) fXn = 1;
+    }
     return f(f(fXp * fXn) * f(fZp * fZn));
   }
 

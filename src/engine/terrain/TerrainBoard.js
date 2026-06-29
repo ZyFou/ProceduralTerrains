@@ -28,6 +28,14 @@ export class TerrainBoard {
     this.chunkCount = 0;
     this.chunkSize = 0;
     this.boardSize = 0;
+
+    // Occupancy of the tile assembly, mirrored from Engine so the CPU merge
+    // layer matches the shader's tileOccupiedAt discard. Without it the
+    // quadtree would fold the axis-aligned bbox of a non-rectangular assembly
+    // (e.g. an L shape) into one rectangular mesh that covers empty cells.
+    this._occupiedCells = new Set();   // "cx,cz"
+    this._tileShape = 'square';        // 'square' | 'circle'
+    this._diskRadiusWorld = 0;         // circle clip radius in world units
     this.activeChunkCount = 0;
     this.targetChunkCount = 0;
     this.lodThresholds = [0, 0, 0];
@@ -82,21 +90,22 @@ export class TerrainBoard {
   // (Re)build the chunk grid. Only called when chunk count / size changes or a
   // full reset is requested. Tile-only changes use syncCells() so already-built
   // cells stay alive and only added/removed cells are touched.
-  build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, progressive = false, initialBatchSize = 64 }) {
+  build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, tileShape, diskRadiusWorld, progressive = false, initialBatchSize = 64 }) {
     this.dispose();
     this._setLayout({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments });
+    this._setTileLayout({ cells, tileShape, diskRadiusWorld });
     this._createSharedGeometries();
     this._applyCellDiff({ cells, progressive, initialBatchSize });
   }
 
   // Incrementally match the occupied tile-cell list. If the chunk layout itself
   // changed, fall back to build(); otherwise preserve existing chunks.
-  syncCells({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, progressive = true, initialBatchSize = 64 }) {
+  syncCells({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, tileShape, diskRadiusWorld, progressive = true, initialBatchSize = 64 }) {
     const needsFullBuild = !this.geometries.length
       || this.chunkCount !== chunkCount
       || this.chunkSize !== chunkSize;
     if (needsFullBuild) {
-      this.build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, progressive, initialBatchSize });
+      this.build({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments, cells, tileShape, diskRadiusWorld, progressive, initialBatchSize });
       return { rebuilt: true, added: this._cells.length, removed: 0 };
     }
 
@@ -105,7 +114,56 @@ export class TerrainBoard {
     if (lodSegments && !this._sameSegments(lodSegments)) this.setLodSegments(lodSegments);
     this._recalcThresholds();
     this.updateBounds(maxHeight, skirtDepth);
+    this._setTileLayout({ cells, tileShape, diskRadiusWorld });
     return this._applyCellDiff({ cells, progressive, initialBatchSize });
+  }
+
+  // Mirror the Engine's tile occupancy so the merge layer (and chunk creation)
+  // knows which world positions actually render terrain.
+  _setTileLayout({ cells, tileShape, diskRadiusWorld }) {
+    const list = this._normalizeCells(cells);
+    this._occupiedCells = new Set(list.map((cell) => `${cell.cx},${cell.cz}`));
+    if (tileShape !== undefined) this._tileShape = tileShape === 'circle' ? 'circle' : 'square';
+    if (diskRadiusWorld !== undefined) this._diskRadiusWorld = Number(diskRadiusWorld) || 0;
+    this._treeDirty = true;
+  }
+
+  // CPU mirror of the shader's tileOccupiedAt: true only where terrain is
+  // actually rendered. Folding a merged proxy over any non-renderable point
+  // would paint ghost terrain (or punch a rectangular hole over hidden chunks).
+  _isTerrainRenderable(x, z) {
+    if (!this.boardSize) return true;
+    const half = this.boardSize / 2;
+    const cx = Math.floor((x + half) / this.boardSize);
+    const cz = Math.floor((z + half) / this.boardSize);
+    if (!this._occupiedCells.has(`${cx},${cz}`)) return false;
+    if (this._tileShape === 'circle') {
+      return Math.hypot(x, z) <= this._diskRadiusWorld + 1e-4;
+    }
+    return true;
+  }
+
+  // A node may fold only when every tile cell its bbox spans is occupied. The
+  // proxy is one rectangular mesh, so a single empty cell inside the bbox (e.g.
+  // the diagonal corner of an L assembly) would paint ghost terrain in square
+  // mode (no shader discard there). Iterate cell CENTERS rather than the bbox
+  // corners — corners sit exactly on cell boundaries and would otherwise leak
+  // into the empty diagonal neighbour. In circle mode the shader's disk discard
+  // handles sub-cell clipping, so cell occupancy is the only thing to check.
+  _nodeFullyRenderable(node) {
+    if (!this.boardSize) return true;
+    const half = this.boardSize / 2;
+    const eps = this.boardSize * 1e-3;
+    const c0x = Math.floor((node.minX + eps + half) / this.boardSize);
+    const c1x = Math.floor((node.minX + node.spanX - eps + half) / this.boardSize);
+    const c0z = Math.floor((node.minZ + eps + half) / this.boardSize);
+    const c1z = Math.floor((node.minZ + node.spanZ - eps + half) / this.boardSize);
+    for (let cz = c0z; cz <= c1z; cz++) {
+      for (let cx = c0x; cx <= c1x; cx++) {
+        if (!this._occupiedCells.has(`${cx},${cz}`)) return false;
+      }
+    }
+    return true;
   }
 
   _setLayout({ chunkCount, chunkSize, maxHeight, skirtDepth, lodSegments }) {
@@ -163,7 +221,7 @@ export class TerrainBoard {
       for (let cx = 0; cx < this.chunkCount; cx++) {
         const x = originX + cx * this.chunkSize;
         const z = originZ + cz * this.chunkSize;
-        jobs.push({
+        const job = {
           x,
           z,
           centerX: x + this.chunkSize / 2,
@@ -171,10 +229,33 @@ export class TerrainBoard {
           cellCx: cell.cx,
           cellCz: cell.cz,
           cellKey,
-        });
+        };
+        if (this._chunkIntersectsRenderable(job)) jobs.push(job);
       }
     }
     return jobs;
+  }
+
+  // Skip chunks whose footprint is non-renderable. Square mode: any corner
+  // inside an occupied cell is enough. Circle mode: require the chunk centre
+  // (or most of the footprint) inside the disk so corner-only slivers don't
+  // paint blocky stair-steps past the circular silhouette.
+  _chunkIntersectsRenderable(job) {
+    const h = this.chunkSize / 2;
+    const pts = [
+      [job.centerX - h, job.centerZ - h],
+      [job.centerX + h, job.centerZ - h],
+      [job.centerX - h, job.centerZ + h],
+      [job.centerX + h, job.centerZ + h],
+      [job.centerX, job.centerZ],
+    ];
+    if (this._tileShape !== 'circle') {
+      return pts.some(([x, z]) => this._isTerrainRenderable(x, z));
+    }
+    if (this._isTerrainRenderable(job.centerX, job.centerZ)) return true;
+    let inside = 0;
+    for (const [x, z] of pts) if (this._isTerrainRenderable(x, z)) inside++;
+    return inside >= 3;
   }
 
   _sortJobsNearestFirst(jobs) {
@@ -214,7 +295,9 @@ export class TerrainBoard {
     }
 
     this._cells = nextCells;
-    this.targetChunkCount = nextCells.length * this.chunkCount * this.chunkCount;
+    // Count real chunks + queued jobs (some are filtered out as non-renderable
+    // in circle mode) so build progress can actually reach 1.
+    this.targetChunkCount = this.chunks.length + this._buildQueue.length;
     this.activeChunkCount = this.chunks.length;
     this._building = this._buildQueue.length > 0;
 
@@ -361,7 +444,9 @@ export class TerrainBoard {
       if (node.chunk.merged) { node.chunk.merged = false; node.chunk.mesh.visible = true; }
       return;
     }
-    const canFold = this.macroProxyEnabled || node.level > 0;
+    // Never fold a block whose bbox straddles empty/clipped space — its single
+    // rectangular proxy would render ghost terrain over unoccupied cells.
+    const canFold = (this.macroProxyEnabled || node.level > 0) && this._nodeFullyRenderable(node);
     const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
     const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
     const want = canFold && (node.merged ? nearest > foldDist * 0.85 : nearest > foldDist);

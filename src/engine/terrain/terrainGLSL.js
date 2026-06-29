@@ -121,16 +121,47 @@ float tileOccAt(vec2 cell) {
 // Per-cell, occupancy-aware island falloff. Each side fades toward its edge
 // only when the neighbour across that edge is empty; a present neighbour keeps
 // the factor at 1 across the shared edge so both cells meet at full height.
+//
+// The "present neighbour keeps full height" rule is gated on the CURRENT cell
+// being occupied. A vertex sitting exactly on the shared edge between an
+// occupied and an empty cell is classified by floor() into the empty cell; if
+// the keep-rule fired there (because the occupied neighbour is present) the
+// edge would stay at full height no matter the falloff, leaving an un-faded
+// terrain ridge / wall poking up along angled tile boundaries. Gating by self
+// occupancy makes an empty cell fade to 0 toward occupied neighbours, so the
+// shared boundary vertex (owned by the occupied cell's mesh) fades consistently.
 float tileFalloff(vec2 xz) {
   if (uFalloff <= 0.0) return 1.0;            // no edge attenuation
   vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
   vec2 cell = floor(rel);
   vec2 lc = (rel - cell) * 2.0 - 1.0;        // [-1,1] within the cell
   float band = uFalloff;
-  float fXp = mix(smoothstep(0.0, band, 1.0 - lc.x), 1.0, tileOccAt(cell + vec2( 1.0, 0.0)));
-  float fXn = mix(smoothstep(0.0, band, 1.0 + lc.x), 1.0, tileOccAt(cell + vec2(-1.0, 0.0)));
-  float fZp = mix(smoothstep(0.0, band, 1.0 - lc.y), 1.0, tileOccAt(cell + vec2(0.0,  1.0)));
-  float fZn = mix(smoothstep(0.0, band, 1.0 + lc.y), 1.0, tileOccAt(cell + vec2(0.0, -1.0)));
+  float keep = tileOccAt(cell);              // 1 only for occupied↔occupied seams
+  float fXp = mix(smoothstep(0.0, band, 1.0 - lc.x), 1.0, tileOccAt(cell + vec2( 1.0, 0.0)) * keep);
+  float fXn = mix(smoothstep(0.0, band, 1.0 + lc.x), 1.0, tileOccAt(cell + vec2(-1.0, 0.0)) * keep);
+  float fZp = mix(smoothstep(0.0, band, 1.0 - lc.y), 1.0, tileOccAt(cell + vec2(0.0,  1.0)) * keep);
+  float fZn = mix(smoothstep(0.0, band, 1.0 + lc.y), 1.0, tileOccAt(cell + vec2(0.0, -1.0)) * keep);
+  // Empty-neighbour fade on one axis must not dip an occupied↔occupied interior
+  // seam on the perpendicular axis near a concave corner (L-shaped junction).
+  // Guard with an epsilon on the outer-edge coordinate so the corner vertex
+  // itself (exactly on the empty-neighbour edge) still falls off to zero.
+  float seamEps = 1e-4;
+  if (tileOccAt(cell + vec2(-1.0, 0.0)) > 0.5 && lc.x < -1.0 + band) {
+    if (lc.y <  1.0 - seamEps) fZp = 1.0;
+    if (lc.y > -1.0 + seamEps) fZn = 1.0;
+  }
+  if (tileOccAt(cell + vec2( 1.0, 0.0)) > 0.5 && lc.x >  1.0 - band) {
+    if (lc.y <  1.0 - seamEps) fZp = 1.0;
+    if (lc.y > -1.0 + seamEps) fZn = 1.0;
+  }
+  if (tileOccAt(cell + vec2(0.0, -1.0)) > 0.5 && lc.y < -1.0 + band) {
+    if (lc.x <  1.0 - seamEps) fXp = 1.0;
+    if (lc.x > -1.0 + seamEps) fXn = 1.0;
+  }
+  if (tileOccAt(cell + vec2(0.0,  1.0)) > 0.5 && lc.y >  1.0 - band) {
+    if (lc.x <  1.0 - seamEps) fXp = 1.0;
+    if (lc.x > -1.0 + seamEps) fXn = 1.0;
+  }
   return fXp * fXn * fZp * fZn;
 }
 

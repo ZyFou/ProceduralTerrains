@@ -1563,6 +1563,10 @@ export class Engine {
       skirtDepth: this._skirtDepth(),
       lodSegments: resolveLodSegments(this.perf),
       cells: this.tiles,
+      tileShape: this.tileAssemblyShape,
+      diskRadiusWorld: this.tileAssemblyShape === 'circle'
+        ? (this.diskRadiusCells + 0.5) * this.cellSize
+        : 0,
       progressive: true,
       initialBatchSize: this._studioChunkCreatesPerFrame(),
     });
@@ -1605,6 +1609,10 @@ export class Engine {
         skirtDepth: this._skirtDepth(),
         lodSegments: resolveLodSegments(this.perf),
         cells: this.tiles,
+        tileShape: this.tileAssemblyShape,
+        diskRadiusWorld: this.tileAssemblyShape === 'circle'
+          ? (this.diskRadiusCells + 0.5) * this.cellSize
+          : 0,
         progressive: this.worldMode === 'studio',
         initialBatchSize: this._studioInitialChunkBatch(),
       });
