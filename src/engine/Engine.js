@@ -110,8 +110,18 @@ const SHAPE_KEYS = new Set([
 
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize', 'planetFaceGrid']);
 
+// Octave count the terrain/water programs are FIRST compiled at on cold boot.
+// The FBM loops are unrolled at the OCTAVES #define, so a low value makes the
+// program ANGLE has to translate (GLSL→HLSL, synchronous on the main thread)
+// small and fast — giving a quick first paint. The full-detail programs are then
+// compiled in the background and swapped in (see _upgradeBootOctaves), so the
+// terrain just sharpens a beat after it first appears instead of freezing the
+// tab while the heavy program translates up front.
+const BOOT_OCTAVES = 3;
+
 export class Engine {
   constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
+    this._bootStart = performance.now();   // boot timing baseline (see [boot] logs)
     this.canvas = canvas;
     this.cb = callbacks;
     this.params = migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams });
@@ -289,6 +299,7 @@ export class Engine {
     const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1));
     idle(() => { if (!this._disposed) this._warmupInitialShaders(); });
 
+    console.info(`[boot] sync init (renderer+scene+board) ${(performance.now() - this._bootStart).toFixed(0)}ms · GPU tier ${this.gpuTier} · preset ${this.perf?.preset}`);
     this.renderer.setAnimationLoop(() => this._tick());
   }
 
@@ -366,12 +377,15 @@ export class Engine {
 
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
-    const oct0 = Math.round(this.params.octaves);
-    this.terrainMaterial = createTerrainMaterial(this.uniforms, oct0, this._stackGLSL);
+    // Boot with a low octave count so the first programs ANGLE translates are
+    // small (fast first paint); _upgradeBootOctaves swaps in the full-detail
+    // programs in the background once boot finishes.
+    const bootOct = Math.min(Math.round(this.params.octaves), BOOT_OCTAVES);
+    this.terrainMaterial = createTerrainMaterial(this.uniforms, bootOct, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
-    this.waterMaterial = createWaterMaterial(this.uniforms, oct0, this._stackGLSL);
+    this.waterMaterial = createWaterMaterial(this.uniforms, bootOct, this._stackGLSL);
     this.water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.waterMaterial);
     this.water.geometry.rotateX(-Math.PI / 2);
     this.water.renderOrder = 10;
@@ -1473,7 +1487,8 @@ export class Engine {
     }
 
     try {
-      await this._compileMaterialVariants(warm);
+      // stagger: one program per frame so editing the noise stack never freezes.
+      await this._compileMaterialVariants(warm, { stagger: true });
     } catch (e) {
       console.warn('Noise stack shader compile failed', e);
     }
@@ -1678,8 +1693,11 @@ export class Engine {
     // octave count is a compile-time constant (keeps loop bounds static for
     // the D3D11 shader compiler) — changing it requires new programs, which
     // are compiled in the background and swapped in when ready (no freeze)
+    // While booting, the materials intentionally hold BOOT_OCTAVES — don't
+    // trigger the full-detail recompile here; _upgradeBootOctaves does it once
+    // the first frame is on screen.
     const oct = Math.round(p.octaves);
-    if (this.terrainMaterial.defines.OCTAVES !== oct) {
+    if (!this._bootPending && this.terrainMaterial.defines.OCTAVES !== oct) {
       this._setOctavesAsync(oct);
     }
 
@@ -1797,6 +1815,51 @@ export class Engine {
   }
 
   /**
+   * Compile every unique material currently in the scene, ONE per animation
+   * frame, then wait for all programs to finish linking.
+   *
+   * Why one-per-frame: ANGLE (Chrome on Windows → D3D11) does the GLSL→HLSL
+   * translation for each program SYNCHRONOUSLY on the calling thread inside
+   * renderer.compile(). KHR_parallel_shader_compile only moves the *D3D bytecode*
+   * link onto a driver thread — the translation still blocks the main thread.
+   * Compiling the whole scene in one call therefore freezes the tab for the SUM
+   * of every shader's translation (several seconds with the heavy FBM terrain +
+   * volumetric materials). Initiating one material per rAF caps the worst stall
+   * at a single shader's translation and lets the browser stay responsive
+   * (overlay animates, input flows) in between, while the driver still links all
+   * the programs in parallel — so total wall-clock time does not regress.
+   *
+   * The board shares one terrain material across all its chunks, so the Set
+   * collapses hundreds of meshes down to a handful of unique programs.
+   *
+   * @param {THREE.WebGLRenderTarget|null} [renderTarget] compile the render-target
+   *   program variant (e.g. the underwater linear-output pass) instead of canvas.
+   */
+  async _compileSceneStaggered(renderTarget = null) {
+    const materials = new Set();
+    this.scene.traverse((obj) => {
+      if (!obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((m) => m && materials.add(m));
+    });
+    if (!materials.size) return;
+
+    const prevTarget = renderTarget ? this.renderer.getRenderTarget() : null;
+    const allPending = new Set();
+    for (const mat of materials) {
+      if (this._disposed) break;
+      const group = new THREE.Group();
+      group.add(new THREE.Mesh(this._warmGeo, mat));
+      if (renderTarget) this.renderer.setRenderTarget(renderTarget);
+      const pending = this.renderer.compile(group, this.camera, this.scene);
+      if (renderTarget) this.renderer.setRenderTarget(prevTarget);
+      pending.forEach((m) => allPending.add(m));
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    await this._waitForMaterialsReady(allPending);
+  }
+
+  /**
    * Compile realistic water shaders without pausing the whole app, then swap.
    * Legacy water stays visible until programs are linked.
    */
@@ -1832,6 +1895,7 @@ export class Engine {
   async _warmupInitialShaders() {
     this._compiling++;
     this.cb.onStatus('Compiling shaders…', true);
+    const _tCompile0 = performance.now();
     try {
       // Boot compiles ONLY the canvas-variant programs. The underwater
       // render-target variants (a second distinct program — linear output color
@@ -1839,22 +1903,48 @@ export class Engine {
       // warmed lazily when the camera first approaches water. Most sessions
       // never submerge, so this roughly halves the cold-boot compile burst that
       // otherwise saturates Chrome's shared GPU process and stalls other tabs.
-      await this._withStudioCloudDetached(async () => {
-        const pending = this.renderer.compile(this.scene, this.camera);
-        await this._waitForMaterialsReady(pending);
-      });
+      //
+      // Materials are compiled one-per-frame instead of all at once. On Windows
+      // ANGLE/FXC, calling gl.compileShader() for every material in one
+      // synchronous burst freezes the main thread for several seconds even with
+      // KHR_parallel_shader_compile. Spreading initiations across rAF frames
+      // keeps each frame short while still letting the GPU compile in parallel.
+      await this._withStudioCloudDetached(() => this._compileSceneStaggered());
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
+    const _compileMs = performance.now() - _tCompile0;
     this._compiling--;
     if (!this._disposed && !this._compiling) {
       this._bootPending = false;
+      // Compile + run the studio height bake now, while the boot overlay is
+      // still up. The baker's own ~full-octave FBM program would otherwise
+      // translate synchronously on the FIRST interactive tick and hitch it.
+      const _tBake0 = performance.now();
+      this._ensureTerrainHeightTex();
+      const _bakeMs = performance.now() - _tBake0;
       this._renderInitialStudioFrame();
+      console.info(`[boot] shader warmup ${_compileMs.toFixed(0)}ms · height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}²) · total ${(performance.now() - this._bootStart).toFixed(0)}ms`);
       this.cb.onStatus('Ready', false);
       // Surface the first-run GPU-tier notice now that the boot overlay is gone
       // (info toasts are suppressed while a blocking overlay is up).
       if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
+      // Upgrade the low-octave boot programs to full detail in the background.
+      this._upgradeBootOctaves();
     }
+  }
+
+  /**
+   * After boot has painted a fast low-octave terrain, compile the full-detail
+   * (params.octaves) programs in the background and swap them in. Scheduled on
+   * idle so it never competes with the first interactive frames; _setOctavesAsync
+   * stagger-compiles, so the swap itself never freezes the tab.
+   */
+  _upgradeBootOctaves() {
+    const target = Math.round(this.params.octaves);
+    if (!this.terrainMaterial || this.terrainMaterial.defines.OCTAVES === target) return;
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
+    idle(() => { if (!this._disposed) this._setOctavesAsync(target); });
   }
 
   /**
@@ -1871,10 +1961,7 @@ export class Engine {
     try {
       await this._withStudioCloudDetached(async () => {
         this.underwater._ensureTarget(this.renderer);
-        this.renderer.setRenderTarget(this.underwater._rt);
-        const pending = this.renderer.compile(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
-        await this._waitForMaterialsReady(pending);
+        await this._compileSceneStaggered(this.underwater._rt);
       });
       const quadPending = this.renderer.compile(
         this.underwater._quadScene, this.underwater._quadCam
@@ -1947,8 +2034,9 @@ export class Engine {
     }
 
     try {
-      // planet never uses the underwater RT variant — compile canvas-only there
-      await this._compileMaterialVariants(warm, { canvasOnly: planetMode });
+      // planet never uses the underwater RT variant — compile canvas-only there.
+      // stagger: one program per frame so changing octaves never freezes the tab.
+      await this._compileMaterialVariants(warm, { canvasOnly: planetMode, stagger: true });
     } catch (e) {
       console.warn('Octave shader compile failed', e);
     }
@@ -2588,10 +2676,7 @@ export class Engine {
     try {
       await this._compileMaterialVariants(warm, { canvasOnly: true });
       // sky dome material (already in the scene) — canvas variant only
-      await this._withStudioCloudDetached(async () => {
-        const pending = this.renderer.compile(this.scene, this.camera);
-        await this._waitForMaterialsReady(pending);
-      });
+      await this._withStudioCloudDetached(() => this._compileSceneStaggered());
     } catch (e) {
       console.warn('Infinite shader warmup failed', e);
     }
@@ -2760,6 +2845,7 @@ export class Engine {
       this.terrainHeightBaker = new TerrainHeightBaker({
         renderer: this.renderer,
         uniforms: this.uniforms,
+        size: this._bakeBaseSize(),
       });
       this._bakedStudioGen = -1;
     }
@@ -2775,6 +2861,19 @@ export class Engine {
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
     this._bakedStudioLayout = layoutKey;
+  }
+
+  /**
+   * Per-cell resolution of the studio height/normal bake, scaled to the GPU
+   * tier. The bake re-evaluates the full ~46-octave field three times per texel
+   * (for the analytic normal), so on a weak GPU a 2048² bake is one of the
+   * heaviest single operations at startup. 1024² is plenty for a single board
+   * and quarters that cost; strong GPUs keep the crisp 2048².
+   */
+  _bakeBaseSize() {
+    if (this.gpuTier === 'low') return 1024;
+    if (this.gpuTier === 'medium') return 1536;
+    return 2048;
   }
 
   _enterPlanetMode() {
@@ -3239,6 +3338,32 @@ export class Engine {
       this._autoScale = Math.min(1.0, this._autoScale + 0.05);
       this._applyPixelRatio();
     }
+
+    // Resolution is already at the floor and a real (rendered) frame is still
+    // slow → the PRESET itself is too heavy for this GPU. Step it down one notch
+    // and hand the lighter preset a fresh full-res budget. Uses per-rendered-
+    // frame CPU time (profiler.frame.avg) rather than the frame COUNT, so the
+    // on-demand studio idle (which legitimately stops drawing) never triggers a
+    // spurious downgrade. ~45ms ≈ sub-22fps while actually working.
+    const frameMs = this.profiler?.frame?.avg || 0;
+    if (this._autoScale <= 0.56 && frameMs > 45) {
+      const lighter = this._lighterPreset(this.perf.preset);
+      if (lighter) {
+        this.cb.onToast?.(`Auto performance: GPU struggling — lowering quality to ${lighter}`);
+        this.setPerfPreset(lighter);
+        this._autoScale = 1.0;
+        this._applyPixelRatio();
+      }
+    }
+  }
+
+  /** Next lighter performance preset, or null if already at the lightest.
+   *  Custom / unknown presets jump straight to the safest tier. */
+  _lighterPreset(key) {
+    const order = ['ultra', 'high', 'balanced', 'performance'];
+    const i = order.indexOf(key);
+    if (i === -1) return 'performance';
+    return i < order.length - 1 ? order[i + 1] : null;
   }
 
   /**

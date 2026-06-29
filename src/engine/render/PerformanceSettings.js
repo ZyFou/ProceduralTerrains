@@ -159,7 +159,7 @@ export function createPerfSettings(presetKey = 'high') {
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
     rendererBackend: 'auto',
     gpuPreference: 'default',
-    autoPerf: false,
+    autoPerf: true,
     underwaterEffect: true,
     lodSegments: [...BASE_LOD_SEGMENTS],
     lodDistances: [...BASE_LOD_DISTANCES],

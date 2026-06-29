@@ -20,11 +20,15 @@ const LOW_HINTS = [
   'uhd graphics 6',                                        // entry UHD 6xx
 ];
 
-// Substrings that indicate a capable discrete / modern GPU.
+// Substrings that indicate a clearly HIGH-END, modern GPU. Kept deliberately
+// narrow: a generic "geforce gtx" match used to bucket a weak GTX 1050 into the
+// same 'high' preset as an RTX 4090, which left low-end discrete cards running
+// the heaviest LOD/cloud/bake settings. Anything not matched here falls through
+// to 'medium' (Balanced) — a safer starting point that the user can raise.
 const HIGH_HINTS = [
-  'rtx', 'gtx', 'geforce', 'quadro', 'titan',             // NVIDIA
-  'radeon rx', 'radeon pro', 'vega', 'rx 5', 'rx 6', 'rx 7',
-  'arc a', 'intel arc',                                    // Intel Arc discrete
+  'rtx', 'quadro rtx', 'titan',                            // NVIDIA high-end
+  'radeon pro', 'rx 6', 'rx 7', 'rx 9',                    // AMD RDNA2/3+
+  'arc a', 'arc b', 'intel arc',                           // Intel Arc discrete
   'apple m1', 'apple m2', 'apple m3', 'apple m4',         // Apple Silicon
 ];
 
