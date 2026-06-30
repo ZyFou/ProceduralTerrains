@@ -36,6 +36,10 @@ uniform float uSkyLightIntensity;  // overall brightness scale
 uniform float uSkyBrightness; // user brightness multiplier (Skybox tab)
 uniform float uSkyHaze;       // horizon haze band strength (Skybox tab)
 uniform float uSkyStars;      // 0/1 — render the night star field
+uniform float uSkyHdrIntensity;
+uniform float uSkySunGlow;
+uniform float uSkyHorizonGlow;
+uniform vec3  uSkyAtmosphereTint;
 
 varying vec3 vDirection;
 
@@ -46,7 +50,7 @@ void main() {
   // ---- Sky gradient: zenith -> horizon -> below-horizon ----
   // Above horizon: smooth blend from zenith to horizon
   float horizonBlend = 1.0 - pow(max(y, 0.0), 0.45);
-  vec3 skyCol = mix(uSkyZenith, uSkyHorizon, horizonBlend);
+  vec3 skyCol = mix(uSkyZenith, uSkyHorizon, horizonBlend) * uSkyAtmosphereTint;
 
   // Horizon haze band: blend toward fog color near y ≈ 0
   float hazeBand = exp(-abs(y) * 8.0);
@@ -71,7 +75,7 @@ void main() {
 
   // Sun color with intensity
   vec3 sunCol = uSkySunColor * uSkyLightIntensity;
-  skyCol += sunCol * (sunDisc * 3.0 + sunGlow + sunHalo);
+  skyCol += sunCol * (sunDisc * 3.0 + sunGlow + sunHalo * uSkySunGlow) * uSkySunGlow;
 
   // Scatter warm light around the sun at the horizon
   float scatterMask = exp(-abs(y) * 3.0);
@@ -79,7 +83,8 @@ void main() {
 
   // Slight warmth at horizon on the sun side
   float horizonWarmth = pow(max(sunDot, 0.0), 4.0) * hazeBand * 0.3;
-  skyCol += uSkySunColor * horizonWarmth * uSkyLightIntensity;
+  skyCol += uSkySunColor * horizonWarmth * uSkyLightIntensity * (1.0 + uSkyHorizonGlow);
+  skyCol += uSkyHorizon * hazeBand * uSkyHorizonGlow * 0.35;
 
   // ---- Night: add stars when sun is below horizon ----
   float nightFactor = smoothstep(0.15, -0.1, uSkySunDir.y) * uSkyStars;
@@ -98,7 +103,7 @@ void main() {
   }
 
   // ---- User brightness ----
-  skyCol *= uSkyBrightness;
+  skyCol *= uSkyBrightness * uSkyHdrIntensity;
 
   // ---- Gamma correction ----
   skyCol = pow(max(skyCol, vec3(0.0)), vec3(1.0 / 2.2));
@@ -125,6 +130,10 @@ export class ProceduralSky {
       uSkyBrightness:     { value: 1.0 },
       uSkyHaze:           { value: 0.55 },
       uSkyStars:          { value: 1.0 },
+      uSkyHdrIntensity:   { value: 1.08 },
+      uSkySunGlow:        { value: 1.0 },
+      uSkyHorizonGlow:    { value: 0.35 },
+      uSkyAtmosphereTint: { value: new THREE.Color(1.0, 0.98, 0.92) },
     };
 
     // Large inverted sphere
@@ -167,6 +176,11 @@ export class ProceduralSky {
     this.uniforms.uSkyBrightness.value = params.skyboxBrightness ?? 1.0;
     this.uniforms.uSkyHaze.value = params.skyboxHaze ?? 0.55;
     this.uniforms.uSkyStars.value = params.skyboxStars === false ? 0.0 : 1.0;
+    this.uniforms.uSkyHdrIntensity.value = params.visualsSkyIntensity ?? 1.08;
+    this.uniforms.uSkySunGlow.value = params.visualsSunGlow ?? 1.0;
+    this.uniforms.uSkyHorizonGlow.value = params.visualsHorizonGlow ?? 0.35;
+    const tint = params.visualsAtmosphereTint ?? [1.0, 0.98, 0.92];
+    this.uniforms.uSkyAtmosphereTint.value.setRGB(tint[0] ?? 1.0, tint[1] ?? 0.98, tint[2] ?? 0.92);
   }
 
   /**

@@ -16,6 +16,8 @@ import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { FogManager } from './render/FogManager.js';
 import { UnderwaterEffect } from './render/UnderwaterEffect.js';
 import { UnderwaterController } from './render/UnderwaterController.js';
+import { VisualPostProcess } from './render/VisualPostProcess.js';
+import { isVisualKey } from './render/VisualSettings.js';
 import {
   applyPerfPreset, createPerfSettings, loadPerfSettings, savePerfSettings,
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
@@ -41,7 +43,7 @@ import {
   TERRAIN_RESET_KEYS, EROSION_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
   LIGHTING_PARAM_KEYS, LIGHTING_STYLE_KEYS, DEBUG_PARAM_KEYS,
   patchParamsFromDefaults, resetWaterParams, resetCloudParams, resetSkyboxParams,
-  lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY, DEFAULT_DEBUG_FLAGS,
+  resetVisualParams, lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY, DEFAULT_DEBUG_FLAGS,
 } from './panelResets.js';
 import { EARTH_PALETTE } from './style/ColorPalette.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
@@ -138,6 +140,7 @@ export class Engine {
     this._minimapDirtyAt = 0;
     this._lastLodUpdate = 0;
     this._lastHudUpdate = 0;
+    this._lastTimeOfDayEmit = 0;
     this._frames = 0;
     this._fpsTime = 0;
     this._fps = 0;
@@ -444,6 +447,7 @@ export class Engine {
     // centralized submersion detection / transition (single source of truth).
     this.underwater = new UnderwaterEffect();
     this.underwaterController = new UnderwaterController();
+    this.visualPost = new VisualPostProcess();
 
     // studio/flat-board volumetric cloud slab (sits above the board; hidden
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
@@ -1193,6 +1197,12 @@ export class Engine {
       return;
     }
 
+    if (isVisualKey(key)) {
+      this._applyVisualSettings();
+      this._applySkyboxSettings();
+      return;
+    }
+
     // planet geometry params: rebuild the cube-sphere (chunk layout / radius).
     // These come from discrete dropdowns (one change at a time), so rebuild
     // immediately — App wraps the change in a loading overlay so the brief
@@ -1820,7 +1830,24 @@ export class Engine {
     this._applyStudioFogFromStyle();
     this._applyCloudSettings();   // slab altitude/scale track board height + size
     this._applySkyboxSettings();  // sky dome params + per-mode visibility
+    this._applyVisualSettings();
     this._applyPixelRatio();
+  }
+
+  _applyVisualSettings() {
+    const p = this.params;
+    const u = this.uniforms;
+    if (!u?.uVisualTerrainColorVariation) return;
+    u.uVisualTerrainColorVariation.value = p.visualsTerrainColorVariation ?? 0.36;
+    u.uVisualTerrainHeightDetail.value = p.visualsTerrainHeightDetail ?? 0.42;
+    u.uVisualWetShoreStrength.value = p.visualsWetShoreStrength ?? 0.55;
+    u.uVisualRockDetail.value = p.visualsRockDetail ?? 0.45;
+    u.uVisualSoilDetail.value = p.visualsSoilDetail ?? 0.35;
+    u.uVisualSandDetail.value = p.visualsSandDetail ?? 0.38;
+    u.uVisualFoamBreakup.value = p.visualsFoamBreakup ?? 0.45;
+    u.uVisualWetSandRange.value = p.visualsWetSandRange ?? 18;
+    u.uVisualShallowWaterSoftness.value = p.visualsShallowWaterSoftness ?? 0.38;
+    this._needsRender = true;
   }
 
   _applyPixelRatio() {
@@ -3342,7 +3369,8 @@ export class Engine {
     if (this.planetWaterMat) { this.planetWaterMat.dispose(); this.planetWaterMat = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
-    if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
+    // Procedural sky is shared by Tile and Infinite. Planet only hides it.
+    if (this.proceduralSky) this.proceduralSky.setVisible(false);
     if (this.planetMaterial) { this.planetMaterial.dispose(); this.planetMaterial = null; }
   }
 
@@ -3620,6 +3648,20 @@ export class Engine {
     if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
   }
 
+  _tickDayNightCycle(dt, now = performance.now()) {
+    const p = this.params;
+    if (!p.skyboxDayNightCycle || !this._skyActive()) return;
+    const speed = Math.max(0, p.skyboxCycleSpeed ?? 1);
+    if (speed <= 0) return;
+    // speed 1 = one full day/night cycle in roughly two minutes.
+    this.timeOfDay = (this.timeOfDay + dt * speed / 120) % 1;
+    this._applyTimeOfDay();
+    if (this.cb.onTimeOfDayChange && now - this._lastTimeOfDayEmit > 160) {
+      this._lastTimeOfDayEmit = now;
+      this.cb.onTimeOfDayChange(this.timeOfDay);
+    }
+  }
+
   /**
    * Toggle frustum culling globally.
    */
@@ -3664,7 +3706,9 @@ export class Engine {
    * Pure uniform/visibility updates — never rebuilds or recompiles.
    */
   _applySkyboxSettings() {
-    if (!this.proceduralSky) return;
+    if (!this.proceduralSky) {
+      this.proceduralSky = new ProceduralSky(this.scene);
+    }
     this.proceduralSky.applyParams(this.params);
     this.proceduralSky.setVisible(this._skyActive());
     this._needsRender = true;
@@ -4017,6 +4061,13 @@ export class Engine {
         toast('Lighting settings reset');
         break;
       }
+      case 'visuals': {
+        this.params = resetVisualParams(this.params);
+        this.cb.onParams({ ...this.params });
+        this._afterParamChange(false);
+        toast('Visual settings reset');
+        break;
+      }
       case 'planet':
         this.applyPlanetPresetByKey('earth');
         toast('Planet style reset');
@@ -4069,8 +4120,16 @@ export class Engine {
 
   exportScreenshot() {
     // planet renders straight to the canvas (no underwater pass)
-    if (this.worldMode === 'planet') this.renderer.render(this.scene, this.camera);
-    else this.underwater.render(this.renderer, this.scene, this.camera);
+    if (this.worldMode === 'planet') {
+      this.renderer.render(this.scene, this.camera);
+    } else if (this.visualPost?.enabled(this.params, this.worldMode)) {
+      this.visualPost.ensureTarget(this.renderer);
+      this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
+      this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
+      this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
+    } else {
+      this.underwater.render(this.renderer, this.scene, this.camera);
+    }
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
@@ -4197,6 +4256,7 @@ export class Engine {
     const now = performance.now();
     this.profiler.beginFrame(now);
     this.uniforms.uTime.value += dt;
+    this._tickDayNightCycle(dt, now);
 
     // free warm-up materials once the live materials hold their programs
     while (this._matTrash.length && now > this._matTrash[0].at) {
@@ -4419,6 +4479,7 @@ export class Engine {
     const animating =
       (this.params.cloudsEnabled && !!this.studioCloud) ||
       (this.water.visible && this.params.waterAnim) ||
+      (this.visualPost?.enabled(this.params, this.worldMode) && (this.params.visualsSunRaysStrength ?? 0) > 0.001) ||
       this.underwater.active ||
       this.exploreMode !== 'none' ||
       !!this.paintState?.enabled ||
@@ -4482,13 +4543,27 @@ export class Engine {
       this._maybeWarmUnderwater();
       this.profiler.begin('render');
       this.profiler.gpu?.frameBegin();
-      this.underwater.render(this.renderer, this.scene, this.camera);
+      const visualPostActive = this.visualPost?.enabled(this.params, this.worldMode);
+      if (visualPostActive) {
+        this.visualPost.ensureTarget(this.renderer);
+        this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
+        this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
+      } else {
+        this.underwater.render(this.renderer, this.scene, this.camera);
+      }
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
       // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
-      if (this.studioCloud) this.studioCloud.compositeLowRes(this.renderer);
+      if (this.studioCloud) {
+        if (visualPostActive) this.renderer.setRenderTarget(this.visualPost.inputTarget);
+        this.studioCloud.compositeLowRes(this.renderer);
+        if (visualPostActive) this.renderer.setRenderTarget(null);
+      }
+      if (visualPostActive) {
+        this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
+      }
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
 
@@ -4720,7 +4795,10 @@ export class Engine {
       camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : null,
       gpuName: this.gpuName,
       shadowsEnabled: !!(this.renderer && this.renderer.shadowMap && this.renderer.shadowMap.enabled),
-      postProcessing: { underwater: !!this.underwater?.active },
+      postProcessing: {
+        underwater: !!this.underwater?.active,
+        visuals: !!this.visualPost?.enabled(this.params, this.worldMode),
+      },
 
       terrain: {},
       culling: {},
@@ -4854,6 +4932,7 @@ export class Engine {
     this.board.dispose();
     this.minimap.dispose();
     this.underwater.dispose();
+    this.visualPost?.dispose();
     this.waterSystem?.dispose();
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];

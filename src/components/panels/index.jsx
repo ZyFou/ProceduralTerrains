@@ -17,6 +17,7 @@ import PlanetStylePanel from '../PlanetStylePanel.jsx';
 import WorldPanelInner from '../ui/WorldPanel.jsx';
 import CloudPanelInner from '../ui/CloudPanel.jsx';
 import WaterPanelInner from '../ui/WaterPanel.jsx';
+import VisualsPanelInner from '../ui/VisualsPanel.jsx';
 import PanelResetButton from '../ui/PanelResetButton.jsx';
 import EnvironmentPanelInner from '../ui/EnvironmentPanel.jsx';
 import PerformanceStats from '../ui/PerformancePanel.jsx';
@@ -44,6 +45,7 @@ export const PANEL_META = {
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
   props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
+  visuals: { label: 'Visuals', title: 'Visuals', desc: 'Tile post effects, HDR sky and terrain surface polish.', icon: PANEL_ICONS.visuals, modes: ['studio'] },
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
@@ -52,7 +54,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -445,6 +447,7 @@ function TimeOfDayControl({ timeOfDay, onTimeOfDay, settingId }) {
 const SKYBOX_SLIDERS = {
   skyboxBrightness: { key: 'skyboxBrightness', label: 'Sky Brightness', min: 0.2, max: 2.5, step: 0.05, digits: 2, info: 'Overall brightness of the sky dome and sun glow.' },
   skyboxHaze: { key: 'skyboxHaze', label: 'Horizon Haze', min: 0, max: 1.2, step: 0.05, digits: 2, info: 'Strength of the atmospheric haze band blended around the horizon.' },
+  skyboxCycleSpeed: { key: 'skyboxCycleSpeed', label: 'Cycle Speed', min: 0.05, max: 12, step: 0.05, digits: 2, unit: 'x', info: 'Day/night animation speed. 1x is one full cycle in about two minutes.' },
 };
 
 function SkyboxPanel({ ctx }) {
@@ -458,6 +461,12 @@ function SkyboxPanel({ ctx }) {
 
       <ControlSection id="skybox-time" title="Time of Day" defaultOpen settingId="skybox.section.time">
         <TimeOfDayControl timeOfDay={ctx.timeOfDay} onTimeOfDay={ctx.onTimeOfDay} settingId="skybox.timeOfDay" />
+        <ToggleRow label="Day/Night Cycle" value={!!params.skyboxDayNightCycle}
+          onChange={(v) => onParam('skyboxDayNightCycle', v)}
+          settingId="skybox.skyboxDayNightCycle"
+          info="Animate the time of day while the procedural sky is active." />
+        <SliderCtl def={SKYBOX_SLIDERS.skyboxCycleSpeed} value={params.skyboxCycleSpeed ?? 1}
+          onChange={(v) => onParam('skyboxCycleSpeed', v)} settingId="skybox.skyboxCycleSpeed" />
         <p className="section-hint">Drives the sky colours, sun position and atmosphere. Shared across the Tile view and the Infinite World.</p>
       </ControlSection>
 
@@ -489,6 +498,14 @@ function LightingPanel({ ctx }) {
       <EnvironmentPanelInner params={params} planetStyle={params.planetStyle}
         onParam={ctx.onParam} onTuning={ctx.onStyleTuning} settingsTarget={ctx.settingsTarget} />
       <PanelResetButton label="Reset Lighting Settings" onClick={() => ctx.onResetPanel?.('lighting')} settingId="lighting.reset" />
+    </SidePanel>
+  );
+}
+
+function VisualsPanel({ ctx }) {
+  return (
+    <SidePanel title="Visuals" description="Tile post effects, HDR sky and terrain surface polish." onClose={ctx.onClose}>
+      <VisualsPanelInner ctx={ctx} />
     </SidePanel>
   );
 }
@@ -932,7 +949,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 
 const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
-  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
+  water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, visuals: VisualsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
 };
 

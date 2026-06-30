@@ -74,6 +74,9 @@ uniform float uRefractionQual;
 uniform float uFoamQual;
 uniform float uCausticsQual;
 uniform float uDebugMode;          // 0=off, 1=depth, 2=shore, 3=foam, 4=water mask
+uniform float uVisualFoamBreakup;
+uniform float uVisualWetSandRange;
+uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
 
@@ -112,7 +115,7 @@ float terrainHeightAt(vec2 xz) {
 
 // Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
 float smoothedFloorHeight(vec2 xz, float centerH) {
-  float e = 8.0;
+  float e = mix(8.0, 16.0, clamp(uVisualShallowWaterSoftness, 0.0, 1.0));
   float h1 = terrainHeightAt(xz + vec2(e, 0.0));
   float h2 = terrainHeightAt(xz - vec2(e, 0.0));
   float h3 = terrainHeightAt(xz + vec2(0.0, e));
@@ -150,8 +153,9 @@ void main() {
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
 
   // depth grading — smoothed bathymetry only (not raw relief)
-  float shallowT = smoothstep(0.0, uShallowDist, visualDepth);
-  float deepT = smoothstep(uShallowDist, uDeepDist, visualDepth);
+  float shoreSoft = clamp(uVisualShallowWaterSoftness, 0.0, 1.0);
+  float shallowT = smoothstep(0.0, uShallowDist * (1.0 + shoreSoft * 0.85), visualDepth);
+  float deepT = smoothstep(uShallowDist, uDeepDist * (1.0 + shoreSoft * 0.45), visualDepth);
   float dGrade = pow(clamp(visualDepth / max(uMaxVisibleDepth, 1.0), 0.0, 1.0), max(uDepthFalloff, 0.1));
   dGrade = mix(shallowT * 0.35, deepT, dGrade) * uDepthColorStr;
 
@@ -177,8 +181,11 @@ void main() {
   if (uFoamEnabled > 0.5 && uFoamQual > 0.1) {
     foamNoise = vnoise(xz * 0.18 + vec2(t * uFoamAnimSpeed * 1.4, -t * uFoamAnimSpeed * 1.1));
   }
-  float shoreFoam = smoothstep(uFoamWidth + uFoamSoftness, uFoamSoftness, shoreDist + foamNoise * 1.4);
-  float nearShore = smoothstep(10.0, 0.0, shoreDist);
+  float breakup = clamp(uVisualFoamBreakup, 0.0, 1.0);
+  float foamEdgeNoise = foamNoise * mix(1.4, 4.2, breakup);
+  float foamPatch = mix(1.0, smoothstep(0.18, 0.82, vnoise(xz * 0.055 + vec2(t * 0.35, t * -0.28))), breakup);
+  float shoreFoam = smoothstep(uFoamWidth + uFoamSoftness + uVisualWetSandRange * 0.05, uFoamSoftness, shoreDist + foamEdgeNoise);
+  float nearShore = smoothstep(10.0 + uVisualWetSandRange * 0.35, 0.0, shoreDist);
   float slopeFoam = 0.0;
   float cliffFoam = 0.0;
   if (uFoamEnabled > 0.5 && nearShore > 0.01 && (uSlopeFoam > 0.01 || uCliffFoam > 0.01)) {
@@ -186,7 +193,7 @@ void main() {
     slopeFoam = smoothstep(0.35, 1.1, slope) * uSlopeFoam * nearShore;
     cliffFoam = smoothstep(0.85, 1.8, slope) * uCliffFoam * nearShore;
   }
-  float foam = clamp((shoreFoam + slopeFoam * 0.2 + cliffFoam * 0.15) * uFoamStrength, 0.0, 1.0);
+  float foam = clamp((shoreFoam * foamPatch + slopeFoam * 0.2 + cliffFoam * 0.15) * uFoamStrength, 0.0, 1.0);
   col = mix(col, uColFoam, foam);
 
   // fake refraction tint (screen-space-ish color shift)

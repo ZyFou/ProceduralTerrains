@@ -7,6 +7,7 @@ import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
+import { VISUAL_DEFAULT_PARAMS, VISUAL_RESET_KEYS } from './render/VisualSettings.js';
 import { DEFAULT_PLANET_STYLE } from './style/PlanetStyleConfig.js';
 import { EARTH_PALETTE } from './style/ColorPalette.js';
 
@@ -64,6 +65,10 @@ export function resetCloudParams(params) {
 
 export function resetSkyboxParams(params) {
   return patchParamsFromDefaults(params, Object.keys(SKYBOX_DEFAULT_PARAMS), SKYBOX_DEFAULT_PARAMS);
+}
+
+export function resetVisualParams(params) {
+  return patchParamsFromDefaults(params, VISUAL_RESET_KEYS, VISUAL_DEFAULT_PARAMS);
 }
 
 export function lightingStyleDefaults() {

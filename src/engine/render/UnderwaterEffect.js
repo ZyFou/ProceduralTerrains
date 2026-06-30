@@ -278,10 +278,13 @@ export class UnderwaterEffect {
   /**
    * Render the scene — directly when dry, through the underwater pass when
    * submerged. Drop-in replacement for renderer.render(scene, camera).
+   * outputTarget lets Tile-mode visual postprocessing chain after underwater.
    */
-  render(renderer, scene, camera) {
+  render(renderer, scene, camera, outputTarget = null) {
     if (!this.active) {
+      renderer.setRenderTarget(outputTarget);
       renderer.render(scene, camera);
+      if (outputTarget) renderer.setRenderTarget(null);
       return;
     }
 
@@ -296,11 +299,12 @@ export class UnderwaterEffect {
 
     renderer.setRenderTarget(this._rt);
     renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
 
     u.tDiffuse.value = this._rt.texture;
     u.tDepth.value = this._rt.depthTexture;
+    renderer.setRenderTarget(outputTarget);
     renderer.render(this._quadScene, this._quadCam);
+    if (outputTarget) renderer.setRenderTarget(null);
   }
 
   _ensureTarget(renderer) {

@@ -31,6 +31,11 @@ export const SKYBOX_DEFAULT_PARAMS = {
 
   // Render the night-time star field when the sun is below the horizon.
   skyboxStars: true,
+
+  // Optional animated time-of-day cycle. Speed 1.0 completes one loop in
+  // roughly two minutes.
+  skyboxDayNightCycle: false,
+  skyboxCycleSpeed: 1.0,
 };
 
 // True if a key belongs to the skybox model (used by Engine.setParam routing).

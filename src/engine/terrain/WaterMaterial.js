@@ -43,6 +43,8 @@ uniform float uWaterQuality;     // 0 = low, 1 = medium, 2 = high
 uniform float uWaterDetail;      // secondary ripple octave amount
 uniform float uWaterReflection;  // sun glints + sky fresnel strength
 uniform float uWaveComplexity;   // ripple normal strength
+uniform float uVisualFoamBreakup;
+uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
 
@@ -85,7 +87,8 @@ void main() {
   float nStr = 1.6 * uWaveComplexity;
   vec3 n = normalize(vec3(-(rX - r0) * nStr, 1.0, -(rZ - r0) * nStr));
 
-  float dGrade = clamp(depth / 55.0, 0.0, 1.0);
+  float shoreSoft = clamp(uVisualShallowWaterSoftness, 0.0, 1.0);
+  float dGrade = clamp(depth / mix(55.0, 74.0, shoreSoft), 0.0, 1.0);
   vec3 col = mix(uColShallow, uColDeep, dGrade);
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
   col *= uPaletteTint;
@@ -107,7 +110,9 @@ void main() {
   if (uWaterQuality > 0.5) {
     foamNoise = vnoise(xz * 0.22 + vec2(t * 1.4, -t * 1.1));
   }
-  float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
+  float breakup = clamp(uVisualFoamBreakup, 0.0, 1.0);
+  float foamPatch = mix(1.0, smoothstep(0.2, 0.82, vnoise(xz * 0.055 + vec2(t * 0.35, -t * 0.28))), breakup);
+  float foam = smoothstep(3.2 + shoreSoft * 1.8, 0.6, depth + foamNoise * mix(2.4, 4.6, breakup)) * foamPatch;
   col = mix(col, uColFoam, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);

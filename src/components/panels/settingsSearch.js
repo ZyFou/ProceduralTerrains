@@ -117,6 +117,8 @@ const SETTINGS_INDEX = [
   { panelId: 'skybox', settingId: 'skybox.skyboxBrightness', label: 'Sky Brightness', keywords: 'sky atmosphere brightness' },
   { panelId: 'skybox', settingId: 'skybox.skyboxHaze', label: 'Horizon Haze', keywords: 'sky atmosphere haze' },
   { panelId: 'skybox', settingId: 'skybox.skyboxStars', label: 'Night Stars', keywords: 'sky stars night' },
+  { panelId: 'skybox', settingId: 'skybox.skyboxDayNightCycle', label: 'Day/Night Cycle', keywords: 'sky day night cycle animate time sun' },
+  { panelId: 'skybox', settingId: 'skybox.skyboxCycleSpeed', label: 'Cycle Speed', keywords: 'sky day night cycle speed animation time sun' },
   { panelId: 'lighting', settingId: 'lighting.sunAzimuth', label: 'Sun Azimuth', keywords: 'sun lighting direction' },
   { panelId: 'lighting', settingId: 'lighting.sunElevation', label: 'Sun Elevation', keywords: 'sun lighting direction' },
   { panelId: 'lighting', settingId: 'lighting.sunColor', label: 'Sun Color', keywords: 'sun lighting color' },
@@ -124,6 +126,18 @@ const SETTINGS_INDEX = [
   { panelId: 'lighting', settingId: 'lighting.fogDensity', label: 'Fog Density', keywords: 'fog atmosphere density' },
   { panelId: 'lighting', settingId: 'lighting.skyAmbient', label: 'Sky Ambient', keywords: 'ambient sky bounce lighting' },
   { panelId: 'lighting', settingId: 'lighting.groundBounce', label: 'Ground Bounce', keywords: 'bounce lighting shadow' },
+
+  // Visuals
+  { panelId: 'visuals', settingId: 'visuals.visualsPostEnabled', label: 'Post Processing', keywords: 'visuals post processing effects bloom vignette exposure contrast saturation' },
+  { panelId: 'visuals', settingId: 'visuals.visualsExposure', label: 'Exposure', keywords: 'visuals post exposure brightness hdr' },
+  { panelId: 'visuals', settingId: 'visuals.visualsBloomStrength', label: 'Bloom Strength', keywords: 'visuals bloom glow post bright highlights' },
+  { panelId: 'visuals', settingId: 'visuals.visualsSunRaysStrength', label: 'Sun Rays', keywords: 'visuals sun rays god rays shafts post' },
+  { panelId: 'visuals', settingId: 'visuals.visualsSkyIntensity', label: 'HDR Sky Intensity', keywords: 'visuals hdri hdr sky environment intensity' },
+  { panelId: 'visuals', settingId: 'visuals.visualsSunGlow', label: 'Sun Glow', keywords: 'visuals sky sun glow hdr' },
+  { panelId: 'visuals', settingId: 'visuals.visualsAtmosphereTint', label: 'Atmosphere Tint', keywords: 'visuals sky atmosphere tint hdr color' },
+  { panelId: 'visuals', settingId: 'visuals.visualsTerrainHeightDetail', label: 'Detail Height', keywords: 'visuals terrain height detail normals bump surface texture' },
+  { panelId: 'visuals', settingId: 'visuals.visualsWetShoreStrength', label: 'Wet Shore Strength', keywords: 'visuals shoreline wet sand terrain shore' },
+  { panelId: 'visuals', settingId: 'visuals.visualsFoamBreakup', label: 'Foam Breakup', keywords: 'visuals shoreline foam water coast breakup' },
 
   // Clouds / props / debug / export
   { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudCoverage', label: 'Coverage', keywords: 'cloud density cover sky shape' },
@@ -173,6 +187,12 @@ const SECTION_INDEX = [
   // Skybox
   { panelId: 'skybox', sectionLabel: 'Time of Day', settingId: 'skybox.section.time', label: 'Time of Day', keywords: 'sky time day night sun', isSection: true },
   { panelId: 'skybox', sectionLabel: 'Appearance', settingId: 'skybox.section.appearance', label: 'Appearance', keywords: 'sky brightness haze stars appearance', isSection: true },
+
+  // Visuals
+  { panelId: 'visuals', sectionLabel: 'Post FX', settingId: 'visuals.section.post', label: 'Post FX', keywords: 'visuals post processing bloom vignette sun rays exposure contrast', isSection: true },
+  { panelId: 'visuals', sectionLabel: 'HDR Sky', settingId: 'visuals.section.sky', label: 'HDR Sky', keywords: 'visuals hdri hdr sky environment sun glow horizon tint', isSection: true },
+  { panelId: 'visuals', sectionLabel: 'Terrain Surface', settingId: 'visuals.section.terrain', label: 'Terrain Surface', keywords: 'visuals terrain surface detail height normals colors rock soil sand', isSection: true },
+  { panelId: 'visuals', sectionLabel: 'Shoreline', settingId: 'visuals.section.shoreline', label: 'Shoreline', keywords: 'visuals shoreline shore foam wet sand shallow water coast', isSection: true },
 
   // Props
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.section.distribution', label: 'Distribution', keywords: 'props grass flowers rocks density distribution', isSection: true },
