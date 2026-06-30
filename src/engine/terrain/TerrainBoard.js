@@ -361,19 +361,23 @@ export class TerrainBoard {
       if (node.chunk.merged) { node.chunk.merged = false; node.chunk.mesh.visible = true; }
       return;
     }
-    const canFold = this.macroProxyEnabled || node.level > 0;
-    const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
-    const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
-    const want = canFold && (node.merged ? nearest > foldDist * 0.85 : nearest > foldDist);
-
-    if (want) {
-      if (!node.merged) this._foldNode(node);
-      this._mergedNodes.push(node);
-      this._hiddenByMerge += node.chunks.length;
-    } else {
-      if (node.merged) this._unfoldNode(node);
-      for (const child of node.children) this._visitNode(child, camPos);
+    // Only a FULL node (its whole square is tiled by existing chunks) may fold:
+    // a partial node straddles the assembly boundary or not-yet-streamed tiles,
+    // and folding it would paint terrain across the empty gap with no edge wall.
+    const canFold = node.full && (this.macroProxyEnabled || node.level > 0);
+    if (canFold) {
+      const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
+      const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
+      const want = node.merged ? nearest > foldDist * 0.85 : nearest > foldDist;
+      if (want) {
+        if (!node.merged) this._foldNode(node);
+        this._mergedNodes.push(node);
+        this._hiddenByMerge += node.chunks.length;
+        return;
+      }
     }
+    if (node.merged) this._unfoldNode(node);
+    for (const child of node.children) this._visitNode(child, camPos);
   }
 
   // Distance-based geometry LOD for the detailed chunks. When skipMerged is
@@ -415,90 +419,93 @@ export class TerrainBoard {
   }
 
   // --- Quadtree ------------------------------------------------------------
-  // Build a spatial quadtree over the current chunks. Leaves are single chunks;
-  // internal nodes cover a square block and own a lazily-built merged mesh.
+  // Build a quadtree over the current chunks on their integer grid. Leaves are
+  // single chunks; internal nodes cover a power-of-two square block. A node is
+  // FULL only when every cell of its square is occupied by an existing chunk —
+  // partial nodes (assembly boundary / still-streaming tiles) never fold, so a
+  // merged mesh can never paint terrain across an empty gap.
   _rebuildTree() {
     this._treeDirty = false;
     this._disposeNodeMeshes();
     if (!this.chunks.length) { this._root = null; return; }
 
     const cs = this.chunkSize;
-    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    let minX = Infinity, minZ = Infinity;
     for (const c of this.chunks) {
       const x0 = c.center.x - cs / 2, z0 = c.center.z - cs / 2;
       if (x0 < minX) minX = x0;
       if (z0 < minZ) minZ = z0;
-      if (x0 + cs > maxX) maxX = x0 + cs;
-      if (z0 + cs > maxZ) maxZ = z0 + cs;
+    }
+    this._gridOriginX = minX;
+    this._gridOriginZ = minZ;
+
+    // Integer grid index relative to the min corner (consistent for any chunk
+    // count / cell layout, since all corners differ by integer × chunkSize).
+    let gw = 0, gh = 0;
+    for (const c of this.chunks) {
+      c.ix = Math.round((c.center.x - cs / 2 - minX) / cs);
+      c.iz = Math.round((c.center.z - cs / 2 - minZ) / cs);
+      if (c.ix + 1 > gw) gw = c.ix + 1;
+      if (c.iz + 1 > gh) gh = c.iz + 1;
       c.node = null;
       c.merged = false;
       c.mesh.visible = true;   // folds below re-hide as needed; avoids a gap
     }
     this._boardMin.set(minX, 0, minZ);
-    this._boardMax.set(maxX, 0, maxZ);
-    const size = Math.max(maxX - minX, maxZ - minZ);
-    this._root = this._buildNode(this.chunks, minX, minZ, size, 0);
+    this._boardMax.set(minX + gw * cs, 0, minZ + gh * cs);
+
+    let size = 1;
+    while (size < Math.max(gw, gh, 1)) size *= 2;
+    this._root = this._buildNode(this.chunks, 0, 0, size, 0);
   }
 
-  _buildNode(chunks, minX, minZ, size, level) {
-    if (chunks.length === 1) return this._leafNode(chunks[0], level);
+  _buildNode(chunks, x0, z0, size, level) {
+    if (!chunks.length) return null;
+    if (size === 1) return this._leafNode(chunks[0], x0, z0, level);
 
-    const cs = this.chunkSize;
     const half = size / 2;
-    if (half < cs * 0.75) {
-      // chunk scale reached: children are the individual chunks
-      return this._internalNode(chunks.map((c) => this._leafNode(c, level + 1)), chunks, level);
-    }
-
-    const midX = minX + half, midZ = minZ + half;
+    const midX = x0 + half, midZ = z0 + half;
     const q = [[], [], [], []];
     for (const c of chunks) {
-      const ix = c.center.x < midX ? 0 : 1;
-      const iz = c.center.z < midZ ? 0 : 1;
-      q[iz * 2 + ix].push(c);
+      const qx = c.ix < midX ? 0 : 1;
+      const qz = c.iz < midZ ? 0 : 1;
+      q[qz * 2 + qx].push(c);
     }
-    const offs = [[minX, minZ], [midX, minZ], [minX, midZ], [midX, midZ]];
+    const offs = [[x0, z0], [midX, z0], [x0, midZ], [midX, midZ]];
     const children = [];
     for (let i = 0; i < 4; i++) {
       if (!q[i].length) continue;
       const child = this._buildNode(q[i], offs[i][0], offs[i][1], half, level + 1);
       if (child) children.push(child);
     }
-    if (children.length === 1) return children[0];   // collapse degenerate (sparse) node
-    return this._internalNode(children, chunks, level);
+    // A square of side `size` is full iff it holds exactly size² distinct chunks.
+    const full = chunks.length === size * size;
+    if (!full && children.length === 1) return children[0];   // collapse sparse chain
+    return this._internalNode(children, chunks, x0, z0, size, level, full);
   }
 
-  _leafNode(chunk, level) {
+  _leafNode(chunk, x0, z0, level) {
     const cs = this.chunkSize;
-    const x0 = chunk.center.x - cs / 2, z0 = chunk.center.z - cs / 2;
+    const minX = this._gridOriginX + x0 * cs, minZ = this._gridOriginZ + z0 * cs;
     const node = {
-      leaf: true, chunk, children: null, chunks: [chunk],
-      minX: x0, minZ: z0, spanX: cs, spanZ: cs, spanWorld: cs, spanChunks: 1,
-      center: new THREE.Vector3(chunk.center.x, 0, chunk.center.z),
+      leaf: true, chunk, children: null, chunks: [chunk], full: true,
+      minX, minZ, spanX: cs, spanZ: cs, spanWorld: cs, spanChunks: 1,
+      center: new THREE.Vector3(minX + cs / 2, 0, minZ + cs / 2),
       half: cs * 0.7072, level, mesh: null, merged: false,
     };
     chunk.node = node;
     return node;
   }
 
-  _internalNode(children, chunks, level) {
+  _internalNode(children, chunks, x0, z0, size, level, full) {
     const cs = this.chunkSize;
-    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
-    for (const c of chunks) {
-      const x0 = c.center.x - cs / 2, z0 = c.center.z - cs / 2;
-      if (x0 < minX) minX = x0;
-      if (z0 < minZ) minZ = z0;
-      if (x0 + cs > maxX) maxX = x0 + cs;
-      if (z0 + cs > maxZ) maxZ = z0 + cs;
-    }
-    const spanX = maxX - minX, spanZ = maxZ - minZ;
-    const spanWorld = Math.max(spanX, spanZ);
+    const minX = this._gridOriginX + x0 * cs, minZ = this._gridOriginZ + z0 * cs;
+    const span = size * cs;
     return {
-      leaf: false, chunk: null, children, chunks,
-      minX, minZ, spanX, spanZ, spanWorld,
-      spanChunks: Math.max(2, Math.round(spanWorld / cs)),
-      center: new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2),
-      half: 0.5 * Math.hypot(spanX, spanZ), level, mesh: null, merged: false,
+      leaf: false, chunk: null, children, chunks, full,
+      minX, minZ, spanX: span, spanZ: span, spanWorld: span, spanChunks: size,
+      center: new THREE.Vector3(minX + span / 2, 0, minZ + span / 2),
+      half: 0.5 * Math.SQRT2 * span, level, mesh: null, merged: false,
     };
   }
 
