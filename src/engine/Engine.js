@@ -2312,6 +2312,8 @@ export class Engine {
     this._needsRender = true;
     if (key === 'mergeDebug') {
       this.board.setMergeDebug(this._debug.mergeDebug);
+      if (this.infiniteWorld) this.infiniteWorld.setMergeDebug(this._debug.mergeDebug);
+      if (this.planetWorld) this.planetWorld.setMergeDebug(this._debug.mergeDebug);
     }
     if (key === 'disableHeightBake') {
       // off → drop to the live field immediately; on → force a fresh bake next tick
@@ -2803,6 +2805,14 @@ export class Engine {
     this.infiniteWorld.setMaxCreatesPerFrame(perf.maxCreatesPerFrame);
     this.infiniteWorld.setTriangleBudget(perf.triangleBudget);
     this.infiniteWorld.cullingAggressiveness = perf.cullingAggressiveness;
+    this.infiniteWorld.setMergeOptions({
+      enabled: perf.terrainMerge,
+      quadsPerChunk: perf.terrainMergeQuads,
+      mergeDistance: perf.terrainMergeDistance,
+      allowRoot: perf.terrainMacroProxy,
+    });
+    this.infiniteWorld.behindCameraCulling = this.board.behindCameraCulling;
+    this.infiniteWorld.setMergeDebug(this._debug.mergeDebug);
 
     // Create FPS controls
     this.fpsControls = new FPSControls(this.camera, this.canvas);
@@ -2960,6 +2970,14 @@ export class Engine {
     this.planetWorld.setTriangleBudget(this.perf.triangleBudget);
     this.planetWorld.cullingAggressiveness = this.perf.cullingAggressiveness;
     this.planetWorld.cullingEnabled = this.cullingEnabled;
+    this.planetWorld.horizonCulling = this.board.behindCameraCulling;
+    this.planetWorld.setMergeOptions({
+      enabled: this.perf.terrainMerge,
+      quadsPerChunk: this.perf.terrainMergeQuads,
+      mergeDistance: this.perf.terrainMergeDistance,
+      macroEnabled: this.perf.terrainMacroProxy,
+    });
+    this.planetWorld.setMergeDebug(this._debug.mergeDebug);
 
     // water shell: a sphere at radius (planetRadius + seaLevel); the shader
     // discards over land so only basins fill. One mesh, one shared material.
@@ -3477,12 +3495,24 @@ export class Engine {
       this.infiniteWorld.setWaterDistanceFactor(s.waterDistance);
       this.infiniteWorld.setTriangleBudget(s.triangleBudget);
       this.infiniteWorld.cullingAggressiveness = s.cullingAggressiveness;
+      this.infiniteWorld.setMergeOptions({
+        enabled: s.terrainMerge,
+        quadsPerChunk: s.terrainMergeQuads,
+        mergeDistance: s.terrainMergeDistance,
+        allowRoot: s.terrainMacroProxy,
+      });
     }
 
     if (this.planetWorld) {
       this.planetWorld.setLodSegments(segments);
       this.planetWorld.setTriangleBudget(s.triangleBudget);
       this.planetWorld.cullingAggressiveness = s.cullingAggressiveness;
+      this.planetWorld.setMergeOptions({
+        enabled: s.terrainMerge,
+        quadsPerChunk: s.terrainMergeQuads,
+        mergeDistance: s.terrainMergeDistance,
+        macroEnabled: s.terrainMacroProxy,
+      });
     }
 
     if (this.fogManager) {
@@ -3608,6 +3638,12 @@ export class Engine {
   setBehindCameraCulling(enabled) {
     if (this.infiniteWorld) {
       this.infiniteWorld.behindCameraCulling = enabled;
+    }
+    if (this.planetWorld) {
+      // Planet's equivalent of behind-camera culling is the horizon (back-of-
+      // planet) test. It was never wired to this toggle, so the control did
+      // nothing in planet mode.
+      this.planetWorld.horizonCulling = enabled;
     }
     this.board.behindCameraCulling = enabled;
   }
@@ -4734,6 +4770,11 @@ export class Engine {
         visible: w.visibleChunkCount,
         culled: w.culledChunkCount,
       };
+      diag.merge = {
+        enabled: w.merge?.enabled !== false,
+        foldedNodes: w.mergedGroupCount ?? 0,
+        savedDrawCalls: w.savedDrawCalls ?? 0,
+      };
       diag.lod = { counts: [...w.lodCounts] };
     } else if (this.worldMode === 'planet' && this.planetWorld) {
       const w = this.planetWorld;
@@ -4747,6 +4788,11 @@ export class Engine {
         total: w.activeChunkCount,
         visible: w.visibleChunkCount,
         culled: w.culledChunkCount,
+      };
+      diag.merge = {
+        enabled: w.mergeEnabled !== false,
+        foldedNodes: w.mergedGroupCount ?? 0,
+        savedDrawCalls: w.savedDrawCalls ?? 0,
       };
       diag.lod = { counts: [...w.lodCounts] };
     } else {

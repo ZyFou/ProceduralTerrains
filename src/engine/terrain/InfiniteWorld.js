@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
 import { cullChunks } from './InfiniteTerrainCulling.js';
+import { MergeQuadtree } from './MergeQuadtree.js';
 
 // ============================================================================
 // InfiniteWorld: streams terrain chunks around the player camera.
@@ -102,6 +103,12 @@ export class InfiniteWorld {
     // chunk loading queue
     this._pendingChunks = [];
 
+    // quadtree merge layer (folds far chunk blocks into single meshes)
+    this.merge = new MergeQuadtree(this.group, this.terrainMaterial);
+    this.merge.setChunkSize(this.chunkSize);
+    this.mergedGroupCount = 0;
+    this.savedDrawCalls = 0;
+
     // stats
     this.activeChunkCount = 0;
     this.visibleChunkCount = 0;
@@ -109,6 +116,17 @@ export class InfiniteWorld {
     this.lodCounts = [0, 0, 0, 0];
 
     this._tmp = new THREE.Vector3();
+  }
+
+  /** Tune the merge layer (performance settings). */
+  setMergeOptions(opts) {
+    this.merge.setOptions(opts);
+  }
+
+  /** Toggle the merge-debug surface tint (drives the shared uMergeDebug). */
+  setMergeDebug(on) {
+    const u = this.terrainMaterial?.uniforms?.uMergeDebug;
+    if (u) u.value = on ? 1.0 : 0.0;
   }
 
   /**
@@ -287,31 +305,57 @@ export class InfiniteWorld {
     // Process at most one gradual LOD geometry rebuild per frame
     this._processLodRebuild();
 
-    // Update LOD for all active chunks
+    // Fold far chunk blocks into single meshes (quadtree). Distance scale
+    // mirrors the active LOD scaling so it tracks the quality preset.
+    this.merge.distanceScale = this._lodMultiplier * this._budgetScale;
+    this.merge.update(this.chunks.values(), playerPos);
+    this.mergedGroupCount = this.merge.mergedNodes.length;
+    this.savedDrawCalls = Math.max(0, this.merge.hiddenCount - this.merge.mergedNodes.length);
+
+    // Update LOD for the chunks still rendered individually (skip folded ones)
     this._updateLOD(playerPos);
 
-    // Cull invisible chunks (frustum + behind-camera)
-    if (camera) {
-      if (!this.cullingEnabled) {
-        let visibleCount = 0;
-        for (const chunk of this.chunks.values()) {
-          if (!chunk.mesh.visible) {
-            chunk.mesh.visible = true;
-          }
-          visibleCount++;
-        }
-        this.visibleChunkCount = visibleCount;
-        this.culledChunkCount = 0;
-      } else {
-        const result = cullChunks(
-          this.chunks, camera, this.chunkSize,
-          this.maxHeight, this.behindCameraCulling,
-          this.cullingAggressiveness
-        );
-        this.visibleChunkCount = result.visibleCount;
-        this.culledChunkCount = result.culledCount;
+    // Cull invisible terrain meshes (chunks + folded nodes)
+    if (camera) this._cull(camera);
+  }
+
+  /** Frustum + behind-camera cull for active chunks and folded node meshes. */
+  _cull(camera) {
+    if (!this.cullingEnabled) {
+      let visibleCount = 0;
+      for (const chunk of this.chunks.values()) {
+        if (chunk.merged) { if (chunk.mesh.visible) chunk.mesh.visible = false; continue; }
+        if (!chunk.mesh.visible) chunk.mesh.visible = true;
+        visibleCount++;
       }
+      for (const node of this.merge.mergedNodes) { node.mesh.visible = true; visibleCount++; }
+      this.visibleChunkCount = visibleCount;
+      this.culledChunkCount = 0;
+      return;
     }
+
+    const chunkResult = cullChunks(
+      this._activeChunks(), camera, this.chunkSize,
+      this.maxHeight, this.behindCameraCulling, this.cullingAggressiveness
+    );
+    let visible = chunkResult.visibleCount;
+    let culled = chunkResult.culledCount;
+
+    if (this.merge.mergedNodes.length) {
+      const r = this.viewRadius * this.chunkSize;   // conservative bound for big folds
+      const mergeResult = cullChunks(
+        this.merge.mergedNodes, camera, r,
+        this.maxHeight, this.behindCameraCulling, this.cullingAggressiveness
+      );
+      visible += mergeResult.visibleCount;
+      culled += mergeResult.culledCount;
+    }
+    this.visibleChunkCount = visible;
+    this.culledChunkCount = culled;
+  }
+
+  *_activeChunks() {
+    for (const chunk of this.chunks.values()) if (!chunk.merged) yield chunk;
   }
 
   /**
@@ -345,14 +389,17 @@ export class InfiniteWorld {
     this._pendingChunks.sort((a, b) => a.dist2 - b.dist2);
 
     // Remove chunks outside unload radius
+    let removed = 0;
     for (const [key, chunk] of this.chunks) {
       const dx = chunk.cx - pcx;
       const dz = chunk.cz - pcz;
       if (dx * dx + dz * dz > unloadR2) {
         this.group.remove(chunk.mesh);
         this.chunks.delete(key);
+        removed++;
       }
     }
+    if (removed) this.merge.markDirty();   // chunk set changed → rebuild quadtree
   }
 
   /**
@@ -382,9 +429,11 @@ export class InfiniteWorld {
           cz * this.chunkSize + this.chunkSize / 2
         ),
         lod: 3,
+        merged: false,
       });
       created++;
     }
+    if (created) this.merge.markDirty();   // chunk set changed → rebuild quadtree
   }
 
   /**
@@ -395,6 +444,7 @@ export class InfiniteWorld {
     const counts = [0, 0, 0, 0];
 
     for (const chunk of this.chunks.values()) {
+      if (chunk.merged) continue;   // folded into a merged node mesh
       const d = this._tmp.copy(chunk.center).sub(playerPos).length();
       const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
       if (lod !== chunk.lod) {
@@ -438,6 +488,7 @@ export class InfiniteWorld {
    * Dispose all chunks and remove from scene.
    */
   dispose() {
+    this.merge.dispose();
     for (const chunk of this.chunks.values()) {
       this.group.remove(chunk.mesh);
     }

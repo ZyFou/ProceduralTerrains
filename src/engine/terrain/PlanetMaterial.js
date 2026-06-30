@@ -82,6 +82,7 @@ ${TERRAIN_DETAIL_GLSL}
 uniform float uNormalStrength;
 uniform float uAO;
 uniform float uLodDebug;
+uniform float uMergeDebug;
 uniform samplerCube uPlanetHeightTex;
 uniform float uUsePlanetHeightTex;
 
@@ -96,6 +97,16 @@ const vec3 LOD_COLORS[4] = vec3[4](
   vec3(0.96, 0.85, 0.04),
   vec3(0.23, 0.51, 0.96)
 );
+
+// Merge-debug ramp keyed off aLod (4..8 = quadtree fold tier): green (small
+// 2x2 fold) → yellow → orange → red → magenta (whole face).
+vec3 mergeTierColor(float vlod) {
+  float t = clamp(vlod - 4.0, 0.0, 4.0);
+  if (t < 1.0)      return mix(vec3(0.18, 0.95, 0.45), vec3(0.95, 0.95, 0.15), t);
+  else if (t < 2.0) return mix(vec3(0.95, 0.95, 0.15), vec3(0.98, 0.55, 0.10), t - 1.0);
+  else if (t < 3.0) return mix(vec3(0.98, 0.55, 0.10), vec3(0.95, 0.20, 0.20), t - 2.0);
+  else              return mix(vec3(0.95, 0.20, 0.20), vec3(0.95, 0.20, 0.95), t - 3.0);
+}
 
 vec3 applyTerrainDetailNormalPlanet(vec3 n, vec3 nGeo, vec3 worldPos, vec3 t1, vec3 t2, float fade, float rockMask, float shoreMask) {
   float strength = uTerrainDetailNormalStrength * fade * (0.45 + 0.55 * terrainDetailQualityFactor());
@@ -221,6 +232,10 @@ void main() {
   if (uLodDebug > 0.5) {
     int li = int(clamp(vLod, 0.0, 3.0) + 0.5);
     col = mix(col, LOD_COLORS[li], 0.55);
+  }
+
+  if (uMergeDebug > 0.5 && vLod > 3.5) {
+    col = mix(col, mergeTierColor(vLod), 0.55);
   }
 
   col *= 1.0 - vSkirt * 0.55;

@@ -645,15 +645,13 @@ function TerrainOverlayOptions({ ctx }) {
           info="Overlay borders along chunk boundaries. Lines turn green over merged chunk groups and magenta over the macro proxy."
         />
       )}
-      {isStudio && (
-        <ToggleRow
-          label="Show Chunk Merging"
-          value={!!ctx.debugFlags?.mergeDebug}
-          onChange={(v) => ctx.onDebugFlag?.('mergeDebug', v)}
-          info="Tint folded terrain on the surface: green = merged chunk group, magenta = full-board macro proxy. Watch regions colour in as terrain folds at distance."
-          settingId="debug.mergeDebug"
-        />
-      )}
+      <ToggleRow
+        label="Show Chunk Merging"
+        value={!!ctx.debugFlags?.mergeDebug}
+        onChange={(v) => ctx.onDebugFlag?.('mergeDebug', v)}
+        info="Tint folded terrain by merge level (green = small 2×2 fold → magenta = whole region). Works in Tile, Infinite and Planet modes. Watch blocks colour in as terrain folds at distance."
+        settingId="debug.mergeDebug"
+      />
       <ToggleRow
         label="Biome Debug"
         value={params.biomeDebug}
