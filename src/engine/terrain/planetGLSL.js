@@ -180,11 +180,15 @@ float legacyShape3D(vec3 dir) {
 
   // layer 4: ridged mountain chains
   float ridge = ridgedFBM3D(q * 1.7 + vec3(31.4, 27.2, 11.9));
+  float smoothAmt = clamp(uTerrainSmoothing, 0.0, 1.0);
+  float ridgeNeedle = pow(ridge, 1.35);
+  float ridgeRounded = pow(ridge, 0.62) * 0.58;
+  float ridgeShape = mix(ridgeNeedle, ridgeRounded, smoothAmt);
   float chain = smoothstep(0.34, 0.66, fbm3D4(q * 0.35 + vec3(5.1, 17.7, 9.4)));
   float mountains = chain * mix(0.35, 1.0, bw.mountains)
                   * (1.0 - bw.desert * 0.85)
                   * (1.0 - bw.wetland);
-  h += pow(ridge, 1.35) * mountains * uRidge * 1.15;
+  h += ridgeShape * mountains * uRidge * mix(1.15, 0.82, smoothAmt);
 
   // layer 5: wetlands settle just above sea level
   float sea01 = uSeaLevel / max(uHeightScale, 1.0);
@@ -206,10 +210,23 @@ ${stackBody3D}
   return h * uAmplitude;
 }
 
+float smoothedStackHeight3D(vec3 dir) {
+  float h = stackHeight3D(dir);
+  float amt = clamp(uTerrainSmoothing, 0.0, 1.0);
+  if (amt <= 0.0001) return h;
+
+  float t = clamp(h / 1.35, 0.0, 1.0);
+  float peakStart = 0.42;
+  float peak = max(t - peakStart, 0.0);
+  float peakMask = smoothstep(peakStart, 0.72, t);
+  float compressed = peakStart + peak / (1.0 + amt * 3.2 * peak / (1.0 - peakStart));
+  return mix(h, compressed * 1.35, peakMask * amt);
+}
+
 // Radial terrain height (world units) for a unit direction — no board falloff
 // (a sphere has no edge).
 float heightAt3D(vec3 dir) {
-  float h = stackHeight3D(dir);
+  float h = smoothedStackHeight3D(dir);
   return clamp(h, 0.0, 1.35) * uHeightScale;
 }
 `;

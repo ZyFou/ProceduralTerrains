@@ -531,6 +531,7 @@ export function createTerrainUniforms() {
     uHeightScale:    { value: 420 },
     uSeaLevel:       { value: 42 },
     uAmplitude:      { value: 1.0 },
+    uTerrainSmoothing: { value: 0.0 },
     uPersistence:    { value: 0.5 },
     uLacunarity:     { value: 2.05 },
     uRidge:          { value: 0.65 },

@@ -19,6 +19,7 @@ export const DEFAULT_PARAMS = {
   // noise stack
   noiseScale: 45,          // feature scale (bigger = more features across board)
   noiseStrength: 1.0,
+  terrainSmoothing: 0.0,    // 0 = crisp terrain, 1 = rounded low-pass hills
   octaves: 7,
   persistence: 0.5,
   lacunarity: 2.05,
@@ -154,7 +155,7 @@ export const PRESETS = {
     noisePreset: 'cartoon',
     params: {
       heightScale: 260, seaLevel: 72, noiseScale: 72, noiseStrength: 0.72,
-      octaves: 4, persistence: 0.36, lacunarity: 1.85, ridge: 0.16, warp: 0.28,
+      terrainSmoothing: 0.28, octaves: 4, persistence: 0.36, lacunarity: 1.85, ridge: 0.16, warp: 0.28,
       falloff: 0.35, biomeScale: 0.7, moistScale: 0.8, snowLine: 0.82,
       normalStrength: 0.8, aoStrength: 0.35,
     },
@@ -167,7 +168,7 @@ export function applyPreset(params, presetKey) {
   const next = { ...params };
   // reset preset-controlled keys to defaults first so presets are absolute
   for (const key of [
-    'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
+    'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves',
     'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
     'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
     'normalStrength', 'aoStrength',

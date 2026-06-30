@@ -11,7 +11,7 @@ import { applyPlanetStyleToUniforms } from './PaletteUniforms.js';
 // ============================================================================
 
 const NOISE_KEYS = [
-  'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
+  'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves',
   'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
 ];

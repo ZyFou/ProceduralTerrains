@@ -11,6 +11,7 @@ const CONTROL_SCHEMA = [
   { section: 'NOISE' },
   { key: 'noiseScale', label: 'Noise Scale', min: 8, max: 160, step: 0.5, digits: 1 },
   { key: 'noiseStrength', label: 'Noise Strength', min: 0.1, max: 2, step: 0.01, digits: 2 },
+  { key: 'terrainSmoothing', label: 'Peak Smoothing', min: 0, max: 1, step: 0.01, digits: 2 },
   { key: 'octaves', label: 'Octaves', min: 1, max: 9, step: 1 },
   { key: 'persistence', label: 'Persistence', min: 0.15, max: 0.85, step: 0.01, digits: 2 },
   { key: 'lacunarity', label: 'Lacunarity', min: 1.5, max: 3.5, step: 0.01, digits: 2 },

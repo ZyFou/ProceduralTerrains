@@ -13,6 +13,7 @@ uniform float uFrequency;      // base noise frequency (1/world units)
 uniform float uHeightScale;    // world-space height of h01 == 1.0
 uniform float uSeaLevel;       // world-space water height
 uniform float uAmplitude;      // overall noise strength multiplier
+uniform float uTerrainSmoothing; // spatial low-pass blend for rounded hills
 uniform float uPersistence;    // FBM gain
 uniform float uLacunarity;     // FBM frequency multiplier
 uniform float uRidge;          // ridged-mountain intensity
@@ -333,11 +334,15 @@ float legacyShape2D(vec2 xz, Climate c) {
   // layer 4: ridged mountain chains — chain noise picks WHERE within a
   // mountain-friendly climate; deserts and wetlands suppress them
   float ridge = ridgedFBM(q * 1.7 + vec2(31.4, 27.2));
+  float smoothAmt = clamp(uTerrainSmoothing, 0.0, 1.0);
+  float ridgeNeedle = pow(ridge, 1.35);
+  float ridgeRounded = pow(ridge, 0.62) * 0.58;
+  float ridgeShape = mix(ridgeNeedle, ridgeRounded, smoothAmt);
   float chain = smoothstep(0.34, 0.66, fbm4(q * 0.35 + vec2(5.1, 17.7)));
   float mountains = chain * mix(0.35, 1.0, bw.mountains)
                   * (1.0 - bw.desert * 0.85)
                   * (1.0 - bw.wetland);
-  h += pow(ridge, 1.35) * mountains * uRidge * 1.15;
+  h += ridgeShape * mountains * uRidge * mix(1.15, 0.82, smoothAmt);
 
   // layer 5: wetlands settle just above sea level (after amplitude so they
   // land at the true water line)
@@ -360,9 +365,22 @@ ${stackBody2D}
   return h * uAmplitude;
 }
 
+float smoothedStackHeight2D(vec2 xz, Climate c) {
+  float h = stackHeight2D(xz, c);
+  float amt = clamp(uTerrainSmoothing, 0.0, 1.0);
+  if (amt <= 0.0001) return h;
+
+  float t = clamp(h / 1.35, 0.0, 1.0);
+  float peakStart = 0.42;
+  float peak = max(t - peakStart, 0.0);
+  float peakMask = smoothstep(peakStart, 0.72, t);
+  float compressed = peakStart + peak / (1.0 + amt * 3.2 * peak / (1.0 - peakStart));
+  return mix(h, compressed * 1.35, peakMask * amt);
+}
+
 // Finalize: island falloff (studio board only) + clamp + world height scale.
 float shapeHeight(vec2 xz, Climate c) {
-  float proceduralH = stackHeight2D(xz, c);
+  float proceduralH = smoothedStackHeight2D(xz, c);
   float h = proceduralH;
 #ifndef INFINITE_MODE
   if (uImportNoiseMode > 1.5) {

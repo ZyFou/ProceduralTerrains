@@ -11,7 +11,7 @@ export const NOISE_PRESETS = {
   smooth: {
     label: 'Smooth Rolling',
     params: {
-      ridge: 0.18, warp: 0.6, persistence: 0.42, lacunarity: 2.0,
+      terrainSmoothing: 0.45, ridge: 0.18, warp: 0.6, persistence: 0.42, lacunarity: 2.0,
       noiseStrength: 0.85, falloff: 0.4,
     },
   },
@@ -61,7 +61,7 @@ export const NOISE_PRESETS = {
   cartoon: {
     label: 'Simple Cartoon',
     params: {
-      ridge: 0.16, warp: 0.28, persistence: 0.36, lacunarity: 1.85,
+      terrainSmoothing: 0.28, ridge: 0.16, warp: 0.28, persistence: 0.36, lacunarity: 1.85,
       noiseStrength: 0.72, noiseScale: 72, octaves: 4, heightScale: 260,
       falloff: 0.35, biomeScale: 0.7, moistScale: 0.8, snowLine: 0.82,
       normalStrength: 0.8, aoStrength: 0.35,
@@ -70,7 +70,7 @@ export const NOISE_PRESETS = {
   flat: {
     label: 'Low Relief',
     params: {
-      ridge: 0.05, warp: 0.3, persistence: 0.35, noiseStrength: 0.6,
+      terrainSmoothing: 0.35, ridge: 0.05, warp: 0.3, persistence: 0.35, noiseStrength: 0.6,
       heightScale: 120, falloff: 0.2,
     },
   },

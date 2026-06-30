@@ -617,6 +617,7 @@ export default function App() {
       case 'terrain.seaLevel': return num(params.seaLevel, 0, ' m');
       case 'terrain.noiseScale': return num(params.noiseScale, 1);
       case 'terrain.noiseStrength': return num(params.noiseStrength, 2);
+      case 'terrain.terrainSmoothing': return num(params.terrainSmoothing, 2);
       case 'terrain.octaves': return String(params.octaves);
       case 'terrain.persistence': return num(params.persistence, 2);
       case 'terrain.lacunarity': return num(params.lacunarity, 2);

@@ -33,6 +33,11 @@ export const NOISE_SLIDERS = [
     icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M8 2v12M5 5l3-3 3 3" stroke="currentColor" strokeWidth="1.2" /></svg>),
   },
   {
+    key: 'terrainSmoothing', label: 'Peak Smoothing', min: 0, max: 1, step: 0.01, digits: 2,
+    info: 'Rounds only high, pointy peaks while leaving low hills, shores and broad terrain mostly unchanged',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M1.5 11.5c2-4.5 4-6 6-2.5 1.9 3.2 4.1 2.2 7-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>),
+  },
+  {
     key: 'octaves', label: 'Octaves', min: 1, max: 9, step: 1,
     info: 'Number of layered noise detail passes (higher = more detailed but slower)',
     icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M2 12h12M2 8h12M2 4h12" stroke="currentColor" strokeWidth="1.2" /></svg>),

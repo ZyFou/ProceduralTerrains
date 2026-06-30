@@ -112,7 +112,7 @@ function yieldTask() {
 // off). Everything else (debug toggles, sun, fog…) always applies instantly.
 const SHAPE_KEYS = new Set([
   'seed', 'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
-  'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
+  'terrainSmoothing', 'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
   'chunkCount', 'chunkSize', 'planetFaceGrid',
 ]);
@@ -1741,6 +1741,7 @@ export class Engine {
     u.uHeightScale.value = p.heightScale;
     u.uSeaLevel.value = p.seaLevel;
     u.uAmplitude.value = p.noiseStrength;
+    u.uTerrainSmoothing.value = p.terrainSmoothing ?? 0;
     u.uPersistence.value = p.persistence;
     u.uLacunarity.value = p.lacunarity;
     u.uRidge.value = p.ridge;

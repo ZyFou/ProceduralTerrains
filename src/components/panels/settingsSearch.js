@@ -28,6 +28,7 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.seaLevel', label: 'Sea Level', keywords: 'water ocean coast shoreline sea' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.noiseScale', label: 'Noise Scale', keywords: 'height noise detail fractal terrain' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.noiseStrength', label: 'Noise Strength', keywords: 'height noise amplitude terrain' },
+  { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.terrainSmoothing', label: 'Peak Smoothing', keywords: 'height noise smooth smoothing rounded round hills peaks pointy spike spiky realistic terrain' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.octaves', label: 'Octaves', keywords: 'height noise detail fbm terrain' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.persistence', label: 'Persistence', keywords: 'height noise roughness fbm' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.lacunarity', label: 'Lacunarity', keywords: 'height noise frequency fbm' },

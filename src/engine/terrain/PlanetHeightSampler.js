@@ -185,10 +185,28 @@ export class PlanetHeightSampler {
   /** Terrain height (world units) above the base radius, for a unit direction. */
   heightAt3D(dx, dy, dz) {
     const u = this.u;
-    const h = (this.stack && !isLegacyStack(this.stack))
+    const h = this._smoothedStackHeightAt3D(dx, dy, dz);
+    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+  }
+
+  _rawStackHeightAt3D(dx, dy, dz) {
+    const u = this.u;
+    return (this.stack && !isLegacyStack(this.stack))
       ? evalStack3D(this.stack, dx, dy, dz, this._ctx())
       : f(this._legacyShape3D(dx, dy, dz) * f(u.uAmplitude.value));
-    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+  }
+
+  _smoothedStackHeightAt3D(dx, dy, dz) {
+    const h = this._rawStackHeightAt3D(dx, dy, dz);
+    const amt = clamp(f(this.u.uTerrainSmoothing?.value ?? 0), 0, 1);
+    if (amt <= 0.0001) return h;
+
+    const t = clamp(f(h / 1.35), 0, 1);
+    const peakStart = 0.42;
+    const peak = Math.max(f(t - peakStart), 0);
+    const peakMask = smoothstep32(peakStart, 0.72, t);
+    const compressed = f(peakStart + f(peak / f(1 + f(f(f(amt * 3.2) * peak) / f(1 - peakStart)))));
+    return mix32(h, f(compressed * 1.35), f(peakMask * amt));
   }
 
   /** Legacy biome-coupled recipe (layers 1-6), h in ~0..1.35 (pre scale). */
@@ -222,9 +240,13 @@ export class PlanetHeightSampler {
 
     // layer 4: ridged mountain chains
     const ridge = this._ridgedFBM3D(f(f(qx * 1.7) + 31.4), f(f(qy * 1.7) + 27.2), f(f(qz * 1.7) + 11.9), oct);
+    const smoothAmt = clamp(f(u.uTerrainSmoothing?.value ?? 0), 0, 1);
+    const ridgeNeedle = f(Math.pow(ridge, 1.35));
+    const ridgeRounded = f(f(Math.pow(ridge, 0.62)) * 0.58);
+    const ridgeShape = mix32(ridgeNeedle, ridgeRounded, smoothAmt);
     const chain = smoothstep32(0.34, 0.66, this._fbm3D4(f(f(qx * 0.35) + 5.1), f(f(qy * 0.35) + 17.7), f(f(qz * 0.35) + 9.4)));
     const mountains = f(f(f(chain * mix32(0.35, 1.0, bw.mountains)) * f(1 - f(bw.desert * 0.85))) * f(1 - bw.wetland));
-    h = f(h + f(f(f(Math.pow(ridge, 1.35)) * mountains) * f(f(u.uRidge.value) * 1.15)));
+    h = f(h + f(f(f(ridgeShape * mountains) * f(u.uRidge.value)) * mix32(1.15, 0.82, smoothAmt)));
 
     // layer 5: wetlands settle just above sea level
     const sea01 = f(f(u.uSeaLevel.value) / Math.max(f(u.uHeightScale.value), 1));
