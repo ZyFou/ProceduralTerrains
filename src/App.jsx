@@ -797,6 +797,8 @@ export default function App() {
     setSettingsTarget({
       panelId: item.panelId,
       tabId: item.tabId ?? null,
+      subTabId: item.subTabId ?? null,
+      perfTabId: item.perfTabId ?? null,
       sectionLabel: item.sectionLabel ?? null,
       settingId: item.settingId,
       label: item.label,

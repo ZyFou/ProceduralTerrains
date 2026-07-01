@@ -7,7 +7,7 @@ import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
 import ControlSection from '../ui/ControlSection.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
-import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, RENDER_SLIDERS, InfoDot } from './defs.jsx';
+import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, InfoDot } from './defs.jsx';
 import { PRESETS } from '../../engine/presets.js';
 import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
 import { EROSION_PRESETS, EROSION_QUALITY } from '../../engine/terrain/erosion/ErosionPresets.js';
@@ -23,7 +23,7 @@ import EnvironmentPanelInner from '../ui/EnvironmentPanel.jsx';
 import PerformanceStats from '../ui/PerformancePanel.jsx';
 import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
 import { LodPanel, CameraPanel } from '../RightPanels.jsx';
-import PerfSettings from './PerfSettings.jsx';
+import PerfSettings, { SurfacePropertiesSettings } from './PerfSettings.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
@@ -49,7 +49,7 @@ export const PANEL_META = {
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
   lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
-  performance: { label: 'Performance', title: 'Performance', desc: 'Quality, LOD and budgets.', icon: PANEL_ICONS.performance },
+  performance: { label: 'Performance', title: 'Performance', desc: 'GPU, water, fog and cloud budgets.', icon: PANEL_ICONS.performance },
   debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
 };
 
@@ -164,11 +164,7 @@ function TerrainPanel({ ctx }) {
         </>
       )}
       {tab === 'surface' && (
-        <>
-          {RENDER_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`terrain.${def.key}`} />
-          ))}
-        </>
+        <SurfacePropertiesSettings perf={ctx.perf} onPerfSetting={ctx.onPerfSetting} />
       )}
       {onErosionTab && <ErosionTabContent ctx={ctx} erosion={erosion} />}
       {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
@@ -512,7 +508,7 @@ function VisualsPanel({ ctx }) {
 
 function PerformancePanel({ ctx }) {
   return (
-    <SidePanel title="Performance" description="Quality, LOD and budgets." onClose={ctx.onClose}>
+    <SidePanel title="Performance" description="GPU, water, fog and cloud budgets." onClose={ctx.onClose}>
       <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
       <PerfSettings perf={ctx.perf} rendererInfo={ctx.rendererInfo} onPerfPreset={ctx.onPerfPreset}
         onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset}

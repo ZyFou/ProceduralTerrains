@@ -1,8 +1,10 @@
-import ControlSection from './ControlSection.jsx';
+import { useEffect, useState } from 'react';
+import { PanelTabs } from '../panels/SidePanel.jsx';
 import PanelResetButton from './PanelResetButton.jsx';
 import { SliderCtl, ToggleRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
 import { VISUAL_DEFAULT_PARAMS } from '../../engine/render/VisualSettings.js';
+import { RENDER_SLIDERS } from '../panels/defs.jsx';
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 
@@ -37,6 +39,13 @@ const SHORE_SLIDERS = [
   slider('visualsShallowWaterSoftness', 'Shallow Water Softness', 0, 1, 0.02, { digits: 2 }),
 ];
 
+const VISUALS_TABS = [
+  { id: 'post', label: 'Post FX' },
+  { id: 'sky', label: 'HDR Sky' },
+  { id: 'terrain', label: 'Terrain Surface' },
+  { id: 'shoreline', label: 'Shoreline' },
+];
+
 function val(params, key) {
   return params[key] ?? VISUAL_DEFAULT_PARAMS[key];
 }
@@ -54,42 +63,59 @@ function SliderList({ items, params, onParam }) {
 }
 
 export default function VisualsPanel({ ctx }) {
-  const { params, onParam } = ctx;
+  const { params, onParam, settingsTarget } = ctx;
   const tint = val(params, 'visualsAtmosphereTint');
+  const [tab, setTab] = useState('post');
+
+  useEffect(() => {
+    const targetTab = settingsTarget?.panelId === 'visuals' ? settingsTarget?.tabId : null;
+    if (targetTab && targetTab !== tab) setTab(targetTab);
+  }, [settingsTarget, tab]);
 
   return (
     <>
-      <ControlSection id="visuals-post" title="Post FX" defaultOpen settingId="visuals.section.post">
-        <ToggleRow
-          label="Post Processing"
-          value={val(params, 'visualsPostEnabled') !== false}
-          onChange={(v) => onParam('visualsPostEnabled', v)}
-          settingId="visuals.visualsPostEnabled"
-          info="Tile-mode color grading, bloom, vignette, and sun rays."
-        />
-        <SliderList items={POST_SLIDERS} params={params} onParam={onParam} />
-      </ControlSection>
+      <PanelTabs active={tab} onChange={setTab} tabs={VISUALS_TABS} />
 
-      <ControlSection id="visuals-hdr-sky" title="HDR Sky" defaultOpen settingId="visuals.section.sky">
-        <SliderList items={SKY_SLIDERS} params={params} onParam={onParam} />
-        <div className="color-field" data-setting-id="visuals.visualsAtmosphereTint">
-          <div className="label-with-icon" data-tooltip="Tint applied to the procedural sky environment.">
-            <span className="setting-label">Atmosphere Tint</span>
-          </div>
-          <ColorInput
-            value={colorToHex(tint)}
-            onChange={(v) => onParam('visualsAtmosphereTint', parseColor(v))}
+      {tab === 'post' && (
+        <>
+          <ToggleRow
+            label="Post Processing"
+            value={val(params, 'visualsPostEnabled') !== false}
+            onChange={(v) => onParam('visualsPostEnabled', v)}
+            settingId="visuals.visualsPostEnabled"
+            info="Tile-mode color grading, bloom, vignette, and sun rays."
           />
-        </div>
-      </ControlSection>
+          <SliderList items={POST_SLIDERS} params={params} onParam={onParam} />
+        </>
+      )}
 
-      <ControlSection id="visuals-terrain" title="Terrain Surface" defaultOpen settingId="visuals.section.terrain">
-        <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} />
-      </ControlSection>
+      {tab === 'sky' && (
+        <>
+          <SliderList items={SKY_SLIDERS} params={params} onParam={onParam} />
+          <div className="color-field" data-setting-id="visuals.visualsAtmosphereTint">
+            <div className="label-with-icon" data-tooltip="Tint applied to the procedural sky environment.">
+              <span className="setting-label">Atmosphere Tint</span>
+            </div>
+            <ColorInput
+              value={colorToHex(tint)}
+              onChange={(v) => onParam('visualsAtmosphereTint', parseColor(v))}
+            />
+          </div>
+        </>
+      )}
 
-      <ControlSection id="visuals-shoreline" title="Shoreline" defaultOpen={false} settingId="visuals.section.shoreline">
+      {tab === 'terrain' && (
+        <>
+          <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} />
+          {RENDER_SLIDERS.map((def) => (
+            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`visuals.${def.key}`} />
+          ))}
+        </>
+      )}
+
+      {tab === 'shoreline' && (
         <SliderList items={SHORE_SLIDERS} params={params} onParam={onParam} />
-      </ControlSection>
+      )}
 
       <PanelResetButton label="Reset Visual Settings" onClick={() => ctx.onResetPanel?.('visuals')} settingId="visuals.reset" />
     </>

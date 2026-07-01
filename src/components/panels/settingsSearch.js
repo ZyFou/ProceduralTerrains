@@ -35,8 +35,6 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.ridge', label: 'Ridge Intensity', keywords: 'height noise ridge mountain alpine' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.warp', label: 'Domain Warp', keywords: 'height noise warp fold distortion' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.falloff', label: 'Edge Falloff Width', keywords: 'height coast island edge falloff' },
-  { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.normalStrength', label: 'Normal Strength', keywords: 'surface shading detail normals' },
-  { panelId: 'terrain', tabId: 'surface', sectionLabel: 'Surface', settingId: 'terrain.aoStrength', label: 'Ambient Occlusion', keywords: 'surface shading crevice darkening' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.heightMap', label: 'Height Map', keywords: 'height import replace blend map' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.noiseMap', label: 'Noise Map', keywords: 'noise import replace blend map' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.biomeMap', label: 'Biome Map', keywords: 'biome import replace blend map' },
@@ -72,7 +70,7 @@ const SETTINGS_INDEX = [
   { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.paletteSaturation', label: 'Saturation', keywords: 'palette color tuning contrast' },
   { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.paletteContrast', label: 'Contrast', keywords: 'palette color tuning contrast' },
 
-  // Performance
+  // Performance (standalone panel — GPU/renderer, global preset, LOD, streaming, water, fog, clouds)
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.preset', label: 'Preset', keywords: 'quality profile performance' },
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.rendererBackend', label: 'Renderer Backend', keywords: 'gpu renderer backend webgl webgpu auto graphics' },
   { panelId: 'performance', tabId: 'overview', settingId: 'performance.gpuPreference', label: 'GPU Preference', keywords: 'gpu power preference high performance low power dedicated battery' },
@@ -88,17 +86,8 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'lod', settingId: 'performance.terrainMacroProxy', label: 'Full Board Merge', keywords: 'macro proxy single mesh whole tile board zoom out extreme distance far root fold' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.viewRadius', label: 'Chunk Load Radius', keywords: 'streaming load radius chunks' },
   { panelId: 'performance', tabId: 'streaming', settingId: 'performance.maxCreatesPerFrame', label: 'Chunk Builds / Frame', keywords: 'streaming tile new cells chunk create spawn budget instant disable throttle' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailOpacity', label: 'Detail Opacity', keywords: 'terrain detail opacity master mix amount overall fade blend' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailStrength', label: 'Detail Strength', keywords: 'terrain albedo biome close detail' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailNormal', label: 'Detail Normal Strength', keywords: 'terrain normal lighting bump close material' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainMicroDetail', label: 'Micro Detail', keywords: 'terrain micro grain speckle crisp close up high frequency' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainMacroVariation', label: 'Macro Variation', keywords: 'terrain macro variation weathering patches biome breakup large scale' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainDetailFar', label: 'Distance Detail Fade', keywords: 'terrain detail fade near far distance' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainRockSlope', label: 'Rock Slope Blend', keywords: 'terrain slope rock cliff blend triplanar' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainTriplanar', label: 'Triplanar Detail', keywords: 'terrain cliff projection stretching triplanar' },
-  { panelId: 'performance', tabId: 'terrain', settingId: 'performance.terrainShoreRange', label: 'Shoreline Detail', keywords: 'terrain shore wet sand mud coastline water edge' },
+  { panelId: 'performance', tabId: 'streaming', settingId: 'performance.triangleBudget', label: 'Triangle Budget', keywords: 'triangles limit budget mesh streaming' },
+  { panelId: 'performance', tabId: 'streaming', settingId: 'performance.cullingAggressiveness', label: 'Culling Aggressiveness', keywords: 'frustum behind camera cull streaming' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterQuality', label: 'Water Quality', keywords: 'water quality reflection detail' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterReflection', label: 'Water Reflection', keywords: 'water specular reflection' },
   { panelId: 'performance', tabId: 'water', settingId: 'performance.waterDetail', label: 'Water Detail', keywords: 'water ripple detail' },
@@ -111,6 +100,19 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudOctaves', label: 'Base Noise Octaves', keywords: 'cloud noise octaves' },
   { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudDetailOctaves', label: 'Detail Noise Octaves', keywords: 'cloud noise detail octaves' },
   { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudMaxDistance', label: 'Max Distance', keywords: 'cloud distance visibility culling' },
+
+  // Terrain > Surface > Properties (terrain material / texture render controls)
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailOpacity', label: 'Detail Opacity', keywords: 'terrain detail opacity master mix amount overall fade blend properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailStrength', label: 'Detail Strength', keywords: 'terrain albedo biome close detail properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailNormal', label: 'Detail Normal Strength', keywords: 'terrain normal lighting bump close material properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainMicroDetail', label: 'Micro Detail', keywords: 'terrain micro grain speckle crisp close up high frequency properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainMacroVariation', label: 'Macro Variation', keywords: 'terrain macro variation weathering patches biome breakup large scale properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailFar', label: 'Distance Detail Fade', keywords: 'terrain detail fade near far distance properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainRockSlope', label: 'Rock Slope Blend', keywords: 'terrain slope rock cliff blend triplanar properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainTriplanar', label: 'Triplanar Detail', keywords: 'terrain cliff projection stretching triplanar properties' },
+  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainShoreRange', label: 'Shoreline Detail', keywords: 'terrain shore wet sand mud coastline water edge properties' },
 
   // Sky / lighting
   { panelId: 'skybox', settingId: 'skybox.timeOfDay', label: 'Time of Day', keywords: 'sun sky day night time' },
@@ -128,16 +130,18 @@ const SETTINGS_INDEX = [
   { panelId: 'lighting', settingId: 'lighting.groundBounce', label: 'Ground Bounce', keywords: 'bounce lighting shadow' },
 
   // Visuals
-  { panelId: 'visuals', settingId: 'visuals.visualsPostEnabled', label: 'Post Processing', keywords: 'visuals post processing effects bloom vignette exposure contrast saturation' },
-  { panelId: 'visuals', settingId: 'visuals.visualsExposure', label: 'Exposure', keywords: 'visuals post exposure brightness hdr' },
-  { panelId: 'visuals', settingId: 'visuals.visualsBloomStrength', label: 'Bloom Strength', keywords: 'visuals bloom glow post bright highlights' },
-  { panelId: 'visuals', settingId: 'visuals.visualsSunRaysStrength', label: 'Sun Rays', keywords: 'visuals sun rays god rays shafts post' },
-  { panelId: 'visuals', settingId: 'visuals.visualsSkyIntensity', label: 'HDR Sky Intensity', keywords: 'visuals hdri hdr sky environment intensity' },
-  { panelId: 'visuals', settingId: 'visuals.visualsSunGlow', label: 'Sun Glow', keywords: 'visuals sky sun glow hdr' },
-  { panelId: 'visuals', settingId: 'visuals.visualsAtmosphereTint', label: 'Atmosphere Tint', keywords: 'visuals sky atmosphere tint hdr color' },
-  { panelId: 'visuals', settingId: 'visuals.visualsTerrainHeightDetail', label: 'Detail Height', keywords: 'visuals terrain height detail normals bump surface texture' },
-  { panelId: 'visuals', settingId: 'visuals.visualsWetShoreStrength', label: 'Wet Shore Strength', keywords: 'visuals shoreline wet sand terrain shore' },
-  { panelId: 'visuals', settingId: 'visuals.visualsFoamBreakup', label: 'Foam Breakup', keywords: 'visuals shoreline foam water coast breakup' },
+  { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsPostEnabled', label: 'Post Processing', keywords: 'visuals post processing effects bloom vignette exposure contrast saturation' },
+  { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsExposure', label: 'Exposure', keywords: 'visuals post exposure brightness hdr' },
+  { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsBloomStrength', label: 'Bloom Strength', keywords: 'visuals bloom glow post bright highlights' },
+  { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsSunRaysStrength', label: 'Sun Rays', keywords: 'visuals sun rays god rays shafts post' },
+  { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsSkyIntensity', label: 'HDR Sky Intensity', keywords: 'visuals hdri hdr sky environment intensity' },
+  { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsSunGlow', label: 'Sun Glow', keywords: 'visuals sky sun glow hdr' },
+  { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsAtmosphereTint', label: 'Atmosphere Tint', keywords: 'visuals sky atmosphere tint hdr color' },
+  { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.visualsTerrainHeightDetail', label: 'Detail Height', keywords: 'visuals terrain height detail normals bump surface texture' },
+  { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.visualsWetShoreStrength', label: 'Wet Shore Strength', keywords: 'visuals shoreline wet sand terrain shore' },
+  { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.normalStrength', label: 'Normal Strength', keywords: 'surface shading detail normals terrain' },
+  { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.aoStrength', label: 'Ambient Occlusion', keywords: 'surface shading crevice darkening terrain' },
+  { panelId: 'visuals', tabId: 'shoreline', settingId: 'visuals.visualsFoamBreakup', label: 'Foam Breakup', keywords: 'visuals shoreline foam water coast breakup' },
 
   // Clouds / props / debug / export
   { panelId: 'clouds', sectionLabel: 'Shape', settingId: 'clouds.cloudCoverage', label: 'Coverage', keywords: 'cloud density cover sky shape' },
@@ -188,12 +192,6 @@ const SECTION_INDEX = [
   // Skybox
   { panelId: 'skybox', sectionLabel: 'Time of Day', settingId: 'skybox.section.time', label: 'Time of Day', keywords: 'sky time day night sun', isSection: true },
   { panelId: 'skybox', sectionLabel: 'Appearance', settingId: 'skybox.section.appearance', label: 'Appearance', keywords: 'sky brightness haze stars appearance', isSection: true },
-
-  // Visuals
-  { panelId: 'visuals', sectionLabel: 'Post FX', settingId: 'visuals.section.post', label: 'Post FX', keywords: 'visuals post processing bloom vignette sun rays exposure contrast', isSection: true },
-  { panelId: 'visuals', sectionLabel: 'HDR Sky', settingId: 'visuals.section.sky', label: 'HDR Sky', keywords: 'visuals hdri hdr sky environment sun glow horizon tint', isSection: true },
-  { panelId: 'visuals', sectionLabel: 'Terrain Surface', settingId: 'visuals.section.terrain', label: 'Terrain Surface', keywords: 'visuals terrain surface detail height normals colors rock soil sand', isSection: true },
-  { panelId: 'visuals', sectionLabel: 'Shoreline', settingId: 'visuals.section.shoreline', label: 'Shoreline', keywords: 'visuals shoreline shore foam wet sand shallow water coast', isSection: true },
 
   // Props
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.section.distribution', label: 'Distribution', keywords: 'props grass flowers rocks density distribution', isSection: true },
