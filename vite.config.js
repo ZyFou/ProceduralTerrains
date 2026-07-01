@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import surfaceMaterialsApi from './vite-plugins/surfaceMaterialsApi.js';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), surfaceMaterialsApi()],
   server: {
     port: 6061,
     strictPort: false,  // allow port shifting if 6061 is in use

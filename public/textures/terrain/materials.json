@@ -1,0 +1,159 @@
+{
+  "version": 2,
+  "mapSlots": [
+    "diffuse",
+    "displacement",
+    "normalDX",
+    "roughness",
+    "ao"
+  ],
+  "materials": [
+    {
+      "id": "grass",
+      "name": "Grass",
+      "folder": "grass",
+      "maps": {
+        "diffuse": "grass_diffuse.jpg",
+        "displacement": "grass_displacement.exr",
+        "normalDX": "grass_normal_dx.jpg",
+        "roughness": "grass_roughness.jpg",
+        "ao": "grass_ao.jpg"
+      },
+      "tiling": 12,
+      "normalStrength": 1,
+      "displacementStrength": 0.12,
+      "roughness": 0.85,
+      "biomes": [
+        "forest",
+        "grassland",
+        "plains"
+      ]
+    },
+    {
+      "id": "rock",
+      "name": "Rock",
+      "folder": "rock",
+      "maps": {
+        "diffuse": "rock_diffuse.jpg",
+        "displacement": "rock_displacement.exr",
+        "normalDX": "rock_normal_dx.jpg",
+        "roughness": "rock_roughness.jpg",
+        "ao": "rock_ao.jpg"
+      },
+      "tiling": 6,
+      "normalStrength": 1.3,
+      "displacementStrength": 0.35,
+      "roughness": 0.75,
+      "biomes": [
+        "mountains",
+        "rocky",
+        "canyon"
+      ]
+    },
+    {
+      "id": "sand",
+      "name": "Sand",
+      "folder": "sand",
+      "maps": {
+        "diffuse": "sand_diffuse.jpg",
+        "displacement": "sand_displacement.exr",
+        "normalDX": "sand_normal_dx.jpg",
+        "roughness": "sand_roughness.jpg",
+        "ao": "sand_ao.jpg"
+      },
+      "tiling": 18,
+      "normalStrength": 0.6,
+      "displacementStrength": 0.08,
+      "roughness": 0.9,
+      "biomes": [
+        "desert",
+        "dunes",
+        "beach"
+      ]
+    },
+    {
+      "id": "snow",
+      "name": "Snow",
+      "folder": "snow",
+      "maps": {
+        "diffuse": "snow_diffuse.jpg",
+        "displacement": "snow_displacement.exr",
+        "normalDX": "snow_normal_dx.jpg",
+        "roughness": "snow_roughness.jpg",
+        "ao": "snow_ao.jpg"
+      },
+      "tiling": 10,
+      "normalStrength": 0.5,
+      "displacementStrength": 0.05,
+      "roughness": 0.35,
+      "biomes": [
+        "snow",
+        "tundra",
+        "alpine"
+      ]
+    },
+    {
+      "id": "mud",
+      "name": "Mud",
+      "folder": "mud",
+      "maps": {
+        "diffuse": "mud_diffuse.jpg",
+        "displacement": "mud_displacement.exr",
+        "normalDX": "mud_normal_dx.jpg",
+        "roughness": "mud_roughness.jpg",
+        "ao": "mud_ao.jpg"
+      },
+      "tiling": 8,
+      "normalStrength": 0.8,
+      "displacementStrength": 0.1,
+      "roughness": 0.6,
+      "biomes": [
+        "swamp",
+        "wetland",
+        "marsh"
+      ]
+    },
+    {
+      "id": "volcanic",
+      "name": "Volcanic",
+      "folder": "volcanic",
+      "maps": {
+        "diffuse": "volcanic_diffuse.jpg",
+        "displacement": "volcanic_displacement.exr",
+        "normalDX": "volcanic_normal_dx.jpg",
+        "roughness": "volcanic_roughness.jpg",
+        "ao": "volcanic_ao.jpg"
+      },
+      "tiling": 8,
+      "normalStrength": 1.4,
+      "displacementStrength": 0.4,
+      "roughness": 0.55,
+      "biomes": [
+        "volcanic",
+        "lava",
+        "ash"
+      ]
+    },
+    {
+      "id": "alien",
+      "name": "Alien",
+      "folder": "alien",
+      "maps": {
+        "diffuse": "alien_diffuse.jpg",
+        "displacement": "alien_displacement.exr",
+        "normalDX": "alien_normal_dx.jpg",
+        "roughness": "alien_roughness.jpg",
+        "ao": "alien_ao.jpg"
+      },
+      "tiling": 10,
+      "normalStrength": 1,
+      "displacementStrength": 0.2,
+      "roughness": 0.5,
+      "biomes": [
+        "alien",
+        "exotic",
+        "otherworldly"
+      ]
+    }
+  ]
+}

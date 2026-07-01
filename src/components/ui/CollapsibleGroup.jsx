@@ -7,6 +7,7 @@ export default function CollapsibleGroup({
   forceOpen = false,
   statusDot,
   settingId,
+  onToggle,
   children,
 }) {
   return (
@@ -17,6 +18,7 @@ export default function CollapsibleGroup({
       forceOpen={forceOpen}
       statusDot={statusDot}
       settingId={settingId}
+      onToggle={onToggle}
     >
       {children}
     </ControlSection>

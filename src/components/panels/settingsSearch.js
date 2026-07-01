@@ -102,17 +102,17 @@ const SETTINGS_INDEX = [
   { panelId: 'performance', tabId: 'clouds', settingId: 'performance.cloudMaxDistance', label: 'Max Distance', keywords: 'cloud distance visibility culling' },
 
   // Terrain > Surface > Properties (terrain material / texture render controls)
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailOpacity', label: 'Detail Opacity', keywords: 'terrain detail opacity master mix amount overall fade blend properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailStrength', label: 'Detail Strength', keywords: 'terrain albedo biome close detail properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailNormal', label: 'Detail Normal Strength', keywords: 'terrain normal lighting bump close material properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainMicroDetail', label: 'Micro Detail', keywords: 'terrain micro grain speckle crisp close up high frequency properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainMacroVariation', label: 'Macro Variation', keywords: 'terrain macro variation weathering patches biome breakup large scale properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainDetailFar', label: 'Distance Detail Fade', keywords: 'terrain detail fade near far distance properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainRockSlope', label: 'Rock Slope Blend', keywords: 'terrain slope rock cliff blend triplanar properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainTriplanar', label: 'Triplanar Detail', keywords: 'terrain cliff projection stretching triplanar properties' },
-  { panelId: 'terrain', tabId: 'surface', settingId: 'performance.terrainShoreRange', label: 'Shoreline Detail', keywords: 'terrain shore wet sand mud coastline water edge properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailQuality', label: 'Terrain Detail Quality', keywords: 'terrain material texture detail walk first person close properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailOpacity', label: 'Detail Opacity', keywords: 'terrain detail opacity master mix amount overall fade blend properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailScale', label: 'Detail Texture Scale', keywords: 'terrain noise texture scale grain world space properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailStrength', label: 'Detail Strength', keywords: 'terrain albedo biome close detail properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailNormal', label: 'Detail Normal Strength', keywords: 'terrain normal lighting bump close material properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainMicroDetail', label: 'Micro Detail', keywords: 'terrain micro grain speckle crisp close up high frequency properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainMacroVariation', label: 'Macro Variation', keywords: 'terrain macro variation weathering patches biome breakup large scale properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainDetailFar', label: 'Distance Detail Fade', keywords: 'terrain detail fade near far distance properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainRockSlope', label: 'Rock Slope Blend', keywords: 'terrain slope rock cliff blend triplanar properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainTriplanar', label: 'Triplanar Detail', keywords: 'terrain cliff projection stretching triplanar properties' },
+  { panelId: 'terrain', tabId: 'surface', subTabId: 'general', settingId: 'performance.terrainShoreRange', label: 'Shoreline Detail', keywords: 'terrain shore wet sand mud coastline water edge properties' },
 
   // Sky / lighting
   { panelId: 'skybox', settingId: 'skybox.timeOfDay', label: 'Time of Day', keywords: 'sun sky day night time' },

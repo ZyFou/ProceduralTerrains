@@ -4223,3 +4223,137 @@ input[type="color"].palette-color-input {
   .perf-hero-metrics { flex-direction: column; }
   .perf-hero-fps { align-self: flex-start; }
 }
+
+/* Surface Library (Terrain > Surface > Textures) */
+.surface-library { margin-top: 4px; }
+.surface-material-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.surface-preview-sphere {
+  flex: none;
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  border: 1px solid var(--border-subtle);
+  cursor: grab;
+  touch-action: none;
+}
+.surface-preview-sphere:active { cursor: grabbing; }
+.surface-material-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.surface-variant-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.surface-variant-pill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-control);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: var(--cursor-pointer);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.surface-variant-pill:hover { border-color: var(--accent); color: var(--text-main); }
+.surface-variant-pill.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.surface-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.surface-slot-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.surface-slot-row:last-child { border-bottom: none; }
+.surface-slot-label { font-size: 12px; color: var(--text-main); }
+.surface-slot-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.surface-slot-status-ok { color: var(--success); background: rgba(34, 197, 94, 0.12); }
+.surface-slot-status-missing { color: var(--text-dim); background: var(--bg-control); }
+.surface-slot-status-custom { color: var(--accent); background: var(--accent-bg); }
+.surface-slot-status-checking { color: var(--text-dim); background: transparent; }
+.surface-slot-picker {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 0;
+}
+.surface-slot-picker .file-picker-btn {
+  width: auto;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.surface-slot-reset { flex: none; width: 28px; padding: 0; }
+.surface-variant-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-style: dashed;
+}
+.surface-add-variant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.surface-add-variant-input {
+  flex: 1;
+  min-width: 90px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-control);
+  color: var(--text-main);
+  font-family: var(--font);
+  font-size: 11px;
+}
+.surface-add-variant .file-picker-btn { width: auto; min-height: 28px; padding: 0 10px; font-size: 11px; }
+.surface-add-variant-error { flex-basis: 100%; margin: 2px 0 0; }
+
+.surface-slot-list {
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.surface-slot-list.drag-over {
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.surface-slot-row.drag-over {
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.surface-drop-summary { color: var(--text-muted); }
+.surface-drop-summary .warning { color: var(--warning); }

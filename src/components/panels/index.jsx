@@ -24,6 +24,7 @@ import PerformanceStats from '../ui/PerformancePanel.jsx';
 import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
 import { LodPanel, CameraPanel } from '../RightPanels.jsx';
 import PerfSettings, { SurfacePropertiesSettings } from './PerfSettings.jsx';
+import SurfaceLibraryPanel from '../ui/SurfaceLibraryPanel.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
@@ -108,6 +109,36 @@ const RegenButton = ({ onRegenerate }) => (
   </button>
 );
 
+const SURFACE_TABS = [
+  { id: 'general', label: 'General Settings' },
+  { id: 'textures', label: 'Textures' },
+];
+
+// Terrain > Surface: procedural material-render sliders (General Settings) and
+// the Surface Library (default texture packs, variants, file overrides,
+// sphere preview) live in their own sub-tab (Textures).
+function SurfaceTab({ ctx }) {
+  const [subTab, setSubTab] = useState('general');
+  useEffect(() => {
+    const target = ctx.settingsTarget;
+    if (target?.tabId === 'surface' && target.subTabId && target.subTabId !== subTab) {
+      setSubTab(target.subTabId);
+    }
+  }, [ctx.settingsTarget, subTab]);
+
+  return (
+    <>
+      <PanelTabs active={subTab} onChange={setSubTab} tabs={SURFACE_TABS} />
+      {subTab === 'general' && (
+        <SurfacePropertiesSettings perf={ctx.perf} onPerfSetting={ctx.onPerfSetting} />
+      )}
+      {subTab === 'textures' && (
+        <SurfaceLibraryPanel settingsTarget={ctx.settingsTarget} />
+      )}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- panels
 function TerrainPanel({ ctx }) {
   const [tab, setTab] = useState('shape');
@@ -163,9 +194,7 @@ function TerrainPanel({ ctx }) {
           ))}
         </>
       )}
-      {tab === 'surface' && (
-        <SurfacePropertiesSettings perf={ctx.perf} onPerfSetting={ctx.onPerfSetting} />
-      )}
+      {tab === 'surface' && <SurfaceTab ctx={ctx} />}
       {onErosionTab && <ErosionTabContent ctx={ctx} erosion={erosion} />}
       {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
       {!onErosionTab && (
