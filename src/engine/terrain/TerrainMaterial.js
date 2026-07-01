@@ -594,9 +594,10 @@ export function createTerrainUniforms() {
     uPaintOpacity:   { value: 1 },
     uPaintBoardSize: { value: 1024 },
     uPaintResolution:{ value: 512 },
-    uPaintHeightRange: { value: 180 },
+    uPaintBaseMult:  { value: 1 },
     uPaintHeightTexture: { value: null },
     uPaintBiomeTexture: { value: null },
+    uPaintPropsTexture: { value: null },
     // Planet-mode baked height/normal cubemap (shared by the planet terrain +
     // water shaders). When uUsePlanetHeightTex is 1, those shaders sample this
     // texture instead of re-evaluating the ~46-octave height field per pixel.

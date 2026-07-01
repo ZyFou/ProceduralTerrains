@@ -481,6 +481,7 @@ export class Engine {
       controls: this.controls,
       getBoardSize: () => this.boardSize,
       getParams: () => this.params,
+      gpuTier: this.gpuTier,
       onChange: (state) => {
         this.paintState = state;
         if (this.cb.onPaintState) this.cb.onPaintState(state);
@@ -3976,6 +3977,7 @@ export class Engine {
       cullingEnabled: this.board?.cullingEnabled !== false,
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
+      paintBaseMode: this.paintMode?.state?.baseMode ?? 'generated',
       erosionRev: this.erosionField?.revision ?? 0,
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
@@ -4070,6 +4072,7 @@ export class Engine {
     if (this.paintMode) {
       if (snap.paint) this.paintMode.load(snap.paint);
       else this.paintMode.layers.clear();
+      this.paintMode.setBaseMode(snap.paintBaseMode ?? 'generated');
     }
 
     // erosion offset field (baked delta + masks). The App injects the heavy

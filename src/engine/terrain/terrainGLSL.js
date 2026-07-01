@@ -30,9 +30,10 @@ uniform float uPaintEnabled;
 uniform float uPaintOpacity;
 uniform float uPaintBoardSize;
 uniform float uPaintResolution;
-uniform float uPaintHeightRange;
+uniform float uPaintBaseMult; // scales ONLY the procedural base term in heightAt() (0 = Empty Terrain)
 uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
+uniform sampler2D uPaintPropsTexture;
 
 // --- Noise Stack: per-layer continuous params (declared once, used by the
 // codegen-injected stackHeight2D / stackHeight3D). MUST match MAX_LAYERS in
@@ -434,8 +435,9 @@ float paintHeightOffsetAt(vec2 xz) {
   if (uPaintEnabled < 0.5) return 0.0;
   vec2 uv = paintUvAt(xz);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
-  float encoded = texture2D(uPaintHeightTexture, uv).r;
-  return (encoded - 0.5) * 2.0 * uPaintHeightRange * uPaintOpacity;
+  // R already carries the signed world-unit delta (HalfFloat texture) — no
+  // fixed-range decode needed, matching erosionOffsetAt's convention.
+  return texture2D(uPaintHeightTexture, uv).r * uPaintOpacity;
 }
 
 vec4 paintBiomeAt(vec2 xz) {
@@ -457,7 +459,8 @@ float erosionOffsetAt(vec2 xz) {
 }
 
 float heightAt(vec2 xz) {
-  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) + paintHeightOffsetAt(xz) + erosionOffsetAt(xz);
+  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) * uPaintBaseMult
+    + paintHeightOffsetAt(xz) + erosionOffsetAt(xz);
 }
 
 // Moisture field for biome blending — now sourced from the climate system.

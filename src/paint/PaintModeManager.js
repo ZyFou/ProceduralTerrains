@@ -19,10 +19,14 @@ const DEFAULT_STATE = {
   biome: 'desert',
   propType: 'mixed',
   layerOpacity: 1,
+  // 'generated' = paint on top of the procedural terrain (default), 'flat' =
+  // Empty Terrain (procedural base suppressed, only paint/water/erosion show).
+  baseMode: 'generated',
+  baseMultiplier: 1,
 };
 
 export class PaintModeManager {
-  constructor({ scene, camera, domElement, uniforms, controls, getBoardSize, getParams, onChange, onToast }) {
+  constructor({ scene, camera, domElement, uniforms, controls, getBoardSize, getParams, gpuTier, onChange, onToast }) {
     this.scene = scene;
     this.camera = camera;
     this.domElement = domElement;
@@ -33,7 +37,7 @@ export class PaintModeManager {
     this.onChange = onChange;
     this.onToast = onToast;
     this.state = { ...DEFAULT_STATE };
-    this.layers = new PaintLayerManager({ uniforms, boardSize: getBoardSize() });
+    this.layers = new PaintLayerManager({ uniforms, boardSize: getBoardSize(), gpuTier });
     this.cursor = new PaintBrushCursor(scene);
     this.cpuSampler = new TerrainHeightSampler(uniforms, () => ({ octaves: Math.round(getParams().octaves), infinite: false }));
     this.raycaster = new THREE.Raycaster();
@@ -100,6 +104,25 @@ export class PaintModeManager {
     this.onToast?.('Paint layers cleared');
   }
 
+  // Non-destructive: swap which procedural base the paint layers sit on top
+  // of, without touching any existing strokes.
+  setBaseMode(mode) {
+    const baseMode = mode === 'flat' ? 'flat' : 'generated';
+    this.state.baseMode = baseMode;
+    this.state.baseMultiplier = baseMode === 'flat' ? 0 : 1;
+    this._syncUniforms();
+    this._emit();
+  }
+
+  // Destructive "start fresh" action: flatten the base AND wipe existing
+  // paint strokes in one step, kept separate from setBaseMode so toggling
+  // the base alone never silently discards work.
+  startEmpty() {
+    this.setBaseMode('flat');
+    this.layers.clear();
+    this.onToast?.('Empty Terrain — flat board, paint layers cleared');
+  }
+
   serialize() { return this.layers.serialize(); }
   load(data) { return this.layers.load(data); }
 
@@ -111,9 +134,10 @@ export class PaintModeManager {
 
   _syncUniforms() {
     this.layers.setBoardSize(this.getBoardSize());
-    this.uniforms.uPaintEnabled.value = this.state.enabled ? 1 : 1;
+    this.uniforms.uPaintEnabled.value = this.state.enabled ? 1 : 0;
     this.uniforms.uPaintBoardSize.value = this.getBoardSize();
     this.uniforms.uPaintOpacity.value = this.state.layerOpacity;
+    this.uniforms.uPaintBaseMult.value = this.state.baseMultiplier;
   }
 
   _emit() { this.onChange?.({ ...this.state }); }
@@ -163,7 +187,7 @@ export class PaintModeManager {
   _heightAt(x, z, includePaint = true) {
     const half = this.getBoardSize() / 2;
     if (Math.abs(x) > half || Math.abs(z) > half) return null;
-    const base = this.cpuSampler.heightAt(x, z);
+    const base = this.cpuSampler.heightAt(x, z) * this.state.baseMultiplier;
     return includePaint ? base + this.layers.sampleHeightOffset(x, z) * this.state.layerOpacity : base;
   }
 
