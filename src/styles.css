@@ -4250,10 +4250,17 @@ input[type="color"].palette-color-input {
   flex-direction: column;
   gap: 8px;
 }
+.surface-card-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
 .surface-variant-pills {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 .surface-variant-pill {
   padding: 5px 10px;
@@ -4297,10 +4304,23 @@ input[type="color"].palette-color-input {
   border-radius: 999px;
   white-space: nowrap;
 }
+.surface-slot-status-base { color: var(--success); background: rgba(34, 197, 94, 0.12); }
 .surface-slot-status-ok { color: var(--success); background: rgba(34, 197, 94, 0.12); }
+.surface-slot-status-default { color: var(--success); background: rgba(34, 197, 94, 0.12); }
 .surface-slot-status-missing { color: var(--text-dim); background: var(--bg-control); }
+.surface-slot-status-missing-optional { color: var(--warning); background: rgba(245, 158, 11, 0.14); }
 .surface-slot-status-custom { color: var(--accent); background: var(--accent-bg); }
 .surface-slot-status-checking { color: var(--text-dim); background: transparent; }
+.surface-layer-status {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .surface-slot-picker {
   display: flex;
   align-items: center;
@@ -4314,6 +4334,12 @@ input[type="color"].palette-color-input {
   font-size: 11px;
 }
 .surface-slot-reset { flex: none; width: 28px; padding: 0; }
+.surface-card-reset {
+  flex: none;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
 .surface-variant-add {
   display: inline-flex;
   align-items: center;
@@ -4377,4 +4403,5 @@ input[type="color"].palette-color-input {
 .surface-apply-row .action-btn { width: auto; }
 .surface-apply-status { font-size: 11px; }
 .surface-apply-status.ok { color: var(--success); }
+.surface-apply-status.pending { color: var(--warning); }
 .surface-apply-status.warning { color: var(--warning); }

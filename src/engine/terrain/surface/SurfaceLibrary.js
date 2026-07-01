@@ -6,6 +6,8 @@ const MANIFEST_URL = '/textures/terrain/materials.json';
 const BASE_URL = '/textures/terrain';
 const VARIANTS_API = '/__surface_api/variants';
 const SELECTION_STORAGE_KEY = 'terrain-studio-surface-variants-v1';
+export const CUSTOM_SURFACE_VARIANT = 'custom';
+export const SURFACE_LIBRARY_CHANGE_EVENT = 'terrain-surface-library-change';
 
 export const MAP_SLOT_LABELS = {
   diffuse: 'Diffuse',
@@ -16,6 +18,12 @@ export const MAP_SLOT_LABELS = {
 };
 
 let manifestPromise = null;
+
+function notifySurfaceLibraryChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(SURFACE_LIBRARY_CHANGE_EVENT));
+  }
+}
 
 // Fetches + caches materials.json for the session. Returns { mapSlots, materials }.
 export function loadMaterialsManifest() {
@@ -39,6 +47,10 @@ export function getMapUrl(material, variant, slot) {
   const filename = material.maps?.[slot];
   if (!filename) return null;
   return `${BASE_URL}/${material.folder}/${variant}/${filename}`;
+}
+
+export function getDefaultMapUrl(material, slot) {
+  return getMapUrl(material, 'base', slot);
 }
 
 const variantsCache = new Map();
@@ -125,8 +137,10 @@ export function getActiveVariant(materialId) {
 
 export function setActiveVariant(materialId, variant) {
   const store = readSelectionStore();
-  store[materialId] = variant;
+  if (!variant || variant === 'base') delete store[materialId];
+  else store[materialId] = variant;
   writeSelectionStore(store);
+  notifySurfaceLibraryChanged();
 }
 
 // Session-only custom file overrides (object URLs from a local file picker — these
@@ -146,6 +160,7 @@ export function setOverrideUrl(materialId, variant, slot, url) {
   const prev = overrides.get(key);
   if (prev) URL.revokeObjectURL(prev);
   overrides.set(key, url);
+  notifySurfaceLibraryChanged();
 }
 
 export function clearOverrideUrl(materialId, variant, slot) {
@@ -153,10 +168,56 @@ export function clearOverrideUrl(materialId, variant, slot) {
   const prev = overrides.get(key);
   if (prev) URL.revokeObjectURL(prev);
   overrides.delete(key);
+  notifySurfaceLibraryChanged();
 }
 
-// Resolves the URL actually used for a slot: a custom override if set, otherwise
-// the manifest's default file for the active variant.
+export function getMaterialOverrideCount(materialId) {
+  let count = 0;
+  const prefix = `${materialId}:`;
+  for (const key of overrides.keys()) {
+    if (key.startsWith(prefix)) count += 1;
+  }
+  return count;
+}
+
+export function resetMaterialSurfaceState(materialId) {
+  const store = readSelectionStore();
+  delete store[materialId];
+  writeSelectionStore(store);
+
+  const prefix = `${materialId}:`;
+  for (const [key, url] of overrides.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    URL.revokeObjectURL(url);
+    overrides.delete(key);
+  }
+  notifySurfaceLibraryChanged();
+}
+
+export function resetSurfaceLibraryState() {
+  try {
+    localStorage.removeItem(SELECTION_STORAGE_KEY);
+  } catch {
+    // storage unavailable - only session overrides can be reset
+  }
+  for (const url of overrides.values()) URL.revokeObjectURL(url);
+  overrides.clear();
+  notifySurfaceLibraryChanged();
+}
+
+// Resolves the URL for the legacy variant preview path: a custom override if
+// set, otherwise the manifest file for the active variant.
 export function resolveMapUrl(material, variant, slot) {
   return getOverrideUrl(material.id, variant, slot) || getMapUrl(material, variant, slot);
+}
+
+export function resolveDefaultMapUrl(material, slot) {
+  return getDefaultMapUrl(material, slot);
+}
+
+// Resolves the URL for Custom Materials rendering. Custom mode is a single
+// upload set keyed separately from legacy variants, so it cannot silently use
+// shipped base files or old variant folders.
+export function resolveCustomMapUrl(material, slot) {
+  return getOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot);
 }

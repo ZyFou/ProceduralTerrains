@@ -4,6 +4,8 @@ import { DEFAULT_PARAMS } from './engine/presets.js';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
 import { buildActiveSurfaceAtlas } from './engine/terrain/surface/applyTerrainSurface.js';
+import { resetSurfaceLibraryState } from './engine/terrain/surface/SurfaceLibrary.js';
+import { normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/terrain/surface/SurfaceTextureSources.js';
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
@@ -903,12 +905,45 @@ export default function App() {
     };
   }, [settingsTarget, showToolPanels, effectivePanel]);
 
-  const applySurfaceTextures = useCallback(async () => {
+  const applySurfaceTextures = useCallback(async ({ source, force = false } = {}) => {
     const eng = engineRef.current;
     if (!eng) return { anyPresent: false };
-    const atlas = await buildActiveSurfaceAtlas();
-    eng.setSurfaceAtlas(atlas);
-    return { anyPresent: atlas.anyPresent };
+    const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source ?? eng.params?.surfaceTextureSource, surfaceTextureMode: eng.params?.surfaceTextureMode });
+    if (!sourceUsesTextureAtlas(surfaceTextureSource)) return { anyPresent: false, source: surfaceTextureSource };
+    if (!force && eng.installCachedSurfaceAtlas?.(surfaceTextureSource)) {
+      const cached = eng.getCachedSurfaceAtlas?.(surfaceTextureSource);
+      return {
+        anyPresent: !!cached?.anyPresent,
+        bakedAt: cached?.bakedAt,
+        coverage: cached?.coverage,
+        layers: cached?.layers,
+        source: surfaceTextureSource,
+        cached: true,
+      };
+    }
+    const atlas = await buildActiveSurfaceAtlas({ source: surfaceTextureSource });
+    eng.setSurfaceAtlas(atlas, surfaceTextureSource);
+    return {
+      anyPresent: atlas.anyPresent,
+      bakedAt: atlas.bakedAt,
+      coverage: atlas.coverage,
+      layers: atlas.layers,
+      source: surfaceTextureSource,
+      cached: false,
+    };
+  }, []);
+
+  useEffect(() => {
+    const source = normalizeSurfaceTextureSource(params);
+    if (!sourceUsesTextureAtlas(source) || !engineRef.current) return;
+    applySurfaceTextures({ source }).catch((err) => {
+      console.warn('Could not bake terrain surface textures', err);
+    });
+  }, [params.surfaceTextureSource, params.surfaceTextureMode, applySurfaceTextures]);
+
+  const handleResetPanel = useCallback((id) => {
+    if (id === 'terrain') resetSurfaceLibraryState();
+    engineRef.current?.resetPanelSettings(id);
   }, []);
 
   const ctx = {
@@ -929,7 +964,7 @@ export default function App() {
     cullingEnabled, behindCameraCulling,
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
     debugFlags, onDebugFlag: handleDebugFlag,
-    onResetPanel: (id) => engine().resetPanelSettings(id),
+    onResetPanel: handleResetPanel,
     onApplySurfaceTextures: applySurfaceTextures,
     stats, gpu, perf,
     rendererInfo: engineRef.current ? {

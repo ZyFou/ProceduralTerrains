@@ -222,13 +222,12 @@ float causticRippleLayer(vec2 p, float t, float scale, float speed) {
 }
 
 float causticRippleHeight(vec2 rp, float t) {
-  if (uCausticRippleLegacy > 0.5) {
-    float h = vnoise(rp + vec2(t * 0.6, t * 0.45));
-    h += 0.5 * uCausticSmallWaveStr * vnoise(rp * 2.7 - vec2(t * 0.8, t * 0.3));
-    return h;
-  }
-  return causticRippleLayer(rp, t, 1.0, uCausticWaveSpeed) * uCausticLargeWaveStr
-       + causticRippleLayer(rp, t, 2.6, uCausticWaveSpeed * 1.3) * uCausticSmallWaveStr;
+  float legacyH = vnoise(rp + vec2(t * 0.6, t * 0.45));
+  legacyH += 0.5 * uCausticSmallWaveStr * vnoise(rp * 2.7 - vec2(t * 0.8, t * 0.3));
+  float realisticH =
+      causticRippleLayer(rp, t, 1.0, uCausticWaveSpeed) * uCausticLargeWaveStr
+    + causticRippleLayer(rp, t, 2.6, uCausticWaveSpeed * 1.3) * uCausticSmallWaveStr;
+  return mix(realisticH, legacyH, step(0.5, uCausticRippleLegacy));
 }
 
 // Surface slope refracts sunlight — shift caustic sampling to follow the waves.
@@ -712,6 +711,7 @@ export function createTerrainUniforms() {
     uSurfMode:       { value: 0.0 },
     uSurfAmount:     { value: 1.0 },
     uSurfTint:       { value: 0.0 },
+    uSurfScale:      { value: 1.0 },
     uSurfNormalAmt:  { value: 1.0 },
     uSurfRoughAmt:   { value: 1.0 },
     uSurfAOAmt:      { value: 1.0 },

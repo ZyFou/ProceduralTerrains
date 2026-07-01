@@ -1,62 +1,106 @@
-import { useEffect, useRef, useState } from 'react';
-import { ImageUp, Plus, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ImageUp, RefreshCw, RotateCcw } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import SurfaceMaterialPreviewSphere from './SurfaceMaterialPreviewSphere.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { detectSlotFromFilename } from '../../engine/terrain/surface/SurfaceTextureDetector.js';
 import {
-  loadMaterialsManifest, listVariants, createVariant, getMapUrl, resolveMapUrl,
-  probeUrlExists, getActiveVariant, setActiveVariant,
+  loadMaterialsManifest, resolveDefaultMapUrl, resolveCustomMapUrl, probeUrlExists,
   setOverrideUrl, clearOverrideUrl, getOverrideUrl, MAP_SLOT_LABELS,
+  resetMaterialSurfaceState, SURFACE_LIBRARY_CHANGE_EVENT, CUSTOM_SURFACE_VARIANT,
 } from '../../engine/terrain/surface/SurfaceLibrary.js';
+import { SURFACE_TEXTURE_LAYERS } from '../../engine/terrain/surface/terrainSurfaceTextureGLSL.js';
+import {
+  SURFACE_TEXTURE_SOURCE,
+  normalizeSurfaceTextureSource,
+  sourceUsesTextureAtlas,
+} from '../../engine/terrain/surface/SurfaceTextureSources.js';
 
 const PREVIEW_SLOTS = ['diffuse', 'normalDX', 'roughness', 'ao'];
+const RENDERED_SLOTS = new Set(PREVIEW_SLOTS);
+const RENDERED_MATERIAL_IDS = new Set(SURFACE_TEXTURE_LAYERS);
 
-function prettyVariantLabel(variant) {
-  if (variant === 'base') return 'Base';
-  return variant.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const STATUS_LABEL = {
+  checking: '...',
+  default: 'Default',
+  custom: 'Custom',
+  missing: 'Missing',
+};
+
+const LAYER_STATUS_LABEL = {
+  notBaked: 'Not Baked',
+  ready: 'Ready',
+  missingDiffuse: 'Missing Diffuse',
+  missingOptional: 'Missing Optional Maps',
+};
+
+const SOURCE_LABEL = {
+  [SURFACE_TEXTURE_SOURCE.DEFAULT]: 'default',
+  [SURFACE_TEXTURE_SOURCE.CUSTOM]: 'custom',
+};
+
+function slotUrlForSource(material, source, slot) {
+  if (source === SURFACE_TEXTURE_SOURCE.DEFAULT) return resolveDefaultMapUrl(material, slot);
+  if (source === SURFACE_TEXTURE_SOURCE.CUSTOM) return resolveCustomMapUrl(material, slot);
+  return null;
 }
 
-function nextVariantName(existing) {
-  let n = 1;
-  while (existing.includes(`variant_${n}`)) n += 1;
-  return `variant_${n}`;
+function layerStatusClass(status) {
+  if (status === 'ready') return 'custom';
+  if (status === 'missingOptional') return 'missing-optional';
+  return 'missing';
 }
 
-function FileSlotRow({ material, variant, slot, onChanged }) {
+function coverageText(source, coverage) {
+  if (!coverage) return source === SURFACE_TEXTURE_SOURCE.DEFAULT ? 'Default atlas not baked' : 'Custom atlas not baked';
+  const kind = SOURCE_LABEL[source] ?? 'texture';
+  return `${coverage.diffuseReady}/${coverage.total} ${kind} diffuse layers ready`;
+}
+
+function FileSlotRow({ material, source, slot, onChanged }) {
   const inputRef = useRef(null);
   const [status, setStatus] = useState('checking');
   const [dragOver, setDragOver] = useState(false);
-  const override = getOverrideUrl(material.id, variant, slot);
+  const custom = source === SURFACE_TEXTURE_SOURCE.CUSTOM;
+  const override = custom ? getOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot) : null;
 
   useEffect(() => {
     let cancelled = false;
-    if (override) { setStatus('custom'); return undefined; }
+    if (custom) {
+      setStatus(override ? 'custom' : 'missing');
+      return undefined;
+    }
     setStatus('checking');
-    probeUrlExists(getMapUrl(material, variant, slot)).then((exists) => {
-      if (!cancelled) setStatus(exists ? 'ok' : 'missing');
+    probeUrlExists(resolveDefaultMapUrl(material, slot)).then((exists) => {
+      if (!cancelled) setStatus(exists ? 'default' : 'missing');
     });
     return () => { cancelled = true; };
-  }, [material, variant, slot, override]);
+  }, [custom, material, slot, override]);
 
   const pick = (file) => {
     const url = URL.createObjectURL(file);
-    setOverrideUrl(material.id, variant, slot, url);
+    setOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot, url);
     onChanged();
   };
 
   const reset = () => {
-    clearOverrideUrl(material.id, variant, slot);
+    clearOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot);
     onChanged();
   };
 
   return (
     <div
       className={`surface-slot-row${dragOver ? ' drag-over' : ''}`}
-      data-setting-id={`surface.${material.id}.${variant}.${slot}`}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
+      data-setting-id={`surface.${material.id}.${source}.${slot}`}
+      onDragOver={(e) => {
+        if (!custom) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(true);
+      }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
+        if (!custom) return;
         e.preventDefault();
         e.stopPropagation();
         setDragOver(false);
@@ -66,132 +110,56 @@ function FileSlotRow({ material, variant, slot, onChanged }) {
     >
       <span className="surface-slot-label">{MAP_SLOT_LABELS[slot]}</span>
       <span className={`surface-slot-status surface-slot-status-${status}`}>
-        {status === 'checking' ? '…' : status === 'custom' ? 'Custom' : status === 'ok' ? 'OK' : 'Missing'}
+        {STATUS_LABEL[status] ?? status}
       </span>
-      <div className="file-picker surface-slot-picker">
-        <button type="button" className="file-picker-btn" onClick={() => inputRef.current?.click()}>
-          <ImageUp size={13} strokeWidth={1.75} aria-hidden />
-          <span>{override ? 'Replace' : 'Upload'}</span>
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          className="file-picker-input"
-          accept={slot === 'displacement' ? 'image/*,.exr' : 'image/png,image/jpeg,image/webp'}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) pick(file);
-            e.target.value = '';
-          }}
-        />
-        {override && (
-          <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title="Reset to default file">
-            <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
+      {custom && (
+        <div className="file-picker surface-slot-picker">
+          <button type="button" className="file-picker-btn" onClick={() => inputRef.current?.click()}>
+            <ImageUp size={13} strokeWidth={1.75} aria-hidden />
+            <span>{override ? 'Replace' : 'Upload'}</span>
           </button>
-        )}
-      </div>
+          <input
+            ref={inputRef}
+            type="file"
+            className="file-picker-input"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) pick(file);
+              e.target.value = '';
+            }}
+          />
+          {override && (
+            <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title="Clear upload">
+              <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function AddVariantRow({ material, existing, onCreated }) {
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const start = () => {
-    setName(nextVariantName(existing));
-    setAdding(true);
-    setError(null);
-  };
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const variants = await createVariant(material, name);
-      onCreated(variants, name);
-      setAdding(false);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!adding) {
-    return (
-      <button type="button" className="surface-variant-pill surface-variant-add" onClick={start}>
-        <Plus size={12} strokeWidth={2} aria-hidden />
-        Add Variant
-      </button>
-    );
-  }
-
-  return (
-    <div className="surface-add-variant">
-      <input
-        type="text"
-        className="surface-add-variant-input"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="variant_3"
-        disabled={busy}
-        autoFocus
-      />
-      <button type="button" className="file-picker-btn" onClick={submit} disabled={busy || !name.trim()}>
-        {busy ? 'Creating…' : 'Create'}
-      </button>
-      <button type="button" className="file-picker-btn surface-slot-reset" onClick={() => setAdding(false)} disabled={busy}>
-        ✕
-      </button>
-      {error && <p className="section-hint warning surface-add-variant-error">{error}</p>}
-    </div>
-  );
-}
-
-function MaterialCard({ material, mapSlots, targetId }) {
-  const [variant, setVariant] = useState(() => getActiveVariant(material.id));
-  const [variants, setVariants] = useState(['base']);
-  const [variantsLoaded, setVariantsLoaded] = useState(false);
+function MaterialCard({ material, mapSlots, source, targetId, atlasLayer, onMaterialChanged }) {
   const [changeTick, setChangeTick] = useState(0);
   const [dropSummary, setDropSummary] = useState(null);
   const [listDragOver, setListDragOver] = useState(false);
-  const bump = () => setChangeTick((n) => n + 1);
-  // ControlSection keeps its body mounted (just CSS-hidden) when collapsed, so
-  // without this the sphere's WebGLRenderer + rAF loop would keep running for
-  // every material card at once. Only render it while actually open.
   const [open, setOpen] = useState(false);
+  const custom = source === SURFACE_TEXTURE_SOURCE.CUSTOM;
 
-  useEffect(() => {
-    if (!open || variantsLoaded) return;
-    let cancelled = false;
-    listVariants(material).then((list) => {
-      if (cancelled) return;
-      setVariants(list);
-      setVariantsLoaded(true);
-      if (!list.includes(variant)) chooseVariant(list[0] || 'base');
-    });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, variantsLoaded, material]);
-
-  const chooseVariant = (v) => {
-    setVariant(v);
-    setActiveVariant(material.id, v);
+  const bump = () => {
+    setChangeTick((n) => n + 1);
+    onMaterialChanged?.();
   };
 
-  const onVariantCreated = (list, created) => {
-    setVariants(list);
-    chooseVariant(created);
+  const resetMaterial = () => {
+    resetMaterialSurfaceState(material.id);
+    setDropSummary(null);
+    bump();
   };
 
-  // Batch drop onto the slot list: auto-detect each dropped file's slot from
-  // its filename so a whole texture pack can be dragged in at once. Individual
-  // rows handle their own single-file drop first (stopPropagation), so this
-  // only fires for drops on the list background / multi-file drops.
   const onBatchDrop = (e) => {
+    if (!custom) return;
     e.preventDefault();
     setListDragOver(false);
     const files = [...(e.dataTransfer.files || [])];
@@ -201,7 +169,7 @@ function MaterialCard({ material, mapSlots, targetId }) {
     files.forEach((file) => {
       const slot = detectSlotFromFilename(file.name);
       if (slot && mapSlots.includes(slot)) {
-        setOverrideUrl(material.id, variant, slot, URL.createObjectURL(file));
+        setOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot, URL.createObjectURL(file));
         matched.push(MAP_SLOT_LABELS[slot]);
       } else {
         unmatched.push(file.name);
@@ -213,8 +181,11 @@ function MaterialCard({ material, mapSlots, targetId }) {
 
   const previewUrls = {};
   PREVIEW_SLOTS.forEach((slot) => {
-    previewUrls[slot] = resolveMapUrl(material, variant, slot);
+    previewUrls[slot] = slotUrlForSource(material, source, slot);
   });
+
+  const layerStatus = atlasLayer?.status ?? 'notBaked';
+  const statusLabel = LAYER_STATUS_LABEL[layerStatus] ?? 'Not baked';
 
   return (
     <CollapsibleGroup
@@ -222,6 +193,7 @@ function MaterialCard({ material, mapSlots, targetId }) {
       defaultOpen={false}
       forceOpen={targetId?.startsWith(`surface.${material.id}.`)}
       settingId={`surface.${material.id}`}
+      statusDot={layerStatus === 'ready' ? 'active' : null}
       onToggle={setOpen}
     >
       {open && (
@@ -234,35 +206,38 @@ function MaterialCard({ material, mapSlots, targetId }) {
               aoUrl={previewUrls.ao}
             />
             <div className="surface-material-side">
-              <div className="surface-variant-pills">
-                {variants.map((v) => (
+              <div className="surface-card-actions">
+                <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
+                  {statusLabel}
+                </span>
+                {custom && (
                   <button
-                    key={v}
                     type="button"
-                    className={`surface-variant-pill${v === variant ? ' active' : ''}`}
-                    onClick={() => chooseVariant(v)}
-                    title={v === variant ? 'Currently used as default for this material' : 'Preview and set as default'}
+                    className="file-picker-btn surface-card-reset"
+                    onClick={resetMaterial}
+                    title="Clear this material's custom uploads"
                   >
-                    {prettyVariantLabel(v)}
+                    <RotateCcw size={13} strokeWidth={1.8} aria-hidden />
                   </button>
-                ))}
-                <AddVariantRow material={material} existing={variants} onCreated={onVariantCreated} />
+                )}
               </div>
-              <p className="section-hint">Drag the sphere to inspect. The highlighted variant is used as this material's default.</p>
             </div>
           </div>
           <div
             key={changeTick}
             className={`surface-slot-list${listDragOver ? ' drag-over' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setListDragOver(true); }}
+            onDragOver={(e) => {
+              if (!custom) return;
+              e.preventDefault();
+              setListDragOver(true);
+            }}
             onDragLeave={() => setListDragOver(false)}
             onDrop={onBatchDrop}
           >
             {mapSlots.map((slot) => (
-              <FileSlotRow key={slot} material={material} variant={variant} slot={slot} onChanged={bump} />
+              <FileSlotRow key={slot} material={material} source={source} slot={slot} onChanged={bump} />
             ))}
           </div>
-          <p className="section-hint">Drop one file on a row to fill that slot, or drop several files here at once — filenames like <code>_diffuse</code> / <code>_normal_dx</code> / <code>_roughness</code> / <code>_ao</code> / <code>_displacement</code> are matched automatically.</p>
           {dropSummary && (
             <p className="section-hint surface-drop-summary">
               {dropSummary.matched.length > 0 && <>Matched: {dropSummary.matched.join(', ')}. </>}
@@ -277,59 +252,48 @@ function MaterialCard({ material, mapSlots, targetId }) {
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 const SURFACE_MODE_SLIDERS = [
-  slider('surfaceTextureAmount', 'Texture Amount', 0, 1, 0.02, { digits: 2 }),
-  slider('surfaceTextureTint', 'Recolor by Biome', 0, 1, 0.02, { digits: 2, info: 'At 1, the biome palette colour drives hue and the texture supplies detail; at 0, raw texture colour shows.' }),
+  slider('surfaceTextureScale', 'Scale', 0.25, 4, 0.05, { digits: 2 }),
   slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2 }),
-  slider('surfaceTextureAO', 'AO Strength', 0, 1, 0.05, { digits: 2 }),
-  slider('surfaceTextureRough', 'Roughness Sheen', 0, 1, 0.05, { digits: 2 }),
 ];
 
-function SurfaceModeControls({ ctx }) {
-  const { params, onParam, onApplySurfaceTextures } = ctx;
-  const on = !!params.surfaceTextureMode;
-  const [applying, setApplying] = useState(false);
-  const [status, setStatus] = useState(null);
-  const appliedRef = useRef(false);
+function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
+  const { params, onParam } = ctx;
+  const textureMode = sourceUsesTextureAtlas(source);
+  const coverage = status?.coverage;
+  const coverageClass = !textureMode
+    ? ''
+    : coverage?.missingDiffuse ? 'warning'
+      : coverage?.missingOptional ? 'pending'
+        : 'ok';
 
-  const apply = async () => {
-    if (!onApplySurfaceTextures) return;
-    setApplying(true);
-    try {
-      const res = await onApplySurfaceTextures();
-      appliedRef.current = true;
-      setStatus(res?.anyPresent ? 'loaded' : 'empty');
-    } catch {
-      setStatus('error');
-    } finally {
-      setApplying(false);
-    }
-  };
-
-  const setMode = async (v) => {
-    const enabled = v === 'textures';
-    onParam('surfaceTextureMode', enabled);
-    if (enabled && !appliedRef.current) await apply();
+  const setSource = async (value) => {
+    onParam('surfaceTextureSource', value);
   };
 
   return (
     <div className="surface-mode-bar">
       <SelectRow
-        label="Terrain Surface"
-        value={on ? 'textures' : 'colors'}
-        options={[{ value: 'colors', label: 'Procedural Colors' }, { value: 'textures', label: 'Material Textures' }]}
-        onChange={setMode}
+        label="Surface Source"
+        value={source}
+        options={[
+          { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL, label: 'Procedural' },
+          { value: SURFACE_TEXTURE_SOURCE.DEFAULT, label: 'Default Materials' },
+          { value: SURFACE_TEXTURE_SOURCE.CUSTOM, label: 'Custom Materials' },
+        ]}
+        onChange={setSource}
         settingId="surface.mode"
-        info="Colors uses the procedural biome palette. Textures replaces it with the material maps below (blended by the same height/slope/climate signals)."
+        info="Procedural uses shader colours. Default Materials uses shipped texture maps. Custom Materials uses only uploaded maps and shows missing layers in the viewport."
       />
-      {on && (
+      {textureMode && (
         <>
           <div className="surface-apply-row">
-            <button type="button" className="action-btn primary" onClick={apply} disabled={applying}>
-              {applying ? 'Building…' : 'Apply / Rebuild Textures'}
+            <button type="button" className="action-btn primary" onClick={() => onBake({ source, force: true })} disabled={applying}>
+              <RefreshCw size={13} strokeWidth={1.8} aria-hidden />
+              {applying ? 'Baking...' : source === SURFACE_TEXTURE_SOURCE.DEFAULT ? 'Bake Default Materials' : 'Bake Custom Materials'}
             </button>
-            {status === 'loaded' && <span className="surface-apply-status ok">Textures applied</span>}
-            {status === 'empty' && <span className="surface-apply-status warning">No textures found — add files to the material folders</span>}
-            {status === 'error' && <span className="surface-apply-status warning">Build failed</span>}
+            <span className={`surface-apply-status ${coverageClass}`}>
+              {applying ? 'Building atlas' : coverageText(source, coverage)}
+            </span>
           </div>
           {SURFACE_MODE_SLIDERS.map((def) => (
             <SliderCtl key={def.key} def={def} value={params[def.key] ?? 1} onChange={(v) => onParam(def.key, v)} settingId={`surface.${def.key}`} />
@@ -349,8 +313,13 @@ function SurfaceModeControls({ ctx }) {
 
 export default function SurfaceLibraryPanel({ ctx }) {
   const settingsTarget = ctx?.settingsTarget;
+  const source = normalizeSurfaceTextureSource(ctx?.params || {});
   const [manifest, setManifest] = useState(null);
   const [error, setError] = useState(null);
+  const [libraryRevision, setLibraryRevision] = useState(0);
+  const [applying, setApplying] = useState(false);
+  const [status, setStatus] = useState(null);
+  const bakeTimerRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -360,21 +329,79 @@ export default function SurfaceLibraryPanel({ ctx }) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    const onChanged = () => setLibraryRevision((n) => n + 1);
+    window.addEventListener(SURFACE_LIBRARY_CHANGE_EVENT, onChanged);
+    return () => window.removeEventListener(SURFACE_LIBRARY_CHANGE_EVENT, onChanged);
+  }, []);
+
+  const bake = useCallback(async ({ source: requestedSource = source, force = false } = {}) => {
+    if (!ctx?.onApplySurfaceTextures || !sourceUsesTextureAtlas(requestedSource)) {
+      setStatus(null);
+      return null;
+    }
+    setApplying(true);
+    setStatus((cur) => ({ ...(cur || {}), source: requestedSource, building: true }));
+    try {
+      const res = await ctx.onApplySurfaceTextures({ source: requestedSource, force });
+      setStatus(res);
+      return res;
+    } catch {
+      setStatus({ source: requestedSource, error: true });
+      return null;
+    } finally {
+      setApplying(false);
+    }
+  }, [ctx, source]);
+
+  const scheduleBake = useCallback(() => {
+    if (!sourceUsesTextureAtlas(source)) return;
+    setStatus((cur) => ({ ...(cur || {}), source, dirty: true }));
+    if (bakeTimerRef.current) window.clearTimeout(bakeTimerRef.current);
+    bakeTimerRef.current = window.setTimeout(() => {
+      bakeTimerRef.current = null;
+      bake({ source, force: true });
+    }, 160);
+  }, [bake, source]);
+
+  useEffect(() => () => {
+    if (bakeTimerRef.current) window.clearTimeout(bakeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!sourceUsesTextureAtlas(source)) {
+      setStatus(null);
+      return;
+    }
+    if (status?.source !== source || (!status?.coverage && !status?.building)) bake({ source });
+  }, [bake, source, status?.source, status?.coverage, status?.building]);
+
+  useEffect(() => {
+    if (libraryRevision && sourceUsesTextureAtlas(source)) scheduleBake();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryRevision]);
+
   if (error) return <p className="section-hint warning">Could not load the surface material manifest ({error}).</p>;
-  if (!manifest) return <p className="section-hint">Loading surface library…</p>;
+  if (!manifest) return <p className="section-hint">Loading surface library...</p>;
+
+  const mapSlots = manifest.mapSlots.filter((slot) => RENDERED_SLOTS.has(slot));
+  const materials = manifest.materials.filter((material) => RENDERED_MATERIAL_IDS.has(material.id));
+  const layersById = new Map((status?.layers || []).map((layer) => [layer.id, layer]));
+  const showMaterials = sourceUsesTextureAtlas(source);
 
   return (
     <div className="surface-library">
-      <SurfaceModeControls ctx={ctx} />
-      <p className="section-hint">
-        Default terrain materials. Each has a <code>base/</code> texture set — drop matching files into
-        <code> public/textures/terrain/&lt;material&gt;/base/</code>, drag-and-drop them below, or upload
-        directly. Use <strong>Add Variant</strong> for extra look-alikes (each gets its own folder); pick a
-        variant to preview it on the sphere and set it as the material's default. After changing textures,
-        press <strong>Apply / Rebuild Textures</strong>.
-      </p>
-      {manifest.materials.map((material) => (
-        <MaterialCard key={material.id} material={material} mapSlots={manifest.mapSlots} targetId={settingsTarget?.settingId} />
+      <SurfaceModeControls ctx={ctx} source={source} onBake={bake} applying={applying} status={status} />
+      {showMaterials && materials.map((material) => (
+        <MaterialCard
+          key={`${source}-${material.id}`}
+          material={material}
+          mapSlots={mapSlots}
+          source={source}
+          targetId={settingsTarget?.settingId}
+          atlasLayer={layersById.get(material.id)}
+          onMaterialChanged={scheduleBake}
+        />
       ))}
     </div>
   );

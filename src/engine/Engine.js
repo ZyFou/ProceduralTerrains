@@ -55,6 +55,11 @@ import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 import {
+  SURFACE_TEXTURE_SOURCE,
+  normalizeSurfaceTextureParams,
+  normalizeSurfaceTextureSource,
+} from './terrain/surface/SurfaceTextureSources.js';
+import {
   detectRendererCapabilities,
   getWebGpuSupport,
   labelGpuPreference,
@@ -127,7 +132,10 @@ export class Engine {
     this.canvas = canvas;
     this.cb = callbacks;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
-    this.params = migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams });
+    this.params = normalizeSurfaceTextureParams(
+      migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams }),
+      initialParams || {},
+    );
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
     // get the default single Classic-Terrain layer == bit-identical to before.
     this.noiseStack = migrateStack(this.params.noiseStack);
@@ -1117,7 +1125,17 @@ export class Engine {
   }
 
   setParam(key, value) {
-    this.params[key] = value;
+    if (key === 'surfaceTextureSource') {
+      const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: value });
+      this.params.surfaceTextureSource = surfaceTextureSource;
+      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+    } else if (key === 'surfaceTextureMode') {
+      const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureMode: !!value });
+      this.params.surfaceTextureSource = surfaceTextureSource;
+      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+    } else {
+      this.params[key] = value;
+    }
     this.cb.onParams({ ...this.params });
     this._needsRender = true;   // any param change → redraw (on-demand studio)
 
@@ -1208,7 +1226,7 @@ export class Engine {
       return;
     }
 
-    if (key.startsWith('surfaceTexture')) {
+    if (key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
       this._applySurfaceSettings();
       return;
     }
@@ -1846,7 +1864,7 @@ export class Engine {
     this._applyPixelRatio();
   }
 
-  // Surface-texture control values (mode / blend / tint / relief). The atlas
+  // Surface-texture control values (source / scale / normal relief). The atlas
   // textures themselves are set separately via setSurfaceAtlas(). Uniforms
   // persist across material rebuilds (shared uniforms object), so this only
   // needs to run on param change + init.
@@ -1854,28 +1872,31 @@ export class Engine {
     const p = this.params;
     const u = this.uniforms;
     if (!u?.uSurfMode) return;
+    const surfaceTextureSource = normalizeSurfaceTextureSource(p);
+    p.surfaceTextureSource = surfaceTextureSource;
+    p.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
     u.uSurfMode.value = p.surfaceTextureMode ? 1.0 : 0.0;
-    u.uSurfAmount.value = p.surfaceTextureAmount ?? 1.0;
-    u.uSurfTint.value = p.surfaceTextureTint ?? 0.0;
+    u.uSurfAmount.value = 1.0;
+    u.uSurfTint.value = 0.0;
+    if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
+    u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
-    u.uSurfRoughAmt.value = p.surfaceTextureRough ?? 1.0;
-    u.uSurfAOAmt.value = p.surfaceTextureAO ?? 1.0;
+    u.uSurfRoughAmt.value = 1.0;
+    u.uSurfAOAmt.value = 1.0;
     u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
     this._needsRender = true;
   }
 
-  // Install freshly-built atlas textures (from SurfaceTextureAtlas.buildSurfaceAtlas).
-  // Disposes the previously-installed atlas (never the shared 1x1 fallback).
-  setSurfaceAtlas(atlas) {
+  _disposeSurfaceAtlas(atlas) {
+    atlas?.diffuse?.dispose?.();
+    atlas?.normal?.dispose?.();
+    atlas?.rough?.dispose?.();
+    atlas?.ao?.dispose?.();
+  }
+
+  _installSurfaceAtlas(atlas) {
     const u = this.uniforms;
-    if (!u?.uSurfDiffuse) return;
-    const prev = this._surfaceAtlas;
-    if (prev) {
-      prev.diffuse?.dispose?.();
-      prev.normal?.dispose?.();
-      prev.rough?.dispose?.();
-      prev.ao?.dispose?.();
-    }
+    if (!u?.uSurfDiffuse || !atlas) return false;
     u.uSurfDiffuse.value = atlas.diffuse;
     u.uSurfNormal.value = atlas.normal;
     u.uSurfRough.value = atlas.rough;
@@ -1884,6 +1905,32 @@ export class Engine {
     u.uSurfTile.value = atlas.tile.slice();
     this._surfaceAtlas = atlas;
     this._needsRender = true;
+    return true;
+  }
+
+  // Install freshly-built atlas textures (from SurfaceTextureAtlas.buildSurfaceAtlas).
+  // Atlases are cached by source so switching Default <-> Custom doesn't rebuild
+  // or dispose the source that is currently inactive.
+  setSurfaceAtlas(atlas, source = this.params.surfaceTextureSource) {
+    const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
+    if (!this._surfaceAtlasCache) this._surfaceAtlasCache = {};
+    const previous = this._surfaceAtlasCache[surfaceTextureSource];
+    if (previous && previous !== atlas) this._disposeSurfaceAtlas(previous);
+    atlas.source = surfaceTextureSource;
+    this._surfaceAtlasCache[surfaceTextureSource] = atlas;
+    return this._installSurfaceAtlas(atlas);
+  }
+
+  installCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
+    const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
+    const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
+    if (!atlas) return false;
+    return this._installSurfaceAtlas(atlas);
+  }
+
+  getCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
+    const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
+    return this._surfaceAtlasCache?.[surfaceTextureSource] ?? null;
   }
 
   _applyVisualSettings() {
@@ -3991,7 +4038,7 @@ export class Engine {
         next.waterEnabled = true;
       }
     }
-    this.params = next;
+    this.params = normalizeSurfaceTextureParams(next, src);
     this._migrateLegacyCloudPerf(src);
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
@@ -4069,7 +4116,7 @@ export class Engine {
 
     // params: full replacement, but keep any newer default keys the snapshot
     // predates so we never end up with undefined settings.
-    this.params = { ...DEFAULT_PARAMS, ...snap.params };
+    this.params = normalizeSurfaceTextureParams({ ...DEFAULT_PARAMS, ...snap.params }, snap.params);
 
     // planet style lives nested in params — re-import so the style manager and
     // its uniforms match the restored palette/tuning exactly.
@@ -5147,6 +5194,11 @@ export class Engine {
     this._warmGeo.dispose();
     if (this.terrainMaterial) this.terrainMaterial.dispose();
     if (this.waterMaterial) this.waterMaterial.dispose();
+    if (this._surfaceAtlasCache) {
+      for (const atlas of Object.values(this._surfaceAtlasCache)) this._disposeSurfaceAtlas(atlas);
+      this._surfaceAtlasCache = null;
+      this._surfaceAtlas = null;
+    }
     if (this.controls) { this.controls.dispose(); this.controls = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     // tile hover-to-add listeners + resources

@@ -42,10 +42,12 @@ export const DEFAULT_PARAMS = {
   aoStrength: 0.75,
   chunkGrid: false,
 
-  // surface textures (real material maps replacing / tinting the biome colour)
-  surfaceTextureMode: false,     // false = procedural colours, true = textures
+  // surface textures (procedural shader, shipped defaults, or uploaded custom maps)
+  surfaceTextureSource: 'procedural', // procedural | defaultTextures | customTextures
+  surfaceTextureMode: false,     // legacy mirror: false = procedural, true = texture atlas source
   surfaceTextureAmount: 1.0,     // master blend of textures over colour
   surfaceTextureTint: 0.0,       // 0 = raw texture colour, 1 = recolour by palette
+  surfaceTextureScale: 1.0,      // custom texture tiling multiplier
   surfaceTextureNormal: 1.0,     // texture normal-relief strength
   surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
   surfaceTextureAO: 1.0,         // sampled-AO crevice darkening

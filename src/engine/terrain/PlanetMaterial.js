@@ -9,6 +9,10 @@ import {
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
 import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
+import {
+  SURFACE_TEXTURE_UNIFORMS_GLSL,
+  SURFACE_TEXTURE_FUNCTIONS_GLSL,
+} from './surface/terrainSurfaceTextureGLSL.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
 
@@ -77,6 +81,8 @@ ${PLANET_NOISE_GLSL}
 ${planetHeightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+${SURFACE_TEXTURE_UNIFORMS_GLSL}
+${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 ${TERRAIN_DETAIL_GLSL}
 
 uniform float uNormalStrength;
@@ -212,10 +218,17 @@ void main() {
     return;
   }
 
+  float dist = length(cameraPosition - vWorldPos);
+  SurfaceTexResult surf = applySurfaceMaterials(
+    td.albedo, n, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+  );
+  td.albedo = surf.albedo;
+  n = surf.normal;
+
   // ambient occlusion from local concavity + low-altitude valleys
   float concave = clamp(((hA + hB) * 0.5 - hC) / (uHeightScale * 0.02 + 1.0), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
-  float ao = 1.0 - uAO * (concave * 0.45 + valley * 0.22);
+  float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
 
   // spherical-up lighting (hemisphere term uses planet up = dir, not world +Y)
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
@@ -228,6 +241,9 @@ void main() {
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 32.0);
   float shoreSheen = 1.0 - smoothstep(0.0, max(tc.sandBand, 0.5), abs(hRel));
   col += spec * (tc.snow * 0.30 + shoreSheen * 0.10 + bw.wetland * tc.flatness * 0.15);
+  if (surf.amount > 0.001) {
+    col += spec * (1.0 - surf.rough) * surf.amount * 0.15 * max(uSunDir.y, 0.0);
+  }
 
   if (uLodDebug > 0.5) {
     int li = int(clamp(vLod, 0.0, 3.0) + 0.5);
@@ -240,7 +256,6 @@ void main() {
 
   col *= 1.0 - vSkirt * 0.55;
 
-  float dist = length(cameraPosition - vWorldPos);
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
 
