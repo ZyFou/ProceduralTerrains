@@ -31,6 +31,8 @@ uniform float uSurfMode;        // 0 = procedural colours, 1 = textures
 uniform float uSurfAmount;      // master blend of textures over colour (0..1)
 uniform float uSurfTint;        // 0 = raw texture colour, 1 = recolour by biome palette
 uniform float uSurfScale;       // global texture repeat multiplier
+uniform float uSurfBreakup;     // low-frequency UV/domain warp that breaks visible tiling
+uniform float uSurfBlend;       // 0 = dominant layer, 1 = weighted material blend
 uniform float uSurfNormalAmt;   // strength of texture normal relief
 uniform float uSurfRoughAmt;    // how much sampled roughness drives the sheen
 uniform float uSurfAOAmt;       // how much sampled AO darkens crevices
@@ -66,21 +68,34 @@ float surfTileInv(float tile) {
   return max(uSurfScale, 0.01) / max(tile, 0.01);
 }
 
+vec3 surfBreakWarp(float fi, vec3 wp, float tile) {
+  if (uSurfBreakup < 0.001) return wp;
+  float world = max(tile, 1.0);
+  vec3 q = wp / world;
+  float nx = vnoise(q.xz * 0.43 + vec2(fi * 7.13, fi * 13.71));
+  float ny = vnoise(q.zy * 0.37 + vec2(fi * 3.91, fi * 17.27));
+  float nz = vnoise(q.xy * 0.41 + vec2(fi * 11.19, fi * 5.47));
+  vec3 shift = vec3(nx, ny, nz) - 0.5;
+  return wp + shift * (world * 0.9 * clamp(uSurfBreakup, 0.0, 1.0));
+}
+
 vec3 surfTri(sampler2D atlas, float fi, vec3 wp, vec3 blend, float tile) {
+  vec3 swp = surfBreakWarp(fi, wp, tile);
   float inv = surfTileInv(tile);
-  vec3 cx = texture2D(atlas, surfAtlasUV(fi, wp.zy * inv)).rgb;
-  vec3 cy = texture2D(atlas, surfAtlasUV(fi, wp.xz * inv)).rgb;
-  vec3 cz = texture2D(atlas, surfAtlasUV(fi, wp.xy * inv)).rgb;
+  vec3 cx = texture2D(atlas, surfAtlasUV(fi, swp.zy * inv)).rgb;
+  vec3 cy = texture2D(atlas, surfAtlasUV(fi, swp.xz * inv)).rgb;
+  vec3 cz = texture2D(atlas, surfAtlasUV(fi, swp.xy * inv)).rgb;
   return cx * blend.x + cy * blend.y + cz * blend.z;
 }
 
 // Triplanar tangent-space (DirectX) normal -> world normal, reoriented per plane
 // with a UDN-style blend. Green is flipped (DX convention).
 vec3 surfTriNormal(float fi, vec3 wp, vec3 blend, float tile, vec3 nGeo) {
+  vec3 swp = surfBreakWarp(fi, wp, tile);
   float inv = surfTileInv(tile);
-  vec3 tx = texture2D(uSurfNormal, surfAtlasUV(fi, wp.zy * inv)).rgb * 2.0 - 1.0;
-  vec3 ty = texture2D(uSurfNormal, surfAtlasUV(fi, wp.xz * inv)).rgb * 2.0 - 1.0;
-  vec3 tz = texture2D(uSurfNormal, surfAtlasUV(fi, wp.xy * inv)).rgb * 2.0 - 1.0;
+  vec3 tx = texture2D(uSurfNormal, surfAtlasUV(fi, swp.zy * inv)).rgb * 2.0 - 1.0;
+  vec3 ty = texture2D(uSurfNormal, surfAtlasUV(fi, swp.xz * inv)).rgb * 2.0 - 1.0;
+  vec3 tz = texture2D(uSurfNormal, surfAtlasUV(fi, swp.xy * inv)).rgb * 2.0 - 1.0;
   tx.y = -tx.y; ty.y = -ty.y; tz.y = -tz.y; // DX -> GL
   // UDN blend: perturb the geometric normal by each plane's tangent normal
   // (swizzled into that plane) and combine by the triplanar weights.
@@ -91,10 +106,11 @@ vec3 surfTriNormal(float fi, vec3 wp, vec3 blend, float tile, vec3 nGeo) {
 }
 
 float surfTriScalar(sampler2D atlas, float fi, vec3 wp, vec3 blend, float tile) {
+  vec3 swp = surfBreakWarp(fi, wp, tile);
   float inv = surfTileInv(tile);
-  float cx = texture2D(atlas, surfAtlasUV(fi, wp.zy * inv)).r;
-  float cy = texture2D(atlas, surfAtlasUV(fi, wp.xz * inv)).r;
-  float cz = texture2D(atlas, surfAtlasUV(fi, wp.xy * inv)).r;
+  float cx = texture2D(atlas, surfAtlasUV(fi, swp.zy * inv)).r;
+  float cy = texture2D(atlas, surfAtlasUV(fi, swp.xz * inv)).r;
+  float cz = texture2D(atlas, surfAtlasUV(fi, swp.xy * inv)).r;
   return cx * blend.x + cy * blend.y + cz * blend.z;
 }
 
@@ -130,7 +146,7 @@ void surfMaterialWeights(
 }
 
 SurfaceTexResult applySurfaceMaterials(
-  vec3 baseAlbedo, vec3 n, vec3 nGeo, vec3 wpos, float dist,
+  vec3 baseAlbedo, vec3 n, vec3 baseNormal, vec3 nGeo, vec3 wpos, float dist,
   TerrainColorResult tc, BiomeWeights bw, float slope, float hRel, float h01
 ) {
   SurfaceTexResult res;
@@ -175,9 +191,47 @@ SurfaceTexResult applySurfaceMaterials(
   if (bestFi < -0.5 || bestWeight < 1e-4) return res;
 
   vec3 texAlb = surfTri(uSurfDiffuse, bestFi, wpos, blend, bestTile);
-  vec3 texNrm = surfTriNormal(bestFi, wpos, blend, bestTile, nGeo);
+  vec3 texNrm = nGeo;
+  if (uSurfNormalAmt > 0.001) {
+    texNrm = surfTriNormal(bestFi, wpos, blend, bestTile, nGeo);
+  }
   float texRough = surfTriScalar(uSurfRough, bestFi, wpos, blend, bestTile);
   float texAO = surfTriScalar(uSurfAO, bestFi, wpos, blend, bestTile);
+
+  float blendAmount = clamp(uSurfBlend, 0.0, 1.0);
+  if (blendAmount > 0.001) {
+    vec3 blendAlb = vec3(0.0);
+    vec3 blendNrm = vec3(0.0);
+    float blendRough = 0.0;
+    float blendAO = 0.0;
+    float blendSum = 0.0;
+    for (int i = 0; i < ${SURFACE_TEXTURE_ROWS}; i++) {
+      float wi = max(w[i], 0.0) * uSurfPresent[i];
+      if (wi > 1e-4) {
+        float fi = float(i);
+        float tile = uSurfTile[i];
+        blendAlb += surfTri(uSurfDiffuse, fi, wpos, blend, tile) * wi;
+        if (uSurfNormalAmt > 0.001) {
+          blendNrm += surfTriNormal(fi, wpos, blend, tile, nGeo) * wi;
+        }
+        blendRough += surfTriScalar(uSurfRough, fi, wpos, blend, tile) * wi;
+        blendAO += surfTriScalar(uSurfAO, fi, wpos, blend, tile) * wi;
+        blendSum += wi;
+      }
+    }
+    if (blendSum > 1e-4) {
+      blendAlb /= blendSum;
+      blendRough /= blendSum;
+      blendAO /= blendSum;
+      texAlb = mix(texAlb, blendAlb, blendAmount);
+      if (uSurfNormalAmt > 0.001) {
+        blendNrm = normalize(blendNrm / blendSum);
+        texNrm = normalize(mix(texNrm, blendNrm, blendAmount));
+      }
+      texRough = mix(texRough, blendRough, blendAmount);
+      texAO = mix(texAO, blendAO, blendAmount);
+    }
+  }
 
   // Dominant-layer sampling keeps the selected material readable. In texture
   // modes, do not ease back to procedural color at layer boundaries: the atlas
@@ -190,9 +244,12 @@ SurfaceTexResult applySurfaceMaterials(
   vec3 recolored = mix(texAlb, baseAlbedo * (0.35 + tl), uSurfTint);
 
   res.albedo = mix(baseAlbedo, recolored, k);
+  vec3 normalBase = normalize(baseNormal);
   if (uSurfNormalAmt > 0.001) {
     vec3 boostedN = normalize(nGeo + (texNrm - nGeo) * uSurfNormalAmt);
-    res.normal = normalize(mix(n, boostedN, clamp(k, 0.0, 1.0)));
+    res.normal = normalize(mix(normalBase, boostedN, clamp(k, 0.0, 1.0)));
+  } else {
+    res.normal = normalBase;
   }
   res.ao = mix(1.0, texAO, k * uSurfAOAmt);
   res.rough = mix(0.8, texRough, clamp(k * uSurfRoughAmt, 0.0, 1.0));

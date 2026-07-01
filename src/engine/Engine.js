@@ -1880,6 +1880,10 @@ export class Engine {
     u.uSurfTint.value = 0.0;
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
     u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
+    if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.0 };
+    u.uSurfBreakup.value = p.surfaceTextureBreakup ?? 0.0;
+    if (!u.uSurfBlend) u.uSurfBlend = { value: 0.0 };
+    u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.0;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
     u.uSurfRoughAmt.value = 1.0;
     u.uSurfAOAmt.value = 1.0;

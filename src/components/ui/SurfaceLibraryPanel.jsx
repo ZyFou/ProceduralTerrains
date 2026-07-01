@@ -5,7 +5,7 @@ import SurfaceMaterialPreviewSphere from './SurfaceMaterialPreviewSphere.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { detectSlotFromFilename } from '../../engine/terrain/surface/SurfaceTextureDetector.js';
 import {
-  loadMaterialsManifest, resolveDefaultMapUrl, resolveCustomMapUrl, probeUrlExists,
+  loadMaterialsManifest, resolveCustomMapUrl,
   setOverrideUrl, clearOverrideUrl, getOverrideUrl, MAP_SLOT_LABELS,
   resetMaterialSurfaceState, SURFACE_LIBRARY_CHANGE_EVENT, CUSTOM_SURFACE_VARIANT,
 } from '../../engine/terrain/surface/SurfaceLibrary.js';
@@ -22,7 +22,6 @@ const RENDERED_MATERIAL_IDS = new Set(SURFACE_TEXTURE_LAYERS);
 
 const STATUS_LABEL = {
   checking: '...',
-  default: 'Default',
   custom: 'Custom',
   missing: 'Missing',
 };
@@ -34,13 +33,7 @@ const LAYER_STATUS_LABEL = {
   missingOptional: 'Missing Optional Maps',
 };
 
-const SOURCE_LABEL = {
-  [SURFACE_TEXTURE_SOURCE.DEFAULT]: 'default',
-  [SURFACE_TEXTURE_SOURCE.CUSTOM]: 'custom',
-};
-
 function slotUrlForSource(material, source, slot) {
-  if (source === SURFACE_TEXTURE_SOURCE.DEFAULT) return resolveDefaultMapUrl(material, slot);
   if (source === SURFACE_TEXTURE_SOURCE.CUSTOM) return resolveCustomMapUrl(material, slot);
   return null;
 }
@@ -52,30 +45,19 @@ function layerStatusClass(status) {
 }
 
 function coverageText(source, coverage) {
-  if (!coverage) return source === SURFACE_TEXTURE_SOURCE.DEFAULT ? 'Default atlas not baked' : 'Custom atlas not baked';
-  const kind = SOURCE_LABEL[source] ?? 'texture';
-  return `${coverage.diffuseReady}/${coverage.total} ${kind} diffuse layers ready`;
+  if (!coverage) return 'Custom atlas not baked';
+  return `${coverage.diffuseReady}/${coverage.total} custom diffuse layers ready`;
 }
 
 function FileSlotRow({ material, source, slot, onChanged }) {
   const inputRef = useRef(null);
   const [status, setStatus] = useState('checking');
   const [dragOver, setDragOver] = useState(false);
-  const custom = source === SURFACE_TEXTURE_SOURCE.CUSTOM;
-  const override = custom ? getOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot) : null;
+  const override = getOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot);
 
   useEffect(() => {
-    let cancelled = false;
-    if (custom) {
-      setStatus(override ? 'custom' : 'missing');
-      return undefined;
-    }
-    setStatus('checking');
-    probeUrlExists(resolveDefaultMapUrl(material, slot)).then((exists) => {
-      if (!cancelled) setStatus(exists ? 'default' : 'missing');
-    });
-    return () => { cancelled = true; };
-  }, [custom, material, slot, override]);
+    setStatus(override ? 'custom' : 'missing');
+  }, [override]);
 
   const pick = (file) => {
     const url = URL.createObjectURL(file);
@@ -93,14 +75,12 @@ function FileSlotRow({ material, source, slot, onChanged }) {
       className={`surface-slot-row${dragOver ? ' drag-over' : ''}`}
       data-setting-id={`surface.${material.id}.${source}.${slot}`}
       onDragOver={(e) => {
-        if (!custom) return;
         e.preventDefault();
         e.stopPropagation();
         setDragOver(true);
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
-        if (!custom) return;
         e.preventDefault();
         e.stopPropagation();
         setDragOver(false);
@@ -112,30 +92,28 @@ function FileSlotRow({ material, source, slot, onChanged }) {
       <span className={`surface-slot-status surface-slot-status-${status}`}>
         {STATUS_LABEL[status] ?? status}
       </span>
-      {custom && (
-        <div className="file-picker surface-slot-picker">
-          <button type="button" className="file-picker-btn" onClick={() => inputRef.current?.click()}>
-            <ImageUp size={13} strokeWidth={1.75} aria-hidden />
-            <span>{override ? 'Replace' : 'Upload'}</span>
+      <div className="file-picker surface-slot-picker">
+        <button type="button" className="file-picker-btn" onClick={() => inputRef.current?.click()}>
+          <ImageUp size={13} strokeWidth={1.75} aria-hidden />
+          <span>{override ? 'Replace' : 'Upload'}</span>
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          className="file-picker-input"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) pick(file);
+            e.target.value = '';
+          }}
+        />
+        {override && (
+          <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title="Clear upload">
+            <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
           </button>
-          <input
-            ref={inputRef}
-            type="file"
-            className="file-picker-input"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) pick(file);
-              e.target.value = '';
-            }}
-          />
-          {override && (
-            <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title="Clear upload">
-              <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
-            </button>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -252,8 +230,10 @@ function MaterialCard({ material, mapSlots, source, targetId, atlasLayer, onMate
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 const SURFACE_MODE_SLIDERS = [
-  slider('surfaceTextureScale', 'Scale', 0.25, 4, 0.05, { digits: 2 }),
-  slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2 }),
+  slider('surfaceTextureScale', 'Scale', 0.25, 4, 0.05, { digits: 2, fallback: 1 }),
+  slider('surfaceTextureBreakup', 'Break Tiling', 0, 1, 0.02, { digits: 2, fallback: 0 }),
+  slider('surfaceTextureBlend', 'Blend Textures', 0, 1, 0.02, { digits: 2, fallback: 0 }),
+  slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2, fallback: 1 }),
 ];
 
 function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
@@ -277,26 +257,25 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
         value={source}
         options={[
           { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL, label: 'Procedural' },
-          { value: SURFACE_TEXTURE_SOURCE.DEFAULT, label: 'Default Materials' },
           { value: SURFACE_TEXTURE_SOURCE.CUSTOM, label: 'Custom Materials' },
         ]}
         onChange={setSource}
         settingId="surface.mode"
-        info="Procedural uses shader colours. Default Materials uses shipped texture maps. Custom Materials uses only uploaded maps and shows missing layers in the viewport."
+        info="Procedural uses shader colours. Custom Materials uses only uploaded maps and shows missing layers in the viewport."
       />
       {textureMode && (
         <>
           <div className="surface-apply-row">
             <button type="button" className="action-btn primary" onClick={() => onBake({ source, force: true })} disabled={applying}>
               <RefreshCw size={13} strokeWidth={1.8} aria-hidden />
-              {applying ? 'Baking...' : source === SURFACE_TEXTURE_SOURCE.DEFAULT ? 'Bake Default Materials' : 'Bake Custom Materials'}
+              {applying ? 'Baking...' : 'Bake Custom Materials'}
             </button>
             <span className={`surface-apply-status ${coverageClass}`}>
               {applying ? 'Building atlas' : coverageText(source, coverage)}
             </span>
           </div>
           {SURFACE_MODE_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key] ?? 1} onChange={(v) => onParam(def.key, v)} settingId={`surface.${def.key}`} />
+            <SliderCtl key={def.key} def={def} value={params[def.key] ?? def.fallback ?? 1} onChange={(v) => onParam(def.key, v)} settingId={`surface.${def.key}`} />
           ))}
           <ToggleRow
             label="Triplanar Projection"

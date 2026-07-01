@@ -424,6 +424,7 @@ void main() {
   }
 
   vec3 n = normalize(vec3(nGeo.x * uNormalStrength, 1.0, nGeo.z * uNormalStrength));
+  vec3 surfaceBaseNormal = n;
 
   float slope = 1.0 - nGeo.y;
   float hRel = hC - uSeaLevel;
@@ -469,7 +470,7 @@ void main() {
   // the mode is off or the camera is far (uSurfMode/uSurfAmount uniform branch).
   float dist = length(cameraPosition - vWorldPos);
   SurfaceTexResult surf = applySurfaceMaterials(
-    td.albedo, n, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
   );
   td.albedo = surf.albedo;
   n = surf.normal;
@@ -712,6 +713,8 @@ export function createTerrainUniforms() {
     uSurfAmount:     { value: 1.0 },
     uSurfTint:       { value: 0.0 },
     uSurfScale:      { value: 1.0 },
+    uSurfBreakup:    { value: 0.0 },
+    uSurfBlend:      { value: 0.0 },
     uSurfNormalAmt:  { value: 1.0 },
     uSurfRoughAmt:   { value: 1.0 },
     uSurfAOAmt:      { value: 1.0 },

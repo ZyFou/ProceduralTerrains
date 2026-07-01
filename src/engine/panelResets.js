@@ -16,6 +16,7 @@ export const TERRAIN_RESET_KEYS = [
   'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves', 'persistence', 'lacunarity', 'ridge', 'warp',
   'noisePreset', 'normalStrength', 'aoStrength',
   'surfaceTextureSource', 'surfaceTextureMode', 'surfaceTextureAmount', 'surfaceTextureTint', 'surfaceTextureScale',
+  'surfaceTextureBreakup', 'surfaceTextureBlend',
   'surfaceTextureNormal', 'surfaceTextureRough', 'surfaceTextureAO',
   'surfaceTextureTriplanar',
 ];

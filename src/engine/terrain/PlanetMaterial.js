@@ -166,6 +166,7 @@ void main() {
   // normal-strength tweak: lean the geometric normal toward/away from up
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
   vec3 n = normalize(mix(dir, nGeo, uNormalStrength));
+  vec3 surfaceBaseNormal = n;
 
   Climate cl = planetClimateAt(dir);
   BiomeWeights bw = biomeWeightsAt(cl);
@@ -220,7 +221,7 @@ void main() {
 
   float dist = length(cameraPosition - vWorldPos);
   SurfaceTexResult surf = applySurfaceMaterials(
-    td.albedo, n, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
   );
   td.albedo = surf.albedo;
   n = surf.normal;

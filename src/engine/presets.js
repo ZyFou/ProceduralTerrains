@@ -42,12 +42,14 @@ export const DEFAULT_PARAMS = {
   aoStrength: 0.75,
   chunkGrid: false,
 
-  // surface textures (procedural shader, shipped defaults, or uploaded custom maps)
-  surfaceTextureSource: 'procedural', // procedural | defaultTextures | customTextures
+  // surface textures (procedural shader or uploaded custom maps)
+  surfaceTextureSource: 'procedural', // procedural | customTextures
   surfaceTextureMode: false,     // legacy mirror: false = procedural, true = texture atlas source
   surfaceTextureAmount: 1.0,     // master blend of textures over colour
   surfaceTextureTint: 0.0,       // 0 = raw texture colour, 1 = recolour by palette
   surfaceTextureScale: 1.0,      // custom texture tiling multiplier
+  surfaceTextureBreakup: 0.0,    // low-frequency domain warp that breaks visible tiling
+  surfaceTextureBlend: 0.0,      // blend neighboring terrain materials at transitions
   surfaceTextureNormal: 1.0,     // texture normal-relief strength
   surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
   surfaceTextureAO: 1.0,         // sampled-AO crevice darkening
