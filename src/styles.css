@@ -4226,6 +4226,37 @@ input[type="color"].palette-color-input {
 
 /* Surface Library (Terrain > Surface > Textures) */
 .surface-library { margin-top: 4px; }
+.surface-role-group {
+  margin-top: 10px;
+}
+.surface-role-group-title {
+  margin: 10px 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.surface-role-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.surface-role-swatch {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.surface-role-count {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+}
 .surface-material-body {
   display: flex;
   gap: 12px;
@@ -4284,6 +4315,32 @@ input[type="color"].palette-color-input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.surface-variant-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.015);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.surface-variant-block.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.surface-variant-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.surface-variant-title {
+  flex: 1;
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 700;
+}
+.surface-preview-hint {
+  margin: 0;
 }
 .surface-slot-row {
   display: grid;

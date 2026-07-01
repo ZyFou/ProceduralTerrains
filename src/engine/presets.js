@@ -48,8 +48,9 @@ export const DEFAULT_PARAMS = {
   surfaceTextureAmount: 1.0,     // master blend of textures over colour
   surfaceTextureTint: 0.0,       // 0 = raw texture colour, 1 = recolour by palette
   surfaceTextureScale: 1.0,      // custom texture tiling multiplier
-  surfaceTextureBreakup: 0.0,    // low-frequency domain warp that breaks visible tiling
-  surfaceTextureBlend: 0.0,      // blend neighboring terrain materials at transitions
+  surfaceTextureBreakup: 0.5,    // stochastic transforms / variant mixing that break visible tiling
+  surfaceTextureBlend: 0.35,     // blend neighboring terrain materials at transitions
+  surfaceTexturePaletteInfluence: 0.6, // recolor uploaded texture luminance toward palette roles
   surfaceTextureNormal: 1.0,     // texture normal-relief strength
   surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
   surfaceTextureAO: 1.0,         // sampled-AO crevice darkening

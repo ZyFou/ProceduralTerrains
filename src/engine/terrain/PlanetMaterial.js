@@ -221,7 +221,7 @@ void main() {
 
   float dist = length(cameraPosition - vWorldPos);
   SurfaceTexResult surf = applySurfaceMaterials(
-    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, cl, bw, slope, hRel, h01, detail, jitter
   );
   td.albedo = surf.albedo;
   n = surf.normal;

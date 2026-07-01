@@ -7,6 +7,7 @@ const BASE_URL = '/textures/terrain';
 const VARIANTS_API = '/__surface_api/variants';
 const SELECTION_STORAGE_KEY = 'terrain-studio-surface-variants-v1';
 export const CUSTOM_SURFACE_VARIANT = 'custom';
+export const CUSTOM_SURFACE_VARIANT_PREFIX = 'custom:v';
 export const SURFACE_LIBRARY_CHANGE_EVENT = 'terrain-surface-library-change';
 
 export const MAP_SLOT_LABELS = {
@@ -171,6 +172,11 @@ export function clearOverrideUrl(materialId, variant, slot) {
   notifySurfaceLibraryChanged();
 }
 
+export function getCustomVariantKey(variantIndex = 0) {
+  const index = Math.max(0, Math.min(3, Number(variantIndex) || 0));
+  return `${CUSTOM_SURFACE_VARIANT_PREFIX}${index}`;
+}
+
 export function getMaterialOverrideCount(materialId) {
   let count = 0;
   const prefix = `${materialId}:`;
@@ -185,9 +191,10 @@ export function resetMaterialSurfaceState(materialId) {
   delete store[materialId];
   writeSelectionStore(store);
 
-  const prefix = `${materialId}:`;
+  const prefixes = [`${materialId}:`];
+  if (materialId === 'swamp') prefixes.push('mud:');
   for (const [key, url] of overrides.entries()) {
-    if (!key.startsWith(prefix)) continue;
+    if (!prefixes.some((prefix) => key.startsWith(prefix))) continue;
     URL.revokeObjectURL(url);
     overrides.delete(key);
   }
@@ -217,7 +224,16 @@ export function resolveDefaultMapUrl(material, slot) {
 
 // Resolves the URL for Custom Materials rendering. Custom mode is a single
 // upload set keyed separately from legacy variants, so it cannot silently use
-// shipped base files or old variant folders.
-export function resolveCustomMapUrl(material, slot) {
-  return getOverrideUrl(material.id, CUSTOM_SURFACE_VARIANT, slot);
+// shipped base files or old variant folders. Variant 0 also reads the previous
+// session-only custom key so old in-memory uploads still appear after this
+// pipeline migration.
+export function resolveCustomMapUrl(material, slot, variantIndex = 0) {
+  const roleId = typeof material === 'string' ? material : material.id;
+  const direct = getOverrideUrl(roleId, getCustomVariantKey(variantIndex), slot);
+  if (direct) return direct;
+  if (variantIndex !== 0) return null;
+  const legacyDirect = getOverrideUrl(roleId, CUSTOM_SURFACE_VARIANT, slot);
+  if (legacyDirect) return legacyDirect;
+  if (roleId === 'swamp') return getOverrideUrl('mud', CUSTOM_SURFACE_VARIANT, slot);
+  return null;
 }

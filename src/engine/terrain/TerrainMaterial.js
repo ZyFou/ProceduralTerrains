@@ -11,6 +11,7 @@ import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
 import {
   SURFACE_TEXTURE_UNIFORMS_GLSL,
   SURFACE_TEXTURE_FUNCTIONS_GLSL,
+  SURFACE_TEXTURE_ROLE_COUNT,
   SURFACE_TEXTURE_ROWS,
 } from './surface/terrainSurfaceTextureGLSL.js';
 import { createPaletteUniforms } from '../style/PaletteUniforms.js';
@@ -470,7 +471,7 @@ void main() {
   // the mode is off or the camera is far (uSurfMode/uSurfAmount uniform branch).
   float dist = length(cameraPosition - vWorldPos);
   SurfaceTexResult surf = applySurfaceMaterials(
-    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+    td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, cl, bw, slope, hRel, h01, detail, jitter
   );
   td.albedo = surf.albedo;
   n = surf.normal;
@@ -712,6 +713,7 @@ export function createTerrainUniforms() {
     uSurfMode:       { value: 0.0 },
     uSurfAmount:     { value: 1.0 },
     uSurfTint:       { value: 0.0 },
+    uSurfPaletteInfluence: { value: 0.6 },
     uSurfScale:      { value: 1.0 },
     uSurfBreakup:    { value: 0.0 },
     uSurfBlend:      { value: 0.0 },
@@ -724,7 +726,8 @@ export function createTerrainUniforms() {
     // for far infinite-world terrain). Studio board distances stay well inside.
     uSurfNear:       { value: 200.0 },
     uSurfFar:        { value: 12000.0 },
-    uSurfTile:       { value: new Array(SURFACE_TEXTURE_ROWS).fill(12) },
+    uSurfTile:       { value: new Array(SURFACE_TEXTURE_ROLE_COUNT).fill(12) },
+    uSurfRolePresent:{ value: new Array(SURFACE_TEXTURE_ROLE_COUNT).fill(0) },
     uSurfPresent:    { value: new Array(SURFACE_TEXTURE_ROWS).fill(0) },
     ...paletteUniforms,
   };

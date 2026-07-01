@@ -1878,12 +1878,14 @@ export class Engine {
     u.uSurfMode.value = p.surfaceTextureMode ? 1.0 : 0.0;
     u.uSurfAmount.value = 1.0;
     u.uSurfTint.value = 0.0;
+    if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
+    u.uSurfPaletteInfluence.value = p.surfaceTexturePaletteInfluence ?? 0.6;
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
     u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
-    if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.0 };
-    u.uSurfBreakup.value = p.surfaceTextureBreakup ?? 0.0;
-    if (!u.uSurfBlend) u.uSurfBlend = { value: 0.0 };
-    u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.0;
+    if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
+    u.uSurfBreakup.value = p.surfaceTextureBreakup ?? 0.5;
+    if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };
+    u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
     u.uSurfRoughAmt.value = 1.0;
     u.uSurfAOAmt.value = 1.0;
@@ -1906,6 +1908,10 @@ export class Engine {
     u.uSurfRough.value = atlas.rough;
     u.uSurfAO.value = atlas.ao;
     u.uSurfPresent.value = atlas.present.map((v) => (v ? 1.0 : 0.0));
+    if (u.uSurfRolePresent) {
+      u.uSurfRolePresent.value = (atlas.rolePresent ?? atlas.layers?.map((layer) => (layer.hasDiffuse ? 1 : 0)) ?? [])
+        .map((v) => (v ? 1.0 : 0.0));
+    }
     u.uSurfTile.value = atlas.tile.slice();
     this._surfaceAtlas = atlas;
     this._needsRender = true;
