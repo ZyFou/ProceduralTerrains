@@ -96,6 +96,7 @@ export const DEFAULT_DEBUG_FLAGS = {
   disableHeightBake: false,
   terrainDetailDebug: 'off',
   mergeDebug: false,
+  freeCamNoClip: false,
 };
 
 export const DEFAULT_TILE_DEBUG = {

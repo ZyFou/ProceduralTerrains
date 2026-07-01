@@ -230,6 +230,9 @@ export class Engine {
     this.playerMode = false;
     this.exploreMode = 'none';
     this.heightSampler = null;
+    this.cpuHeightSampler = null;
+    this._freeCamRestore = null;
+    this._debugFreeCamOwnsFps = false;
     this._terrainGen = 0;   // bumped whenever the height field changes
     this._infiniteTerrainMat = null;
     this._infiniteWaterMat = null;
@@ -266,6 +269,7 @@ export class Engine {
       disableHeightBake: false, // force the live per-pixel height field (studio bake off)
       terrainDetailDebug: 'off',
       mergeDebug: false,      // wireframe boxes around merged groups / macro proxy
+      freeCamNoClip: false,
     };
     this._landingShowcase = false;
 
@@ -1449,6 +1453,7 @@ export class Engine {
     this.noiseStack = stack;
     this.params.noiseStack = stack;
     this._soloLayerId = solo;
+    if (this.cpuHeightSampler?.setStack) this.cpuHeightSampler.setStack(stack);
     if (this.heightSampler?.cpu?.setStack) this.heightSampler.cpu.setStack(stack);
     if (this.planetSampler) this.planetSampler.setStack(stack);
     if (this._minimapSampler?.setStack) this._minimapSampler.setStack(stack);
@@ -2336,6 +2341,10 @@ export class Engine {
       this._needsRender = true;
       return;
     }
+    if (key === 'freeCamNoClip') {
+      this._setDebugFreeCam(!!value);
+      return;
+    }
     this._debug[key] = !!value;
     this._needsRender = true;
     if (key === 'mergeDebug') {
@@ -2354,15 +2363,140 @@ export class Engine {
     }
   }
 
+  _setDebugFreeCam(enabled) {
+    enabled = !!enabled;
+    if (enabled === !!this._debug.freeCamNoClip) return;
+    this._debug.freeCamNoClip = enabled;
+
+    if (enabled) {
+      const savedPos = this.camera.position.clone();
+      const savedQuat = this.camera.quaternion.clone();
+      this._freeCamRestore = {
+        worldMode: this.worldMode,
+        exploreMode: this.exploreMode,
+        playerMode: this.playerMode,
+      };
+      const previousExplore = this.exploreMode;
+      if (previousExplore !== 'none') this.setExploreMode('none');
+      this.camera.position.copy(savedPos);
+      this.camera.quaternion.copy(savedQuat);
+
+      if (this.worldMode === 'studio') {
+        this.controls.enabled = false;
+        if (!this.fpsControls) {
+          this.fpsControls = new FPSControls(this.camera, this.canvas);
+          this._debugFreeCamOwnsFps = true;
+        }
+      } else if (this.worldMode === 'planet') {
+        if (this.planetControls) {
+          this.planetControls.dispose();
+          this.planetControls = null;
+        }
+        if (!this.fpsControls) {
+          this.fpsControls = new FPSControls(this.camera, this.canvas);
+          this._debugFreeCamOwnsFps = true;
+        }
+      } else if (this.worldMode === 'infinite') {
+        if (!this.fpsControls) {
+          this.fpsControls = new FPSControls(this.camera, this.canvas);
+          this._debugFreeCamOwnsFps = true;
+        }
+      }
+      this._configureDebugFreeCamControls();
+      this.cb.onExploreMode?.('freecam');
+      this.cb.onPlayerMode?.(false);
+      this._emitExploreStats({
+        chunks: this.worldMode === 'infinite'
+          ? (this.infiniteWorld?.activeChunkCount ?? 0)
+          : (this.worldMode === 'planet' ? (this.planetWorld?.activeChunkCount ?? 0) : (this.board?.activeChunkCount ?? 0)),
+        visibleChunks: this.worldMode === 'infinite'
+          ? (this.infiniteWorld?.visibleChunkCount ?? 0)
+          : (this.worldMode === 'planet' ? (this.planetWorld?.visibleChunkCount ?? 0) : (this.board?.visibleChunkCount ?? 0)),
+        culledChunks: this.worldMode === 'infinite'
+          ? (this.infiniteWorld?.culledChunkCount ?? 0)
+          : (this.worldMode === 'planet' ? (this.planetWorld?.culledChunkCount ?? 0) : (this.board?.culledChunkCount ?? 0)),
+        lodCounts: this.worldMode === 'infinite'
+          ? [...(this.infiniteWorld?.lodCounts ?? [0, 0, 0, 0])]
+          : (this.worldMode === 'planet' ? [...(this.planetWorld?.lodCounts ?? [0, 0, 0, 0])] : [...(this.board?.lodCounts ?? [0, 0, 0, 0])]),
+      });
+      try { document.activeElement?.blur?.(); } catch {}
+      try { this.canvas.requestPointerLock?.(); } catch {}
+      this.cb.onToast?.('No-clip fly camera - ZQSD/WASD move · Space up · Shift down');
+      this._needsRender = true;
+      return;
+    }
+
+    const restore = this._freeCamRestore;
+    this._freeCamRestore = null;
+
+    if (this._debugFreeCamOwnsFps && this.fpsControls) {
+      this.fpsControls.dispose();
+      this.fpsControls = null;
+    }
+    this._debugFreeCamOwnsFps = false;
+
+    if (this.worldMode === 'studio') {
+      this.controls.enabled = true;
+      if (restore?.worldMode === this.worldMode && restore.exploreMode !== 'none') {
+        this.setExploreMode(restore.exploreMode);
+      }
+    } else if (this.worldMode === 'infinite') {
+      if (restore?.worldMode === this.worldMode && restore.exploreMode !== 'none') {
+        this.setExploreMode(restore.exploreMode);
+      } else if (!this.fpsControls) {
+        this.fpsControls = new FPSControls(this.camera, this.canvas);
+      } else {
+        this.fpsControls.allowKeyboardWithoutLock = false;
+      }
+    } else if (this.worldMode === 'planet') {
+      if (restore?.worldMode === this.worldMode && restore.exploreMode !== 'none') {
+        this.setExploreMode(restore.exploreMode);
+      } else if (!this.planetControls && this._planetModules) {
+        const planet = this._planetModules;
+        this.planetControls = new planet.PlanetOrbitControls(this.camera, this.canvas, this.params.planetRadius);
+        this.planetControls.onFirstInteract = () => this.cb.onFirstInteract();
+        this.planetControls.update(0.001);
+      }
+    }
+    this.cb.onExploreMode?.(this.exploreMode);
+    this.cb.onPlayerMode?.(this.playerMode);
+    this.cb.onToast?.('No-clip free cam off');
+    this._needsRender = true;
+  }
+
+  _configureDebugFreeCamControls() {
+    if (!this.fpsControls) return;
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    this.fpsControls.yaw = Math.atan2(-dir.x, -dir.z);
+    this.fpsControls.pitch = Math.asin(Math.max(-0.999, Math.min(0.999, dir.y)));
+    this.fpsControls.externalMove = false;
+    this.fpsControls.allowKeyboardWithoutLock = true;
+    this.fpsControls.onSpeedWheel = null;
+    this.fpsControls.moveSpeed = this.worldMode === 'planet'
+      ? Math.max(200, (this.params.planetRadius || 16000) * 0.025)
+      : Math.max(80, Math.min(600, this.params.chunkSize * 1.6));
+    this.fpsControls.minSpeed = 10;
+    this.fpsControls.maxSpeed = this.worldMode === 'planet' ? 5000 : 2500;
+    this.fpsControls.update(0);
+  }
+
   // ------------------------------------------------------------- player mode
 
-  _getHeightSampler() {
-    if (!this.heightSampler) {
-      const cpu = new TerrainHeightSampler(this.uniforms, () => ({
+  _getCpuHeightSampler() {
+    if (!this.cpuHeightSampler) {
+      this.cpuHeightSampler = new TerrainHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
-      cpu.erosion = this.erosionField;   // analytic fallback tracks erosion too
+      this.cpuHeightSampler.erosion = this.erosionField;
+    }
+    return this.cpuHeightSampler;
+  }
+
+  _getHeightSampler() {
+    if (!this.heightSampler) {
+      const cpu = this._getCpuHeightSampler();
       this.heightSampler = new GpuHeightSampler({
         renderer: this.renderer,
         scene: this.scene,
@@ -3885,7 +4019,12 @@ export class Engine {
       this.perf = sanitizePerfSettings({ ...snap.perf });
       this.qualityPreset = this.perf.preset;
     }
-    if (snap.debug) this._debug = { ...this._debug, ...snap.debug };
+    if (snap.debug) {
+      const wantFreeCam = !!snap.debug.freeCamNoClip;
+      if (this._debug.freeCamNoClip && !wantFreeCam) this._setDebugFreeCam(false);
+      this._debug = { ...this._debug, ...snap.debug, freeCamNoClip: false };
+      if (wantFreeCam) this._setDebugFreeCam(true);
+    }
     if (snap.tileDebug) this.tileDebug = { ...this.tileDebug, ...snap.tileDebug };
 
     // tile assembly (so the board rebuild below lays out the right cells)
@@ -4084,6 +4223,7 @@ export class Engine {
         break;
       case 'debug': {
         this.params = patchParamsFromDefaults(this.params, DEBUG_PARAM_KEYS);
+        if (this._debug.freeCamNoClip) this._setDebugFreeCam(false);
         this._debug = { ...DEFAULT_DEBUG_FLAGS };
         this.uniforms.uTerrainDetailDebug.value = 0.0;
         this.board.setMergeDebug(this._debug.mergeDebug);
@@ -4453,7 +4593,9 @@ export class Engine {
 
   _tickStudio(dt, now) {
     // Input always runs (so inertia/look settle even when we skip drawing).
-    if (this.exploreMode === 'walk' && this.player) {
+    if (this._debug.freeCamNoClip && this.fpsControls) {
+      this.fpsControls.update(dt);
+    } else if (this.exploreMode === 'walk' && this.player) {
       this.fpsControls.update(dt);   // mouse look
       this.player.update(dt);        // body physics
     } else if (this.exploreMode === 'plane' && this.player) {
@@ -4481,6 +4623,7 @@ export class Engine {
       (this.water.visible && this.params.waterAnim) ||
       (this.visualPost?.enabled(this.params, this.worldMode) && (this.params.visualsSunRaysStrength ?? 0) > 0.001) ||
       this.underwater.active ||
+      this._debug.freeCamNoClip ||
       this.exploreMode !== 'none' ||
       !!this.paintState?.enabled ||
       this.board?.isBuilding ||
@@ -4585,7 +4728,7 @@ export class Engine {
       if (this.cb.onPlayerState) {
         this.cb.onPlayerState(this.player ? this.player.state : null);
       }
-      if (this.exploreMode === 'plane') {
+      if (this.exploreMode === 'plane' || this._debug.freeCamNoClip) {
         this._emitExploreStats({
           chunks: this.board?.activeChunkCount ?? 0,
           visibleChunks: this.board?.visibleChunkCount ?? 0,
@@ -4626,7 +4769,6 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
       this.profiler.end('chunks');
     }
-
     this._maybeWarmUnderwater();
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
@@ -4661,7 +4803,9 @@ export class Engine {
   }
 
   _tickPlanet(dt, now) {
-    if (this.exploreMode !== 'none' && this.player) {
+    if (this._debug.freeCamNoClip && this.fpsControls) {
+      this.fpsControls.update(dt);
+    } else if (this.exploreMode !== 'none' && this.player) {
       this.player.update(dt);   // explore controller owns look + physics
     } else if (this.planetControls) {
       this.planetControls.update(dt);

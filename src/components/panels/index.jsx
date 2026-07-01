@@ -527,6 +527,11 @@ function DebugPanel({ ctx }) {
   const [tab, setTab] = useState('monitor');
   const isStudio = ctx.worldMode === 'studio';
 
+  useEffect(() => {
+    const targetTab = ctx.settingsTarget?.tabId;
+    if (targetTab && targetTab !== tab) setTab(targetTab);
+  }, [ctx.settingsTarget?.tabId, tab]);
+
   return (
     <SidePanel title="Debug" description="Live stats and diagnostics." onClose={ctx.onClose}>
       <PanelTabs
@@ -746,9 +751,25 @@ function EngineDebugOptions({ ctx }) {
                 : 'Force the live per-pixel height field instead of the baked cubemap — A/B the planet render optimization.'}
               settingId="debug.disableHeightBake"
             />
+            <ToggleRow
+              label="Free Cam No-Clip"
+              value={!!flags.freeCamNoClip}
+              onChange={(v) => setFlag('freeCamNoClip', v)}
+              info="Temporarily switch to a collision-free FPS debug camera, then restore the previous explore/camera mode when disabled."
+              settingId="debug.freeCamNoClip"
+            />
           </>
         ) : (
-          <p className="section-hint">Freeze / render diagnostics apply to Tile or Planet mode.</p>
+          <>
+            <ToggleRow
+              label="Free Cam No-Clip"
+              value={!!flags.freeCamNoClip}
+              onChange={(v) => setFlag('freeCamNoClip', v)}
+              info="Temporarily switch to a collision-free FPS debug camera, then restore the previous explore/camera mode when disabled."
+              settingId="debug.freeCamNoClip"
+            />
+            <p className="section-hint">Freeze / render diagnostics apply to Tile or Planet mode.</p>
+          </>
         )}
       </CollapsibleGroup>
     </>

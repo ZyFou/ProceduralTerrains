@@ -395,6 +395,14 @@ export default function App() {
   runModeSwitchRef.current = runModeSwitch;
 
   const selectExploreMode = (mode) => {
+    if (exploreMode === 'freecam') {
+      engine().setDebugFlag('freeCamNoClip', false);
+      setDebugFlags((f) => ({ ...f, freeCamNoClip: false }));
+      if (mode === 'freecam') {
+        scheduleRecordRef.current?.();
+        return;
+      }
+    }
     const next = exploreMode === mode ? 'none' : mode;
     engine().setExploreMode(next);
   };
@@ -598,7 +606,7 @@ export default function App() {
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
-  const exploring = exploreMode !== 'none';
+  const exploring = exploreMode !== 'none' && exploreMode !== 'freecam';
   const planetExploring = isPlanet && exploring;
   const fpsView = isInfinite || planetExploring;
   const touchExplore = isInfinite || exploring;
@@ -832,6 +840,7 @@ export default function App() {
 
   const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
   const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
+  const drawerOpen = !!effectivePanel;
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
@@ -946,7 +955,7 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${effectivePanel ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}>
+    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}>
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}

@@ -47,7 +47,7 @@ export default function InfiniteHUD({
 
   const qualityKeys = getQualityKeys();
   const togglePerf = () => setPerfOpen((v) => !v);
-  const exploring = exploreMode === 'walk' || exploreMode === 'plane';
+  const exploring = exploreMode === 'walk' || exploreMode === 'plane' || exploreMode === 'freecam';
 
   return (
     <>
@@ -114,6 +114,16 @@ export default function InfiniteHUD({
             >
               Plane
             </button>
+            {exploreMode === 'freecam' && (
+              <button
+                type="button"
+                className="fps-explore-option active"
+                onClick={() => onExploreMode?.('freecam')}
+                title="Exit no-clip free camera"
+              >
+                Free Cam
+              </button>
+            )}
           </div>
         </div>
         <div className="fps-setting-row">

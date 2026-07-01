@@ -32,6 +32,10 @@ export class FPSControls {
     // When a PlayerController drives the body, FPSControls only applies
     // mouse-look orientation; movement keys are read by the controller.
     this.externalMove = false;
+    // Debug freecam can be entered from a UI toggle. Pointer lock may be denied
+    // until the canvas is clicked, but keyboard fly movement should start
+    // immediately.
+    this.allowKeyboardWithoutLock = false;
     // Optional wheel hook: receives the speed factor instead of moveSpeed.
     this.onSpeedWheel = null;
 
@@ -89,7 +93,7 @@ export class FPSControls {
 
   _onLockChange() {
     this._locked = document.pointerLockElement === this.dom;
-    if (!this._locked) this._keys.clear();
+    if (!this._locked && !this.allowKeyboardWithoutLock) this._keys.clear();
   }
 
   _onMouseMove(e) {
@@ -111,7 +115,7 @@ export class FPSControls {
   }
 
   _onKeyDown(e) {
-    if (!this._locked) return;
+    if (!this._locked && !this.allowKeyboardWithoutLock) return;
     this._keys.add(e.code);
   }
 
@@ -138,7 +142,7 @@ export class FPSControls {
       return;
     }
 
-    const canMove = this._locked || this.touchActive;
+    const canMove = this._locked || this.touchActive || this.allowKeyboardWithoutLock;
     if (!canMove) {
       this._applyOrientation();
       return;
