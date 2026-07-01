@@ -1208,6 +1208,11 @@ export class Engine {
       return;
     }
 
+    if (key.startsWith('surfaceTexture')) {
+      this._applySurfaceSettings();
+      return;
+    }
+
     // planet geometry params: rebuild the cube-sphere (chunk layout / radius).
     // These come from discrete dropdowns (one change at a time), so rebuild
     // immediately — App wraps the change in a loading overlay so the brief
@@ -1837,7 +1842,48 @@ export class Engine {
     this._applyCloudSettings();   // slab altitude/scale track board height + size
     this._applySkyboxSettings();  // sky dome params + per-mode visibility
     this._applyVisualSettings();
+    this._applySurfaceSettings();
     this._applyPixelRatio();
+  }
+
+  // Surface-texture control values (mode / blend / tint / relief). The atlas
+  // textures themselves are set separately via setSurfaceAtlas(). Uniforms
+  // persist across material rebuilds (shared uniforms object), so this only
+  // needs to run on param change + init.
+  _applySurfaceSettings() {
+    const p = this.params;
+    const u = this.uniforms;
+    if (!u?.uSurfMode) return;
+    u.uSurfMode.value = p.surfaceTextureMode ? 1.0 : 0.0;
+    u.uSurfAmount.value = p.surfaceTextureAmount ?? 1.0;
+    u.uSurfTint.value = p.surfaceTextureTint ?? 0.0;
+    u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
+    u.uSurfRoughAmt.value = p.surfaceTextureRough ?? 1.0;
+    u.uSurfAOAmt.value = p.surfaceTextureAO ?? 1.0;
+    u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
+    this._needsRender = true;
+  }
+
+  // Install freshly-built atlas textures (from SurfaceTextureAtlas.buildSurfaceAtlas).
+  // Disposes the previously-installed atlas (never the shared 1x1 fallback).
+  setSurfaceAtlas(atlas) {
+    const u = this.uniforms;
+    if (!u?.uSurfDiffuse) return;
+    const prev = this._surfaceAtlas;
+    if (prev) {
+      prev.diffuse?.dispose?.();
+      prev.normal?.dispose?.();
+      prev.rough?.dispose?.();
+      prev.ao?.dispose?.();
+    }
+    u.uSurfDiffuse.value = atlas.diffuse;
+    u.uSurfNormal.value = atlas.normal;
+    u.uSurfRough.value = atlas.rough;
+    u.uSurfAO.value = atlas.ao;
+    u.uSurfPresent.value = atlas.present.map((v) => (v ? 1.0 : 0.0));
+    u.uSurfTile.value = atlas.tile.slice();
+    this._surfaceAtlas = atlas;
+    this._needsRender = true;
   }
 
   _applyVisualSettings() {

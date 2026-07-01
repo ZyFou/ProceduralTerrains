@@ -8,6 +8,11 @@ import {
   TERRAIN_COLOR_FUNCTIONS_GLSL,
 } from '../shaders/terrainColor.glsl.js';
 import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
+import {
+  SURFACE_TEXTURE_UNIFORMS_GLSL,
+  SURFACE_TEXTURE_FUNCTIONS_GLSL,
+  SURFACE_TEXTURE_ROWS,
+} from './surface/terrainSurfaceTextureGLSL.js';
 import { createPaletteUniforms } from '../style/PaletteUniforms.js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 import { applyPlanetStyleToUniforms } from '../style/PaletteUniforms.js';
@@ -118,6 +123,8 @@ ${heightGLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+${SURFACE_TEXTURE_UNIFORMS_GLSL}
+${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 ${TERRAIN_DETAIL_GLSL}
 
 uniform float uNormalStrength;
@@ -458,9 +465,19 @@ void main() {
     return;
   }
 
+  // Surface textures: replace / tint the procedural biome colour with real
+  // material textures (triplanar, blended by the same signals). No-op cost when
+  // the mode is off or the camera is far (uSurfMode/uSurfAmount uniform branch).
+  float dist = length(cameraPosition - vWorldPos);
+  SurfaceTexResult surf = applySurfaceMaterials(
+    td.albedo, n, nGeo, vWorldPos, dist, tc, bw, slope, hRel, h01
+  );
+  td.albedo = surf.albedo;
+  n = surf.normal;
+
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
-  float ao = 1.0 - uAO * (concave * 0.45 + valley * 0.22);
+  float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   vec3 col = terrainLighting(
@@ -468,6 +485,12 @@ void main() {
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
     viewDir
   );
+
+  // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
+  if (surf.amount > 0.001) {
+    float ssp = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 24.0);
+    col += ssp * (1.0 - surf.rough) * surf.amount * 0.15 * max(uSunDir.y, 0.0);
+  }
 
   // underwater caustics on the submerged sea floor (no-op when dry: the
   // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
@@ -508,7 +531,6 @@ void main() {
 #endif
   col *= 1.0 - skirtDarken;
 
-  float dist = length(cameraPosition - vWorldPos);
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
 
@@ -516,6 +538,17 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }
 `;
+
+// 1x1 mid-grey fallback so the four surface-texture samplers are always bound
+// (avoids "no texture" warnings while the real atlas is null / before build).
+let _surfFallbackTex = null;
+function surfFallbackTexture() {
+  if (!_surfFallbackTex) {
+    _surfFallbackTex = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+    _surfFallbackTex.needsUpdate = true;
+  }
+  return _surfFallbackTex;
+}
 
 export function createTerrainUniforms() {
   const paletteUniforms = createPaletteUniforms();
@@ -667,6 +700,29 @@ export function createTerrainUniforms() {
     uImportHeightStrength:{ value: 1.0 },
     uImportHeightOffset:{ value: 0.0 },
     uImportBiomeBlend:{ value: 1.0 },
+
+    // Surface textures (real material maps replacing / tinting the biome colour).
+    // Atlas samplers stay null until the engine builds them; uSurfMode 0 keeps the
+    // whole feature a no-op (procedural colours), so the shader is unchanged until
+    // the user switches to texture mode.
+    uSurfDiffuse:    { value: surfFallbackTexture() },
+    uSurfNormal:     { value: surfFallbackTexture() },
+    uSurfRough:      { value: surfFallbackTexture() },
+    uSurfAO:         { value: surfFallbackTexture() },
+    uSurfMode:       { value: 0.0 },
+    uSurfAmount:     { value: 1.0 },
+    uSurfTint:       { value: 0.0 },
+    uSurfNormalAmt:  { value: 1.0 },
+    uSurfRoughAmt:   { value: 1.0 },
+    uSurfAOAmt:      { value: 1.0 },
+    uSurfTriplanar:  { value: 1.0 },
+    // Textures render at full strength across the board and near field, easing
+    // to procedural colour only in the far distance (cuts cost + no-mip shimmer
+    // for far infinite-world terrain). Studio board distances stay well inside.
+    uSurfNear:       { value: 200.0 },
+    uSurfFar:        { value: 12000.0 },
+    uSurfTile:       { value: new Array(SURFACE_TEXTURE_ROWS).fill(12) },
+    uSurfPresent:    { value: new Array(SURFACE_TEXTURE_ROWS).fill(0) },
     ...paletteUniforms,
   };
 }

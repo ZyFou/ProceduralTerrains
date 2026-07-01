@@ -4357,3 +4357,24 @@ input[type="color"].palette-color-input {
 }
 .surface-drop-summary { color: var(--text-muted); }
 .surface-drop-summary .warning { color: var(--warning); }
+
+.surface-mode-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+}
+.surface-apply-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.surface-apply-row .action-btn { width: auto; }
+.surface-apply-status { font-size: 11px; }
+.surface-apply-status.ok { color: var(--success); }
+.surface-apply-status.warning { color: var(--warning); }

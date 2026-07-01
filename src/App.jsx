@@ -3,6 +3,7 @@ import { createEngineProxy } from './engine/EngineProxy.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
+import { buildActiveSurfaceAtlas } from './engine/terrain/surface/applyTerrainSurface.js';
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
@@ -902,6 +903,14 @@ export default function App() {
     };
   }, [settingsTarget, showToolPanels, effectivePanel]);
 
+  const applySurfaceTextures = useCallback(async () => {
+    const eng = engineRef.current;
+    if (!eng) return { anyPresent: false };
+    const atlas = await buildActiveSurfaceAtlas();
+    eng.setSurfaceAtlas(atlas);
+    return { anyPresent: atlas.anyPresent };
+  }, []);
+
   const ctx = {
     params, worldMode, onParam,
     settingsTarget,
@@ -921,6 +930,7 @@ export default function App() {
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
     debugFlags, onDebugFlag: handleDebugFlag,
     onResetPanel: (id) => engine().resetPanelSettings(id),
+    onApplySurfaceTextures: applySurfaceTextures,
     stats, gpu, perf,
     rendererInfo: engineRef.current ? {
       ...(engineRef.current.rendererConfig || {}),

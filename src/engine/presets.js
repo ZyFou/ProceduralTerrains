@@ -42,6 +42,15 @@ export const DEFAULT_PARAMS = {
   aoStrength: 0.75,
   chunkGrid: false,
 
+  // surface textures (real material maps replacing / tinting the biome colour)
+  surfaceTextureMode: false,     // false = procedural colours, true = textures
+  surfaceTextureAmount: 1.0,     // master blend of textures over colour
+  surfaceTextureTint: 0.0,       // 0 = raw texture colour, 1 = recolour by palette
+  surfaceTextureNormal: 1.0,     // texture normal-relief strength
+  surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
+  surfaceTextureAO: 1.0,         // sampled-AO crevice darkening
+  surfaceTextureTriplanar: true, // triplanar projection (off = planar world-XZ)
+
   // world (rebuild required)
   chunkCount: 16,
   chunkSize: 128,

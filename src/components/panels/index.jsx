@@ -132,9 +132,7 @@ function SurfaceTab({ ctx }) {
       {subTab === 'general' && (
         <SurfacePropertiesSettings perf={ctx.perf} onPerfSetting={ctx.onPerfSetting} />
       )}
-      {subTab === 'textures' && (
-        <SurfaceLibraryPanel settingsTarget={ctx.settingsTarget} />
-      )}
+      {subTab === 'textures' && <SurfaceLibraryPanel ctx={ctx} />}
     </>
   );
 }

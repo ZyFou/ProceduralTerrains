@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ImageUp, Plus, RotateCcw } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import SurfaceMaterialPreviewSphere from './SurfaceMaterialPreviewSphere.jsx';
+import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { detectSlotFromFilename } from '../../engine/terrain/surface/SurfaceTextureDetector.js';
 import {
   loadMaterialsManifest, listVariants, createVariant, getMapUrl, resolveMapUrl,
@@ -274,7 +275,80 @@ function MaterialCard({ material, mapSlots, targetId }) {
   );
 }
 
-export default function SurfaceLibraryPanel({ settingsTarget }) {
+const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
+const SURFACE_MODE_SLIDERS = [
+  slider('surfaceTextureAmount', 'Texture Amount', 0, 1, 0.02, { digits: 2 }),
+  slider('surfaceTextureTint', 'Recolor by Biome', 0, 1, 0.02, { digits: 2, info: 'At 1, the biome palette colour drives hue and the texture supplies detail; at 0, raw texture colour shows.' }),
+  slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2 }),
+  slider('surfaceTextureAO', 'AO Strength', 0, 1, 0.05, { digits: 2 }),
+  slider('surfaceTextureRough', 'Roughness Sheen', 0, 1, 0.05, { digits: 2 }),
+];
+
+function SurfaceModeControls({ ctx }) {
+  const { params, onParam, onApplySurfaceTextures } = ctx;
+  const on = !!params.surfaceTextureMode;
+  const [applying, setApplying] = useState(false);
+  const [status, setStatus] = useState(null);
+  const appliedRef = useRef(false);
+
+  const apply = async () => {
+    if (!onApplySurfaceTextures) return;
+    setApplying(true);
+    try {
+      const res = await onApplySurfaceTextures();
+      appliedRef.current = true;
+      setStatus(res?.anyPresent ? 'loaded' : 'empty');
+    } catch {
+      setStatus('error');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const setMode = async (v) => {
+    const enabled = v === 'textures';
+    onParam('surfaceTextureMode', enabled);
+    if (enabled && !appliedRef.current) await apply();
+  };
+
+  return (
+    <div className="surface-mode-bar">
+      <SelectRow
+        label="Terrain Surface"
+        value={on ? 'textures' : 'colors'}
+        options={[{ value: 'colors', label: 'Procedural Colors' }, { value: 'textures', label: 'Material Textures' }]}
+        onChange={setMode}
+        settingId="surface.mode"
+        info="Colors uses the procedural biome palette. Textures replaces it with the material maps below (blended by the same height/slope/climate signals)."
+      />
+      {on && (
+        <>
+          <div className="surface-apply-row">
+            <button type="button" className="action-btn primary" onClick={apply} disabled={applying}>
+              {applying ? 'Building…' : 'Apply / Rebuild Textures'}
+            </button>
+            {status === 'loaded' && <span className="surface-apply-status ok">Textures applied</span>}
+            {status === 'empty' && <span className="surface-apply-status warning">No textures found — add files to the material folders</span>}
+            {status === 'error' && <span className="surface-apply-status warning">Build failed</span>}
+          </div>
+          {SURFACE_MODE_SLIDERS.map((def) => (
+            <SliderCtl key={def.key} def={def} value={params[def.key] ?? 1} onChange={(v) => onParam(def.key, v)} settingId={`surface.${def.key}`} />
+          ))}
+          <ToggleRow
+            label="Triplanar Projection"
+            value={params.surfaceTextureTriplanar !== false}
+            onChange={(v) => onParam('surfaceTextureTriplanar', v)}
+            settingId="surface.surfaceTextureTriplanar"
+            info="Blends X/Y/Z projections so cliffs don't stretch. Off = cheaper planar world-XZ."
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function SurfaceLibraryPanel({ ctx }) {
+  const settingsTarget = ctx?.settingsTarget;
   const [manifest, setManifest] = useState(null);
   const [error, setError] = useState(null);
 
@@ -291,11 +365,13 @@ export default function SurfaceLibraryPanel({ settingsTarget }) {
 
   return (
     <div className="surface-library">
+      <SurfaceModeControls ctx={ctx} />
       <p className="section-hint">
         Default terrain materials. Each has a <code>base/</code> texture set — drop matching files into
         <code> public/textures/terrain/&lt;material&gt;/base/</code>, drag-and-drop them below, or upload
         directly. Use <strong>Add Variant</strong> for extra look-alikes (each gets its own folder); pick a
-        variant to preview it on the sphere and set it as the material's default.
+        variant to preview it on the sphere and set it as the material's default. After changing textures,
+        press <strong>Apply / Rebuild Textures</strong>.
       </p>
       {manifest.materials.map((material) => (
         <MaterialCard key={material.id} material={material} mapSlots={manifest.mapSlots} targetId={settingsTarget?.settingId} />
