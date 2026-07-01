@@ -2892,6 +2892,21 @@ export class Engine {
     this._needsRender = true;
   }
 
+  // Non-destructive: swap between painting on top of the generated terrain
+  // and a flat Empty Terrain base, keeping any existing paint strokes.
+  setPaintBaseMode(mode) {
+    this.paintMode?.setBaseMode(mode);
+    this._bakedStudioGen = -1;
+    this._needsRender = true;
+  }
+
+  // Destructive "start fresh": flatten the base AND clear paint layers.
+  startEmptyTerrain() {
+    this.paintMode?.startEmpty();
+    this._bakedStudioGen = -1;
+    this._needsRender = true;
+  }
+
   // -------------------------------------------------------------- world mode
 
   async setWorldMode(mode) {

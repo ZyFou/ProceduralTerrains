@@ -1042,6 +1042,8 @@ export default function App() {
               paintState={paintState}
               onSetting={(key, value) => engine().setPaintSetting(key, value)}
               onClear={() => engine().clearPaintLayers()}
+              onSetBaseMode={(mode) => engine().setPaintBaseMode(mode)}
+              onStartEmpty={() => engine().startEmptyTerrain()}
               onExit={() => engine().setPaintMode(false)}
             />
           )}
