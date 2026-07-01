@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageUp, RefreshCw, RotateCcw } from 'lucide-react';
+import { unzipSync } from 'fflate';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import SurfaceMaterialPreviewSphere from './SurfaceMaterialPreviewSphere.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
@@ -23,6 +24,8 @@ import {
 
 const PREVIEW_SLOTS = ['diffuse', 'normalDX', 'roughness', 'ao'];
 const RENDERED_SLOTS = new Set(PREVIEW_SLOTS);
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|avif|gif|bmp)$/i;
+const ZIP_EXT_RE = /\.zip$/i;
 
 const STATUS_LABEL = {
   checking: '...',
@@ -54,6 +57,83 @@ function previewUrlsFor(role, variantIndex) {
     urls[slot] = resolveCustomMapUrl(role, slot, variantIndex);
   });
   return urls;
+}
+
+function mimeForTextureName(name) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.avif')) return 'image/avif';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.bmp')) return 'image/bmp';
+  return 'application/octet-stream';
+}
+
+function isZipFile(file) {
+  return ZIP_EXT_RE.test(file.name) || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+}
+
+function isTextureEntryPath(name) {
+  const normalized = name.replace(/\\/g, '/').toLowerCase();
+  return normalized.startsWith('textures/') || normalized.includes('/textures/');
+}
+
+async function textureFilesFromZip(file, mapSlots) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const entries = unzipSync(bytes);
+  const matchedBySlot = new Map();
+  const unmatched = [];
+
+  Object.entries(entries).forEach(([entryName, data]) => {
+    if (!data?.length || !isTextureEntryPath(entryName) || !IMAGE_EXT_RE.test(entryName)) return;
+    const slot = detectSlotFromFilename(entryName);
+    if (!slot || !mapSlots.includes(slot)) {
+      unmatched.push(entryName.split(/[\\/]/).pop() || entryName);
+      return;
+    }
+    if (matchedBySlot.has(slot)) return;
+    const blob = new Blob([data], { type: mimeForTextureName(entryName) });
+    matchedBySlot.set(slot, {
+      name: entryName.split(/[\\/]/).pop() || entryName,
+      url: URL.createObjectURL(blob),
+    });
+  });
+
+  return { matchedBySlot, unmatched };
+}
+
+async function importDroppedTextures({ files, role, mapSlots, variantIndex }) {
+  const matched = [];
+  const unmatched = [];
+  const variantKey = getCustomVariantKey(variantIndex);
+  const filledSlots = new Set();
+
+  for (const file of files) {
+    if (isZipFile(file)) {
+      const { matchedBySlot, unmatched: zipUnmatched } = await textureFilesFromZip(file, mapSlots);
+      for (const [slot, item] of matchedBySlot.entries()) {
+        if (filledSlots.has(slot)) continue;
+        setOverrideUrl(role.id, variantKey, slot, item.url);
+        filledSlots.add(slot);
+        matched.push(`${MAP_SLOT_LABELS[slot]} (${item.name})`);
+      }
+      if (!matchedBySlot.size) unmatched.push(file.name);
+      else unmatched.push(...zipUnmatched.slice(0, 4));
+      continue;
+    }
+
+    const slot = detectSlotFromFilename(file.name);
+    if (slot && mapSlots.includes(slot) && IMAGE_EXT_RE.test(file.name) && !filledSlots.has(slot)) {
+      setOverrideUrl(role.id, variantKey, slot, URL.createObjectURL(file));
+      filledSlots.add(slot);
+      matched.push(`${MAP_SLOT_LABELS[slot]} (${file.name})`);
+    } else {
+      unmatched.push(file.name);
+    }
+  }
+
+  return { matched, unmatched: unmatched.slice(0, 6) };
 }
 
 function FileSlotRow({ role, variantIndex, slot, onChanged }) {
@@ -134,29 +214,30 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
 function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialChanged }) {
   const [dropSummary, setDropSummary] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [importing, setImporting] = useState(false);
   const urls = previewUrlsFor(role, variantIndex);
   const layerStatus = atlasVariant?.status ?? 'notBaked';
   const statusLabel = LAYER_STATUS_LABEL[layerStatus] ?? 'Not baked';
 
-  const onBatchDrop = (e) => {
+  const onBatchDrop = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOver(false);
     const files = [...(e.dataTransfer.files || [])];
     if (!files.length) return;
-    const matched = [];
-    const unmatched = [];
-    const variantKey = getCustomVariantKey(variantIndex);
-    files.forEach((file) => {
-      const slot = detectSlotFromFilename(file.name);
-      if (slot && mapSlots.includes(slot)) {
-        setOverrideUrl(role.id, variantKey, slot, URL.createObjectURL(file));
-        matched.push(MAP_SLOT_LABELS[slot]);
-      } else {
-        unmatched.push(file.name);
-      }
-    });
-    if (matched.length) onMaterialChanged?.();
-    setDropSummary({ matched, unmatched });
+    setImporting(true);
+    try {
+      // Drop a ZIP containing textures/*_diff_*, *_nor_dx_*, *_rough_* and *_ao_*,
+      // or drop loose image maps directly onto the active variant.
+      // The first valid map per slot wins so accidental duplicates are ignored.
+      const { matched, unmatched } = await importDroppedTextures({ files, role, mapSlots, variantIndex });
+      if (matched.length) onMaterialChanged?.();
+      setDropSummary({ matched, unmatched });
+    } catch (err) {
+      setDropSummary({ matched: [], unmatched: [`${files[0]?.name || 'ZIP'} import failed`] });
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -164,30 +245,43 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
       className={`surface-variant-block${dragOver ? ' drag-over' : ''}`}
       onDragOver={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         setDragOver(true);
       }}
-      onDragLeave={() => setDragOver(false)}
+      onDragLeave={(e) => {
+        e.stopPropagation();
+        setDragOver(false);
+      }}
       onDrop={onBatchDrop}
     >
       <div className="surface-variant-head">
         <span className="surface-variant-title">Variant {variantIndex + 1}</span>
+        <span className="surface-variant-drop-chip">{importing ? 'Importing' : 'Drop ZIP / maps'}</span>
         <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
           {statusLabel}
         </span>
       </div>
-      {variantIndex === 0 && (
-        <div className="surface-material-body">
-          <SurfaceMaterialPreviewSphere
-            diffuseUrl={urls.diffuse}
-            normalUrl={urls.normalDX}
-            roughnessUrl={urls.roughness}
-            aoUrl={urls.ao}
-          />
-          <div className="surface-material-side">
-            <p className="section-hint surface-preview-hint">Primary role preview.</p>
+      <div className="surface-material-body">
+        <SurfaceMaterialPreviewSphere
+          diffuseUrl={urls.diffuse}
+          normalUrl={urls.normalDX}
+          roughnessUrl={urls.roughness}
+          aoUrl={urls.ao}
+        />
+        <div className="surface-material-side">
+          <div className="surface-variant-map-badges">
+            {mapSlots.map((slot) => (
+              <span
+                key={slot}
+                className={`surface-map-badge${urls[slot] ? ' filled' : ''}`}
+                title={MAP_SLOT_LABELS[slot]}
+              >
+                {MAP_SLOT_LABELS[slot]}
+              </span>
+            ))}
           </div>
         </div>
-      )}
+      </div>
       <div className="surface-slot-list">
         {mapSlots.map((slot) => (
           <FileSlotRow
@@ -209,11 +303,36 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
   );
 }
 
+function variantFromTarget(targetId, roleId) {
+  const match = targetId?.match(new RegExp(`^surface\\.${roleId}\\.v(\\d+)\\.`));
+  if (!match) return 0;
+  return Math.max(0, Math.min(SURFACE_TEXTURE_VARIANT_COUNT - 1, Number(match[1]) || 0));
+}
+
+function firstAvailableVariantIndex(role, atlasLayer) {
+  for (let variantIndex = 0; variantIndex < SURFACE_TEXTURE_VARIANT_COUNT; variantIndex += 1) {
+    if (!resolveCustomMapUrl(role, 'diffuse', variantIndex)) return variantIndex;
+  }
+  const variants = atlasLayer?.variants || [];
+  const emptyIndex = variants.findIndex((variant) => !variant?.hasDiffuse);
+  return emptyIndex >= 0 ? emptyIndex : 0;
+}
+
 function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialChanged }) {
   const [open, setOpen] = useState(false);
+  const [activeVariant, setActiveVariant] = useState(() => variantFromTarget(targetId, role.id));
+  const [forceOpenAfterDrop, setForceOpenAfterDrop] = useState(false);
+  const [roleDragOver, setRoleDragOver] = useState(false);
   const paletteHex = colorToHex(palette?.[role.id] ?? [0.5, 0.5, 0.5]);
   const layerStatus = atlasLayer?.status ?? 'notBaked';
   const statusLabel = LAYER_STATUS_LABEL[layerStatus] ?? 'Not baked';
+
+  useEffect(() => {
+    if (targetId?.startsWith(`surface.${role.id}.`)) {
+      setActiveVariant(variantFromTarget(targetId, role.id));
+      setOpen(true);
+    }
+  }, [role.id, targetId]);
 
   const resetMaterial = () => {
     resetMaterialSurfaceState(role.id);
@@ -221,46 +340,92 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
   };
 
   return (
-    <CollapsibleGroup
-      title={role.label}
-      defaultOpen={false}
-      forceOpen={targetId?.startsWith(`surface.${role.id}.`)}
-      settingId={`surface.${role.id}`}
-      statusDot={layerStatus === 'ready' ? 'active' : null}
-      onToggle={setOpen}
+    <div
+      className={`surface-role-drop-zone${roleDragOver ? ' drag-over' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setRoleDragOver(true);
+      }}
+      onDragLeave={() => setRoleDragOver(false)}
+      onDrop={async (e) => {
+        e.preventDefault();
+        setRoleDragOver(false);
+        const files = [...(e.dataTransfer.files || [])];
+        if (!files.length) return;
+        const nextVariant = firstAvailableVariantIndex(role, atlasLayer);
+        setActiveVariant(nextVariant);
+        setOpen(true);
+        setForceOpenAfterDrop(true);
+        try {
+          const { matched } = await importDroppedTextures({ files, role, mapSlots, variantIndex: nextVariant });
+          if (matched.length) onMaterialChanged?.();
+        } catch {
+          // Variant panel import shows detailed failures; closed-row drops stay quiet.
+        }
+      }}
     >
-      {open && (
-        <>
-          <div className="surface-role-head">
-            <span className="surface-role-swatch" style={{ background: paletteHex }} />
-            <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
-              {statusLabel}
-            </span>
-            <span className="surface-role-count">
-              {atlasLayer?.readyVariants ?? 0}/{SURFACE_TEXTURE_VARIANT_COUNT} variants
-            </span>
-            <button
-              type="button"
-              className="file-picker-btn surface-card-reset"
-              onClick={resetMaterial}
-              title="Clear this role's custom uploads"
-            >
-              <RotateCcw size={13} strokeWidth={1.8} aria-hidden />
-            </button>
-          </div>
-          {Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, (_, variantIndex) => (
+      <CollapsibleGroup
+        title={role.label}
+        defaultOpen={false}
+        forceOpen={targetId?.startsWith(`surface.${role.id}.`) || forceOpenAfterDrop}
+        settingId={`surface.${role.id}`}
+        statusDot={layerStatus === 'ready' ? 'active' : null}
+        onToggle={(nextOpen) => {
+          setOpen(nextOpen);
+          if (!nextOpen) setForceOpenAfterDrop(false);
+        }}
+      >
+        {open && (
+          <>
+            <div className="surface-role-head">
+              <span className="surface-role-swatch" style={{ background: paletteHex }} />
+              <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
+                {statusLabel}
+              </span>
+              <span className="surface-role-count">
+                {atlasLayer?.readyVariants ?? 0}/{SURFACE_TEXTURE_VARIANT_COUNT} variants
+              </span>
+              <button
+                type="button"
+                className="file-picker-btn surface-card-reset"
+                onClick={resetMaterial}
+                title="Clear this role's custom uploads"
+              >
+                <RotateCcw size={13} strokeWidth={1.8} aria-hidden />
+              </button>
+            </div>
+            <div className="surface-variant-tabs" role="tablist" aria-label={`${role.label} variants`}>
+              {Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, (_, variantIndex) => {
+                const variant = atlasLayer?.variants?.[variantIndex];
+                const ready = variant?.hasDiffuse;
+                const active = activeVariant === variantIndex;
+                return (
+                  <button
+                    key={`${role.id}-tab-${variantIndex}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={`surface-variant-tab${active ? ' active' : ''}${ready ? ' ready' : ''}`}
+                    onClick={() => setActiveVariant(variantIndex)}
+                  >
+                    <span>V{variantIndex + 1}</span>
+                    <small>{ready ? 'Ready' : 'Empty'}</small>
+                  </button>
+                );
+              })}
+            </div>
             <VariantBlock
-              key={`${role.id}-${variantIndex}`}
+              key={`${role.id}-${activeVariant}`}
               role={role}
-              variantIndex={variantIndex}
+              variantIndex={activeVariant}
               mapSlots={mapSlots}
-              atlasVariant={atlasLayer?.variants?.[variantIndex]}
+              atlasVariant={atlasLayer?.variants?.[activeVariant]}
               onMaterialChanged={onMaterialChanged}
             />
-          ))}
-        </>
-      )}
-    </CollapsibleGroup>
+          </>
+        )}
+      </CollapsibleGroup>
+    </div>
   );
 }
 
