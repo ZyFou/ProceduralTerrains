@@ -2196,12 +2196,16 @@ export class Engine {
     this._compiling--;
     if (!this._disposed && !this._compiling) {
       this._bootPending = false;
-      // First paint uses canvas shaders already warmed; bake and water init are
-      // deferred below so the overlay can clear promptly.
-
+      // Bake the studio height/normal texture under the boot overlay (not
+      // deferred): the first paint then already renders the baked field, and
+      // no post-paint bake competes with the full-material compile.
+      const _tBake0 = performance.now();
+      this._terrainHeightBakeDeferred = false;
+      this._ensureTerrainHeightTex();
+      const _bakeMs = performance.now() - _tBake0;
 
       this._renderInitialStudioFrame();
-      console.info(`[boot] terrain+water warmup ${_compileMs.toFixed(0)}ms - height bake deferred - water init deferred - first paint ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+      console.info(`[boot] terrain+water warmup ${_compileMs.toFixed(0)}ms - height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}^2) - water init deferred - first paint ${(performance.now() - this._bootStart).toFixed(0)}ms`);
       this.cb.onStatus('Ready', false);
       // Surface the first-run GPU-tier notice now that the boot overlay is gone
       // (info toasts are suppressed while a blocking overlay is up).
@@ -2220,14 +2224,18 @@ export class Engine {
 
   async _runPostFirstPaintWarmups() {
     if (this._disposed) return;
-    await Promise.all([
-      this._warmDeferredWater(),
-      this._warmDeferredTerrainBake(),
-    ]);
-    // Last: replace the minimal boot terrain fragment with the full one. This
-    // is the single heaviest translation, so it runs after everything the
-    // first interactive frames need is already warm.
-    await this._upgradeMinimalTerrain();
+    try {
+      // Full terrain colors FIRST — kicked off immediately after the first
+      // paint (the height bake already ran under the boot overlay), so the
+      // most visible upgrade lands as early as possible. Water follows.
+      await this._upgradeMinimalTerrain();
+      await this._warmDeferredWater();
+    } finally {
+      // The landing page's "Open Editor" button unlocks only now: every boot
+      // compile (full material swap included) is done, so entering the editor
+      // never runs into the material-swap stall.
+      if (!this._disposed) this.cb.onBootComplete?.();
+    }
   }
 
   /**
@@ -2305,18 +2313,6 @@ export class Engine {
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
     })();
     return this._terrainUpgradePromise;
-  }
-
-  async _warmDeferredTerrainBake() {
-    if (this._disposed || !this._terrainHeightBakeDeferred || this.worldMode !== 'studio') return;
-    this._terrainHeightBakeDeferred = false;
-    const t0 = performance.now();
-    this.cb.onStatus('Baking terrain detail...', false);
-    await yieldTask();
-    this._ensureTerrainHeightTex();
-    console.info(`[boot] deferred terrain bake ${(performance.now() - t0).toFixed(0)}ms (${this._bakeBaseSize()}^2)`);
-    if (!this._waterDeferred) this.cb.onStatus('Ready', false);
-    this._needsRender = true;
   }
 
   async _warmDeferredWater() {
@@ -3552,11 +3548,12 @@ export class Engine {
     // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
     this._applyUniforms();
 
-    // First planet entry this session boots the chunk materials on the
-    // MINIMAL fragment (fast ANGLE translation, no freeze); the full fragment
-    // is upgraded in the background by _warmupPlanetShaders. Re-entries with
-    // the program already cached go straight to the full fragment.
-    this._planetMatMinimal = !this._compiledKeys.has(`planet:${Math.round(p.octaves)}`);
+    // Planet always builds the FULL chunk materials and holds the mode-switch
+    // overlay until they are compiled (user preference: never show the planet
+    // with interim colors). The minimal-fragment machinery stays available but
+    // is not used here — the overlay compile is staggered, so the tab stays
+    // responsive while it works.
+    this._planetMatMinimal = false;
 
     this._buildPlanetWorld();
 

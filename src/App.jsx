@@ -169,12 +169,14 @@ export default function App() {
             // feed the active blocking task's detail line
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
             // clear the initial boot overlay once the engine is first ready
+            // (the landing "Open Editor" button unlocks later, on onBootComplete,
+            // once the full-detail materials are compiled too)
             if (!busy && !bootedRef.current) {
               bootedRef.current = true;
               loadingRef.current.done('boot');
-              landingRef.current?.setBootReady(true);
             }
           },
+          onBootComplete: () => landingRef.current?.setBootReady(true),
           onStats: setStats,
           onBackgroundWork: setBgWork,
           onLod: (counts, count, visible, culled) => {
