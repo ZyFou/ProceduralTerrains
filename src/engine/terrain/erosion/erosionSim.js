@@ -16,8 +16,9 @@
 // relax into believable talus. Everything is deterministic from `seed`.
 // ============================================================================
 
-/** Deterministic 32-bit PRNG (mulberry32) → float in [0, 1). */
-function mulberry32(seed) {
+/** Deterministic 32-bit PRNG (mulberry32) → float in [0, 1). Exported so the
+ *  WebGPU backend can precompute the exact same droplet start positions. */
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
@@ -31,8 +32,9 @@ function mulberry32(seed) {
  * Precompute the erosion brush: for every cell, the neighbouring indices within
  * `radius` and their normalized falloff weights. Eroding through a brush (rather
  * than a single cell) keeps carved channels smooth instead of pitted.
+ * Exported so the WebGPU backend uploads the identical brush.
  */
-function buildBrush(width, height, radius) {
+export function buildBrush(width, height, radius) {
   const offsets = [];
   const weights = [];
   let weightSum = 0;
@@ -202,6 +204,21 @@ export function erode({ width, height, heightmap, params, onProgress }) {
     }
   }
 
+  const result = finalizeErosion({ width, height, base, map, flow, erosionMask, depositionMask, params: p });
+  if (onProgress) onProgress(1, 'done');
+  return result;
+}
+
+/**
+ * Shared post-simulation pass: optional smoothing, master-strength blend and
+ * mask normalization. Used by the CPU path above AND by the WebGPU backend
+ * after readback, so both backends produce identically post-processed output.
+ * Mutates `map`, `flow`, `erosionMask`, `depositionMask` in place.
+ */
+export function finalizeErosion({ width, height, base, map, flow, erosionMask, depositionMask, params }) {
+  const p = { ...DEFAULT_SIM_PARAMS, ...params };
+  const N = width * height;
+
   // -------------------------------------------------------------- smoothing
   if (p.smoothing > 0) {
     const src = Float32Array.from(map);
@@ -252,7 +269,6 @@ export function erode({ width, height, heightmap, params, onProgress }) {
   for (let i = 0; i < N; i++) if (sedimentMap[i] > sedMax) sedMax = sedimentMap[i];
   for (let i = 0; i < N; i++) sedimentMap[i] /= sedMax;
 
-  if (onProgress) onProgress(1, 'done');
   return { eroded, flow, erosionMask, depositionMask, sedimentMap, slopeMap };
 }
 

@@ -18,6 +18,7 @@ export const EROSION_DEFAULT_PARAMS = {
   erosionEnabled: false,        // apply the baked offset to the terrain
   erosionPreset: 'natural',
   erosionQuality: 'balanced',
+  erosionBackend: 'auto',       // 'auto' → WebGPU compute when available; 'cpu' forces the worker
   erosionSeed: 1,
 
   erosionStrength: 1.0,         // master blend of the eroded result (0..1)

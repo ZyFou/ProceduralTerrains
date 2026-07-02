@@ -2824,7 +2824,7 @@ export class Engine {
       const cellWorld = Math.max(sizeX, sizeZ) / res;
       const params = this._erosionSimParams(cellWorld);
 
-      const out = await this._runErosionWorker({
+      const out = await this._runErosionSim({
         width: res, height: res, heightmap: base, params,
         onProgress: (pr, phase) => onProgress?.(0.1 + pr * 0.85, phase),
       });
@@ -2844,7 +2844,7 @@ export class Engine {
       }
       this._onErosionChanged();
       onProgress?.(1, 'done');
-      this.cb.onToast?.('Erosion baked.');
+      this.cb.onToast?.(out.backend === 'webgpu' ? 'Erosion baked (WebGPU compute).' : 'Erosion baked.');
       return true;
     } catch (err) {
       this.cb.onToast?.(`Erosion failed: ${err?.message || err}`);
@@ -2877,6 +2877,29 @@ export class Engine {
       talus: p.erosionTalus * cellWorld,
       smoothing: p.erosionSmoothing,
     };
+  }
+
+  /**
+   * Backend dispatch for the erosion simulation. `erosionBackend` param:
+   * 'auto' (default) tries the WebGPU compute backend and falls back to the
+   * CPU worker on any failure; 'cpu' forces the worker. The WebGPU module is
+   * imported lazily so it never affects boot.
+   */
+  async _runErosionSim(job) {
+    if (this.params.erosionBackend !== 'cpu') {
+      try {
+        const gpu = await import('./terrain/erosion/erosionWebGPU.js');
+        if (gpu.isWebGPUErosionSupported()) {
+          const t0 = performance.now();
+          const out = await gpu.erodeWebGPU(job);
+          console.log(`[erosion] WebGPU compute backend: ${(performance.now() - t0).toFixed(0)}ms`);
+          return { ...out, backend: 'webgpu' };
+        }
+      } catch (err) {
+        console.warn('[erosion] WebGPU backend failed — falling back to CPU worker.', err);
+      }
+    }
+    return { ...(await this._runErosionWorker(job)), backend: 'cpu' };
   }
 
   _runErosionWorker({ width, height, heightmap, params, onProgress }) {
