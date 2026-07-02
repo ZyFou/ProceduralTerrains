@@ -412,10 +412,10 @@ export class Engine {
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
     const oct = Math.round(this.params.octaves);
-    // Boot on the MINIMAL terrain fragment: the full fragment's synchronous
-    // GLSL→HLSL translation (ANGLE/D3D11) is the dominant first-load freeze.
-    // _upgradeMinimalTerrain swaps the full source in after the first paint.
-    this.terrainMaterial = createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    // Studio boot keeps the overlay up until the first full-material render, so
+    // compile the real terrain material once instead of doing a placeholder
+    // material and then a second full-material compile/swap.
+    this.terrainMaterial = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
@@ -2193,25 +2193,47 @@ export class Engine {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
     const _compileMs = performance.now() - _tCompile0;
-    this._compiling--;
-    if (!this._disposed && !this._compiling) {
-      this._bootPending = false;
-      // Bake the studio height/normal texture under the boot overlay (not
-      // deferred): the first paint then already renders the baked field, and
-      // no post-paint bake competes with the full-material compile.
-      const _tBake0 = performance.now();
-      this._terrainHeightBakeDeferred = false;
-      this._ensureTerrainHeightTex();
-      const _bakeMs = performance.now() - _tBake0;
+    try {
+      if (!this._disposed && this._compiling === 1) {
+        // Bake the studio height/normal texture under the boot overlay (not
+        // deferred): the first paint then already renders the baked field, and
+        // no post-paint bake competes with the full-material compile.
+        const _tBake0 = performance.now();
+        this._terrainHeightBakeDeferred = false;
+        this._ensureTerrainHeightTex();
+        const _bakeMs = performance.now() - _tBake0;
 
-      this._renderInitialStudioFrame();
-      console.info(`[boot] terrain+water warmup ${_compileMs.toFixed(0)}ms - height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}^2) - water init deferred - first paint ${(performance.now() - this._bootStart).toFixed(0)}ms`);
-      this.cb.onStatus('Ready', false);
-      // Surface the first-run GPU-tier notice now that the boot overlay is gone
-      // (info toasts are suppressed while a blocking overlay is up).
-      if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
-      // Finish terrain bake and show water after the first paint.
-      this._schedulePostFirstPaintWarmups();
+        if (this.terrainMaterial?.userData?.minimalFragment) {
+          const _minimalPaintMs = this._renderInitialStudioFrame();
+          console.info(`[boot] minimal terrain first paint ${(_minimalPaintMs ?? 0).toFixed(0)}ms after warmup ${_compileMs.toFixed(0)}ms + height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}^2); elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+
+          this.cb.onStatus('Compiling full terrain colors...', true);
+          const upgrade = await this._upgradeMinimalTerrain();
+          if (this._disposed) return;
+          if (upgrade?.swapped) {
+            const _tFullRender0 = performance.now();
+            const _fullPaintMs = this._renderInitialStudioFrame();
+            console.info(`[boot] first full terrain render ${(_fullPaintMs ?? (performance.now() - _tFullRender0)).toFixed(0)}ms; elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+          } else {
+            console.warn('[boot] full terrain material was not swapped before Ready');
+          }
+        } else {
+          const _fullPaintMs = this._renderInitialStudioFrame();
+          console.info(`[boot] first full terrain render ${(_fullPaintMs ?? 0).toFixed(0)}ms after warmup ${_compileMs.toFixed(0)}ms + height bake ${_bakeMs.toFixed(0)}ms (${this._bakeBaseSize()}^2); elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+        }
+        this._bootPending = false;
+        this.cb.onStatus('Ready', false);
+        // Surface the first-run GPU-tier notice now that the boot overlay is gone
+        // (info toasts are suppressed while a blocking overlay is up).
+        if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
+        // The editor can open once the full terrain material is live; hidden
+        // water finishes preparing separately after the first full-material paint.
+        this.cb.onBootComplete?.();
+        // Show water after the first full-material paint.
+        this._schedulePostFirstPaintWarmups();
+      }
+    } finally {
+      this._compiling--;
     }
   }
 
@@ -2224,18 +2246,9 @@ export class Engine {
 
   async _runPostFirstPaintWarmups() {
     if (this._disposed) return;
-    try {
-      // Full terrain colors FIRST — kicked off immediately after the first
-      // paint (the height bake already ran under the boot overlay), so the
-      // most visible upgrade lands as early as possible. Water follows.
-      await this._upgradeMinimalTerrain();
-      await this._warmDeferredWater();
-    } finally {
-      // The landing page's "Open Editor" button unlocks only now: every boot
-      // compile (full material swap included) is done, so entering the editor
-      // never runs into the material-swap stall.
-      if (!this._disposed) this.cb.onBootComplete?.();
-    }
+    // Terrain full-material work is completed before Ready. Keep hidden water
+    // deferred so boot does not wait on work that is not needed for first view.
+    await this._warmDeferredWater();
   }
 
   /**
@@ -2289,9 +2302,16 @@ export class Engine {
       const oct = this.terrainMaterial.defines.OCTAVES;
       const warm = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
       this._bgWorkStart('terrain-full', 'Loading full terrain colors…');
+      let swapped = false;
+      let ready = false;
+      let compileWaitMs = 0;
+      let swapMs = 0;
       try {
+        const tCompile = performance.now();
         await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
-        const ready = await this._pollProgramReady(warm);
+        ready = await this._pollProgramReady(warm);
+        compileWaitMs = performance.now() - tCompile;
+        console.info(`[boot] full terrain compile wait ${compileWaitMs.toFixed(0)}ms (ready=${ready})`);
         // Swap ONLY when the warmed program is genuinely ready and the live
         // material still matches what was warmed (octaves may have changed
         // mid-compile — that path upgrades the source itself). Swapping onto a
@@ -2299,11 +2319,14 @@ export class Engine {
         if (!this._disposed && ready &&
             this.terrainMaterial.userData.minimalFragment &&
             this.terrainMaterial.defines.OCTAVES === oct) {
+          const tSwap = performance.now();
           rebuildTerrainShaderSource(this.terrainMaterial, this._stackGLSL);
+          swapMs = performance.now() - tSwap;
+          swapped = true;
           this._needsRender = true;
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
-          console.info(`[boot] full terrain material swapped in ${(performance.now() - t0).toFixed(0)}ms`);
+          console.info(`[boot] full terrain live material source swapped in ${swapMs.toFixed(1)}ms; elapsed ${(performance.now() - t0).toFixed(0)}ms`);
         }
       } catch (e) {
         console.warn('Full terrain material upgrade failed', e);
@@ -2311,6 +2334,7 @@ export class Engine {
         this._bgWorkEnd('terrain-full');
       }
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
+      return { ready, swapped, compileWaitMs, swapMs };
     })();
     return this._terrainUpgradePromise;
   }
@@ -2386,7 +2410,8 @@ export class Engine {
   }
 
   _renderInitialStudioFrame() {
-    if (this.worldMode !== 'studio' || !this.board?.chunks?.length) return;
+    if (this.worldMode !== 'studio' || !this.board?.chunks?.length) return null;
+    const t0 = performance.now();
 
     this.controls.update(0.016);
     this.camera.updateMatrixWorld(true);
@@ -2412,6 +2437,7 @@ export class Engine {
     this._camPos.copy(this.camera.position);
     this._camQuat.copy(this.camera.quaternion);
     this._needsRender = false;
+    return performance.now() - t0;
   }
 
   /**
