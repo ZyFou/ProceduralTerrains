@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, rebuildTerrainShaderSource } from './terrain/TerrainMaterial.js';
+import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource } from './terrain/TerrainMaterial.js';
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
@@ -411,7 +411,10 @@ export class Engine {
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
     const oct = Math.round(this.params.octaves);
-    this.terrainMaterial = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    // Boot on the MINIMAL terrain fragment: the full fragment's synchronous
+    // GLSL→HLSL translation (ANGLE/D3D11) is the dominant first-load freeze.
+    // _upgradeMinimalTerrain swaps the full source in after the first paint.
+    this.terrainMaterial = createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
@@ -2091,11 +2094,14 @@ export class Engine {
    *
    * @param {THREE.WebGLRenderTarget|null} [renderTarget] compile the render-target
    *   program variant (e.g. the underwater linear-output pass) instead of canvas.
+   * @param {boolean} [visibleOnly] skip materials whose meshes are hidden (deferred
+   *   water, disk wall, tile ghost, disabled sky) — they compile lazily when shown.
    */
-  async _compileSceneStaggered(renderTarget = null) {
+  async _compileSceneStaggered(renderTarget = null, { visibleOnly = false } = {}) {
     const materials = new Set();
     this.scene.traverse((obj) => {
       if (!obj.material) return;
+      if (visibleOnly && !this._isRenderable(obj)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach((m) => m && materials.add(m));
     });
@@ -2114,6 +2120,14 @@ export class Engine {
       await yieldTask();
     }
     await this._waitForMaterialsReady(allPending);
+  }
+
+  /** True when the object (and its whole parent chain) is visible. */
+  _isRenderable(obj) {
+    for (let o = obj; o; o = o.parent) {
+      if (o.visible === false) return false;
+    }
+    return true;
   }
 
   /**
@@ -2166,8 +2180,14 @@ export class Engine {
       // synchronous burst freezes the main thread for several seconds even with
       // KHR_parallel_shader_compile. Spreading initiations across rAF frames
       // keeps each frame short while still letting the GPU compile in parallel.
-      await this._withBootDeferredObjectsDetached(() => this._compileSceneStaggered());
-      this._waterMaterialWarmed = true;
+      // visibleOnly: the first burst only translates the on-screen set (the
+      // hidden water / disk wall / ghost / disabled sky compile lazily later).
+      await this._withBootDeferredObjectsDetached(
+        () => this._compileSceneStaggered(null, { visibleOnly: true })
+      );
+      // NOTE: the deferred (hidden) water was skipped by visibleOnly, so
+      // _waterMaterialWarmed stays false — _warmDeferredWater compiles it
+      // after the first paint instead of inside the boot burst.
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
@@ -2203,6 +2223,68 @@ export class Engine {
       this._warmDeferredWater(),
       this._warmDeferredTerrainBake(),
     ]);
+    // Last: replace the minimal boot terrain fragment with the full one. This
+    // is the single heaviest translation, so it runs after everything the
+    // first interactive frames need is already warm.
+    await this._upgradeMinimalTerrain();
+  }
+
+  /**
+   * Poll (off the compile hot path) until a warmed material's program reports
+   * ready. The _compileMaterialVariants wait can time out while the driver is
+   * still linking (slow GPU, throttled/occluded tab); swapping sources onto a
+   * not-ready program would force a blocking link — the exact freeze all of
+   * this avoids — so the upgrade paths wait patiently here instead.
+   */
+  async _pollProgramReady(mat, { tries = 300, intervalMs = 1000 } = {}) {
+    for (let i = 0; i < tries; i++) {
+      if (this._disposed) return false;
+      const prog = this.renderer.properties.get(mat)?.currentProgram;
+      if (prog?.isReady?.()) return true;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    return false;
+  }
+
+  /**
+   * The board boots on a minimal-fragment terrain material so the first paint
+   * never waits on the full fragment's synchronous GLSL→HLSL translation (the
+   * multi-second first-load freeze on Windows/ANGLE). Warm the full-source
+   * program in the background here, then swap the live material's source in
+   * place — at that point the program is cached, so the swap is instant and no
+   * mesh needs touching (board chunks + disk wall share the material object).
+   * The landing page is opaque, so the colour pop from the swap is invisible
+   * on a normal boot.
+   */
+  async _upgradeMinimalTerrain() {
+    if (!this.terrainMaterial?.userData?.minimalFragment) return;
+    if (this._terrainUpgradePromise) return this._terrainUpgradePromise;
+    this._terrainUpgradePromise = (async () => {
+      const t0 = performance.now();
+      const oct = this.terrainMaterial.defines.OCTAVES;
+      const warm = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+      try {
+        await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
+        const ready = await this._pollProgramReady(warm);
+        // Swap ONLY when the warmed program is genuinely ready and the live
+        // material still matches what was warmed (octaves may have changed
+        // mid-compile — that path upgrades the source itself). Swapping onto a
+        // not-ready program would trigger a blocking link = the freeze.
+        if (!this._disposed && ready &&
+            this.terrainMaterial.userData.minimalFragment &&
+            this.terrainMaterial.defines.OCTAVES === oct) {
+          rebuildTerrainShaderSource(this.terrainMaterial, this._stackGLSL);
+          this._needsRender = true;
+          this._minimapDirtyAt = performance.now();
+          this.minimap.requestRedraw();
+          console.info(`[boot] full terrain material swapped in ${(performance.now() - t0).toFixed(0)}ms`);
+        }
+      } catch (e) {
+        console.warn('Full terrain material upgrade failed', e);
+      }
+      this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
+    })();
+    return this._terrainUpgradePromise;
   }
 
   async _warmDeferredTerrainBake() {
@@ -2260,6 +2342,11 @@ export class Engine {
     if (this._underwaterWarmed || this._disposed) return;
     this._underwaterWarmed = true;
     try {
+      // the RT variants must be compiled from the FULL fragment — finish the
+      // boot-material upgrade first so we don't warm a soon-discarded variant
+      if (this.terrainMaterial?.userData?.minimalFragment) {
+        await this._upgradeMinimalTerrain();
+      }
       await this._withStudioCloudDetached(async () => {
         this.underwater._ensureTarget(this.renderer);
         await this._compileSceneStaggered(this.underwater._rt);
@@ -2353,11 +2440,25 @@ export class Engine {
       for (const m of live) {
         if (m && m.defines.OCTAVES !== oct) {
           m.defines.OCTAVES = oct;
+          // a minimal boot fragment + the new define is NOT in the program
+          // cache — upgrade the source to the full fragment (which the warm
+          // clone above just compiled) so the relink stays a cache hit
+          if (m.userData?.minimalFragment) rebuildTerrainShaderSource(m, this._stackGLSL);
           m.needsUpdate = true;
         }
       }
       // planet chunk materials share one program — swap the define on all
       if (this.planetWorld) this.planetWorld.setOctaves(oct);
+      if (this.planetWorld && this._planetMatMinimal) {
+        // same cache-miss guard as above for minimal planet chunk materials
+        this._planetMatMinimal = false;
+        const planet = this._planetModules;
+        if (planet) {
+          for (const m of this.planetWorld.materials) {
+            planet.upgradePlanetMaterialSource(m, this._stackGLSL);
+          }
+        }
+      }
       if (this.planetWaterMat && this.planetWaterMat.defines.OCTAVES !== oct) {
         this.planetWaterMat.defines.OCTAVES = oct;
         this.planetWaterMat.needsUpdate = true;
@@ -3055,9 +3156,15 @@ export class Engine {
     const p = this.params;
     const tileFreq = (p.noiseScale * 0.1) / this.boardSize;
 
-    // Create infinite materials (sharing the same uniform objects)
+    // Create infinite materials (sharing the same uniform objects). First
+    // entry this session boots on the MINIMAL fragment (fast to translate) —
+    // _warmupInfiniteShaders upgrades it to the full fragment in the
+    // background once the mode is interactive. Re-entries reuse the cached
+    // full program directly.
     const oct = Math.round(p.octaves);
-    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    this._infiniteTerrainMat = this._compiledKeys.has(`infinite:${oct}`)
+      ? createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL)
+      : createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL, { infinite: true });
     this._infiniteTerrainMat.wireframe = p.wireframe;
     this._infiniteWaterMat = this.waterSystem.createInfiniteMaterial();
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
@@ -3140,12 +3247,19 @@ export class Engine {
     // Canvas-variant only — the underwater render-target variants are deferred
     // and warmed lazily on first approach to water (see _warmUnderwaterShaders),
     // halving the compile burst that otherwise stalls other tabs on mode switch.
+    // On first entry the terrain clone uses the MINIMAL fragment: its ANGLE
+    // translation is a fraction of the full one, so the mode becomes
+    // interactive quickly; the full fragment is upgraded in the background.
+    const minimal = this._infiniteTerrainMat?.userData?.minimalFragment === true;
     const warm = [
-      createInfiniteTerrainMaterial(this.uniforms, oct),
+      minimal
+        ? createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL, { infinite: true })
+        : createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL),
       createInfiniteWaterMaterial(this.uniforms, oct),
     ];
     try {
-      await this._compileMaterialVariants(warm, { canvasOnly: true });
+      // stagger: one program per yielded task caps each stall at one translation
+      await this._compileMaterialVariants(warm, { canvasOnly: true, stagger: true });
       // sky dome material (already in the scene) — canvas variant only
       await this._withStudioCloudDetached(() => this._compileSceneStaggered());
     } catch (e) {
@@ -3156,6 +3270,31 @@ export class Engine {
     if (!this._disposed && !this._compiling) {
       this.cb.onStatus(this.worldMode === 'infinite' ? 'Infinite World' : 'Ready', false);
     }
+    if (minimal && !this._disposed) this._upgradeInfiniteTerrain(oct);
+  }
+
+  /**
+   * Background full-fragment upgrade for a minimal infinite terrain material
+   * (same warm-then-swap-source pattern as _upgradeMinimalTerrain).
+   */
+  async _upgradeInfiniteTerrain(oct) {
+    const mat = this._infiniteTerrainMat;
+    if (!mat?.userData?.minimalFragment) return;
+    const warm = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    try {
+      await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
+      const ready = await this._pollProgramReady(warm);
+      if (ready) this._compiledKeys.add(`infinite:${oct}`);
+      if (!this._disposed && this._infiniteTerrainMat === mat &&
+          mat.userData.minimalFragment && mat.defines.OCTAVES === oct &&
+          ready) {
+        rebuildTerrainShaderSource(mat, this._stackGLSL);
+        this._needsRender = true;
+      }
+    } catch (e) {
+      console.warn('Infinite terrain material upgrade failed', e);
+    }
+    this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
   }
 
   /** Dispose the infinite-world systems (does not restore studio). */
@@ -3238,7 +3377,10 @@ export class Engine {
     // per-chunk cube-face mapping uniforms
     this.planetWorld = new planet.PlanetWorld(
       this.scene,
-      () => planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
+      // the factory reads the minimal flag at call time, so fold meshes
+      // created after the background upgrade get the full fragment directly
+      () => planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL,
+        { minimal: this._planetMatMinimal === true }),
       {
         radius: this._planetRadius(),
         maxHeight: this._maxHeight(),
@@ -3382,6 +3524,12 @@ export class Engine {
 
     // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
     this._applyUniforms();
+
+    // First planet entry this session boots the chunk materials on the
+    // MINIMAL fragment (fast ANGLE translation, no freeze); the full fragment
+    // is upgraded in the background by _warmupPlanetShaders. Re-entries with
+    // the program already cached go straight to the full fragment.
+    this._planetMatMinimal = !this._compiledKeys.has(`planet:${Math.round(p.octaves)}`);
 
     this._buildPlanetWorld();
 
@@ -3583,15 +3731,25 @@ export class Engine {
     this._compiling++;
     this.cb.onStatus('Compiling planet shaders…', true);
     // planet never uses the underwater pass → compile only the canvas variant
-    // (skips the second, render-target colour-space program: ~half the work)
+    // (skips the second, render-target colour-space program: ~half the work).
+    // On first entry the terrain clone is the MINIMAL fragment — the full one
+    // is upgraded in the background below, so entry never pays its translation.
     const planet = await this._loadPlanetModules();
+    const minimal = this._planetMatMinimal === true;
     const warm = [
-      planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL),
+      planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL, { minimal }),
       planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
     ];
     try {
-      await this._compileMaterialVariants(warm, { canvasOnly: true });
-      this._compiledKeys.add(key);
+      // stagger: one program per yielded task caps each stall at one translation
+      await this._compileMaterialVariants(warm, { canvasOnly: true, stagger: true });
+      if (!minimal) this._compiledKeys.add(key);
+      // bake the height/normal cubemap while the overlay is still up — its FBM
+      // program otherwise compiles (and stalls) on the first interactive frame
+      if (!this._disposed && this.worldMode === 'planet') {
+        await yieldTask();
+        this._ensurePlanetHeightTex();
+      }
     } catch (e) {
       console.warn('Planet shader warmup failed', e);
     }
@@ -3600,6 +3758,36 @@ export class Engine {
     if (!this._disposed && !this._compiling) {
       this.cb.onStatus(this.worldMode === 'planet' ? 'Planet' : 'Ready', false);
     }
+    if (minimal && !this._disposed) this._upgradePlanetMaterials(oct);
+  }
+
+  /**
+   * Background full-fragment upgrade for the live planet chunk materials.
+   * All chunk materials share one program (identical source + defines), so
+   * after warming the full source once, flipping each material's source in
+   * place is served from three's program cache — no freeze, no mesh churn.
+   */
+  async _upgradePlanetMaterials(oct) {
+    const planet = this._planetModules;
+    if (!planet || this._planetMatMinimal !== true) return;
+    const warm = planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL);
+    try {
+      await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
+      const ready = await this._pollProgramReady(warm);
+      if (ready) this._compiledKeys.add(`planet:${oct}`);
+      if (!this._disposed && this.worldMode === 'planet' && this.planetWorld &&
+          this._planetMatMinimal === true && ready &&
+          (this.planetWorld.materials[0]?.defines?.OCTAVES ?? oct) === oct) {
+        this._planetMatMinimal = false;
+        for (const m of this.planetWorld.materials) {
+          planet.upgradePlanetMaterialSource(m, this._stackGLSL);
+        }
+        this._needsRender = true;
+      }
+    } catch (e) {
+      console.warn('Planet terrain material upgrade failed', e);
+    }
+    this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
   }
 
   /** Dispose the planet-mode systems (does not restore studio). */

@@ -540,6 +540,99 @@ void main() {
 }
 `;
 
+// Minimal boot fragment: height + a simple height/slope-banded colour + sun +
+// fog only. It skips the palette/colour, surface-texture, terrain-detail and
+// caustic blocks — the dominant cost of the full fragment's synchronous
+// GLSL→HLSL translation on Windows/ANGLE (the multi-second tab freeze). Used
+// for the first paint and for infinite-mode entry while the full fragment
+// compiles in the background; the live material's source is then swapped in
+// place (rebuildTerrainShaderSource) for an instant program-cache hit.
+const buildMinimalFragment = (heightGLSL) => /* glsl */ `
+precision highp float;
+
+${COMMON_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+${heightGLSL}
+${TERRAIN_HEIGHT_TEX_GLSL}
+
+uniform float uColorMode;
+uniform float uEps;
+uniform vec3  uPlinthColor;
+
+varying vec3  vWorldPos;
+varying float vSkirt;
+varying float vWall;
+varying float vWallMesh;
+
+void main() {
+  vec2 xz = vWorldPos.xz;
+
+#ifndef INFINITE_MODE
+  if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
+#endif
+
+  float eps = uEps;
+  float hC;
+  vec3 nGeo;
+#ifndef INFINITE_MODE
+  if (uUseTerrainHeightTex > 0.5) {
+    vec4 hT = texture2D(uTerrainHeightTex, bakedUvAt(xz));
+    hC = hT.a * uHeightScale;
+    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+  } else
+#endif
+  {
+    hC = heightAt(xz);
+    float hX = heightAt(xz + vec2(eps, 0.0));
+    float hZ = heightAt(xz + vec2(0.0, eps));
+    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  }
+
+  // keep the height-packing export/sampler modes correct while the boot
+  // material is live (prop placement / collision tiles may render early)
+  if (uColorMode > 0.5) {
+    float hp = clamp(((uColorMode > 2.5) ? vWorldPos.y : hC) / max(uHeightScale, 1e-3), 0.0, 1.0);
+    if (uColorMode > 1.5) {
+      float hi = floor(hp * 255.0) / 255.0;
+      float lo = fract(hp * 255.0);
+      gl_FragColor = vec4(hi, lo, 0.0, 1.0);
+    } else {
+      gl_FragColor = vec4(vec3(hp), 1.0);
+    }
+    return;
+  }
+
+  float dist = length(cameraPosition - vWorldPos);
+
+  if (vWall > 0.02) {
+    float wfog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
+    gl_FragColor = vec4(mix(uPlinthColor, uFogColor, clamp(wfog, 0.0, 1.0)), 1.0);
+    return;
+  }
+
+  float slope = 1.0 - nGeo.y;
+  float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
+  float hRel = hC - uSeaLevel;
+
+  vec3 albedo = mix(vec3(0.30, 0.36, 0.22), vec3(0.42, 0.38, 0.30), smoothstep(0.15, 0.45, h01));
+  albedo = mix(albedo, vec3(0.58, 0.56, 0.54), smoothstep(0.45, 0.80, h01));
+  albedo = mix(albedo, vec3(0.48, 0.42, 0.34), clamp(slope * 1.8, 0.0, 1.0) * 0.55);
+  albedo = mix(albedo, vec3(0.92, 0.93, 0.95), smoothstep(0.78, 0.92, h01 - slope * 0.25));
+  albedo = mix(vec3(0.72, 0.66, 0.50), albedo, smoothstep(0.0, 6.0, hRel));
+
+  vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
+  float diff = max(dot(n, uSunDir), 0.0);
+  vec3 col = albedo * (vec3(1.0, 0.96, 0.88) * 1.15 * diff + vec3(0.36, 0.42, 0.52) * 0.55);
+
+  col *= 1.0 - vSkirt * 0.55;
+
+  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
+  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+  gl_FragColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}
+`;
+
 // 1x1 mid-grey fallback so the four surface-texture samplers are always bound
 // (avoids "no texture" warnings while the real atlas is null / before build).
 let _surfFallbackTex = null;
@@ -759,6 +852,26 @@ export function createInfiniteTerrainMaterial(uniforms, octaves = 7, stackGLSL =
   });
 }
 
+/**
+ * Terrain material with the MINIMAL fragment (see buildMinimalFragment). Same
+ * heavy vertex shader — geometry must match exactly — but a fragment that is a
+ * fraction of the full source, so ANGLE's synchronous translation is fast.
+ * `userData.minimalFragment` marks it for the in-place source upgrade
+ * (rebuildTerrainShaderSource) once the full program is warmed.
+ */
+export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL, { infinite = false } = {}) {
+  const h = buildHeightGLSL(stackGLSL.body2d);
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    defines: infinite ? { OCTAVES: octaves, INFINITE_MODE: 1 } : { OCTAVES: octaves },
+    vertexShader: buildVertex(h),
+    fragmentShader: buildMinimalFragment(h),
+    side: THREE.DoubleSide,
+  });
+  mat.userData.minimalFragment = true;
+  return mat;
+}
+
 // Update a live terrain material's shader source to a new generated stack
 // in place (same material object → every mesh referencing it updates). The
 // program for the identical source was warm-compiled first, so the relink is
@@ -767,5 +880,6 @@ export function rebuildTerrainShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
   mat.fragmentShader = buildFragment(h);
+  mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.needsUpdate = true;
 }

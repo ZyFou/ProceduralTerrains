@@ -265,6 +265,82 @@ void main() {
 }
 `;
 
+// Minimal boot fragment for planet mode: height/normal + a simple banded
+// colour + spherical sun light + fog. Skips the palette/colour, surface-texture
+// and terrain-detail blocks so ANGLE's synchronous GLSL→HLSL translation is a
+// fraction of the full fragment's (the multi-second freeze on planet entry).
+// The full source is compiled in the background and swapped in place via
+// upgradePlanetMaterialSource — an instant program-cache hit.
+const buildMinimalFragment = (planetHeightGLSL) => /* glsl */ `
+precision highp float;
+
+${COMMON_UNIFORMS_GLSL}
+${PLANET_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+${PLANET_NOISE_GLSL}
+${planetHeightGLSL}
+
+uniform float uNormalStrength;
+uniform samplerCube uPlanetHeightTex;
+uniform float uUsePlanetHeightTex;
+
+varying vec3  vDir;
+varying vec3  vWorldPos;
+varying float vSkirt;
+
+void main() {
+  vec3 dir = normalize(vDir);
+
+  vec3 ref = abs(dir.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 t1 = normalize(cross(ref, dir));
+  vec3 t2 = cross(dir, t1);
+
+  float hC;
+  vec3 nGeo;
+  if (uUsePlanetHeightTex > 0.5) {
+    vec4 hT = textureCube(uPlanetHeightTex, dir);
+    hC = hT.a * uHeightScale;
+    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+  } else {
+    float eps = uPlanetEps;
+    vec3 dA = normalize(dir + t1 * eps);
+    vec3 dB = normalize(dir + t2 * eps);
+    hC = heightAt3D(dir);
+    float hA = heightAt3D(dA);
+    float hB = heightAt3D(dB);
+    vec3 pC = dir * (uPlanetRadius + hC);
+    vec3 pA = dA  * (uPlanetRadius + hA);
+    vec3 pB = dB  * (uPlanetRadius + hB);
+    nGeo = normalize(cross(pA - pC, pB - pC));
+    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
+  }
+
+  float up = clamp(dot(nGeo, dir), 0.0, 1.0);
+  vec3 n = normalize(mix(dir, nGeo, uNormalStrength));
+
+  float slope = 1.0 - up;
+  float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
+  float hRel = hC - uSeaLevel;
+
+  vec3 albedo = mix(vec3(0.30, 0.36, 0.22), vec3(0.42, 0.38, 0.30), smoothstep(0.15, 0.45, h01));
+  albedo = mix(albedo, vec3(0.58, 0.56, 0.54), smoothstep(0.45, 0.80, h01));
+  albedo = mix(albedo, vec3(0.48, 0.42, 0.34), clamp(slope * 1.8, 0.0, 1.0) * 0.55);
+  albedo = mix(albedo, vec3(0.92, 0.93, 0.95), smoothstep(0.78, 0.92, h01 - slope * 0.25));
+  albedo = mix(vec3(0.72, 0.66, 0.50), albedo, smoothstep(0.0, 6.0, hRel));
+
+  float diff = max(dot(n, uSunDir), 0.0);
+  vec3 col = albedo * (vec3(1.0, 0.96, 0.88) * 1.2 * diff + vec3(0.30, 0.34, 0.42) * (up * 0.5 + 0.5));
+
+  col *= 1.0 - vSkirt * 0.55;
+
+  float dist = length(cameraPosition - vWorldPos);
+  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
+  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+  gl_FragColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}
+`;
+
 function makeFaceUniforms() {
   return {
     uFaceOrigin: { value: new THREE.Vector3(-1, -1, 1) },
@@ -273,19 +349,36 @@ function makeFaceUniforms() {
   };
 }
 
-export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL, { minimal = false } = {}) {
   const ph = buildPlanetHeightGLSL(stackGLSL.body3d);
   // Per-chunk face uniforms must NOT be shared — clone fresh ones, merged with
   // the shared terrain/palette uniform objects.
-  return new THREE.ShaderMaterial({
+  const mat = new THREE.ShaderMaterial({
     uniforms: { ...uniforms, ...makeFaceUniforms() },
     defines: { OCTAVES: octaves, PLANET_MODE: 1 },
     vertexShader: buildVertex(ph),
-    fragmentShader: buildFragment(ph),
+    // `minimal` boots on the cheap fragment (fast ANGLE translation); the full
+    // source is swapped in later via upgradePlanetMaterialSource.
+    fragmentShader: minimal ? buildMinimalFragment(ph) : buildFragment(ph),
     // analytic outward normal is computed in the shader, so two-sided shading
     // stays correct; matches the studio/infinite terrain materials.
     side: THREE.DoubleSide,
   });
+  mat.userData.minimalFragment = minimal;
+  return mat;
+}
+
+// Upgrade a live minimal-fragment planet material to the full shader source in
+// place. The identical full program must have been warm-compiled first so the
+// relink is served from three's program cache (no freeze). All planet chunk
+// materials share one program, so flipping each one's source is free after the
+// first.
+export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+  const ph = buildPlanetHeightGLSL(stackGLSL.body3d);
+  mat.vertexShader = buildVertex(ph);
+  mat.fragmentShader = buildFragment(ph);
+  mat.userData.minimalFragment = false;
+  mat.needsUpdate = true;
 }
 
 // ============================================================================
