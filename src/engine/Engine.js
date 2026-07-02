@@ -171,6 +171,7 @@ export class Engine {
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
     this._compiling = 0;
+    this._bgWork = new Map();   // id → label of non-blocking background compiles
     // The underwater render-target program variants are deferred from boot and
     // warmed lazily on first approach to water (see _warmUnderwaterShaders).
     this._underwaterWarmed = false;
@@ -2230,6 +2231,22 @@ export class Engine {
   }
 
   /**
+   * Track background (non-blocking) shader work for the UI. The status-bar
+   * indicator shows the latest active label; null clears it. Unlike onStatus
+   * busy=true this never gates rendering or the mode-switch overlay.
+   */
+  _bgWorkStart(id, label) {
+    this._bgWork.set(id, label);
+    this.cb.onBackgroundWork?.(label);
+  }
+
+  _bgWorkEnd(id) {
+    this._bgWork.delete(id);
+    const rest = [...this._bgWork.values()];
+    this.cb.onBackgroundWork?.(rest.length ? rest[rest.length - 1] : null);
+  }
+
+  /**
    * Poll (off the compile hot path) until a warmed material's program reports
    * ready. The _compileMaterialVariants wait can time out while the driver is
    * still linking (slow GPU, throttled/occluded tab); swapping sources onto a
@@ -2263,6 +2280,7 @@ export class Engine {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
       const warm = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+      this._bgWorkStart('terrain-full', 'Loading full terrain colors…');
       try {
         await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
         const ready = await this._pollProgramReady(warm);
@@ -2281,6 +2299,8 @@ export class Engine {
         }
       } catch (e) {
         console.warn('Full terrain material upgrade failed', e);
+      } finally {
+        this._bgWorkEnd('terrain-full');
       }
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
     })();
@@ -3280,7 +3300,9 @@ export class Engine {
   async _upgradeInfiniteTerrain(oct) {
     const mat = this._infiniteTerrainMat;
     if (!mat?.userData?.minimalFragment) return;
+    const t0 = performance.now();
     const warm = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    this._bgWorkStart('infinite-full', 'Loading full terrain colors…');
     try {
       await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
       const ready = await this._pollProgramReady(warm);
@@ -3290,9 +3312,14 @@ export class Engine {
           ready) {
         rebuildTerrainShaderSource(mat, this._stackGLSL);
         this._needsRender = true;
+        console.info(`[mode] full infinite terrain swapped in ${(performance.now() - t0).toFixed(0)}ms`);
+      } else if (!this._disposed) {
+        console.warn(`[mode] infinite terrain upgrade skipped (ready=${ready}, live=${this._infiniteTerrainMat === mat})`);
       }
     } catch (e) {
       console.warn('Infinite terrain material upgrade failed', e);
+    } finally {
+      this._bgWorkEnd('infinite-full');
     }
     this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
   }
@@ -3770,7 +3797,9 @@ export class Engine {
   async _upgradePlanetMaterials(oct) {
     const planet = this._planetModules;
     if (!planet || this._planetMatMinimal !== true) return;
+    const t0 = performance.now();
     const warm = planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL);
+    this._bgWorkStart('planet-full', 'Loading full planet colors…');
     try {
       await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
       const ready = await this._pollProgramReady(warm);
@@ -3783,9 +3812,14 @@ export class Engine {
           planet.upgradePlanetMaterialSource(m, this._stackGLSL);
         }
         this._needsRender = true;
+        console.info(`[mode] full planet material swapped in ${(performance.now() - t0).toFixed(0)}ms (${this.planetWorld.materials.length} chunk materials)`);
+      } else if (!this._disposed) {
+        console.warn(`[mode] planet material upgrade skipped (ready=${ready}, mode=${this.worldMode}, minimal=${this._planetMatMinimal})`);
       }
     } catch (e) {
       console.warn('Planet terrain material upgrade failed', e);
+    } finally {
+      this._bgWorkEnd('planet-full');
     }
     this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
   }

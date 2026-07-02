@@ -58,6 +58,7 @@ export default function App() {
 
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
+  const [bgWork, setBgWork] = useState(null);   // background shader-compile label
   const [stats, setStats] = useState({ fps: 0, triangles: 0, drawCalls: 0 });
   const [lodCounts, setLodCounts] = useState([0, 0, 0, 0]);
   const [chunkCount, setChunkCount] = useState(DEFAULT_PARAMS.chunkCount);
@@ -175,6 +176,7 @@ export default function App() {
             }
           },
           onStats: setStats,
+          onBackgroundWork: setBgWork,
           onLod: (counts, count, visible, culled) => {
             setLodCounts(counts);
             setChunkCount(count);
@@ -1161,6 +1163,7 @@ export default function App() {
 
       <StatusBar
         status={status}
+        bgWork={bgWork}
         gpu={gpu}
         stats={stats}
         worldMode={worldMode}

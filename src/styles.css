@@ -1527,6 +1527,21 @@ input[type="color"].palette-color-input {
   background: var(--success);
 }
 .status-dot.busy { background: var(--warning); }
+/* background shader-compile indicator (bottom-right status group) */
+.sb-bgwork {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warning);
+  white-space: nowrap;
+}
+.sb-bgwork .status-dot.busy {
+  animation: bgwork-pulse 1.1s ease-in-out infinite;
+}
+@keyframes bgwork-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 .fps-badge {
   padding: 1px 8px;
   border-radius: 4px;

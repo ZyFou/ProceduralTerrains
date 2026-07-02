@@ -280,6 +280,7 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
 ${planetHeightGLSL}
+${PALETTE_UNIFORMS_GLSL}
 
 uniform float uNormalStrength;
 uniform samplerCube uPlanetHeightTex;
@@ -323,14 +324,21 @@ void main() {
   float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
   float hRel = hC - uSeaLevel;
 
-  vec3 albedo = mix(vec3(0.30, 0.36, 0.22), vec3(0.42, 0.38, 0.30), smoothstep(0.15, 0.45, h01));
-  albedo = mix(albedo, vec3(0.58, 0.56, 0.54), smoothstep(0.45, 0.80, h01));
-  albedo = mix(albedo, vec3(0.48, 0.42, 0.34), clamp(slope * 1.8, 0.0, 1.0) * 0.55);
-  albedo = mix(albedo, vec3(0.92, 0.93, 0.95), smoothstep(0.78, 0.92, h01 - slope * 0.25));
-  albedo = mix(vec3(0.72, 0.66, 0.50), albedo, smoothstep(0.0, 6.0, hRel));
+  // banded albedo from the REAL palette uniforms so the interim look already
+  // matches the user's style (see TerrainMaterial buildMinimalFragment)
+  vec3 albedo = mix(uColGrass, uColDryGrass, smoothstep(0.18, 0.45, h01));
+  albedo = mix(albedo, uColRock, smoothstep(0.40, 0.75, h01));
+  albedo = mix(albedo, uColRock, clamp(slope * 1.8, 0.0, 1.0) * 0.6);
+  albedo = mix(albedo, uColRockHi, smoothstep(0.60, 0.85, h01) * (1.0 - slope));
+  albedo = mix(albedo, uColSnow, smoothstep(uSnowLine - 0.08, uSnowLine + 0.06, h01 - slope * 0.25));
+  albedo = mix(uColSand, albedo, smoothstep(0.0, 6.0, hRel));
+  float luma = dot(albedo, vec3(0.299, 0.587, 0.114));
+  albedo = max((mix(vec3(luma), albedo, uPaletteSaturation) - 0.5) * uPaletteContrast + 0.5, vec3(0.0)) * uPaletteTint;
 
   float diff = max(dot(n, uSunDir), 0.0);
-  vec3 col = albedo * (vec3(1.0, 0.96, 0.88) * 1.2 * diff + vec3(0.30, 0.34, 0.42) * (up * 0.5 + 0.5));
+  vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
+                       + uTerrainSkyAmb * 0.50 * (up * 0.5 + 0.5)
+                       + uTerrainBounce * 0.25 * (1.0 - up * 0.5));
 
   col *= 1.0 - vSkirt * 0.55;
 

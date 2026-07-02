@@ -14,7 +14,7 @@ const PLAYER_STATE_LABELS = {
 };
 
 export default function StatusBar({
-  status, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState,
+  status, bgWork, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState,
   perfOpen, onPerfToggle,
 }) {
   const exploring = playerMode || exploreMode === 'plane';
@@ -65,6 +65,15 @@ export default function StatusBar({
         )}
       </div>
       <div className="sb-group sb-group-stats">
+        {bgWork && (
+          <>
+            <span className="sb-bgwork" title="Full-detail shaders are compiling in the background — brief hiccups are normal until this finishes">
+              <span className="status-dot busy" />
+              {bgWork}
+            </span>
+            <span className="sb-sep" aria-hidden="true" />
+          </>
+        )}
         <span className="sb-tris">Triangles: {fmtTris(stats.triangles)}</span>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <span className="sb-desktop-only">Draw Calls: {stats.drawCalls}</span>
