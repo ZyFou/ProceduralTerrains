@@ -60,23 +60,27 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 46px;
-  flex: 0 0 46px;
-  padding: 0 14px;
-  background: var(--bg-panel-soft);
+  height: 50px;
+  flex: 0 0 50px;
+  padding: 0 16px;
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent),
+    var(--bg-panel-soft);
   border-bottom: 1px solid var(--border-subtle);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
   z-index: 30;
 }
 .tb-group { display: flex; align-items: center; gap: 6px; }
-.tb-brand { gap: 9px; margin-right: 8px; }
+.tb-brand { gap: 10px; margin-right: 8px; padding-right: 12px; border-right: 1px solid var(--border-subtle); }
 .tb-center {
   flex: 1 1 auto;
   justify-content: center;
   min-width: 0;
   gap: 8px;
 }
-.logo { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
-.app-name { font-weight: 700; letter-spacing: 1.5px; font-size: 13px; color: var(--text-bright); }
+.logo { width: 24px; height: 24px; color: var(--accent); flex-shrink: 0; filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.28)); }
+.app-name { font-weight: 800; letter-spacing: 1.8px; font-size: 13px; color: var(--text-bright); text-transform: uppercase; }
 .app-version { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
 .tb-right { margin-left: auto; }
 
@@ -84,22 +88,24 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 30px;
   padding: 0 10px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.018);
+  border: 1px solid rgba(255, 255, 255, 0.035);
+  border-radius: 9px;
   color: var(--text-muted);
   font-family: var(--font);
   font-size: 12px;
   cursor: var(--cursor-pointer);
   white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
 }
+.tb-btn:active { transform: translateY(1px); }
 .tb-btn:hover {
   background: var(--bg-control);
   color: var(--text-main);
-  border-color: var(--border-subtle);
+  border-color: var(--border-active);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 .tb-btn.active {
   background: var(--accent-bg);
@@ -141,9 +147,10 @@ body {
   flex-shrink: 0;
 }
 .tb-btn.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: #fff;
   border-color: var(--accent);
+  box-shadow: 0 8px 20px rgba(56, 189, 248, 0.18);
 }
 .tb-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
 .tb-btn:disabled { opacity: 0.45; cursor: var(--cursor-not-allowed); }
@@ -195,18 +202,20 @@ body {
 .tb-dropdown { position: relative; }
 .tb-menu {
   position: absolute;
-  top: 32px;
+  top: 36px;
   left: 0;
-  min-width: 170px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 4px;
+  min-width: 190px;
+  background: color-mix(in srgb, var(--bg-panel) 94%, #ffffff 6%);
+  border: 1px solid var(--border-active);
+  border-radius: 12px;
+  padding: 6px;
   display: none;
   flex-direction: column;
   z-index: 50;
-  box-shadow: var(--shadow-panel);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
 }
+.tb-view-btn { background: rgba(56, 189, 248, 0.07); border-color: rgba(56, 189, 248, 0.16); color: var(--text-main); }
+.tb-view-menu button + button { margin-top: 2px; }
 .tb-menu.open { display: flex; }
 .tb-menu button {
   background: none;
@@ -3596,7 +3605,7 @@ input[type="color"].palette-color-input {
     touch-action: pan-x;
   }
   #topbar::-webkit-scrollbar { display: none; }
-  .tb-brand { margin-right: 0; flex: 0 0 auto; padding-right: 2px; }
+  .tb-brand { margin-right: 0; flex: 0 0 auto; padding-right: 2px; border-right: none; }
   .tb-brand .logo { width: 18px; height: 18px; }
   .app-name { display: none; }
   .app-version { display: none; }

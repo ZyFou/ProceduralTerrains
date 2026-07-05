@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
 import WorldModeBar from './WorldModeBar.jsx';
 
@@ -16,8 +16,21 @@ export default function TopBar({
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
+  onSaveViewLayout, onLoadSavedViewLayout, onImportViewLayout, onExportViewLayout,
 }) {
   const fileRef = useRef(null);
+  const layoutFileRef = useRef(null);
+  const viewMenuRef = useRef(null);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!viewMenuOpen) return undefined;
+    const close = (event) => {
+      if (!viewMenuRef.current?.contains(event.target)) setViewMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [viewMenuOpen]);
 
   const onFile = (e) => {
     const file = e.target.files[0];
@@ -29,6 +42,25 @@ export default function TopBar({
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+
+  const onLayoutFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { onImportViewLayout?.(JSON.parse(reader.result)); }
+      catch { onImportViewLayout?.(null); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+    setViewMenuOpen(false);
+  };
+
+  const runViewAction = (action) => {
+    action?.();
+    setViewMenuOpen(false);
   };
 
   return (
@@ -102,6 +134,30 @@ export default function TopBar({
         <button className="tb-btn" onClick={() => fileRef.current.click()} title="Load seed + parameters from JSON">
           <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> <span className="tb-text">Load</span>
         </button>
+
+        <div className="tb-dropdown" ref={viewMenuRef}>
+          <button
+            type="button"
+            className={`tb-btn tb-view-btn${viewMenuOpen ? ' active' : ''}`}
+            onClick={() => setViewMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={viewMenuOpen}
+            title="View layout options"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden>
+              <rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" fill="none" strokeWidth="1.2" />
+              <path d="M2 6.5h12M6.2 6.5V13" stroke="currentColor" fill="none" strokeWidth="1.2" />
+            </svg>
+            <span className="tb-text">View</span>
+            <svg className="caret" viewBox="0 0 8 8" aria-hidden><path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" fill="none" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <div className={`tb-menu tb-view-menu${viewMenuOpen ? ' open' : ''}`} role="menu">
+            <button type="button" role="menuitem" onClick={() => runViewAction(onSaveViewLayout)}>Save current layout</button>
+            <button type="button" role="menuitem" onClick={() => runViewAction(onLoadSavedViewLayout)}>Restore saved layout</button>
+            <button type="button" role="menuitem" onClick={() => layoutFileRef.current?.click()}>Import layout…</button>
+            <button type="button" role="menuitem" onClick={() => runViewAction(onExportViewLayout)}>Export layout…</button>
+          </div>
+        </div>
         <button
           className={`tb-btn${paintMode ? ' active' : ''}`}
           onClick={onTogglePaintMode}
@@ -154,6 +210,7 @@ export default function TopBar({
       </div>
 
       <input type="file" ref={fileRef} accept="application/json" hidden onChange={onFile} />
+      <input type="file" ref={layoutFileRef} accept="application/json" hidden onChange={onLayoutFile} />
     </header>
   );
 }

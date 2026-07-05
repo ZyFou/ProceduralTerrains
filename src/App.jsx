@@ -1004,6 +1004,79 @@ export default function App() {
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
   };
 
+
+  const buildViewLayout = useCallback(() => ({
+    version: 1,
+    savedAt: new Date().toISOString(),
+    worldMode,
+    activePanel: effectivePanel,
+    previewMode,
+    paintMode,
+    helpVisible,
+    settingsSearchOpen,
+    camMode,
+  }), [worldMode, effectivePanel, previewMode, paintMode, helpVisible, settingsSearchOpen, camMode]);
+
+  const applyViewLayout = useCallback((layout) => {
+    if (!layout || typeof layout !== 'object') {
+      showToast('Could not import view layout', 'error');
+      return;
+    }
+
+    const nextWorldMode = layout.worldMode;
+    if (nextWorldMode && ['studio', 'infinite', 'planet'].includes(nextWorldMode)) {
+      selectWorldMode(nextWorldMode);
+    }
+
+    setPreviewMode(!!layout.previewMode);
+    setHelpVisible(!!layout.helpVisible);
+    setSettingsSearchOpen(!!layout.settingsSearchOpen);
+    if (typeof layout.paintMode === 'boolean') engine().setPaintMode(layout.paintMode);
+    if (typeof layout.camMode === 'string') setCamMode(layout.camMode);
+
+    const targetMode = ['studio', 'infinite', 'planet'].includes(nextWorldMode) ? nextWorldMode : worldMode;
+    const panelId = typeof layout.activePanel === 'string' ? layout.activePanel : null;
+    setActivePanel(panelId && panelAvailable(panelId, targetMode) ? panelId : null);
+    showToast('View layout applied', 'success');
+  }, [selectWorldMode, showToast, worldMode]);
+
+  const saveViewLayout = useCallback(() => {
+    try {
+      localStorage.setItem('terrain-studio:view-layout', JSON.stringify(buildViewLayout()));
+      showToast('View layout saved', 'success');
+    } catch {
+      showToast('Could not save view layout', 'error');
+    }
+  }, [buildViewLayout, showToast]);
+
+
+  const loadSavedViewLayout = useCallback(() => {
+    try {
+      const raw = localStorage.getItem('terrain-studio:view-layout');
+      if (!raw) {
+        showToast('No saved view layout found', 'info');
+        return;
+      }
+      applyViewLayout(JSON.parse(raw));
+    } catch {
+      showToast('Could not load saved view layout', 'error');
+    }
+  }, [applyViewLayout, showToast]);
+
+  const exportViewLayout = useCallback(() => {
+    const blob = new Blob([JSON.stringify(buildViewLayout(), null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'terrain-studio-view-layout.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    showToast('View layout exported', 'success');
+  }, [buildViewLayout, showToast]);
+
+  const importViewLayout = useCallback((layout) => {
+    applyViewLayout(layout);
+  }, [applyViewLayout]);
+
   return (
     <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}>
       <TopBar
@@ -1029,6 +1102,10 @@ export default function App() {
         canRedo={histState.canRedo}
         onOpenSettingsSearch={openSettingsSearch}
         settingsSearchOpen={settingsSearchOpen}
+        onSaveViewLayout={saveViewLayout}
+        onImportViewLayout={importViewLayout}
+        onLoadSavedViewLayout={loadSavedViewLayout}
+        onExportViewLayout={exportViewLayout}
       />
 
       <div id="main" className="app-shell">
