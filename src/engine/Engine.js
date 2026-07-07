@@ -178,6 +178,11 @@ export class Engine {
     this._octToken = 0;
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._warmGeo = new THREE.PlaneGeometry(1, 1);
+    this._erosionGPUModule = null;
+    this._erosionGPUImportPromise = null;
+    this._erosionGPUUnavailable = false;
+    this._erosionGPUWarmScheduled = false;
+    this._erosionGPUWarmCancel = null;
     this.planetStyle = new PlanetStyleManager();
     this.paintMode = null;
     this.paintState = null;
@@ -2249,6 +2254,27 @@ export class Engine {
     // Terrain full-material work is completed before Ready. Keep hidden water
     // deferred so boot does not wait on work that is not needed for first view.
     await this._warmDeferredWater();
+    this._scheduleErosionGPUWarmImport();
+  }
+
+  _scheduleErosionGPUWarmImport() {
+    if (this._disposed || this._erosionGPUWarmScheduled) return;
+    if (this.params.erosionBackend === 'cpu' || this._erosionGPUUnavailable) return;
+    this._erosionGPUWarmScheduled = true;
+
+    const run = () => {
+      this._erosionGPUWarmCancel = null;
+      if (this._disposed) return;
+      this._importErosionGPU({ warm: true });
+    };
+
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(run, { timeout: 3000 });
+      this._erosionGPUWarmCancel = () => cancelIdleCallback(id);
+    } else {
+      const id = setTimeout(run, 1000);
+      this._erosionGPUWarmCancel = () => clearTimeout(id);
+    }
   }
 
   /**
@@ -2886,20 +2912,74 @@ export class Engine {
    * imported lazily so it never affects boot.
    */
   async _runErosionSim(job) {
-    if (this.params.erosionBackend !== 'cpu') {
-      try {
-        const gpu = await import('./terrain/erosion/erosionWebGPU.js');
-        if (gpu.isWebGPUErosionSupported()) {
+    if (this.params.erosionBackend !== 'cpu' && !this._erosionGPUUnavailable) {
+      const gpu = await this._importErosionGPU();
+      if (gpu?.isWebGPUErosionSupported?.()) {
+        try {
           const t0 = performance.now();
           const out = await gpu.erodeWebGPU(job);
           console.log(`[erosion] WebGPU compute backend: ${(performance.now() - t0).toFixed(0)}ms`);
           return { ...out, backend: 'webgpu' };
+        } catch (err) {
+          console.warn('[erosion] WebGPU compute backend failed — falling back to CPU worker.', err);
         }
-      } catch (err) {
-        console.warn('[erosion] WebGPU backend failed — falling back to CPU worker.', err);
       }
     }
     return { ...(await this._runErosionWorker(job)), backend: 'cpu' };
+  }
+
+  _importErosionGPU({ warm = false } = {}) {
+    if (this._erosionGPUUnavailable) return Promise.resolve(null);
+    if (this._erosionGPUModule) return Promise.resolve(this._erosionGPUModule);
+    if (this._erosionGPUImportPromise) return this._erosionGPUImportPromise;
+
+    this._erosionGPUImportPromise = this._importErosionGPUWithRetries()
+      .then((mod) => {
+        this._erosionGPUModule = mod;
+        return mod;
+      })
+      .catch((err) => {
+        this._erosionGPUUnavailable = true;
+        const context = warm ? 'during post-boot warmup' : 'while starting erosion';
+        console.warn(
+          `[erosion] WebGPU module import failed ${context}; dev server may have restarted — hard-reload the tab. Falling back to CPU erosion, slower but same result.`,
+          err,
+        );
+        return null;
+      })
+      .finally(() => {
+        this._erosionGPUImportPromise = null;
+      });
+
+    return this._erosionGPUImportPromise;
+  }
+
+  async _importErosionGPUWithRetries() {
+    const failures = [];
+
+    try {
+      return await import('./terrain/erosion/erosionWebGPU.js');
+    } catch (err) {
+      failures.push(err);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    try {
+      return await import('./terrain/erosion/erosionWebGPU.js');
+    } catch (err) {
+      failures.push(err);
+    }
+
+    if (import.meta.env.DEV) {
+      try {
+        return await import(/* @vite-ignore */ `./terrain/erosion/erosionWebGPU.js?t=${Date.now()}`);
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+
+    throw failures[failures.length - 1] || new Error('unknown WebGPU module import failure');
   }
 
   _runErosionWorker({ width, height, heightmap, params, onProgress }) {
@@ -5446,6 +5526,10 @@ export class Engine {
     this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
+    if (this._erosionGPUWarmCancel) {
+      this._erosionGPUWarmCancel();
+      this._erosionGPUWarmCancel = null;
+    }
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
     if (this.renderer) {
