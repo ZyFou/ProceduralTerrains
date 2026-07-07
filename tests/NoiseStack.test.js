@@ -50,6 +50,8 @@ describe('migrateStack (save compatibility)', () => {
     const migrated = migrateStack({ layers: [{ type: 'fbm' }] });
     expect(Object.keys(migrated.layers[0].params).sort())
       .toEqual(Object.keys(fresh.params).sort());
+    expect(migrated.layers[0].params.erosion).toBe(0);
+    expect(migrated.layers[0].params.warp).toBe(0);
   });
 
   it('preserves explicitly saved param values over defaults', () => {
@@ -100,6 +102,17 @@ describe('structuralSignature (shader recompile key)', () => {
     const tweaked = {
       ...stack,
       layers: stack.layers.map((l) => ({ ...l, strength: 0.123 })),
+    };
+    expect(structuralSignature(tweaked)).toBe(structuralSignature(stack));
+  });
+
+  it('ignores eroded-fractal params — uniforms only, no recompile', () => {
+    const stack = base();
+    const tweaked = {
+      ...stack,
+      layers: stack.layers.map((l) => (l.type === 'fbm'
+        ? { ...l, params: { ...l.params, erosion: 0.6, warp: 0.8 } }
+        : l)),
     };
     expect(structuralSignature(tweaked)).toBe(structuralSignature(stack));
   });

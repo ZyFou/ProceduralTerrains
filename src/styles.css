@@ -3549,11 +3549,10 @@ input[type="color"].palette-color-input {
   justify-content: center;
 }
 .nl-add-menu {
-  position: absolute;
-  bottom: 100%;
+  position: relative;
   left: 0;
   right: 0;
-  margin-bottom: 6px;
+  margin-top: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border-active);
   border-radius: var(--radius-md);

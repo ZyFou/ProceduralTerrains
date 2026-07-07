@@ -13,6 +13,26 @@
 // ============================================================================
 
 export const NOISE_STACK_PRIMS2D_GLSL = /* glsl */ `
+// value noise plus analytic derivatives. The .x channel intentionally matches
+// vnoise(p): same hash corners, same quintic interpolant, same mix order.
+vec3 vnoised2(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f - 1.0) * (f - 1.0);
+  float a = hash12(i);
+  float b = hash12(i + vec2(1.0, 0.0));
+  float c = hash12(i + vec2(0.0, 1.0));
+  float d = hash12(i + vec2(1.0, 1.0));
+  float top = mix(a, b, u.x);
+  float bot = mix(c, d, u.x);
+  float value = mix(top, bot, u.y);
+  vec2 deriv = vec2(
+    mix(b - a, d - c, u.y) * du.x,
+    (bot - top) * du.y
+  );
+  return vec3(value, deriv);
+}
+
 // value noise with selectable interpolation (0 linear, 1 smooth, 2 quintic)
 float valueNoise2(vec2 p, int mode) {
   vec2 i = floor(p), f = fract(p);
@@ -103,6 +123,33 @@ float flow2(vec2 p, float flowDir, float width, float meander, float meanderScal
 `;
 
 export const NOISE_STACK_PRIMS3D_GLSL = /* glsl */ `
+vec4 vnoised3(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec3 du = 30.0 * f * f * (f - 1.0) * (f - 1.0);
+  float n000 = hash13(i + vec3(0.0, 0.0, 0.0));
+  float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+  float x00 = mix(n000, n100, u.x);
+  float x10 = mix(n010, n110, u.x);
+  float x01 = mix(n001, n101, u.x);
+  float x11 = mix(n011, n111, u.x);
+  float y0 = mix(x00, x10, u.y);
+  float y1 = mix(x01, x11, u.y);
+  float value = mix(y0, y1, u.z);
+  vec3 deriv = vec3(
+    mix(mix(n100 - n000, n110 - n010, u.y), mix(n101 - n001, n111 - n011, u.y), u.z) * du.x,
+    mix(x10 - x00, x11 - x01, u.z) * du.y,
+    (y1 - y0) * du.z
+  );
+  return vec4(value, deriv);
+}
+
 float valueNoise3(vec3 p, int mode) {
   vec3 i = floor(p), f = fract(p);
   vec3 u = mode == 0 ? f

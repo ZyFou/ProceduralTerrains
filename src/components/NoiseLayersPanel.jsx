@@ -144,6 +144,7 @@ function NoiseLayerItem({
                 <SelectRow key={p.key} label={p.label}
                   value={layer.params[p.key] ?? p.default}
                   options={p.options}
+                  settingId={p.settingId}
                   onChange={(v) => onUpdateParam(layer.id, p.key, Number(v))} />
               );
             }
@@ -151,6 +152,7 @@ function NoiseLayerItem({
               <SliderCtl key={p.key}
                 def={{ ...p, key: `_${p.key}` }}
                 value={layer.params[p.key] ?? p.default}
+                settingId={p.settingId}
                 onChange={(v) => onUpdateParam(layer.id, p.key, v)} />
             );
           })}

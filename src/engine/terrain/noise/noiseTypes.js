@@ -28,35 +28,133 @@ const fract = (v) => v - Math.floor(v);
 
 // ---- shared GLSL fragments for the per-octave fractal loops -----------------
 const fbmLoop2 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
-  for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise(q); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
+    for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise(q); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P, dsum = vec2(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec3 n = vnoised2(q + dsum * selfWarp);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * n.x * damp; norm += amp * damp;
+      dsum += n.yz * amp;
+      amp *= pa.x; q = ROT2 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 const fbmLoop3 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
-  for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise3(q); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
+    for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise3(q); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P, dsum = vec3(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec4 n = vnoised3(q + dsum * selfWarp);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * n.x * damp; norm += amp * damp;
+      dsum += n.yzw * amp;
+      amp *= pa.x; q = ROT3 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 const ridgedLoop2 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec2 q = P;
-  for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec2 q = P;
+    for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec2 q = P, dsum = vec2(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec3 n = vnoised2(q + dsum * selfWarp);
+      float raw = n.x * 2.0 - 1.0;
+      float ridge = 1.0 - abs(raw);
+      float v = pow(max(ridge, 0.0), pa.z);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * v * carry * damp; norm += amp * damp;
+      float s = raw < 0.0 ? 1.0 : -1.0;
+      vec2 dv = s * 2.0 * n.yz * pa.z * pow(max(ridge, 1e-4), pa.z - 1.0);
+      dsum += dv * amp * carry;
+      carry = clamp(v * 1.4, 0.0, 1.0);
+      amp *= pa.x; q = ROT2 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 const ridgedLoop3 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec3 q = P;
-  for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise3(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec3 q = P;
+    for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise3(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec3 q = P, dsum = vec3(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec4 n = vnoised3(q + dsum * selfWarp);
+      float raw = n.x * 2.0 - 1.0;
+      float ridge = 1.0 - abs(raw);
+      float v = pow(max(ridge, 0.0), pa.z);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * v * carry * damp; norm += amp * damp;
+      float s = raw < 0.0 ? 1.0 : -1.0;
+      vec3 dv = s * 2.0 * n.yzw * pa.z * pow(max(ridge, 1e-4), pa.z - 1.0);
+      dsum += dv * amp * carry;
+      carry = clamp(v * 1.4, 0.0, 1.0);
+      amp *= pa.x; q = ROT3 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 const billowLoop2 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
-  for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
+    for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P, dsum = vec2(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec3 n = vnoised2(q + dsum * selfWarp);
+      float raw = n.x * 2.0 - 1.0;
+      float v = abs(raw);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * v * damp; norm += amp * damp;
+      float s = raw < 0.0 ? -1.0 : 1.0;
+      dsum += s * 2.0 * n.yz * amp;
+      amp *= pa.x; q = ROT2 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 const billowLoop3 = (oct) => `
-  float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
-  for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise3(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
-  val = sum / max(norm, 1e-4);`;
+  if (pb.x <= 0.0 && pb.y <= 0.0) {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
+    for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise3(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    val = sum / max(norm, 1e-4);
+  } else {
+    float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P, dsum = vec3(0.0);
+    float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
+    for (int i = 0; i < ${oct}; i++) {
+      vec4 n = vnoised3(q + dsum * selfWarp);
+      float raw = n.x * 2.0 - 1.0;
+      float v = abs(raw);
+      float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
+      sum += amp * v * damp; norm += amp * damp;
+      float s = raw < 0.0 ? -1.0 : 1.0;
+      dsum += s * 2.0 * n.yzw * amp;
+      amp *= pa.x; q = ROT3 * q * pa.y;
+    }
+    val = sum / max(norm, 1e-4);
+  }`;
 
 // common param descriptors
 const P_OCT = { key: 'octaves', label: 'Octaves', min: 1, max: 8, step: 1, default: 5, structural: true };
 const P_PERS = { key: 'persistence', label: 'Persistence', min: 0.15, max: 0.85, step: 0.01, default: 0.5, digits: 2 };
 const P_LAC = { key: 'lacunarity', label: 'Lacunarity', min: 1.5, max: 3.5, step: 0.01, default: 2.0, digits: 2 };
 const P_SCALE = { key: 'scale', label: 'Scale', min: 0.1, max: 20, step: 0.05, default: 1.0, digits: 2 };
+const P_EROSION = { key: 'erosion', label: 'Erosion', min: 0, max: 1, step: 0.01, default: 0, digits: 2, settingId: 'noise.layer.erosion' };
+const P_SELF_WARP = { key: 'warp', label: 'Self Warp', min: 0, max: 1.5, step: 0.01, default: 0, digits: 2, settingId: 'noise.layer.selfWarp' };
 
 export const NOISE_TYPES = [
   // ---------------------------------------------------------------- legacy
@@ -76,12 +174,12 @@ export const NOISE_TYPES = [
     id: 'fbm', label: 'FBM / Fractal', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.4,
     desc: 'Layered value noise — general terrain variation, rolling hills, natural detail.',
-    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: [],
-    params: [P_SCALE, P_OCT, P_PERS, P_LAC],
+    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: ['erosion', 'warp'],
+    params: [P_SCALE, P_OCT, P_PERS, P_LAC, P_EROSION, P_SELF_WARP],
     body2d: (l) => fbmLoop2(clampOct(l.params.octaves)),
     body3d: (l) => fbmLoop3(clampOct(l.params.octaves)),
-    eval2d: (px, pz, l) => fbm2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity),
-    eval3d: (px, py, pz, l) => fbm3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity),
+    eval2d: (px, pz, l) => fbm2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.erosion, l.params.warp),
+    eval3d: (px, py, pz, l) => fbm3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.erosion, l.params.warp),
   },
 
   // ---------------------------------------------------------------- ridged
@@ -89,13 +187,14 @@ export const NOISE_TYPES = [
     id: 'ridged', label: 'Ridged', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.5,
     desc: 'Sharp ridges and mountain chains, alpine terrain, canyon edges.',
-    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity', 'sharpness'], pbKeys: [],
+    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity', 'sharpness'], pbKeys: ['erosion', 'warp'],
     params: [P_SCALE, P_OCT, P_PERS, P_LAC,
-      { key: 'sharpness', label: 'Ridge Sharpness', min: 0.5, max: 4, step: 0.05, default: 2.0, digits: 2 }],
+      { key: 'sharpness', label: 'Ridge Sharpness', min: 0.5, max: 4, step: 0.05, default: 2.0, digits: 2 },
+      P_EROSION, P_SELF_WARP],
     body2d: (l) => ridgedLoop2(clampOct(l.params.octaves)),
     body3d: (l) => ridgedLoop3(clampOct(l.params.octaves)),
-    eval2d: (px, pz, l) => ridged2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.sharpness),
-    eval3d: (px, py, pz, l) => ridged3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.sharpness),
+    eval2d: (px, pz, l) => ridged2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.sharpness, l.params.erosion, l.params.warp),
+    eval3d: (px, py, pz, l) => ridged3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.sharpness, l.params.erosion, l.params.warp),
   },
 
   // ---------------------------------------------------------------- billow
@@ -103,12 +202,12 @@ export const NOISE_TYPES = [
     id: 'billow', label: 'Billow', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.4,
     desc: 'Soft rounded noise — hills, soft dunes, organic/cloud-like surfaces.',
-    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: [],
-    params: [P_SCALE, P_OCT, P_PERS, P_LAC],
+    scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: ['erosion', 'warp'],
+    params: [P_SCALE, P_OCT, P_PERS, P_LAC, P_EROSION, P_SELF_WARP],
     body2d: (l) => billowLoop2(clampOct(l.params.octaves)),
     body3d: (l) => billowLoop3(clampOct(l.params.octaves)),
-    eval2d: (px, pz, l) => billow2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity),
-    eval3d: (px, py, pz, l) => billow3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity),
+    eval2d: (px, pz, l) => billow2(px, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.erosion, l.params.warp),
+    eval3d: (px, py, pz, l) => billow3(px, py, pz, l.params.octaves, l.params.persistence, l.params.lacunarity, l.params.erosion, l.params.warp),
   },
 
   // ---------------------------------------------------------------- value

@@ -39,6 +39,10 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.noiseMap', label: 'Noise Map', keywords: 'noise import replace blend map' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.biomeMap', label: 'Biome Map', keywords: 'biome import replace blend map' },
 
+  // Noise Layers
+  { panelId: 'noiseLayers', sectionLabel: 'Layer Parameters', settingId: 'noise.layer.erosion', label: 'Layer Erosion', keywords: 'noise layer erosion derivative dampening eroded fractal valleys drainage realistic fbm ridged billow mountains' },
+  { panelId: 'noiseLayers', sectionLabel: 'Layer Parameters', settingId: 'noise.layer.selfWarp', label: 'Self Warp', keywords: 'noise layer self warp anti pattern breakup spaghetti ridges massif mountains fbm ridged billow realistic' },
+
   // Biomes
   { panelId: 'biomes', settingId: 'biomes.biomeScale', label: 'Biome Density', keywords: 'biome density distribution climate map' },
   { panelId: 'biomes', settingId: 'biomes.tempBias', label: 'Temperature', keywords: 'biome climate heat cold' },
