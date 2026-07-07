@@ -22,6 +22,19 @@ function smoothstep32(e0, e1, x) {
   return f(f(t * t) * f(3 - f(2 * t)));
 }
 
+function stackSoftClamp(h) {
+  if (h <= 0) return 0;
+  if (h <= 1) return f(h);
+  return f(Math.min(1.35, f(1 + f(0.35 * f(1 - Math.exp(f(-(h - 1) / 0.35)))))));
+}
+
+function finalizeStackHeight(h, u) {
+  if ((u.uStackNormalize?.value ?? 0) < 0.5) return clamp(h, 0, 1.35);
+  const outMin = f(u.uStackOutMin?.value ?? 0);
+  const outMax = Math.max(f(u.uStackOutMax?.value ?? 1.35), f(outMin + 0.0001));
+  return stackSoftClamp(f(f(h - outMin) / f(outMax - outMin)));
+}
+
 // GLSL mat3(0,0.80,0.60, -0.80,0.36,-0.48, -0.60,-0.48,0.64) is column-major;
 // ROT3 * p =>  (cols dotted with p).
 function rot3x(x, y, z) { return f(f(0.0 * x) + f(f(-0.80 * y) + f(-0.60 * z))); }
@@ -186,7 +199,7 @@ export class PlanetHeightSampler {
   heightAt3D(dx, dy, dz) {
     const u = this.u;
     const h = this._smoothedStackHeightAt3D(dx, dy, dz);
-    return f(clamp(h, 0, 1.35) * f(u.uHeightScale.value));
+    return f(finalizeStackHeight(h, u) * f(u.uHeightScale.value));
   }
 
   _rawStackHeightAt3D(dx, dy, dz) {

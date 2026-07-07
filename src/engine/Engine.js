@@ -1465,6 +1465,14 @@ export class Engine {
 
   _packNoiseUniforms() {
     const u = this.uniforms;
+    if (u.uStackNormalize) u.uStackNormalize.value = this.noiseStack?.normalizeOutput ? 1.0 : 0.0;
+    if (u.uStackOutMin) u.uStackOutMin.value = Number.isFinite(this.noiseStack?.outputMin) ? this.noiseStack.outputMin : 0.0;
+    if (u.uStackOutMax) {
+      const outMin = Number.isFinite(this.noiseStack?.outputMin) ? this.noiseStack.outputMin : 0.0;
+      const outMax = Number.isFinite(this.noiseStack?.outputMax) ? this.noiseStack.outputMax : 1.35;
+      u.uStackOutMax.value = Math.max(outMin + 0.0001, outMax);
+    }
+
     const p = packStackUniforms(this.noiseStack, { solo: this._soloLayerId });
     for (let i = 0; i < p.strength.length; i++) {
       u.uLayerStrength.value[i] = p.strength[i];
@@ -1474,6 +1482,7 @@ export class Engine {
       u.uLayerParamsB.value[i].set(p.paramsB[i][0], p.paramsB[i][1], p.paramsB[i][2], p.paramsB[i][3]);
       u.uLayerMaskA.value[i].set(p.maskA[i][0], p.maskA[i][1], p.maskA[i][2], p.maskA[i][3]);
       u.uLayerMaskB.value[i].set(p.maskB[i][0], p.maskB[i][1], p.maskB[i][2], p.maskB[i][3]);
+      if (u.uLayerMaskC) u.uLayerMaskC.value[i].set(p.maskC[i][0], p.maskC[i][1], p.maskC[i][2], p.maskC[i][3]);
     }
   }
 

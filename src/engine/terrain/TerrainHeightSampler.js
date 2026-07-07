@@ -25,6 +25,19 @@ function smoothstep32(e0, e1, x) {
   return f(f(t * t) * f(3 - f(2 * t)));
 }
 
+function stackSoftClamp(h) {
+  if (h <= 0) return 0;
+  if (h <= 1) return f(h);
+  return f(Math.min(1.35, f(1 + f(0.35 * f(1 - Math.exp(f(-(h - 1) / 0.35)))))));
+}
+
+function finalizeStackHeight(h, u) {
+  if ((u.uStackNormalize?.value ?? 0) < 0.5) return clamp(h, 0, 1.35);
+  const outMin = f(u.uStackOutMin?.value ?? 0);
+  const outMax = Math.max(f(u.uStackOutMax?.value ?? 1.35), f(outMin + 0.0001));
+  return stackSoftClamp(f(f(h - outMin) / f(outMax - outMin)));
+}
+
 // GLSL: mat2(0.80,-0.60,0.60,0.80) * p  =>  (0.80x + 0.60y, -0.60x + 0.80y)
 function rot2x(x, y) { return f(f(0.80 * x) + f(0.60 * y)); }
 function rot2y(x, y) { return f(f(-0.60 * x) + f(0.80 * y)); }
@@ -263,7 +276,7 @@ export class TerrainHeightSampler {
     }
     // World-unit height, then the erosion delta on top (matches GLSL heightAt:
     // the offset is added after the clamp/scale, in world units).
-    return f(f(clamp(h, 0, 1.35) * f(u.uHeightScale.value)) + this._erosionOffset(x, z));
+    return f(f(finalizeStackHeight(h, u) * f(u.uHeightScale.value)) + this._erosionOffset(x, z));
   }
 
   _erosionOffset(x, z) {

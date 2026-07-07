@@ -3352,6 +3352,28 @@ input[type="color"].palette-color-input {
   gap: 2px;
   margin-top: 8px;
 }
+.nl-output-section {
+  margin-top: 10px;
+  padding: 8px 10px 10px;
+  background: rgba(120, 150, 200, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.nl-output-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.nl-output-section .ctl,
+.nl-output-section .toggle-row {
+  margin-bottom: 7px;
+}
+.nl-output-section .ctl:last-child {
+  margin-bottom: 0;
+}
 
 /* layer item */
 .nl-item {

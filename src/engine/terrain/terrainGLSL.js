@@ -13,6 +13,9 @@ uniform float uFrequency;      // base noise frequency (1/world units)
 uniform float uHeightScale;    // world-space height of h01 == 1.0
 uniform float uSeaLevel;       // world-space water height
 uniform float uAmplitude;      // overall noise strength multiplier
+uniform float uStackNormalize; // 0 = legacy clamp, 1 = remap by output min/max
+uniform float uStackOutMin;    // raw stack height mapped to 0 when normalized
+uniform float uStackOutMax;    // raw stack height mapped to 1 when normalized
 uniform float uTerrainSmoothing; // spatial low-pass blend for rounded hills
 uniform float uPersistence;    // FBM gain
 uniform float uLacunarity;     // FBM frequency multiplier
@@ -46,6 +49,7 @@ uniform vec4  uLayerParamsA[MAX_NOISE_LAYERS];  // type-specific continuous lane
 uniform vec4  uLayerParamsB[MAX_NOISE_LAYERS];
 uniform vec4  uLayerMaskA[MAX_NOISE_LAYERS];    // height mask (min,max,falloff,flags)
 uniform vec4  uLayerMaskB[MAX_NOISE_LAYERS];    // noise mask (scale,threshold,soft,invert)
+uniform vec4  uLayerMaskC[MAX_NOISE_LAYERS];    // slope mask (min,max,falloff,invert)
 uniform float uNoiseDebug;                      // debug view selector (0 = off)
 uniform float uTileDebugView;                   // 0 off, 1 noise, 2 height, 3 biome
 uniform sampler2D uImportNoiseTex;
@@ -95,6 +99,19 @@ uniform float uTileDiskRadius;      // world-space disk outer radius
 float rimFalloff(float t) {
   t = clamp(t, 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
+}
+
+float stackSoftClamp(float h) {
+  if (h <= 0.0) return 0.0;
+  if (h <= 1.0) return h;
+  return min(1.35, 1.0 + 0.35 * (1.0 - exp(-(h - 1.0) / 0.35)));
+}
+
+float finalizeStackHeight(float h) {
+  if (uStackNormalize < 0.5) return clamp(h, 0.0, 1.35);
+  float outMin = uStackOutMin;
+  float outMax = max(uStackOutMax, outMin + 0.0001);
+  return stackSoftClamp((h - outMin) / (outMax - outMin));
 }
 
 // Hard disk clip: 1 inside the rendered disk, 0 outside. Pure visibility mask —
@@ -417,7 +434,7 @@ float shapeHeight(vec2 xz, Climate c) {
     h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude * clamp(uFalloff, 0.0, 1.0);
   }
 #endif
-  float finalH = clamp(h, 0.0, 1.35) * uHeightScale;
+  float finalH = finalizeStackHeight(h) * uHeightScale;
 #ifndef INFINITE_MODE
   if (uImportHeightMode > 1.5) {
     float importedH = importedMapValue(uImportHeightTex, tileUvAt(xz)) * uHeightScale * uImportHeightStrength + uImportHeightOffset;

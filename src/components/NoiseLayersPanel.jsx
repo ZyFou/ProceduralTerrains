@@ -50,6 +50,17 @@ const TrashIcon = () => (
 
 // ---- blend mode options for select ------------------------------------------
 const BLEND_OPTIONS = BLEND_MODES.map((m) => ({ value: m, label: BLEND_LABELS[m] || m }));
+const OUTPUT_MIN_DEF = { key: 'outputMin', label: 'Min', min: -1, max: 1, step: 0.01, digits: 2, info: 'Raw stack value mapped to zero when output normalization is enabled.' };
+const OUTPUT_MAX_DEF = { key: 'outputMax', label: 'Max', min: 0.5, max: 3, step: 0.01, digits: 2, info: 'Raw stack value mapped to full height before the soft clamp.' };
+const OUTPUT_RANGE_GAP = 0.01;
+
+function finiteNumber(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 // ---- add-layer type menu items (grouped) ------------------------------------
 const TYPE_GROUPS = [
@@ -247,6 +258,28 @@ function MaskItem({ mask, onRemove, onToggle, onInvert, onParam }) {
             value={mask.params.softness ?? 0.12} onChange={(v) => onParam('noise', 'softness', v)} />
         </>
       )}
+      {mask.type === 'slope' && mask.enabled !== false && (
+        <>
+          <SliderCtl
+            def={{ key: '_smin', label: 'Min', min: 0, max: 3, step: 0.01, digits: 2 }}
+            value={mask.params.min ?? 0}
+            onChange={(v) => onParam('slope', 'min', v)}
+            settingId="noise.mask.slopeMin"
+          />
+          <SliderCtl
+            def={{ key: '_smax', label: 'Max', min: 0, max: 3, step: 0.01, digits: 2 }}
+            value={mask.params.max ?? 1}
+            onChange={(v) => onParam('slope', 'max', v)}
+            settingId="noise.mask.slopeMax"
+          />
+          <SliderCtl
+            def={{ key: '_sfall', label: 'Falloff', min: 0, max: 1, step: 0.005, digits: 3 }}
+            value={mask.params.falloff ?? 0.1}
+            onChange={(v) => onParam('slope', 'falloff', v)}
+            settingId="noise.mask.slopeFalloff"
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -352,9 +385,42 @@ export default function NoiseLayersPanel({ ctx, children }) {
     }
   };
 
+  const handleStackOutput = (patch) => {
+    const next = cloneStack(stack);
+    let outputMin = clampNumber(
+      finiteNumber(patch.outputMin ?? next.outputMin, 0.0),
+      OUTPUT_MIN_DEF.min,
+      OUTPUT_MIN_DEF.max,
+    );
+    let outputMax = clampNumber(
+      finiteNumber(patch.outputMax ?? next.outputMax, 1.35),
+      OUTPUT_MAX_DEF.min,
+      OUTPUT_MAX_DEF.max,
+    );
+
+    if (outputMax <= outputMin + OUTPUT_RANGE_GAP) {
+      if ('outputMin' in patch) outputMin = Math.max(OUTPUT_MIN_DEF.min, outputMax - OUTPUT_RANGE_GAP);
+      else outputMax = Math.min(OUTPUT_MAX_DEF.max, outputMin + OUTPUT_RANGE_GAP);
+    }
+
+    pushStack({
+      ...next,
+      normalizeOutput: patch.normalizeOutput ?? !!next.normalizeOutput,
+      outputMin,
+      outputMax,
+    }, false);
+  };
+
   const toggleExpand = (id) => setExpandedId((cur) => cur === id ? null : id);
 
   const layers = stack?.layers ?? [];
+  const outputMin = clampNumber(finiteNumber(stack?.outputMin, 0.0), OUTPUT_MIN_DEF.min, OUTPUT_MIN_DEF.max);
+  const outputMax = clampNumber(
+    Math.max(finiteNumber(stack?.outputMax, 1.35), outputMin + OUTPUT_RANGE_GAP),
+    OUTPUT_MAX_DEF.min,
+    OUTPUT_MAX_DEF.max,
+  );
+  const normalizeOutput = !!stack?.normalizeOutput;
 
   return (
     <SidePanel title="Noise Layers" description="Stack noise layers to shape the terrain height." onClose={ctx.onClose}>
@@ -363,6 +429,29 @@ export default function NoiseLayersPanel({ ctx, children }) {
         options={[{ value: '__custom', label: '— Custom Stack —' }, ...NOISE_STACK_PRESET_KEYS.map((k) => ({ value: k, label: NOISE_STACK_PRESETS[k].label }))]}
         onChange={(v) => { if (v !== '__custom') handlePreset(v); }}
         info="Load a preset noise stack. You can edit it freely afterwards." />
+
+      <div className="nl-output-section" data-setting-id="noise.section.output">
+        <div className="nl-output-title">Output</div>
+        <ToggleRow
+          label="Normalize Output"
+          value={normalizeOutput}
+          onChange={(value) => handleStackOutput({ normalizeOutput: value })}
+          settingId="noise.stackNormalize"
+          info="Remap the raw stack by Min and Max, then apply a soft ceiling instead of hard flattening peaks."
+        />
+        <SliderCtl
+          def={OUTPUT_MIN_DEF}
+          value={outputMin}
+          onChange={(value) => handleStackOutput({ outputMin: value })}
+          settingId="noise.outputMin"
+        />
+        <SliderCtl
+          def={OUTPUT_MAX_DEF}
+          value={outputMax}
+          onChange={(value) => handleStackOutput({ outputMax: value })}
+          settingId="noise.outputMax"
+        />
+      </div>
 
       {/* layer list */}
       <div className="nl-stack">

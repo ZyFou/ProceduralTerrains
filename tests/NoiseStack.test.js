@@ -15,6 +15,16 @@ import {
   structuralSignature, isLegacyStack, activeLayers,
   migrateStack, defaultLegacyStack,
 } from '../src/engine/terrain/noise/NoiseStack.js';
+import { generateStackGLSL, packStackUniforms, evalStack2D } from '../src/engine/terrain/noise/noiseStackCodegen.js';
+import { COMMON_UNIFORMS_GLSL, buildHeightGLSL } from '../src/engine/terrain/terrainGLSL.js';
+import { buildPlanetHeightGLSL } from '../src/engine/terrain/planetGLSL.js';
+
+const TEST_UNIFORMS = {
+  uFrequency: { value: 0.01 },
+  uSeedOffset: { value: { x: 0, y: 0 } },
+  uAmplitude: { value: 1 },
+  uHeightScale: { value: 100 },
+};
 
 describe('migrateStack (save compatibility)', () => {
   it('synthesizes the default legacy stack for pre-noiseStack saves', () => {
@@ -54,6 +64,11 @@ describe('migrateStack (save compatibility)', () => {
     expect(migrated.layers[0].params.warp).toBe(0);
   });
 
+  it('fills new Domain Warp octaves with the current legacy default', () => {
+    const migrated = migrateStack({ layers: [{ type: 'domainWarp' }] });
+    expect(migrated.layers[0].params.octaves).toBe(4);
+  });
+
   it('preserves explicitly saved param values over defaults', () => {
     const fresh = makeLayer('fbm');
     const key = Object.keys(fresh.params)[0];
@@ -70,6 +85,13 @@ describe('migrateStack (save compatibility)', () => {
     expect(stack.normalizeOutput).toBe(true);
     expect(stack.outputMin).toBe(-1);
     expect(stack.outputMax).toBe(2);
+  });
+
+  it('fills missing stack output fields with legacy-compatible defaults', () => {
+    const stack = migrateStack({ layers: [{ type: 'fbm' }] });
+    expect(stack.normalizeOutput).toBe(false);
+    expect(stack.outputMin).toBe(0);
+    expect(stack.outputMax).toBe(1.35);
   });
 });
 
@@ -115,6 +137,39 @@ describe('structuralSignature (shader recompile key)', () => {
         : l)),
     };
     expect(structuralSignature(tweaked)).toBe(structuralSignature(stack));
+  });
+
+  it('ignores output normalization fields (uniforms only, no recompile)', () => {
+    const stack = base();
+    const tweaked = {
+      ...stack,
+      normalizeOutput: !stack.normalizeOutput,
+      outputMin: -0.25,
+      outputMax: 1.8,
+    };
+    expect(structuralSignature(tweaked)).toBe(structuralSignature(stack));
+  });
+
+  it('changes when a slope mask is added', () => {
+    const stack = base();
+    const withSlope = {
+      ...stack,
+      layers: stack.layers.map((l, i) => (i === 1
+        ? { ...l, masks: [{ type: 'slope', enabled: true, invert: false, params: { min: 0, max: 1, falloff: 0.1 } }] }
+        : l)),
+    };
+    expect(structuralSignature(withSlope)).not.toBe(structuralSignature(stack));
+  });
+
+  it('changes when Domain Warp octaves change', () => {
+    const warp = makeLayer('domainWarp');
+    const detail = makeLayer('fbm');
+    const stack = makeStack([warp, detail]);
+    const changed = {
+      ...stack,
+      layers: stack.layers.map((l, i) => (i === 0 ? { ...l, params: { ...l.params, octaves: 6 } } : l)),
+    };
+    expect(structuralSignature(changed)).not.toBe(structuralSignature(stack));
   });
 
   it('changes when a layer is disabled', () => {
@@ -179,5 +234,67 @@ describe('stack mutations (immutable updates)', () => {
     const active = activeLayers(stack);
     expect(active.map((a) => a.layer.type)).toEqual(['legacy', 'ridged']);
     expect(active.map((a) => a.slot)).toEqual([0, 1]);
+  });
+});
+
+describe('stack output finalization shader contract', () => {
+  it('declares output normalization uniforms and helper in the shared include', () => {
+    expect(COMMON_UNIFORMS_GLSL).toContain('uniform float uStackNormalize');
+    expect(COMMON_UNIFORMS_GLSL).toContain('uniform float uStackOutMin');
+    expect(COMMON_UNIFORMS_GLSL).toContain('uniform float uStackOutMax');
+    expect(COMMON_UNIFORMS_GLSL).toContain('float finalizeStackHeight(float h)');
+  });
+
+  it('uses the shared output finalizer for terrain and planet height', () => {
+    const stack2d = 'float stackHeight2D(vec2 xz) { return 0.0; }';
+    const stack3d = 'float stackHeight3D(vec3 dir) { return 0.0; }';
+    expect(buildHeightGLSL(stack2d)).toContain('finalizeStackHeight(h) * uHeightScale');
+    expect(buildPlanetHeightGLSL(stack3d)).toContain('finalizeStackHeight(h) * uHeightScale');
+  });
+});
+
+describe('slope masks and domain warp codegen', () => {
+  it('keeps no-slope stacks on the single-track 2D shader body', () => {
+    const stack = makeStack([makeLayer('fbm')]);
+    const glsl = generateStackGLSL(stack);
+    expect(glsl.body2d).not.toContain('hDX');
+    expect(glsl.body2d).not.toContain('uLayerMaskC');
+  });
+
+  it('emits the 2D tri-track path only when a slope mask is enabled', () => {
+    const layer = makeLayer('fbm', {
+      masks: [{ type: 'slope', enabled: true, invert: false, params: { min: 0.2, max: 1.2, falloff: 0.1 } }],
+    });
+    const glsl = generateStackGLSL(makeStack([layer]));
+    expect(glsl.body2d).toContain('stackSlope(h, hDX, hDZ)');
+    expect(glsl.body2d).toContain('uLayerMaskC[0]');
+    expect(glsl.body3d).not.toContain('uLayerMaskC');
+  });
+
+  it('packs slope mask params into mask C', () => {
+    const layer = makeLayer('fbm', {
+      masks: [{ type: 'slope', enabled: true, invert: true, params: { min: 0.2, max: 1.4, falloff: 0.25 } }],
+    });
+    const packed = packStackUniforms(makeStack([layer]));
+    expect(packed.maskC[0]).toEqual([0.2, 1.4, 0.25, 1]);
+  });
+
+  it('applies slope masks in the CPU evaluator', () => {
+    const base = makeLayer('constant', { blendMode: 'replace', params: { value: 0.5 } });
+    const masked = makeLayer('constant', {
+      blendMode: 'add',
+      params: { value: 1 },
+      masks: [{ type: 'slope', enabled: true, invert: false, params: { min: 0.1, max: 3, falloff: 0.001 } }],
+    });
+    const inverted = { ...masked, masks: [{ ...masked.masks[0], invert: true }] };
+    expect(evalStack2D(makeStack([base, masked]), 0, 0, { uniforms: TEST_UNIFORMS })).toBeCloseTo(0.5, 8);
+    expect(evalStack2D(makeStack([base, inverted]), 0, 0, { uniforms: TEST_UNIFORMS })).toBeCloseTo(1.5, 8);
+  });
+
+  it('bakes Domain Warp octaves as literal loop bounds', () => {
+    const warp = makeLayer('domainWarp', { params: { scale: 1, octaves: 6 } });
+    const detail = makeLayer('fbm');
+    const glsl = generateStackGLSL(makeStack([warp, detail]));
+    expect(glsl.body2d).toContain('for (int i = 0; i < 6; i++)');
   });
 });

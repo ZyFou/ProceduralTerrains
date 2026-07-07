@@ -22,6 +22,7 @@ import {
 } from './cpuNoise.js';
 
 const clampOct = (v) => Math.max(1, Math.min(8, Math.round(v || 1)));
+const clampWarpOct = (v) => Math.max(1, Math.min(6, Math.round(v || 1)));
 
 // fract for JS terrace
 const fract = (v) => v - Math.floor(v);
@@ -148,8 +149,46 @@ const billowLoop3 = (oct) => `
     val = sum / max(norm, 1e-4);
   }`;
 
+const fbmAssign2 = (name, expr, oct) => `
+      float ${name} = 0.0;
+      {
+        float amp = 0.5, norm = 0.0; vec2 q = ${expr};
+        for (int i = 0; i < ${oct}; i++) {
+          ${name} += amp * vnoise(q); norm += amp;
+          amp *= uPersistence; q = ROT2 * q * uLacunarity;
+        }
+        ${name} = ${name} / max(norm, 1e-4);
+      }`;
+
+const fbmAssign3 = (name, expr, oct) => `
+      float ${name} = 0.0;
+      {
+        float amp = 0.5, norm = 0.0; vec3 q = ${expr};
+        for (int i = 0; i < ${oct}; i++) {
+          ${name} += amp * vnoise3(q); norm += amp;
+          amp *= uPersistence; q = ROT3 * q * uLacunarity;
+        }
+        ${name} = ${name} / max(norm, 1e-4);
+      }`;
+
+const domainWarp2 = (oct, coord = 'pw') => `{
+      vec2 WP = ${coord} * scale;
+${fbmAssign2('wx', 'WP + vec2(13.7, 41.3)', oct)}
+${fbmAssign2('wz', 'WP + vec2(87.2, 9.1)', oct)}
+      ${coord} += (vec2(wx, wz) - 0.5) * eff;
+    }`;
+
+const domainWarp3 = (oct, coord = 'pw') => `{
+      vec3 WP = ${coord} * scale;
+${fbmAssign3('wx', 'WP + vec3(13.7, 41.3, 7.2)', oct)}
+${fbmAssign3('wy', 'WP + vec3(87.2, 9.1, 55.1)', oct)}
+${fbmAssign3('wz', 'WP + vec3(31.7, 5.3, 91.4)', oct)}
+      ${coord} += (vec3(wx, wy, wz) - 0.5) * eff;
+    }`;
+
 // common param descriptors
 const P_OCT = { key: 'octaves', label: 'Octaves', min: 1, max: 8, step: 1, default: 5, structural: true };
+const P_WARP_OCT = { key: 'octaves', label: 'Octaves', min: 1, max: 6, step: 1, default: 4, structural: true, settingId: 'noise.layer.domainWarpOctaves' };
 const P_PERS = { key: 'persistence', label: 'Persistence', min: 0.15, max: 0.85, step: 0.01, default: 0.5, digits: 2 };
 const P_LAC = { key: 'lacunarity', label: 'Lacunarity', min: 1.5, max: 3.5, step: 0.01, default: 2.0, digits: 2 };
 const P_SCALE = { key: 'scale', label: 'Scale', min: 0.1, max: 20, step: 0.05, default: 1.0, digits: 2 };
@@ -332,29 +371,24 @@ export const NOISE_TYPES = [
     id: 'domainWarp', label: 'Domain Warp', category: 'modifier', badge: 'MOD',
     defaultBlend: 'add', defaultStrength: 1.0,
     desc: 'Distorts the coordinates of the layers below — breaks artificial patterns, twists terrain.',
+    modKind: 'domain',
     scaleKey: 'scale', paKeys: [], pbKeys: [],
-    params: [{ key: 'scale', label: 'Warp Scale', min: 0.1, max: 8, step: 0.05, default: 1.0, digits: 2 }],
-    mod2d: () => `{
-      vec2 WP = pw * scale;
-      vec2 wv = vec2(fbm4(WP + vec2(13.7, 41.3)), fbm4(WP + vec2(87.2, 9.1)));
-      pw += (wv - 0.5) * eff;
-    }`,
-    mod3d: () => `{
-      vec3 WP = pw * scale;
-      vec3 wv = vec3(fbm3D4(WP + vec3(13.7, 41.3, 7.2)), fbm3D4(WP + vec3(87.2, 9.1, 55.1)), fbm3D4(WP + vec3(31.7, 5.3, 91.4)));
-      pw += (wv - 0.5) * eff;
-    }`,
+    params: [{ key: 'scale', label: 'Warp Scale', min: 0.1, max: 8, step: 0.05, default: 1.0, digits: 2 }, P_WARP_OCT],
+    mod2d: (l, coord = 'pw') => domainWarp2(clampWarpOct(l.params.octaves ?? 4), coord),
+    mod3d: (l, coord = 'pw') => domainWarp3(clampWarpOct(l.params.octaves ?? 4), coord),
     modJs2: (state, l, eff) => {
       const s = l.params.scale;
-      const wx = fbm2(state.px * s + 13.7, state.pz * s + 41.3, 4, 0.5, 2.0);
-      const wz = fbm2(state.px * s + 87.2, state.pz * s + 9.1, 4, 0.5, 2.0);
+      const oct = l.params.octaves ?? 4;
+      const wx = fbm2(state.px * s + 13.7, state.pz * s + 41.3, oct, 0.5, 2.0);
+      const wz = fbm2(state.px * s + 87.2, state.pz * s + 9.1, oct, 0.5, 2.0);
       state.px += (wx - 0.5) * eff; state.pz += (wz - 0.5) * eff;
     },
     modJs3: (state, l, eff) => {
       const s = l.params.scale;
-      const wx = fbm3(state.px * s + 13.7, state.py * s + 41.3, state.pz * s + 7.2, 4, 0.5, 2.0);
-      const wy = fbm3(state.px * s + 87.2, state.py * s + 9.1, state.pz * s + 55.1, 4, 0.5, 2.0);
-      const wz = fbm3(state.px * s + 31.7, state.py * s + 5.3, state.pz * s + 91.4, 4, 0.5, 2.0);
+      const oct = l.params.octaves ?? 4;
+      const wx = fbm3(state.px * s + 13.7, state.py * s + 41.3, state.pz * s + 7.2, oct, 0.5, 2.0);
+      const wy = fbm3(state.px * s + 87.2, state.py * s + 9.1, state.pz * s + 55.1, oct, 0.5, 2.0);
+      const wz = fbm3(state.px * s + 31.7, state.py * s + 5.3, state.pz * s + 91.4, oct, 0.5, 2.0);
       state.px += (wx - 0.5) * eff; state.py += (wy - 0.5) * eff; state.pz += (wz - 0.5) * eff;
     },
   },
@@ -364,11 +398,13 @@ export const NOISE_TYPES = [
     id: 'terrace', label: 'Terrace', category: 'modifier', badge: 'MOD',
     defaultBlend: 'replace', defaultStrength: 1.0,
     desc: 'Quantizes the accumulated height into stepped terraces — plateaus, cliffs, strata.',
+    modKind: 'height',
     scaleKey: null, paKeys: ['count', 'smoothness'], pbKeys: [],
     params: [
       { key: 'count', label: 'Terrace Count', min: 2, max: 40, step: 1, default: 12, digits: 0 },
       { key: 'smoothness', label: 'Smoothness', min: 0.02, max: 1, step: 0.01, default: 0.5, digits: 2 }],
-    mod2d: () => terraceMod, mod3d: () => terraceMod,
+    mod2d: (l, heightVar = 'h') => terraceMod(heightVar),
+    mod3d: (l, heightVar = 'h') => terraceMod(heightVar),
     modHeightJs: (h, l, eff, m) => {
       const steps = Math.max(1, l.params.count);
       const t = h * steps;
@@ -379,12 +415,12 @@ export const NOISE_TYPES = [
   },
 ];
 
-const terraceMod = `{
+const terraceMod = (heightVar = 'h') => `{
   float steps = max(pa.x, 1.0);
-  float t = h * steps;
+  float t = ${heightVar} * steps;
   float s = smoothstep(0.5 - pa.y * 0.5, 0.5 + pa.y * 0.5, fract(t));
   float terr = (floor(t) + s) / steps;
-  h = mix(h, terr, eff * m);
+  ${heightVar} = mix(${heightVar}, terr, eff * m);
 }`;
 
 // ---- CPU helpers for the feature types -------------------------------------

@@ -11,7 +11,7 @@
 export const MASK_TYPES = [
   { id: 'height', label: 'Height' },
   { id: 'noise', label: 'Noise' },
-  { id: 'slope', label: 'Slope', soon: true },
+  { id: 'slope', label: 'Slope' },
   { id: 'biome', label: 'Biome', soon: true },
 ];
 
@@ -33,13 +33,23 @@ float maskHeight(float h, vec4 a) {
   float lo = smoothstep(a.x - a.z, a.x + a.z, h);
   float hi = smoothstep(a.y + a.z, a.y - a.z, h);
   float mm = clamp(lo * hi, 0.0, 1.0);
-  if (mod(a.w, 2.0) >= 1.0) mm = 1.0 - mm;
+  if (a.w >= 0.5) mm = 1.0 - mm;
   return mm;
 }
 float maskNoise2(vec2 pw, vec4 b) {
   float n = vnoise(pw * b.x + vec2(53.2, 11.7));
   float mm = smoothstep(b.y - b.z, b.y + b.z, n);
   if (b.w >= 0.5) mm = 1.0 - mm;
+  return mm;
+}
+float stackSlope(float h, float hDX, float hDZ) {
+  return length(vec2(hDX - h, hDZ - h)) * max(uAmplitude, 0.0) * max(uHeightScale, 1.0) / 8.0;
+}
+float maskSlope(float slope, vec4 c) {
+  float lo = smoothstep(c.x - c.z, c.x + c.z, slope);
+  float hi = smoothstep(c.y + c.z, c.y - c.z, slope);
+  float mm = clamp(lo * hi, 0.0, 1.0);
+  if (c.w >= 0.5) mm = 1.0 - mm;
   return mm;
 }
 `;
@@ -54,7 +64,7 @@ float maskNoise3(vec3 pw, vec4 b) {
 `;
 
 /** GLSL expression (string) for this layer's mask product, or '1.0' if none. */
-export function evalMaskGlsl(layer, slot, is3d) {
+export function evalMaskGlsl(layer, slot, is3d, slopeExpr = '0.0') {
   const masks = (layer.masks || []).filter((m) => m.enabled !== false);
   if (masks.length === 0) return '1.0';
   const parts = [];
@@ -62,6 +72,7 @@ export function evalMaskGlsl(layer, slot, is3d) {
   if (masks.some((m) => m.type === 'noise')) {
     parts.push(is3d ? `maskNoise3(pw, uLayerMaskB[${slot}])` : `maskNoise2(pw, uLayerMaskB[${slot}])`);
   }
+  if (!is3d && masks.some((m) => m.type === 'slope')) parts.push(`maskSlope(${slopeExpr}, uLayerMaskC[${slot}])`);
   return parts.length ? `clamp(${parts.join(' * ')}, 0.0, 1.0)` : '1.0';
 }
 
@@ -77,6 +88,15 @@ export function evalMaskJs(layer, state) {
     const hi = smooth(max + falloff, max - falloff, state.h);
     let mm = clamp01(lo * hi);
     if (hm.invert) mm = 1 - mm;
+    m *= mm;
+  }
+  const sm = masks.find((x) => x.type === 'slope');
+  if (sm && Number.isFinite(state.slope)) {
+    const { min = 0, max = 1, falloff = 0.1 } = sm.params;
+    const lo = smooth(min - falloff, min + falloff, state.slope);
+    const hi = smooth(max + falloff, max - falloff, state.slope);
+    let mm = clamp01(lo * hi);
+    if (sm.invert) mm = 1 - mm;
     m *= mm;
   }
   return m;

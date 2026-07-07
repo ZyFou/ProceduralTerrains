@@ -40,8 +40,15 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.biomeMap', label: 'Biome Map', keywords: 'biome import replace blend map' },
 
   // Noise Layers
+  { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.stackNormalize', label: 'Normalize Output', keywords: 'noise stack output normalize normalization remap range soft clamp peaks ceiling height' },
+  { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.outputMin', label: 'Output Min', keywords: 'noise stack output minimum min remap range normalize height floor low' },
+  { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.outputMax', label: 'Output Max', keywords: 'noise stack output maximum max remap range normalize height peaks soft clamp ceiling' },
   { panelId: 'noiseLayers', sectionLabel: 'Layer Parameters', settingId: 'noise.layer.erosion', label: 'Layer Erosion', keywords: 'noise layer erosion derivative dampening eroded fractal valleys drainage realistic fbm ridged billow mountains' },
   { panelId: 'noiseLayers', sectionLabel: 'Layer Parameters', settingId: 'noise.layer.selfWarp', label: 'Self Warp', keywords: 'noise layer self warp anti pattern breakup spaghetti ridges massif mountains fbm ridged billow realistic' },
+  { panelId: 'noiseLayers', sectionLabel: 'Layer Parameters', settingId: 'noise.layer.domainWarpOctaves', label: 'Domain Warp Octaves', keywords: 'noise layer domain warp octaves pattern repetition distortion' },
+  { panelId: 'noiseLayers', sectionLabel: 'Masks', settingId: 'noise.mask.slopeMin', label: 'Slope Mask Min', keywords: 'noise layer mask slope cliff steep scree rock minimum min' },
+  { panelId: 'noiseLayers', sectionLabel: 'Masks', settingId: 'noise.mask.slopeMax', label: 'Slope Mask Max', keywords: 'noise layer mask slope cliff steep scree rock maximum max' },
+  { panelId: 'noiseLayers', sectionLabel: 'Masks', settingId: 'noise.mask.slopeFalloff', label: 'Slope Mask Falloff', keywords: 'noise layer mask slope softness falloff feather cliffs scree' },
 
   // Biomes
   { panelId: 'biomes', settingId: 'biomes.biomeScale', label: 'Biome Density', keywords: 'biome density distribution climate map' },

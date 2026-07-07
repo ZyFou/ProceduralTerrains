@@ -227,7 +227,7 @@ float smoothedStackHeight3D(vec3 dir) {
 // (a sphere has no edge).
 float heightAt3D(vec3 dir) {
   float h = smoothedStackHeight3D(dir);
-  return clamp(h, 0.0, 1.35) * uHeightScale;
+  return finalizeStackHeight(h) * uHeightScale;
 }
 `;
 }
