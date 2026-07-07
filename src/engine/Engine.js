@@ -1543,9 +1543,29 @@ export class Engine {
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
     }
 
+    const emitProgress = (payload) => {
+      if (token === this._octToken && !this._disposed) {
+        this.cb.onCompileProgress?.(payload);
+      }
+    };
+    emitProgress({
+      id: 'noise-stack',
+      label: 'Compiling noise stack',
+      done: 0,
+      total: warm.length * 2,
+    });
+
     try {
       // stagger: one program per yielded task so editing the noise stack never freezes.
-      await this._compileMaterialVariants(warm, { stagger: true });
+      await this._compileMaterialVariants(warm, {
+        stagger: true,
+        onProgress: (done, total) => emitProgress({
+          id: 'noise-stack',
+          label: 'Compiling noise stack',
+          done,
+          total,
+        }),
+      });
     } catch (e) {
       console.warn('Noise stack shader compile failed', e);
     }
@@ -1566,6 +1586,7 @@ export class Engine {
       this.minimap.requestRedraw();
       this._needsRender = true;
     }
+    emitProgress(null);
     this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
   }
 
@@ -1987,13 +2008,21 @@ export class Engine {
   // keep running. Avoids Three.js compileAsync crashing when currentProgram is
   // still undefined during transparent DoubleSide prepare.
 
-  async _compileMaterialVariants(mats, { canvasOnly = false, timeoutMs, stagger = false } = {}) {
+  async _compileMaterialVariants(mats, { canvasOnly = false, timeoutMs, stagger = false, onProgress } = {}) {
     const list = mats.filter(Boolean);
     if (!list.length) return;
+    const passesPerMaterial = canvasOnly ? 1 : 2;
+    const total = list.length * passesPerMaterial;
 
     if (stagger && list.length > 1) {
+      let done = 0;
       for (const m of list) {
-        await this._compileMaterialVariants([m], { canvasOnly, timeoutMs });
+        await this._compileMaterialVariants([m], {
+          canvasOnly,
+          timeoutMs,
+          onProgress: (stepDone) => onProgress?.(done + stepDone, total),
+        });
+        done += passesPerMaterial;
         await yieldTask();
       }
       return;
@@ -2005,6 +2034,7 @@ export class Engine {
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const pending = this.renderer.compile(group, this.camera, this.scene);
     await this._waitForMaterialsReady(pending, waitOpts);
+    onProgress?.(list.length, total);
 
     if (canvasOnly) return;
 
@@ -2013,6 +2043,7 @@ export class Engine {
     const pendingRt = this.renderer.compile(group, this.camera, this.scene);
     this.renderer.setRenderTarget(null);
     await this._waitForMaterialsReady(pendingRt, waitOpts);
+    onProgress?.(total, total);
   }
 
   /**

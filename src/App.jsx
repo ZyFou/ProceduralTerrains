@@ -24,6 +24,7 @@ import TouchControls from './components/TouchControls.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
+import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
 import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
@@ -59,6 +60,7 @@ export default function App() {
   const [params, setParams] = useState({ ...DEFAULT_PARAMS });
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
   const [bgWork, setBgWork] = useState(null);   // background shader-compile label
+  const [compileProgress, setCompileProgress] = useState(null);
   const [stats, setStats] = useState({ fps: 0, triangles: 0, drawCalls: 0 });
   const [lodCounts, setLodCounts] = useState([0, 0, 0, 0]);
   const [chunkCount, setChunkCount] = useState(DEFAULT_PARAMS.chunkCount);
@@ -178,6 +180,7 @@ export default function App() {
           onBootComplete: () => landingRef.current?.setBootReady(true),
           onStats: setStats,
           onBackgroundWork: setBgWork,
+          onCompileProgress: setCompileProgress,
           onLod: (counts, count, visible, culled) => {
             setLodCounts(counts);
             setChunkCount(count);
@@ -1145,6 +1148,7 @@ export default function App() {
 
           {exploreMode === 'plane' && <PlaneHUD stats={infiniteStats} />}
 
+          <CompileProgressChip progress={compileProgress} />
           {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>
 
