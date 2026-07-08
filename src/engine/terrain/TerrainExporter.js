@@ -96,6 +96,7 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
         float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
         float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
         float ao = 1.0 - uAO * (concave * 0.45 + valley * 0.22);
+        ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
         vec3 viewDir = vec3(0.0, 1.0, 0.0);
         vec3 col = terrainLighting(
           tc.albedo, n, uSunDir, ao,

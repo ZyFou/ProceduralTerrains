@@ -100,6 +100,69 @@ export function getLocation(id) {
   return CURATED_LOCATIONS.find((l) => l.id === id) || null;
 }
 
+// --- Custom area picker ------------------------------------------------------
+// Slider bounds for the free lat/lon picker. Terrarium tiles exist for z 0..15;
+// ±85 keeps the box inside the Web-Mercator projection domain (±85.051°).
+export const CUSTOM_AREA_LIMITS = {
+  lat: { min: -85, max: 85, step: 0.01 },
+  lon: { min: -180, max: 180, step: 0.01 },
+  sizeKm: { min: 4, max: 160, step: 1 },
+  zoom: { min: 6, max: 15, step: 1 },
+};
+
+const MERCATOR_LAT_MAX = 85.051;
+const clampRange = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * Build a location object (same shape as CURATED_LOCATIONS entries) from a
+ * centre + size + requested zoom. Every input is clamped to CUSTOM_AREA_LIMITS
+ * and the bbox to the Mercator domain, so no combination of slider values can
+ * produce an out-of-bounds or non-loading request.
+ */
+export function makeCustomLocation({ lat, lon, sizeKm, zoom }) {
+  const lim = CUSTOM_AREA_LIMITS;
+  const cLat = clampRange(+lat || 0, lim.lat.min, lim.lat.max);
+  const cLon = clampRange(+lon || 0, lim.lon.min, lim.lon.max);
+  const km = clampRange(+sizeKm || lim.sizeKm.min, lim.sizeKm.min, lim.sizeKm.max);
+  // degrees per km: latitude is constant, longitude shrinks with cos(lat)
+  const halfLat = (km / 2) / 110.574;
+  const halfLon = (km / 2) / (111.32 * Math.max(Math.cos((cLat * Math.PI) / 180), 0.05));
+  return {
+    id: 'custom',
+    name: `Custom ${cLat.toFixed(2)}°, ${cLon.toFixed(2)}°`,
+    blurb: `${Math.round(km)} km area`,
+    bbox: {
+      minLat: Math.max(cLat - halfLat, -MERCATOR_LAT_MAX),
+      maxLat: Math.min(cLat + halfLat, MERCATOR_LAT_MAX),
+      minLon: Math.max(cLon - halfLon, -180),
+      maxLon: Math.min(cLon + halfLon, 180),
+    },
+    zoom: Math.round(clampRange(+zoom || lim.zoom.min, lim.zoom.min, lim.zoom.max)),
+  };
+}
+
+/**
+ * What a custom request will ACTUALLY fetch — effective zoom after the
+ * per-axis tile cap, tile count, output resolution and ground resolution.
+ * The UI shows this live so the picker never promises impossible values.
+ */
+export function describeCustomArea(spec) {
+  const loc = makeCustomLocation(spec);
+  const z = pickZoom(loc);
+  const fx0 = lonToTileX(loc.bbox.minLon, z);
+  const fx1 = lonToTileX(loc.bbox.maxLon, z);
+  const fy0 = latToTileY(loc.bbox.maxLat, z);
+  const fy1 = latToTileY(loc.bbox.minLat, z);
+  const tilesX = Math.floor(fx1) - Math.floor(fx0) + 1;
+  const tilesY = Math.floor(fy1) - Math.floor(fy0) + 1;
+  const outW = Math.max(1, Math.round((fx1 - fx0) * TILE));
+  const outH = Math.max(1, Math.round((fy1 - fy0) * TILE));
+  const centerLat = (loc.bbox.minLat + loc.bbox.maxLat) / 2;
+  // Web-Mercator ground resolution: earth circumference * cos(lat) / (256 * 2^z)
+  const metersPerPixel = (40075016.686 * Math.cos((centerLat * Math.PI) / 180)) / (TILE * Math.pow(2, z));
+  return { loc, zoom: z, zoomClamped: z < loc.zoom, tilesX, tilesY, outW, outH, metersPerPixel };
+}
+
 // --- Web-Mercator slippy-tile math (fractional tile coordinates) ---
 function lonToTileX(lon, z) {
   return ((lon + 180) / 360) * Math.pow(2, z);

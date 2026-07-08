@@ -479,6 +479,7 @@ void main() {
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
   float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
+  ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   vec3 col = terrainLighting(
@@ -689,6 +690,11 @@ export function createTerrainUniforms() {
     uSnowLine:       { value: 0.7 },
     uNormalStrength: { value: 1.25 },
     uAO:             { value: 0.75 },
+    uAORidge:        { value: 0.0 },
+    uRockSlopeLo:    { value: 0.42 },
+    uRockSlopeHi:    { value: 0.72 },
+    uSnowSlopeMin:   { value: 0.30 },
+    uSnowSlopeMax:   { value: 0.62 },
     uGrid:           { value: 1.0 },
     uLodDebug:       { value: 0.0 },
     uMergeDebug:     { value: 0.0 },

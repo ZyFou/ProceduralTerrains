@@ -425,7 +425,7 @@ export default function NoiseLayersPanel({ ctx, children }) {
   return (
     <SidePanel title="Noise Layers" description="Stack noise layers to shape the terrain height." onClose={ctx.onClose}>
       {/* preset quick-select */}
-      <SelectRow label="Stack Preset" value="__custom"
+      <SelectRow label="Stack Preset" value="__custom" settingId="noise.stackPreset"
         options={[{ value: '__custom', label: '— Custom Stack —' }, ...NOISE_STACK_PRESET_KEYS.map((k) => ({ value: k, label: NOISE_STACK_PRESETS[k].label }))]}
         onChange={(v) => { if (v !== '__custom') handlePreset(v); }}
         info="Load a preset noise stack. You can edit it freely afterwards." />

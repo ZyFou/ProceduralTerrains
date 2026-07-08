@@ -230,6 +230,7 @@ void main() {
   float concave = clamp(((hA + hB) * 0.5 - hC) / (uHeightScale * 0.02 + 1.0), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
   float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
+  ao = applyRidgeAccent(ao, (hC - (hA + hB) * 0.5) / (uHeightScale * 0.02 + 1.0));
 
   // spherical-up lighting (hemisphere term uses planet up = dir, not world +Y)
   vec3 viewDir = normalize(cameraPosition - vWorldPos);

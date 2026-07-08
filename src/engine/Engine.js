@@ -6,7 +6,7 @@ import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
-import { fetchLocationHeightmap, getLocation } from './terrain/RealWorldHeightmap.js';
+import { fetchLocationHeightmap, getLocation, makeCustomLocation } from './terrain/RealWorldHeightmap.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
@@ -1016,12 +1016,25 @@ export class Engine {
    * fed in as floatData so it deforms the mesh + GLB export like any height map.
    */
   async loadRealWorldLocation(locationId, { onProgress } = {}) {
+    const loc = getLocation(locationId);
+    if (!loc) { this.cb.onToast('Unknown location.'); return false; }
+    return this._loadRealWorldHeightmap(loc, { onProgress });
+  }
+
+  /**
+   * Free lat/lon area picker variant — spec is { lat, lon, sizeKm, zoom }.
+   * makeCustomLocation clamps every value to its valid range, so any slider
+   * combination resolves to a loadable Mercator-domain request.
+   */
+  async loadRealWorldCustom(spec, { onProgress } = {}) {
+    return this._loadRealWorldHeightmap(makeCustomLocation(spec), { onProgress });
+  }
+
+  async _loadRealWorldHeightmap(loc, { onProgress } = {}) {
     if (this.worldMode !== 'studio') {
       this.cb.onToast('Real-world heightmaps load in Tile (Studio) mode.');
       return false;
     }
-    const loc = getLocation(locationId);
-    if (!loc) { this.cb.onToast('Unknown location.'); return false; }
     this._setImportState('height', { loading: true, error: '' });
     try {
       const result = await fetchLocationHeightmap(loc, { onProgress });
@@ -1837,6 +1850,17 @@ export class Engine {
     u.uSnowLine.value = p.snowLine;
     u.uNormalStrength.value = p.normalStrength;
     u.uAO.value = p.aoStrength;
+    u.uAORidge.value = p.aoRidge ?? 0;
+    // Slope gates — keep each pair ordered so the smoothstep edges stay valid
+    // whatever the two sliders are set to.
+    {
+      const rockLo = p.rockSlopeLo ?? 0.42;
+      const snowMin = p.snowSlopeMin ?? 0.30;
+      u.uRockSlopeLo.value = rockLo;
+      u.uRockSlopeHi.value = Math.max(p.rockSlopeHi ?? 0.72, rockLo + 0.01);
+      u.uSnowSlopeMin.value = snowMin;
+      u.uSnowSlopeMax.value = Math.max(p.snowSlopeMax ?? 0.62, snowMin + 0.01);
+    }
     u.uGrid.value = p.chunkGrid ? 1 : 0;
     u.uLodDebug.value = p.lodDebug ? 1 : 0;
     u.uEps.value = Math.max(0.35, size / 4096);

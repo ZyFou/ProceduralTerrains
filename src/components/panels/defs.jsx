@@ -90,6 +90,26 @@ export const BIOME_SLIDERS = [
     info: 'Height threshold above which snow cover begins to appear on rock peaks',
     icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M2 13h12M8 2L4.5 9h7L8 2z" stroke="currentColor" strokeWidth="1.2" /></svg>),
   },
+  {
+    key: 'snowSlopeMin', label: 'Snow Slope Hold', min: 0, max: 0.9, step: 0.01, digits: 2,
+    info: 'Slope below which snow keeps full coverage. Raise to let snow cling to steeper faces',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M2 13L8 4l6 9H2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /><path d="M6.2 7h3.6" stroke="currentColor" strokeWidth="1.2" /></svg>),
+  },
+  {
+    key: 'snowSlopeMax', label: 'Snow Slope Shed', min: 0.1, max: 1, step: 0.01, digits: 2,
+    info: 'Slope above which snow sheds entirely. Lower keeps snow only on flat high-altitude ground (more plausible alpine look)',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M2 13L8 4l6 9H2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /><path d="M8 4v4M8 13v-2" stroke="currentColor" strokeWidth="1.2" /></svg>),
+  },
+  {
+    key: 'rockSlopeLo', label: 'Rock Slope Start', min: 0, max: 0.9, step: 0.01, digits: 2,
+    info: 'Slope where bare rock starts replacing vegetation. Lower exposes rock on gentler terrain',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M2 13l4-6 3 3 3-5 2 8H2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>),
+  },
+  {
+    key: 'rockSlopeHi', label: 'Rock Slope Full', min: 0.1, max: 1, step: 0.01, digits: 2,
+    info: 'Slope of full rock exposure. Lower makes steep faces read as cliffs sooner',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M3 13V6l4-3 6 4v6H3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>),
+  },
 ];
 
 export const RENDER_SLIDERS = [
@@ -102,6 +122,11 @@ export const RENDER_SLIDERS = [
     key: 'aoStrength', label: 'Ambient Occlusion', min: 0, max: 1, step: 0.05, digits: 2,
     info: 'Shadow shading intensity in crevices and valleys (Ambient Occlusion)',
     icon: (<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><path d="M3 8h10M8 3v10" stroke="currentColor" strokeWidth="1.2" /></svg>),
+  },
+  {
+    key: 'aoRidge', label: 'Ridge Accent', min: 0, max: 1, step: 0.01, digits: 2,
+    info: 'Brightens convex ridge crests so alpine ridgelines catch the light. 0 = classic shading',
+    icon: (<svg viewBox="0 0 16 16" fill="none"><path d="M1 13l4-8 3 5 4-7 3 10" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /><path d="M5 5l1-2M12 3l1-2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>),
   },
 ];
 

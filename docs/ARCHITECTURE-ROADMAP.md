@@ -115,6 +115,17 @@ from any prior version must load bit-identically (extend the existing
   hierarchical height caches for exact CPU collision; GPU vegetation
   scattering; photo-mode path (TAA/high-quality capture); marketplace-able
   plugin presets.
+- ✅ TERRAIN REALISM STACK LANDED (2026-07-08): the realism toolset is
+  layer-level **eroded fractals** (`erosion` param on fbm/ridged/billow),
+  **self warp**, **domain-warp octaves**, per-layer **slope/noise/height
+  masks**, and stack-level **output normalization** (`normalizeOutput` +
+  `outputMin/Max`). Material side: **slope gates** (`rockSlopeLo/Hi`,
+  `snowSlopeMin/Max`) replace the previously hard-coded rock/snow slope
+  thresholds, and `aoRidge` adds convex ridge-crest brightening — all
+  default to the old constants, so **existing saves and presets render
+  bit-identically unless a preset or user opts in**. Shipped tuned noise
+  presets that use them: Alpine Ranges, Granite Spires, Foothill Ranges
+  (`noisePresets.js`); the classic presets are untouched.
 
 ## 4. What we explicitly refuse to do
 - Big-bang rewrite, repo split, or framework change. React+Vite is not a

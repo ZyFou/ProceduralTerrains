@@ -40,7 +40,14 @@ export const DEFAULT_PARAMS = {
   // render
   normalStrength: 1.25,
   aoStrength: 0.75,
+  aoRidge: 0.0,            // convex ridge-crest brightening (0 = classic AO)
   chunkGrid: false,
+
+  // material slope gates (defaults = the previously hard-coded thresholds)
+  rockSlopeLo: 0.42,       // slope where rock starts bleeding in
+  rockSlopeHi: 0.72,       // slope of full rock exposure
+  snowSlopeMin: 0.30,      // slope below which snow holds fully
+  snowSlopeMax: 0.62,      // slope above which snow sheds entirely
 
   // surface textures (procedural shader or uploaded custom maps)
   surfaceTextureSource: 'procedural', // procedural | customTextures
@@ -189,7 +196,8 @@ export function applyPreset(params, presetKey) {
     'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves',
     'persistence', 'lacunarity', 'ridge', 'warp', 'falloff',
     'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
-    'normalStrength', 'aoStrength',
+    'normalStrength', 'aoStrength', 'aoRidge',
+    'rockSlopeLo', 'rockSlopeHi', 'snowSlopeMin', 'snowSlopeMax',
   ]) next[key] = DEFAULT_PARAMS[key];
   Object.assign(next, preset.params);
   next.preset = presetKey;

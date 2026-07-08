@@ -643,6 +643,9 @@ export default function App() {
       case 'terrain.falloff': return num(params.falloff, 2);
       case 'terrain.normalStrength': return num(params.normalStrength, 2);
       case 'terrain.aoStrength': return num(params.aoStrength, 2);
+      case 'visuals.normalStrength': return num(params.normalStrength, 2);
+      case 'visuals.aoStrength': return num(params.aoStrength, 2);
+      case 'visuals.aoRidge': return num(params.aoRidge ?? 0, 2);
       case 'terrain.heightMap':
       case 'terrain.noiseMap':
       case 'terrain.biomeMap':
@@ -653,6 +656,10 @@ export default function App() {
       case 'biomes.moistScale': return num(params.moistScale, 2);
       case 'biomes.moistBias': return num(params.moistBias, 2);
       case 'biomes.snowLine': return num(params.snowLine, 2);
+      case 'biomes.snowSlopeMin': return num(params.snowSlopeMin ?? 0.30, 2);
+      case 'biomes.snowSlopeMax': return num(params.snowSlopeMax ?? 0.62, 2);
+      case 'biomes.rockSlopeLo': return num(params.rockSlopeLo ?? 0.42, 2);
+      case 'biomes.rockSlopeHi': return num(params.rockSlopeHi ?? 0.72, 2);
       case 'biomes.biomeDebug': return yesNo(params.biomeDebug);
 
       case 'world.chunkCount': return `${params.chunkCount} × ${params.chunkCount}`;
@@ -1003,6 +1010,7 @@ export default function App() {
     onImportTileMap: (type, file) => engine().importTileMap(type, file),
     onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),
     onLoadRealWorldLocation: (id, opts) => engine().loadRealWorldLocation(id, opts),
+    onLoadRealWorldCustom: (spec, opts) => engine().loadRealWorldCustom(spec, opts),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
   };

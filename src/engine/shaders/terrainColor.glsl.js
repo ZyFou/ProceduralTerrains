@@ -31,6 +31,16 @@ uniform vec3  uTerrainBounce;
 
 // Used by computeTerrainAlbedo — must be declared before TERRAIN_COLOR_FUNCTIONS_GLSL.
 uniform float uSnowLine;
+
+// Slope gates (Materials realism). Defaults reproduce the previously hard-coded
+// thresholds, so scenes that never touch the sliders render identically.
+uniform float uRockSlopeLo;   // slope where rock starts bleeding in   (was 0.42)
+uniform float uRockSlopeHi;   // slope of full rock exposure           (was 0.72)
+uniform float uSnowSlopeMin;  // slope below which snow holds fully    (was 0.30)
+uniform float uSnowSlopeMax;  // slope above which snow sheds entirely (was 0.62)
+
+// Ridge accent: brightens convex crests in the AO term. 0 (default) = off.
+uniform float uAORidge;
 `;
 
 export const TERRAIN_COLOR_FUNCTIONS_GLSL = /* glsl */ `
@@ -88,12 +98,12 @@ TerrainColorResult computeTerrainAlbedo(
   float highBlend = smoothstep(0.30, 0.62, h01 + jitter * 0.08);
   albedo = mix(albedo, uColRockHi, highBlend * 0.65 * (1.0 - bw.desert * 0.7));
 
-  float rockBlend = smoothstep(0.42, 0.72, slope + jitter * 0.06);
+  float rockBlend = smoothstep(uRockSlopeLo, uRockSlopeHi, slope + jitter * 0.06);
   vec3 slopeRock = mix(mix(uColRock, uColRockHi, detail), uColRedRock, bw.canyon * 0.8);
   albedo = mix(albedo, slopeRock, rockBlend);
 
   float snowLine01 = uSnowLine * (0.40 + 1.20 * cl.temp);
-  float flatness = smoothstep(0.62, 0.30, slope);
+  float flatness = smoothstep(uSnowSlopeMax, uSnowSlopeMin, slope);
   float snow = smoothstep(snowLine01 - 0.03, snowLine01 + 0.05, h01 + jitter * 0.04) * flatness;
   snow = max(snow, smoothstep(0.10, 0.02, tempEff) * smoothstep(0.50, 0.25, slope));
   snow *= 1.0 - bw.desert;
@@ -115,6 +125,13 @@ TerrainColorResult computeTerrainAlbedo(
   res.flatness = flatness;
   res.rockBlend = rockBlend;
   return res;
+}
+
+// Ridge accent: convex is the positive counterpart of the concavity AO term
+// (crest sticking up above its neighbours). Brightens crests so alpine ridges
+// catch light; capped so lighting never blows out. uAORidge 0 = exact no-op.
+float applyRidgeAccent(float ao, float convex) {
+  return min(ao * (1.0 + uAORidge * clamp(convex, 0.0, 1.0) * 0.45), 1.25);
 }
 
 vec3 terrainBiomeDebugColor(BiomeWeights bw, float h01) {

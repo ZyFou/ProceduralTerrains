@@ -14,7 +14,7 @@ import { EARTH_PALETTE } from './style/ColorPalette.js';
 export const TERRAIN_RESET_KEYS = [
   'preset', 'heightScale', 'seaLevel', 'falloff', 'edgeFalloffMode',
   'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves', 'persistence', 'lacunarity', 'ridge', 'warp',
-  'noisePreset', 'normalStrength', 'aoStrength',
+  'noisePreset', 'normalStrength', 'aoStrength', 'aoRidge',
   'surfaceTextureSource', 'surfaceTextureMode', 'surfaceTextureAmount', 'surfaceTextureTint', 'surfaceTextureScale',
   'surfaceTextureBreakup', 'surfaceTextureBlend', 'surfaceTexturePaletteInfluence',
   'surfaceTextureNormal', 'surfaceTextureRough', 'surfaceTextureAO',
@@ -27,6 +27,7 @@ export const EROSION_RESET_KEYS = Object.keys(EROSION_DEFAULT_PARAMS);
 
 export const BIOME_RESET_KEYS = [
   'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine', 'biomeDebug',
+  'snowSlopeMin', 'snowSlopeMax', 'rockSlopeLo', 'rockSlopeHi',
 ];
 
 export const PROPS_RESET_KEYS = [

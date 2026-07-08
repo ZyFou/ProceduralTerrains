@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { ImageUp, Mountain, Palette, Waves, Globe, Download } from 'lucide-react';
+import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
-import { CURATED_LOCATIONS, ELEVATION_SOURCE } from '../../engine/terrain/RealWorldHeightmap.js';
+import {
+  CURATED_LOCATIONS, ELEVATION_SOURCE, CUSTOM_AREA_LIMITS, describeCustomArea,
+} from '../../engine/terrain/RealWorldHeightmap.js';
 
 const IMPORT_MODE_OPTIONS = [
   { value: 'disabled', label: 'Disabled' },
@@ -216,6 +218,79 @@ function RealWorldBrowser({ ctx }) {
   );
 }
 
+const CUSTOM_AREA_SLIDERS = {
+  lat: { label: 'Latitude', ...CUSTOM_AREA_LIMITS.lat, digits: 2, unit: '°' },
+  lon: { label: 'Longitude', ...CUSTOM_AREA_LIMITS.lon, digits: 2, unit: '°' },
+  sizeKm: { label: 'Area Size', ...CUSTOM_AREA_LIMITS.sizeKm, digits: 0, unit: ' km' },
+  zoom: { label: 'Detail (Zoom)', ...CUSTOM_AREA_LIMITS.zoom, digits: 0 },
+};
+
+function CustomAreaPicker({ ctx }) {
+  // Default: Chamonix / Mont Blanc valley — instantly recognizable relief.
+  const [spec, setSpec] = useState({ lat: 45.90, lon: 6.90, sizeKm: 30, zoom: 12 });
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  // Live description of what the sliders will actually fetch (tile cap,
+  // Mercator clamps and the z 0..15 data range are all applied inside).
+  const info = useMemo(() => describeCustomArea(spec), [spec]);
+  const set = (key) => (v) => setSpec((s) => ({ ...s, [key]: v }));
+
+  const load = async () => {
+    if (busy) return;
+    setBusy(true);
+    setProgress(0);
+    try {
+      await ctx.onLoadRealWorldCustom?.(spec, { onProgress: (p) => setProgress(p) });
+    } finally {
+      setBusy(false);
+      setProgress(0);
+    }
+  };
+
+  return (
+    <CollapsibleGroup
+      title="Custom Area"
+      icon={<Crosshair size={15} strokeWidth={1.75} />}
+      defaultOpen={false}
+      settingId="terrain.realWorldCustom"
+    >
+      <p className="section-hint">
+        Pick any place on Earth by coordinates. Values are kept in range automatically — the info below always shows what will really load.
+      </p>
+      <SliderCtl def={CUSTOM_AREA_SLIDERS.lat} value={spec.lat} onChange={set('lat')} settingId="terrain.realWorldLat" />
+      <SliderCtl def={CUSTOM_AREA_SLIDERS.lon} value={spec.lon} onChange={set('lon')} settingId="terrain.realWorldLon" />
+      <SliderCtl def={CUSTOM_AREA_SLIDERS.sizeKm} value={spec.sizeKm} onChange={set('sizeKm')} settingId="terrain.realWorldSize" />
+      <SliderCtl def={CUSTOM_AREA_SLIDERS.zoom} value={spec.zoom} onChange={set('zoom')} settingId="terrain.realWorldZoom" />
+      <div className="stat-row">
+        <span className="stat-label">Effective zoom</span>
+        <span className="stat-value stat-mono">z{info.zoom}</span>
+      </div>
+      <div className="stat-row">
+        <span className="stat-label">Tiles fetched</span>
+        <span className="stat-value stat-mono">{info.tilesX}×{info.tilesY}</span>
+      </div>
+      <div className="stat-row">
+        <span className="stat-label">Output resolution</span>
+        <span className="stat-value stat-mono">{info.outW}×{info.outH}</span>
+      </div>
+      <div className="stat-row">
+        <span className="stat-label">Ground resolution</span>
+        <span className="stat-value stat-mono">≈{info.metersPerPixel < 10 ? info.metersPerPixel.toFixed(1) : Math.round(info.metersPerPixel)} m/px</span>
+      </div>
+      {info.zoomClamped && (
+        <p className="section-hint">
+          Zoom reduced to z{info.zoom} so this area stays under the tile-fetch cap. Shrink the area size to get more detail.
+        </p>
+      )}
+      <button type="button" className="file-picker-btn" disabled={busy} onClick={load}>
+        <Download size={15} strokeWidth={1.75} aria-hidden />
+        <span>{busy ? `Loading… ${Math.round(progress * 100)}%` : 'Load This Area'}</span>
+      </button>
+    </CollapsibleGroup>
+  );
+}
+
 export default function ImportMapsContent({ ctx }) {
   const targetId = ctx.settingsTarget?.settingId ?? null;
   return (
@@ -224,6 +299,7 @@ export default function ImportMapsContent({ ctx }) {
         Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.
       </p>
       <RealWorldBrowser ctx={ctx} />
+      <CustomAreaPicker ctx={ctx} />
       {['height', 'noise', 'biome'].map((type) => (
         <ImportMapSection
           key={type}

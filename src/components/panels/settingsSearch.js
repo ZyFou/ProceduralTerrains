@@ -35,11 +35,15 @@ const SETTINGS_INDEX = [
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.ridge', label: 'Ridge Intensity', keywords: 'height noise ridge mountain alpine' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.warp', label: 'Domain Warp', keywords: 'height noise warp fold distortion' },
   { panelId: 'terrain', tabId: 'noise', sectionLabel: 'Noise', settingId: 'terrain.falloff', label: 'Edge Falloff Width', keywords: 'height coast island edge falloff' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.realWorldCustom', label: 'Real-World Custom Area', keywords: 'real world earth elevation heightmap terrarium custom area latitude longitude coordinates zoom picker import' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.realWorldLat', label: 'Real-World Latitude', keywords: 'real world earth latitude coordinates custom area import' },
+  { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.realWorldLon', label: 'Real-World Longitude', keywords: 'real world earth longitude coordinates custom area import' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.heightMap', label: 'Height Map', keywords: 'height import replace blend map' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.noiseMap', label: 'Noise Map', keywords: 'noise import replace blend map' },
   { panelId: 'terrain', tabId: 'import', sectionLabel: 'Import', settingId: 'terrain.biomeMap', label: 'Biome Map', keywords: 'biome import replace blend map' },
 
   // Noise Layers
+  { panelId: 'noiseLayers', settingId: 'noise.stackPreset', label: 'Stack Preset', keywords: 'noise stack preset realistic alpine ranges massif granite spires foothills rolling mountains eroded classic hills sharp canyon dunes craters cellular islands valleys' },
   { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.stackNormalize', label: 'Normalize Output', keywords: 'noise stack output normalize normalization remap range soft clamp peaks ceiling height' },
   { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.outputMin', label: 'Output Min', keywords: 'noise stack output minimum min remap range normalize height floor low' },
   { panelId: 'noiseLayers', sectionLabel: 'Output', settingId: 'noise.outputMax', label: 'Output Max', keywords: 'noise stack output maximum max remap range normalize height peaks soft clamp ceiling' },
@@ -56,6 +60,10 @@ const SETTINGS_INDEX = [
   { panelId: 'biomes', settingId: 'biomes.moistScale', label: 'Moisture Scale', keywords: 'biome climate humidity wet dry' },
   { panelId: 'biomes', settingId: 'biomes.moistBias', label: 'Moisture Bias', keywords: 'biome climate humidity wet dry' },
   { panelId: 'biomes', settingId: 'biomes.snowLine', label: 'Snow Line', keywords: 'biome climate snow altitude' },
+  { panelId: 'biomes', settingId: 'biomes.snowSlopeMin', label: 'Snow Slope Hold', keywords: 'biome snow slope flat hold realistic alpine steep coverage' },
+  { panelId: 'biomes', settingId: 'biomes.snowSlopeMax', label: 'Snow Slope Shed', keywords: 'biome snow slope shed steep cliff realistic alpine plausible' },
+  { panelId: 'biomes', settingId: 'biomes.rockSlopeLo', label: 'Rock Slope Start', keywords: 'biome rock slope cliff exposure start realistic steep terrain' },
+  { panelId: 'biomes', settingId: 'biomes.rockSlopeHi', label: 'Rock Slope Full', keywords: 'biome rock slope cliff exposure full realistic steep terrain' },
   { panelId: 'biomes', settingId: 'biomes.biomeDebug', label: 'Biome Debug', keywords: 'biome debug overlay inspection' },
 
   // World
@@ -152,6 +160,7 @@ const SETTINGS_INDEX = [
   { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.visualsWetShoreStrength', label: 'Wet Shore Strength', keywords: 'visuals shoreline wet sand terrain shore' },
   { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.normalStrength', label: 'Normal Strength', keywords: 'surface shading detail normals terrain' },
   { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.aoStrength', label: 'Ambient Occlusion', keywords: 'surface shading crevice darkening terrain' },
+  { panelId: 'visuals', tabId: 'terrain', settingId: 'visuals.aoRidge', label: 'Ridge Accent', keywords: 'surface shading ridge crest highlight alpine realistic mountain ao' },
   { panelId: 'visuals', tabId: 'shoreline', settingId: 'visuals.visualsFoamBreakup', label: 'Foam Breakup', keywords: 'visuals shoreline foam water coast breakup' },
 
   // Clouds / props / debug / export
