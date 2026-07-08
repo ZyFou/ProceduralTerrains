@@ -1182,6 +1182,17 @@ export class Engine {
       entry.meta = { ...entry.meta, minElev: c.minElev, maxElev: c.maxElev };
       entry.regionBounds = c.bounds;   // world rect derived from cellSize in _syncImportedMapUniforms
       this._rebuildImportedTexture('height');
+      // Real-world elevation is normalized 0..1 over [minElev,maxElev] then scaled
+      // by heightScale — so the water plane (an absolute world height) needs to
+      // sit at the world height that corresponds to TRUE elevation 0, not at
+      // whatever the previous (procedural-tuned) seaLevel happened to be. Without
+      // this, low-lying coastal areas (small span, minElev near 0) flood almost
+      // entirely under the default seaLevel, while tall peaks correctly show none.
+      const span = c.maxElev - c.minElev;
+      if (span > 0) {
+        const trueSeaWorldY = ((0 - c.minElev) / span) * (this.params.heightScale || 1);
+        this.setParam('seaLevel', Math.max(0, trueSeaWorldY));
+      }
       this.applyAll({ force: false });
     };
 
