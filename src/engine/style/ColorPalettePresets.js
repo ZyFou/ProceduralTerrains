@@ -179,6 +179,19 @@ export const COLOR_PALETTE_PRESETS = {
       snow: [0.98, 0.95, 0.98], foam: [0.95, 0.92, 0.98],
     },
   },
+  monolith: {
+    label: 'Monolith',
+    palette: {
+      deep: [0.10, 0.10, 0.11], shallow: [0.32, 0.32, 0.34],
+      sand: [0.80, 0.79, 0.77], dune: [0.84, 0.83, 0.81],
+      dryGrass: [0.72, 0.71, 0.69], grass: [0.68, 0.67, 0.65],
+      forest: [0.62, 0.61, 0.59], jungle: [0.58, 0.57, 0.55],
+      swamp: [0.55, 0.54, 0.52], tundra: [0.76, 0.75, 0.73],
+      redRock: [0.64, 0.50, 0.35], redRock2: [0.74, 0.58, 0.41],
+      rock: [0.58, 0.46, 0.33], rockHi: [0.78, 0.64, 0.46],
+      snow: [0.87, 0.74, 0.56], foam: [0.88, 0.88, 0.87],
+    },
+  },
   obsidian: {
     label: 'Dark Obsidian',
     palette: {

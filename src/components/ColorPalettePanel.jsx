@@ -171,15 +171,19 @@ export default function ColorPalettePanel({
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const handleSeedChange = (raw) => {
+    setGenSeed(raw);
+    const parsed = parseInt(String(raw).trim(), 10);
+    if (Number.isFinite(parsed)) onGenerate?.({ seed: parsed >>> 0, type: genType });
+  };
+
   const randomizeSeed = () => {
     const next = (Math.random() * 0xFFFFFFFF) >>> 0;
-    setGenSeed(String(next));
+    handleSeedChange(String(next));
   };
 
   const handleGenerate = () => {
-    const seed = readSeed();
-    onGenerate?.({ seed, type: genType });
-    setGenSeed(String((seed + 1) >>> 0));
+    onGenerate?.({ seed: readSeed(), type: genType });
   };
 
   const handleImport = () => {
@@ -258,7 +262,7 @@ export default function ColorPalettePanel({
               ref={seedInputRef}
               type="text"
               value={genSeed}
-              onChange={(e) => setGenSeed(e.target.value)}
+              onChange={(e) => handleSeedChange(e.target.value)}
               placeholder="Seed"
             />
             <button type="button" className="icon-btn" onClick={randomizeSeed} title="Random seed">

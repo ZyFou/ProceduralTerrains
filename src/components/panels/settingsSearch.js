@@ -82,7 +82,7 @@ const SETTINGS_INDEX = [
   { panelId: 'water', settingId: 'water.waterDebugView', label: 'Water Debug View', keywords: 'water debug depth foam shoreline mask' },
 
   // Planet style / colors
-  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.palettePreset', label: 'Color Palette Preset', keywords: 'palette preset colors theme earth desert ice toxic neon volcanic cartoon pastel moon rust', aliases: 'cartoon toon colors palette' },
+  { panelId: 'planet', sectionLabel: 'Palette', settingId: 'planet.palettePreset', label: 'Color Palette Preset', keywords: 'palette preset colors theme earth desert ice toxic neon volcanic cartoon pastel moon rust monolith gray grey', aliases: 'cartoon toon colors palette' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.deep', label: 'Deep Water', keywords: 'water color ocean deep' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.shallow', label: 'Shallow', keywords: 'water color shore coast shallow' },
   { panelId: 'planet', sectionLabel: 'Water', settingId: 'planet.water.foam', label: 'Foam', keywords: 'water color waves foam shoreline' },
