@@ -547,13 +547,10 @@ void main() {
 // for the first paint and for infinite-mode entry while the full fragment
 // compiles in the background; the live material's source is then swapped in
 // place (rebuildTerrainShaderSource) for an instant program-cache hit.
-const buildMinimalFragment = (heightGLSL) => /* glsl */ `
+const buildMinimalFragment = () => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
-${NOISE_GLSL}
-${BIOME_GLSL}
-${heightGLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 
@@ -573,7 +570,6 @@ void main() {
   if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 #endif
 
-  float eps = uEps;
   float hC;
   vec3 nGeo;
 #ifndef INFINITE_MODE
@@ -584,10 +580,8 @@ void main() {
   } else
 #endif
   {
-    hC = heightAt(xz);
-    float hX = heightAt(xz + vec2(eps, 0.0));
-    float hZ = heightAt(xz + vec2(0.0, eps));
-    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+    hC = vWorldPos.y;
+    nGeo = vec3(0.0, 1.0, 0.0);
   }
 
   // keep the height-packing export/sampler modes correct while the boot
