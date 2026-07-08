@@ -218,17 +218,20 @@ function makePreview(floatData, W, H, maxSide = 160) {
   return c.toDataURL('image/png');
 }
 
+/** Effective slippy zoom a bbox will be fetched at (after the tile cap). */
+export function effectiveZoomFor(loc) { return pickZoom(loc); }
+
 /**
- * Fetch + decode the elevation field for a curated location.
- * @returns {Promise<{width:number,height:number,floatData:Float32Array,fileName:string,preview:string,meta:object}>}
+ * Fetch + decode RAW elevations (meters) for a bbox at a FIXED zoom.
+ * The core of every real-world load — callers normalize / composite on top.
+ * @returns {Promise<{elev:Float32Array,width:number,height:number}>}
  * @throws if every tile failed to load (likely CORS or offline).
  */
-export async function fetchLocationHeightmap(loc, { onProgress, signal } = {}) {
-  const z = pickZoom(loc);
-  const fx0 = lonToTileX(loc.bbox.minLon, z);
-  const fx1 = lonToTileX(loc.bbox.maxLon, z);
-  const fy0 = latToTileY(loc.bbox.maxLat, z);   // north edge → smaller tile-Y
-  const fy1 = latToTileY(loc.bbox.minLat, z);   // south edge → larger tile-Y
+export async function fetchBboxElevation(bbox, z, { onProgress, signal } = {}) {
+  const fx0 = lonToTileX(bbox.minLon, z);
+  const fx1 = lonToTileX(bbox.maxLon, z);
+  const fy0 = latToTileY(bbox.maxLat, z);   // north edge → smaller tile-Y
+  const fy1 = latToTileY(bbox.minLat, z);   // south edge → larger tile-Y
   const tx0 = Math.floor(fx0), tx1 = Math.floor(fx1);
   const ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
   const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
@@ -261,24 +264,141 @@ export async function fetchLocationHeightmap(loc, { onProgress, signal } = {}) {
   const id = sctx.getImageData(cropX, cropY, cropW, cropH);
 
   const W = id.width, H = id.height, data = id.data;
-  const floatData = new Float32Array(W * H);
-  let minE = Infinity, maxE = -Infinity;
+  const elev = new Float32Array(W * H);
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const e = data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768;
-    floatData[p] = e;
-    if (e < minE) minE = e;
-    if (e > maxE) maxE = e;
+    elev[p] = data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768;
+  }
+  return { elev, width: W, height: H };
+}
+
+/**
+ * Fetch + decode the elevation field for a curated location.
+ * @returns {Promise<{width:number,height:number,floatData:Float32Array,fileName:string,preview:string,meta:object}>}
+ * @throws if every tile failed to load (likely CORS or offline).
+ */
+export async function fetchLocationHeightmap(loc, { onProgress, signal } = {}) {
+  const z = pickZoom(loc);
+  const { elev, width: W, height: H } = await fetchBboxElevation(loc.bbox, z, { onProgress, signal });
+
+  let minE = Infinity, maxE = -Infinity;
+  for (let p = 0; p < elev.length; p++) {
+    if (elev[p] < minE) minE = elev[p];
+    if (elev[p] > maxE) maxE = elev[p];
   }
   // Normalize to 0..1 for the import texture; real elevation range is in meta.
   const span = maxE > minE ? maxE - minE : 1;
-  for (let p = 0; p < floatData.length; p++) floatData[p] = (floatData[p] - minE) / span;
+  const floatData = new Float32Array(elev.length);
+  for (let p = 0; p < elev.length; p++) floatData[p] = (elev[p] - minE) / span;
 
   return {
     width: W,
     height: H,
     floatData,
+    elev,
+    zoom: z,
     fileName: `${loc.name} (real-world)`,
     preview: makePreview(floatData, W, H),
     meta: { name: loc.name, zoom: z, minElev: minE, maxElev: maxE, source: ELEVATION_SOURCE },
+  };
+}
+
+// --- Neighbor-tile geography -------------------------------------------------
+// A real-world import remembers its geo reference (anchor bbox mapped onto
+// board cell (0,0) + the fetch zoom + per-cell elevation patches). Expanding
+// the tile assembly then loads the geographically ADJACENT area for each new
+// cell instead of stretching the anchor heightmap.
+
+/** Bbox of board cell (cx, cz) given the anchor bbox on cell (0,0).
+ *  World +X = east (+lon); world +Z = south (-lat, texture row 0 is north). */
+export function offsetBbox(bbox, cx, cz) {
+  const lonSpan = bbox.maxLon - bbox.minLon;
+  const latSpan = bbox.maxLat - bbox.minLat;
+  return {
+    minLon: bbox.minLon + cx * lonSpan,
+    maxLon: bbox.maxLon + cx * lonSpan,
+    minLat: bbox.minLat - cz * latSpan,
+    maxLat: bbox.maxLat - cz * latSpan,
+  };
+}
+
+// Bilinear sample of a raw patch at normalized (u, v); v 0 = north (row 0).
+function samplePatch(patch, u, v) {
+  const { elev, width: w, height: h } = patch;
+  const x = Math.min(Math.max(u, 0), 1) * (w - 1);
+  const y = Math.min(Math.max(v, 0), 1) * (h - 1);
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+  const fx = x - x0, fy = y - y0;
+  const a = elev[y0 * w + x0] + (elev[y0 * w + x1] - elev[y0 * w + x0]) * fx;
+  const b = elev[y1 * w + x0] + (elev[y1 * w + x1] - elev[y1 * w + x0]) * fx;
+  return a + (b - a) * fy;
+}
+
+/**
+ * Composite the cached per-cell elevation patches into one normalized union
+ * heightmap covering the tile-assembly bounding rect. Cells without a patch
+ * (holes in an L-shaped assembly) fill with the union minimum — they carry no
+ * terrain chunks, so the value only pads the texture.
+ *
+ * @param cells  object keyed 'cx,cz' → { elev, width, height } (raw meters)
+ * @param tiles  occupied board cells [{cx, cz}, …]
+ * @returns {{floatData, width, height, minElev, maxElev, preview, bounds}}
+ */
+export function compositeCellPatches(cells, tiles, { maxSide = 4096 } = {}) {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const t of tiles) {
+    if (t.cx < minX) minX = t.cx;
+    if (t.cz < minZ) minZ = t.cz;
+    if (t.cx > maxX) maxX = t.cx;
+    if (t.cz > maxZ) maxZ = t.cz;
+  }
+  if (!tiles.length) { minX = minZ = maxX = maxZ = 0; }
+  const cols = maxX - minX + 1, rows = maxZ - minZ + 1;
+
+  const anchor = cells['0,0'] ?? Object.values(cells)[0];
+  if (!anchor) throw new Error('No elevation patches to composite.');
+  // Per-cell output resolution: anchor resolution, downscaled so the union
+  // texture never exceeds maxSide per axis (matches the image-import cap).
+  const scale = Math.min(1, maxSide / (cols * anchor.width), maxSide / (rows * anchor.height));
+  const cw = Math.max(1, Math.round(anchor.width * scale));
+  const ch = Math.max(1, Math.round(anchor.height * scale));
+  const W = cols * cw, H = rows * ch;
+
+  let minE = Infinity, maxE = -Infinity;
+  for (const t of tiles) {
+    const patch = cells[`${t.cx},${t.cz}`];
+    if (!patch) continue;
+    for (let p = 0; p < patch.elev.length; p++) {
+      const e = patch.elev[p];
+      if (e < minE) minE = e;
+      if (e > maxE) maxE = e;
+    }
+  }
+  if (!Number.isFinite(minE)) { minE = 0; maxE = 1; }
+  const span = maxE > minE ? maxE - minE : 1;
+
+  const floatData = new Float32Array(W * H);   // holes default to 0 = union minimum
+  for (const t of tiles) {
+    const patch = cells[`${t.cx},${t.cz}`];
+    if (!patch) continue;
+    const ox = (t.cx - minX) * cw, oy = (t.cz - minZ) * ch;
+    for (let y = 0; y < ch; y++) {
+      const v = ch > 1 ? y / (ch - 1) : 0;
+      const row = (oy + y) * W + ox;
+      for (let x = 0; x < cw; x++) {
+        const u = cw > 1 ? x / (cw - 1) : 0;
+        floatData[row + x] = (samplePatch(patch, u, v) - minE) / span;
+      }
+    }
+  }
+
+  return {
+    floatData,
+    width: W,
+    height: H,
+    minElev: minE,
+    maxElev: maxE,
+    preview: makePreview(floatData, W, H),
+    bounds: { minX, minZ, maxX, maxZ, cols, rows },
   };
 }

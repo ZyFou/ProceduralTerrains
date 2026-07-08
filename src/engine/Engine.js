@@ -6,7 +6,10 @@ import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
-import { fetchLocationHeightmap, getLocation, makeCustomLocation } from './terrain/RealWorldHeightmap.js';
+import {
+  getLocation, makeCustomLocation, effectiveZoomFor, fetchBboxElevation,
+  offsetBbox, compositeCellPatches, ELEVATION_SOURCE,
+} from './terrain/RealWorldHeightmap.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
@@ -1037,24 +1040,23 @@ export class Engine {
     }
     this._setImportState('height', { loading: true, error: '' });
     try {
-      const result = await fetchLocationHeightmap(loc, { onProgress });
+      // Raw-meters anchor patch for cell (0,0). The geo reference lets tile
+      // expansion fetch the geographically ADJACENT area for each new cell.
+      const zoom = effectiveZoomFor(loc);
+      const anchor = await fetchBboxElevation(loc.bbox, zoom, { onProgress });
       const previous = this.importedMaps.height;
       if (previous?.texture) previous.texture.dispose();
       this.importedMaps.height = {
-        fileName: result.fileName,
-        width: result.width,
-        height: result.height,
-        originalWidth: result.width,
-        originalHeight: result.height,
-        floatData: result.floatData,
-        preview: result.preview,
-        meta: result.meta,
+        fileName: `${loc.name} (real-world)`,
+        meta: { name: loc.name, zoom, source: ELEVATION_SOURCE },
+        geoRef: { bbox0: { ...loc.bbox }, zoom, cells: { '0,0': anchor } },
         // default to replacing the procedural shape so the location reads clearly
         settings: { ...DEFAULT_IMPORT_SETTINGS, mode: 'replace', heightStrength: 1 },
       };
-      this._rebuildImportedTexture('height');
+      // Composite over the CURRENT assembly — also fetches neighbors for any
+      // extra tiles already placed, so multi-tile boards load fully covered.
+      await this._syncRealWorldNeighborTiles({ silent: true });
       this._setImportState('height', { loading: false });
-      this.applyAll({ force: false });
       this.cb.onToast(`Loaded ${loc.name}`);
       return true;
     } catch (e) {
@@ -1065,6 +1067,67 @@ export class Engine {
       this._setImportState('height', { loading: false, error });
       this.cb.onToast(error);
       return false;
+    }
+  }
+
+  /**
+   * Keep a real-world height import in sync with the tile assembly: fetch the
+   * geographic neighbor patch for every cell that doesn't have one yet (same
+   * zoom as the anchor → same detail), then composite all patches into one
+   * union heightmap mapped over the assembly via uImportHeightRegion. Called
+   * from _applyTileLayout on every add/remove/expand; a no-op without a geoRef.
+   */
+  async _syncRealWorldNeighborTiles({ silent = false } = {}) {
+    const entry = this.importedMaps.height;
+    const geo = entry?.geoRef;
+    if (!geo || this.worldMode !== 'studio') return;
+    const layoutKey = this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
+    if (layoutKey === entry.regionKey) return;
+    const gen = (this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1);
+
+    const missing = this.tiles.filter((t) => !geo.cells[`${t.cx},${t.cz}`]);
+    let failures = 0;
+    if (missing.length) {
+      if (!silent) {
+        this._setImportState('height', { loading: true, error: '' });
+        this.cb.onToast(missing.length === 1
+          ? 'Loading adjacent real-world terrain…'
+          : `Loading real-world terrain for ${missing.length} tiles…`);
+      }
+      for (const t of missing) {
+        try {
+          const patch = await fetchBboxElevation(offsetBbox(geo.bbox0, t.cx, t.cz), geo.zoom);
+          geo.cells[`${t.cx},${t.cz}`] = patch;
+        } catch (e) {
+          console.error(e);
+          failures++;
+        }
+        // a newer layout change superseded this run — it re-syncs everything
+        if (gen !== this._realWorldSyncGen) return;
+      }
+    }
+    if (gen !== this._realWorldSyncGen || this.importedMaps.height !== entry) return;
+
+    // Composite whatever patches exist (failed cells pad with the union
+    // minimum) so a network hiccup never leaves the import texture broken.
+    const c = compositeCellPatches(geo.cells, this.tiles);
+    entry.floatData = c.floatData;
+    entry.width = c.width;
+    entry.height = c.height;
+    entry.originalWidth = c.width;
+    entry.originalHeight = c.height;
+    entry.preview = c.preview;
+    entry.meta = { ...entry.meta, minElev: c.minElev, maxElev: c.maxElev };
+    entry.regionBounds = c.bounds;   // world rect derived from cellSize in _syncImportedMapUniforms
+    entry.regionKey = failures === 0 ? layoutKey : null;   // retry failed cells on the next layout change
+    this._rebuildImportedTexture('height');
+    this.applyAll({ force: false });
+    if (!silent) {
+      this._setImportState('height', { loading: false });
+      if (failures > 0) this.cb.onToast('Some real-world tiles could not be loaded (network or CORS blocked).');
+      else if (missing.length) this.cb.onToast('Real-world terrain extended');
+    } else if (failures > 0) {
+      this.cb.onToast('Some real-world tiles could not be loaded (network or CORS blocked).');
     }
   }
 
@@ -1141,6 +1204,16 @@ export class Engine {
     const h = this.importedMaps.height;
     this.uniforms.uImportHeightStrength.value = h?.settings.heightStrength ?? 1;
     this.uniforms.uImportHeightOffset.value = h?.settings.heightOffset ?? 0;
+    // World rect the height map covers. Real-world composites span the tile
+    // union (regionBounds, in cells — derived here so cellSize changes track);
+    // everything else keeps the classic single origin cell.
+    const region = this.uniforms.uImportHeightRegion?.value;
+    if (region) {
+      const b = h?.regionBounds;
+      const cs = this.cellSize;
+      if (b) region.set((b.minX - 0.5) * cs, (b.minZ - 0.5) * cs, b.cols * cs, b.rows * cs);
+      else region.set(-cs / 2, -cs / 2, cs, cs);
+    }
     this._bakedStudioGen = -1;
     this._terrainGen++;
     this._needsRender = true;
@@ -1672,6 +1745,9 @@ export class Engine {
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._updateTileGhost();
     this._notifyTiles();
+    // Real-world height import: fetch the geographic neighbor for any new cell
+    // (async, fire-and-forget; no-op unless a geoRef-carrying import is active).
+    this._syncRealWorldNeighborTiles();
     if (!this._bootPending) {
       this.cb.onStatus(this.board?.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
     }

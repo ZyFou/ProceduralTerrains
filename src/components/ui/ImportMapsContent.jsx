@@ -165,6 +165,7 @@ function RealWorldBrowser({ ctx }) {
     >
       <p className="section-hint">
         Loads real Earth elevation as the height map. Fetches public terrain tiles from the internet.
+        Adding board tiles afterwards loads the neighboring real-world terrain automatically.
       </p>
       <div className="settings-search-wrap realworld-search">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>

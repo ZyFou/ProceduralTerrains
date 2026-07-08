@@ -806,6 +806,10 @@ export function createTerrainUniforms() {
     uImportHeightStrength:{ value: 1.0 },
     uImportHeightOffset:{ value: 0.0 },
     uImportBiomeBlend:{ value: 1.0 },
+    // World rect the imported height map covers (originX, originZ, spanX, spanZ).
+    // Kept in sync with the single origin cell by _syncImportedMapUniforms unless
+    // a real-world import widens it to the tile-assembly union.
+    uImportHeightRegion:{ value: new THREE.Vector4(-1024, -1024, 2048, 2048) },
 
     // Surface textures (real material maps replacing / tinting the biome colour).
     // Atlas samplers stay null until the engine builds them; uSurfMode 0 keeps the

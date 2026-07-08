@@ -77,6 +77,12 @@ uniform sampler2D uErosionOffsetTex;
 uniform float uErosionEnabled;
 
 vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
+// World rect the imported HEIGHT map covers: (originX, originZ, spanX, spanZ).
+// Defaults to the single origin cell (== tileUvAt) so plain image imports are
+// unchanged; real-world imports widen it to the tile-assembly union so each
+// cell shows its own geography instead of a clamped edge stretch.
+uniform vec4 uImportHeightRegion;
+vec2 importHeightUvAt(vec2 xz) { return (xz - uImportHeightRegion.xy) / uImportHeightRegion.zw; }
 float importedMapValue(sampler2D tex, vec2 uv) {
   vec3 c = texture2D(tex, clamp(uv, 0.0, 1.0)).rgb;
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -437,7 +443,7 @@ float shapeHeight(vec2 xz, Climate c) {
   float finalH = finalizeStackHeight(h) * uHeightScale;
 #ifndef INFINITE_MODE
   if (uImportHeightMode > 1.5) {
-    float importedH = importedMapValue(uImportHeightTex, tileUvAt(xz)) * uHeightScale * uImportHeightStrength + uImportHeightOffset;
+    float importedH = importedMapValue(uImportHeightTex, importHeightUvAt(xz)) * uHeightScale * uImportHeightStrength + uImportHeightOffset;
     finalH = (uImportHeightMode > 2.5) ? mix(finalH, importedH, uImportHeightBlend) : importedH;
   }
 #endif
