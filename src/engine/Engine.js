@@ -783,6 +783,86 @@ export class Engine {
     if (next === 'circle') this._frameCircleExpansion();
   }
 
+  // ------------------------------------------- real-world tile load overlay
+  // Small floating billboards above cells whose real-world elevation is being
+  // fetched — label + progress bar, so tile expansion never looks stalled.
+  // Sprites ignore depth (always readable) and are hidden from the minimap.
+
+  _rwOverlayGroup() {
+    if (!this._rwLoadGroup) {
+      this._rwLoadGroup = new THREE.Group();
+      this._rwLoadGroup.name = 'realworld-load-overlay';
+      this.scene.add(this._rwLoadGroup);
+    }
+    return this._rwLoadGroup;
+  }
+
+  _rwDrawLoadSprite(sprite, progress) {
+    const canvas = sprite.userData.canvas;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(8, 10, 14, 0.82)';
+    ctx.beginPath(); ctx.roundRect(1, 1, w - 2, h - 2, 16); ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#e8ecf3';
+    ctx.font = '600 22px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Loading terrain…', w / 2, 32);
+    const bx = 24, by = 46, bw = w - 48, bh = 12;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 6); ctx.fill();
+    ctx.fillStyle = '#2563eb';
+    const p = Math.max(0, Math.min(1, progress));
+    ctx.beginPath(); ctx.roundRect(bx, by, Math.max(bh, bw * p), bh, 6); ctx.fill();
+    sprite.material.map.needsUpdate = true;
+  }
+
+  /** progress 0..1 shows/updates the cell's overlay; null removes it. */
+  _rwSetTileLoadProgress(cx, cz, progress) {
+    const key = `${cx},${cz}`;
+    const map = (this._rwLoadSprites ??= new Map());
+    if (progress === null) {
+      const s = map.get(key);
+      if (s) {
+        this._rwLoadGroup?.remove(s);
+        s.material.map.dispose();
+        s.material.dispose();
+        map.delete(key);
+        this._needsRender = true;
+      }
+      return;
+    }
+    let s = map.get(key);
+    if (!s) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 68;
+      const tex = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+      s = new THREE.Sprite(mat);
+      s.userData.canvas = canvas;
+      s.renderOrder = 30;
+      const cs = this.cellSize;
+      const c = this._cellWorldCenter(cx, cz);
+      s.position.set(c.x, this._maxHeight() * 0.6, c.z);
+      s.scale.set(cs * 0.42, cs * 0.42 * (canvas.height / canvas.width), 1);
+      this._rwOverlayGroup().add(s);
+      map.set(key, s);
+    }
+    this._rwDrawLoadSprite(s, progress);
+    this._needsRender = true;
+  }
+
+  _rwClearTileLoadOverlay() {
+    if (!this._rwLoadSprites?.size) return;
+    for (const key of [...this._rwLoadSprites.keys()]) {
+      const [cx, cz] = key.split(',').map(Number);
+      this._rwSetTileLoadProgress(cx, cz, null);
+    }
+  }
+
   // ---------------------------------------------------- hover-to-add tile UI
 
   _buildTileGhost() {
@@ -1084,44 +1164,66 @@ export class Engine {
     const layoutKey = this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
     if (layoutKey === entry.regionKey) return;
     const gen = (this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1);
+    this._rwClearTileLoadOverlay();   // fresh run owns the overlay from here
+
+    // Composite whatever patches exist (failed/not-yet-fetched cells pad with
+    // the union minimum) so a network hiccup never leaves the import texture
+    // broken — called after every tile resolves so the terrain grows in as
+    // each patch arrives instead of waiting for the whole batch.
+    const applyComposite = () => {
+      if (this.importedMaps.height !== entry) return;
+      const c = compositeCellPatches(geo.cells, this.tiles);
+      entry.floatData = c.floatData;
+      entry.width = c.width;
+      entry.height = c.height;
+      entry.originalWidth = c.width;
+      entry.originalHeight = c.height;
+      entry.preview = c.preview;
+      entry.meta = { ...entry.meta, minElev: c.minElev, maxElev: c.maxElev };
+      entry.regionBounds = c.bounds;   // world rect derived from cellSize in _syncImportedMapUniforms
+      this._rebuildImportedTexture('height');
+      this.applyAll({ force: false });
+    };
 
     const missing = this.tiles.filter((t) => !geo.cells[`${t.cx},${t.cz}`]);
     let failures = 0;
     if (missing.length) {
+      // floating per-cell progress overlay — expansion never looks stalled
+      for (const t of missing) this._rwSetTileLoadProgress(t.cx, t.cz, 0);
       if (!silent) {
         this._setImportState('height', { loading: true, error: '' });
         this.cb.onToast(missing.length === 1
           ? 'Loading adjacent real-world terrain…'
           : `Loading real-world terrain for ${missing.length} tiles…`);
       }
-      for (const t of missing) {
+      // Fetch every missing tile concurrently — each one composites and
+      // reveals its terrain the moment IT resolves, independent of the rest,
+      // so a slow neighbor never delays the others.
+      await Promise.all(missing.map(async (t) => {
         try {
-          const patch = await fetchBboxElevation(offsetBbox(geo.bbox0, t.cx, t.cz), geo.zoom);
+          const patch = await fetchBboxElevation(offsetBbox(geo.bbox0, t.cx, t.cz), geo.zoom, {
+            onProgress: (p) => { if (gen === this._realWorldSyncGen) this._rwSetTileLoadProgress(t.cx, t.cz, p); },
+          });
           geo.cells[`${t.cx},${t.cz}`] = patch;
         } catch (e) {
           console.error(e);
           failures++;
         }
         // a newer layout change superseded this run — it re-syncs everything
+        // (and reset the overlay at its start, so no cleanup needed here)
         if (gen !== this._realWorldSyncGen) return;
-      }
+        this._rwSetTileLoadProgress(t.cx, t.cz, null);
+        applyComposite();   // reveal this tile's terrain now, don't wait on the rest
+      }));
+      if (gen !== this._realWorldSyncGen) return;
+    } else {
+      applyComposite();
     }
-    if (gen !== this._realWorldSyncGen || this.importedMaps.height !== entry) return;
+    if (gen !== this._realWorldSyncGen) return;   // newer run owns the overlay now
+    this._rwClearTileLoadOverlay();
+    if (this.importedMaps.height !== entry) return;
 
-    // Composite whatever patches exist (failed cells pad with the union
-    // minimum) so a network hiccup never leaves the import texture broken.
-    const c = compositeCellPatches(geo.cells, this.tiles);
-    entry.floatData = c.floatData;
-    entry.width = c.width;
-    entry.height = c.height;
-    entry.originalWidth = c.width;
-    entry.originalHeight = c.height;
-    entry.preview = c.preview;
-    entry.meta = { ...entry.meta, minElev: c.minElev, maxElev: c.maxElev };
-    entry.regionBounds = c.bounds;   // world rect derived from cellSize in _syncImportedMapUniforms
     entry.regionKey = failures === 0 ? layoutKey : null;   // retry failed cells on the next layout change
-    this._rebuildImportedTexture('height');
-    this.applyAll({ force: false });
     if (!silent) {
       this._setImportState('height', { loading: false });
       if (failures > 0) this.cb.onToast('Some real-world tiles could not be loaded (network or CORS blocked).');
@@ -1372,6 +1474,14 @@ export class Engine {
     this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
     this._tileGhostCell = null;
+    // Drop any imported height map (incl. real-world) — a fresh project starts
+    // procedural; keeping it would apply the old elevation over the new board.
+    this._rwClearTileLoadOverlay();
+    this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1;
+    this.importedMaps.height?.texture?.dispose();
+    this.importedMaps.height = null;
+    this._setImportState('height');
+    this._syncImportedMapUniforms();
     // Drop any baked erosion: its delta is anchored to the OLD board region, so
     // keeping it would smear the previous (possibly larger / multi-tile) carve
     // over the fresh small default board. params already reset erosion* knobs.
@@ -1437,8 +1547,12 @@ export class Engine {
     const sky = this.proceduralSky;
     const wasVisible = !!sky && sky.mesh.visible;
     if (wasVisible) sky.setVisible(false);
+    const overlay = this._rwLoadGroup;
+    const overlayWas = !!overlay && overlay.visible;
+    if (overlayWas) overlay.visible = false;
     this.minimap.renderBase();
     if (wasVisible) sky.setVisible(true);
+    if (overlayWas) overlay.visible = true;
   }
 
   _applyStudioFogFromStyle() {
@@ -5701,6 +5815,11 @@ export class Engine {
     if (this._tileGhost) {
       this._tileGhost.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
       this._tileGhost = null;
+    }
+    if (this._rwLoadGroup) {
+      this._rwClearTileLoadOverlay();
+      this._rwLoadGroup = null;
+      this._rwLoadSprites = null;
     }
     if (this._tileOccTex) { this._tileOccTex.dispose(); this._tileOccTex = null; }
     if (this.renderer) {
