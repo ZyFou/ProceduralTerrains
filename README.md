@@ -98,6 +98,15 @@ Full export (ZIP with optional contents):
 - **Biome splat** map, **collision** mesh, water surface mesh
 - Water masks (depth, shoreline, foam) and preset JSON for re-import
 
+### Production presets
+
+The Export panel includes a preflight **Production Check** and target presets for **Unity
+Terrain**, **Unreal Landscape**, **Godot Terrain3D**, **Blender Scene**, and **Three.js Viewer
+Assets**. Engine presets package files into import-oriented folders with a `terrain.json` and
+`README.txt`; Unity and Unreal use a little-endian unsigned 16-bit raw heightmap (`.raw` / `.r16`).
+The checker blocks invalid asset selections and flags high-memory maps or missing water masks
+before the GPU bake begins.
+
 Planet mode has a dedicated planet exporter with cubemap height baking.
 
 ## Performance notes

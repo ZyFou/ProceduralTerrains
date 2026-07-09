@@ -75,6 +75,8 @@ import { TerrainPicker } from './terrain/TerrainPicker.js';
 import { SplineManager } from '../creator/splines/SplineManager.js';
 import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManager.js';
 import { ProjectHistoryManager } from '../creator/history/ProjectHistoryManager.js';
+import { createProductionFiles } from '../export/ExportPresetManager.js';
+import { hasExportErrors, validateExport } from '../export/ExportValidator.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -5147,6 +5149,12 @@ export class Engine {
   }
 
   async export3DTerrain(options) {
+    const checks = validateExport(options, { worldMode: this.worldMode, boardSize: this.boardSize });
+    const blockingCheck = checks.find((check) => check.status === 'error');
+    if (hasExportErrors(checks)) {
+      this.cb.onToast(`Export blocked: ${blockingCheck.message}`);
+      return false;
+    }
     this.cb.onStatus('Preparing export...', true);
     this._exporting = true;
     const _exportTask = this.profiler.registerLoadingTask({
@@ -5160,10 +5168,13 @@ export class Engine {
     try {
       // Water masks are folded into the single export zip (not downloaded
       // separately) via extraZipFiles, so the user gets one .zip with everything.
-      let extraZipFiles = {};
+      const exportOptions = { ...options };
+      let extraZipFiles = createProductionFiles(exportOptions, {
+        seed: this.params.seed, boardSize: this.boardSize, heightScale: this.params.heightScale,
+      });
       if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask
         || options.exportFoamMask || options.exportWaterMetadata) {
-        extraZipFiles = await this.waterSystem.exportMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
+        Object.assign(extraZipFiles, await this.waterSystem.exportMasks({ ...exportOptions, maskRes: exportOptions.maskRes ?? exportOptions.meshRes ?? '512' }));
       }
       if (options.exportSplineMasks && this.splineManager?.baker) {
         Object.assign(extraZipFiles, await this._splineMaskZipFiles());
@@ -5171,18 +5182,20 @@ export class Engine {
       if (this.worldMode === 'planet') {
         // export the full cube-sphere planet mesh
         const { PlanetExporter } = await import('./terrain/PlanetExporter.js');
-        await PlanetExporter.export(this.renderer, this.params, this.uniforms, { ...options, extraZipFiles }, onMsg);
+        await PlanetExporter.export(this.renderer, this.params, this.uniforms, { ...exportOptions, extraZipFiles }, onMsg);
       } else {
         const { TerrainExporter } = await import('./terrain/TerrainExporter.js');
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
-          { ...options, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
+          { ...exportOptions, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
         );
       }
+      return true;
     } catch (e) {
       console.error(e);
       this.cb.onToast('Export failed: ' + e.message);
       this.profiler.failLoadingTask(_exportTask, e);
+      return false;
     } finally {
       this._exporting = false;
       this.profiler.finishLoadingTask(_exportTask);

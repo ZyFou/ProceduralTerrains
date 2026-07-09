@@ -13,6 +13,8 @@ import { NOISE_PRESETS } from '../../engine/style/NoisePresets.js';
 import { EROSION_PRESETS, EROSION_QUALITY } from '../../engine/terrain/erosion/ErosionPresets.js';
 import { formatTimeOfDay } from '../../engine/sky/TimeOfDay.js';
 import { APP_VERSION } from '../../constants/app.js';
+import { applyExportPreset, EXPORT_PRESET_OPTIONS, getExportPreset } from '../../export/ExportPresetManager.js';
+import { hasExportErrors, validateExport } from '../../export/ExportValidator.js';
 import PlanetStylePanel from '../PlanetStylePanel.jsx';
 import WorldPanelInner from '../ui/WorldPanel.jsx';
 import CloudPanelInner from '../ui/CloudPanel.jsx';
@@ -827,6 +829,7 @@ const COLL_OPTIONS = [
 
 function ExportPanel({ ctx }) {
   const [opt, setOpt] = useState({
+    exportPresetId: 'custom', packageRoot: null, packagePaths: null, heightmapRawPath: null,
     format: 'glb', meshRes: '512', includeMesh: true, includeSkirts: true, includeBase: true,
     bakeColor: true, texRes: '2048', bakeLighting: false, bakeNormal: true,
     exportHeightmap: false, exportSplat: false, exportCollision: false, collisionRes: '128',
@@ -843,8 +846,13 @@ function ExportPanel({ ctx }) {
   const showTex = opt.bakeColor || opt.bakeNormal || opt.exportHeightmap;
   const multiTile = ctx.worldMode === 'studio' && (ctx.tiles?.length ?? 1) > 1;
   const circleTiles = ctx.tileAssemblyShape === 'circle';
+  const productionChecks = validateExport(opt, { worldMode: ctx.worldMode, boardSize: ctx.boardSize });
+  const exportBlocked = hasExportErrors(productionChecks);
+  const selectedPreset = getExportPreset(opt.exportPresetId);
+  const applyPreset = (id) => setOpt((current) => applyExportPreset(current, id));
 
   const doExport = async () => {
+    if (exportBlocked) return;
     setBusy(true);
     try { await ctx.onExport(opt); }
     finally { setBusy(false); }
@@ -854,7 +862,7 @@ function ExportPanel({ ctx }) {
     <SidePanel title="Export" description="Export meshes and textures."
       onClose={ctx.onClose}
       footer={(
-        <button type="button" className="action-btn primary" onClick={doExport} disabled={busy}>
+        <button type="button" className="action-btn primary" onClick={doExport} disabled={busy || exportBlocked}>
           {busy ? 'Exporting…' : `Export ${ctx.worldMode === 'planet' ? 'Planet' : 'Terrain'}`}
         </button>
       )}>
@@ -862,6 +870,21 @@ function ExportPanel({ ctx }) {
         <button type="button" className="action-btn" onClick={ctx.onExportScreenshot} disabled={busy}>Screenshot</button>
         <button type="button" className="action-btn" onClick={ctx.onExportHeightmap} disabled={busy}>Heightmap</button>
       </div>
+
+      <ControlSection id="export-production-preset" title="Production Preset" defaultOpen settingId="export.section.productionPreset">
+        <SelectRow label="Target" value={opt.exportPresetId} options={EXPORT_PRESET_OPTIONS} onChange={applyPreset} />
+        <div className="settings-hint">
+          {selectedPreset ? selectedPreset.description : 'Choose files, maps, and geometry manually.'}
+        </div>
+        <div className="export-validation" role="status" aria-label="Production check">
+          <strong>Production Check</strong>
+          {productionChecks.map((check, index) => (
+            <div className={`export-validation-row ${check.status}`} key={`${check.status}-${index}`}>
+              <span aria-hidden>{check.status === 'success' ? '✓' : check.status === 'warning' ? '⚠' : '×'}</span>{check.message}
+            </div>
+          ))}
+        </div>
+      </ControlSection>
 
       {multiTile && !circleTiles && (
         <ControlSection id="export-tile-assembly" title="Tile Assembly" defaultOpen settingId="export.section.tileAssembly">

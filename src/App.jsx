@@ -607,7 +607,8 @@ export default function App() {
     return loading.run('export', { blocking: true, label: 'Exporting…', detail: 'Preparing scene…' }, async (update) => {
       blockingUpdateRef.current = update;
       try {
-        await engine().export3DTerrain(options);
+        const exported = await engine().export3DTerrain(options);
+        if (!exported) exportFailedRef.current = true;
       } finally {
         blockingUpdateRef.current = null;
       }

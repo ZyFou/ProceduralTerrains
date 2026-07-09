@@ -410,6 +410,7 @@ export class TerrainExporter {
 
     // D. Union-wide grayscale heightmap (one image covering the whole assembly)
     let heightCanvas = null;
+    let heightRaw16 = null;
     if (exportHeightmap) {
       onToast('Baking grayscale heightmap...');
       const visualRT = new THREE.WebGLRenderTarget(texRes, texRes);
@@ -427,6 +428,10 @@ export class TerrainExporter {
       heightCanvas.height = texRes;
       const ctx = heightCanvas.getContext('2d');
       const img = ctx.createImageData(texRes, texRes);
+      // Game-engine presets use this little-endian, unsigned 16-bit stream.
+      // Keep it alongside the preview PNG so one bake services both outputs.
+      heightRaw16 = new Uint8Array(texRes * texRes * 2);
+      const rawView = new DataView(heightRaw16.buffer);
       for (let y = 0; y < texRes; y++) {
         const srcRow = (texRes - 1 - y) * texRes * 4;
         const dstRow = y * texRes * 4;
@@ -434,8 +439,10 @@ export class TerrainExporter {
           const sIdx = srcRow + x * 4;
           const dIdx = dstRow + x * 4;
           const r = visualPixels[sIdx], g = visualPixels[sIdx + 1], b = visualPixels[sIdx + 2];
-          const val = Math.round(((r * 65536 + g * 256 + b) / 16777215) * 255);
+          const height01 = (r * 65536 + g * 256 + b) / 16777215;
+          const val = Math.round(height01 * 255);
           img.data[dIdx] = val; img.data[dIdx + 1] = val; img.data[dIdx + 2] = val; img.data[dIdx + 3] = 255;
+          rawView.setUint16((y * texRes + x) * 2, Math.round(height01 * 65535), true);
         }
       }
       ctx.putImageData(img, 0, 0);
@@ -542,6 +549,12 @@ export class TerrainExporter {
 
     // --- 4. Serialize & Download ---
     const zipFiles = {};
+    const pathFor = (path) => {
+      const root = options.packageRoot;
+      if (!root) return path;
+      if (path === root || path.startsWith(`${root}/`)) return path;
+      return options.packagePaths?.[path] ?? `${root}/${path}`;
+    };
 
     // Preset JSON
     if (exportPreset) {
@@ -551,21 +564,22 @@ export class TerrainExporter {
         exportedAt: new Date().toISOString(),
         params: engineParams,
       };
-      zipFiles['terrain_preset.json'] = new TextEncoder().encode(JSON.stringify(presetData, null, 2));
+      zipFiles[pathFor('terrain_preset.json')] = new TextEncoder().encode(JSON.stringify(presetData, null, 2));
     }
 
     // Textures separately in zip
     if (colorCanvas) {
-      zipFiles['textures/terrain_color.png'] = await canvasToUint8Array(colorCanvas);
+      zipFiles[pathFor('textures/terrain_color.png')] = await canvasToUint8Array(colorCanvas);
     }
     if (normalCanvas) {
-      zipFiles['textures/terrain_normal.png'] = await canvasToUint8Array(normalCanvas);
+      zipFiles[pathFor('textures/terrain_normal.png')] = await canvasToUint8Array(normalCanvas);
     }
     if (heightCanvas) {
-      zipFiles['textures/terrain_heightmap.png'] = await canvasToUint8Array(heightCanvas);
+      if (options.heightmapRawPath && heightRaw16) zipFiles[pathFor(options.heightmapRawPath)] = heightRaw16;
+      else zipFiles[pathFor('textures/terrain_heightmap.png')] = await canvasToUint8Array(heightCanvas);
     }
     if (splatCanvas) {
-      zipFiles['textures/terrain_splat.png'] = await canvasToUint8Array(splatCanvas);
+      zipFiles[pathFor('textures/terrain_splat.png')] = await canvasToUint8Array(splatCanvas);
     }
 
     // GLTF / GLB Export
@@ -633,20 +647,22 @@ export class TerrainExporter {
     // Download results
     const modelExt = format === 'glb' ? 'glb' : 'obj';
     if (exportedModel) {
-      zipFiles[`terrain.${modelExt}`] = exportedModel;
+      zipFiles[pathFor(`terrain.${modelExt}`)] = exportedModel;
     }
 
     if (exportedCollision) {
-      zipFiles['collision.glb'] = exportedCollision;
+      zipFiles[pathFor('collision.glb')] = exportedCollision;
     }
 
     // Water masks (and any other caller-supplied files) ride along in the same zip.
-    if (options.extraZipFiles) Object.assign(zipFiles, options.extraZipFiles);
+    if (options.extraZipFiles) {
+      for (const [path, data] of Object.entries(options.extraZipFiles)) zipFiles[pathFor(path)] = data;
+    }
 
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing export package (ZIP)...');
       const zipped = zipSync(zipFiles);
-      downloadBlob(new Blob([zipped]), `terrain_export-${engineParams.seed}.zip`);
+      downloadBlob(new Blob([zipped]), `${options.exportPresetId && options.exportPresetId !== 'custom' ? `${options.exportPresetId}_` : ''}terrain_export-${engineParams.seed}.zip`);
     }
 
     onToast('Export completed successfully!');

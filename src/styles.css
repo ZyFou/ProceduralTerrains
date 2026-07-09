@@ -651,6 +651,22 @@ body {
 
 /* Tiles panel */
 .settings-hint { font-size: 11px; line-height: 1.45; color: var(--text-dim, #9aa0a6); margin: 4px 0 8px; }
+.export-validation {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 3px;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-control) 72%, transparent);
+  font-size: 11px;
+}
+.export-validation > strong { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.export-validation-row { display: flex; gap: 6px; align-items: flex-start; line-height: 1.35; color: var(--text-dim); }
+.export-validation-row span { width: 12px; font-weight: 800; text-align: center; }
+.export-validation-row.success span { color: #55c58b; }
+.export-validation-row.warning span { color: #e8b85c; }
+.export-validation-row.error span { color: #f06f6f; }
 .kv-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 0; }
 .tile-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; }
 .tile-chip-grid .action-btn { margin-top: 0; flex: 0 0 auto; }
