@@ -1,5 +1,6 @@
 const DB = 'procedural-terrains-creator-history'; const STORE = 'snapshots';
 const clone = (value) => JSON.parse(JSON.stringify(value));
+import { APP_VERSION } from '../../constants/app.js';
 
 export class ProjectHistoryManager {
   constructor({ getState, restoreState, getThumbnail, onChange, limit = 100 }) { this.getState = getState; this.restoreState = restoreState; this.getThumbnail = getThumbnail; this.onChange = onChange; this.limit = limit; this.actions = []; this.cursor = -1; this.snapshots = []; this._open(); }
@@ -20,7 +21,7 @@ export class ProjectHistoryManager {
     return true;
   }
   async createSnapshot(name, { description = '', automatic = false, tags = [] } = {}) {
-    const snap = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || 'Untitled snapshot', description, timestamp: Date.now(), appVersion: '0.17.0', thumbnail: await this.getThumbnail?.(), projectState: clone(this.getState()), tags, automatic };
+    const snap = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || 'Untitled snapshot', description, timestamp: Date.now(), appVersion: APP_VERSION, thumbnail: await this.getThumbnail?.(), projectState: clone(this.getState()), tags, automatic };
     this.snapshots.push(snap); if (automatic) { const autos = this.snapshots.filter((s) => s.automatic); while (autos.length > 5) { const old = autos.shift(); this.snapshots = this.snapshots.filter((s) => s.id !== old.id); } }
     await this._put(snap); this._emit(); return snap;
   }
