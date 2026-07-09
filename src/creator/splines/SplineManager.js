@@ -49,6 +49,12 @@ export class SplineManager {
   getHeightOffset(x, z) { return this.baker.sampleHeightOffset(x, z); }
   getPropExclusion(x, z) { return this.baker.samplePropExclusion(x, z); }
   serialize() { return serializeSplines(this.splines); }
+  clear() {
+    this.editor.cancel();
+    this.splines = [];
+    this.selectedId = null;
+    this.bake();
+  }
   load(value) { this.splines = migrateSplines(value); this.selectedId = null; this.bake(); }
   _point(hit) { return { id: uid('point'), x: hit.x, y: hit.y, z: hit.z, widthMultiplier: 1, depthMultiplier: 1, lockedToTerrain: true }; }
   _find(id) { return this.splines.find((s) => s.id === id); }

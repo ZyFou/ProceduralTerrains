@@ -1519,6 +1519,17 @@ export class Engine {
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
+
+    // A new project must not inherit any authoring data from the previous
+    // terrain. Clear both the baked masks and their source data, including an
+    // unfinished spline draft, before rebuilding the fresh terrain.
+    this.splineManager?.clear();
+    this.splineManager?.setEditingEnabled(false);
+    this.paintMode?.setEnabled(false);
+    this.paintMode?.setBaseMode('generated');
+    this.paintMode?.clear();
+    this.terrainAnalysis?.load();
+
     this.tileAssemblyShape = 'square';
     this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
@@ -1527,9 +1538,11 @@ export class Engine {
     // procedural; keeping it would apply the old elevation over the new board.
     this._rwClearTileLoadOverlay();
     this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1;
-    this.importedMaps.height?.texture?.dispose();
-    this.importedMaps.height = null;
-    this._setImportState('height');
+    for (const type of ['noise', 'height', 'biome']) {
+      this.importedMaps[type]?.texture?.dispose();
+      this.importedMaps[type] = null;
+      this._setImportState(type);
+    }
     this._syncImportedMapUniforms();
     // Drop any baked erosion: its delta is anchored to the OLD board region, so
     // keeping it would smear the previous (possibly larger / multi-tile) carve
