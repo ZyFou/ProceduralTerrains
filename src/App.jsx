@@ -30,6 +30,8 @@ import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
+import { normalizeProject, projectStore } from './project/ProjectStore.js';
+import { getProjectTemplate } from './project/ProjectTemplates.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
@@ -46,6 +48,7 @@ export default function App() {
   const minimapBaseRef = useRef(null);
   const minimapOverlayRef = useRef(null);
   const engineRef = useRef(null);
+  const activeProjectRef = useRef(null);
 
   const loading = useLoading();
   const landing = useLanding();
@@ -102,6 +105,7 @@ export default function App() {
   const [settingsSearchIndex, setSettingsSearchIndex] = useState(0);
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [webglError, setWebglError] = useState(null);
+  const [activeProject, setActiveProject] = useState(null);
 
   // ---- toasts ----
   const [toasts, setToasts] = useState([]);
@@ -293,6 +297,60 @@ export default function App() {
   }, []);
 
   const engine = () => engineRef.current;
+
+  const setCurrentProject = useCallback((project) => {
+    activeProjectRef.current = project;
+    setActiveProject(project);
+  }, []);
+
+  const saveCurrentProject = useCallback(async (metadata = null) => {
+    const eng = engineRef.current;
+    if (!eng) return null;
+    const current = activeProjectRef.current;
+    const thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) ?? current?.metadata?.thumbnail ?? null;
+    const project = normalizeProject({
+      id: current?.id,
+      metadata: {
+        ...current?.metadata,
+        ...(metadata ?? {}),
+        thumbnail,
+      },
+      terrain: eng.createProjectPayload(),
+      exportHistory: current?.exportHistory ?? [],
+    });
+    const saved = await projectStore.save(project);
+    setCurrentProject(saved);
+    showToast(`Saved ${saved.metadata.name}`, 'success');
+    return saved;
+  }, [setCurrentProject, showToast]);
+
+  const createProjectFromTemplate = useCallback(async (templateId = 'blank') => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    const template = getProjectTemplate(templateId);
+    eng.newProject();
+    if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+    const project = await saveCurrentProject({ name: template.name, description: template.description, tags: [template.id] });
+    if (project) showToast(`${template.name} project created`, 'success');
+  }, [saveCurrentProject, showToast]);
+
+  useEffect(() => {
+    const onNewProject = (event) => { createProjectFromTemplate(event.detail?.templateId ?? 'blank'); };
+    const onOpenProject = (event) => {
+      const project = event.detail?.project;
+      const eng = engineRef.current;
+      if (!project?.terrain || !eng) return;
+      eng.loadSeedJSON(project.terrain);
+      setCurrentProject(normalizeProject(project));
+      showToast(`Opened ${project.metadata?.name ?? 'terrain project'}`, 'success');
+    };
+    window.addEventListener('terrain-project:new', onNewProject);
+    window.addEventListener('terrain-project:open', onOpenProject);
+    return () => {
+      window.removeEventListener('terrain-project:new', onNewProject);
+      window.removeEventListener('terrain-project:open', onOpenProject);
+    };
+  }, [createProjectFromTemplate, setCurrentProject, showToast]);
 
   // Params that rebuild the whole world geometry (planet radius / surface
   // detail, board chunk layout). The rebuild briefly freezes the main thread,
@@ -1052,10 +1110,20 @@ export default function App() {
         previewMode={previewMode}
         worldMode={worldMode}
         modeLocked={modeLocked}
-        onNew={() => engine().newProject()}
+        onNew={() => createProjectFromTemplate('blank')}
         onRandomize={() => engine().randomizeSeed()}
-        onSave={() => engine().saveSeed()}
-        onLoadJSON={(json) => (json ? engine().loadSeedJSON(json) : showToast('Could not parse seed file', 'error'))}
+        onSave={() => saveCurrentProject()}
+        onLoadJSON={(json) => {
+          if (!json) return showToast('Could not parse project file', 'error');
+          if (json.terrain) {
+            engine().loadSeedJSON(json.terrain);
+            setCurrentProject(normalizeProject(json));
+            return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
+          }
+          engine().loadSeedJSON(json);
+          setCurrentProject(null);
+        }}
+        onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
         onResetView={() => engine().resetView()}
         onToggleHelp={() => setHelpVisible((v) => !v)}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import App from './App.jsx';
 import Landing from './landing/Landing.jsx';
 import { LandingProvider } from './landing/landingContext.jsx';
@@ -18,6 +18,15 @@ export default function Root() {
     setExiting(true);
     setTimeout(() => setVisible(false), EXIT_MS);
   }, [bootReady, exiting]);
+
+  useEffect(() => {
+    const showProjects = () => {
+      setExiting(false);
+      setVisible(true);
+    };
+    window.addEventListener('terrain-project:home', showProjects);
+    return () => window.removeEventListener('terrain-project:home', showProjects);
+  }, []);
 
   const landing = useMemo(
     () => ({ visible, exiting, bootReady, setBootReady, dismiss, sessionSeed }),

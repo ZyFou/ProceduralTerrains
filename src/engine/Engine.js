@@ -4705,7 +4705,7 @@ export class Engine {
 
   // ------------------------------------------------------------- save/load
 
-  saveSeed() {
+  createProjectPayload() {
     this._syncPlanetStyleToParams();
     const data = {
       app: 'terrain-studio',
@@ -4723,6 +4723,11 @@ export class Engine {
     // bloat the file with ~3M neutral values.
     const paint = this.paintMode?.serialize();
     if (paint) data.paint = paint;
+    return data;
+  }
+
+  saveSeed() {
+    const data = this.createProjectPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     this._download(URL.createObjectURL(blob), `terrain-seed-${this.params.seed}.json`);
     this.cb.onToast('Seed saved as JSON');

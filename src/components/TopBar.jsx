@@ -16,7 +16,7 @@ export default function TopBar({
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
-  onOpenHistory,
+  onOpenHistory, onOpenProjects,
 }) {
   const fileRef = useRef(null);
 
@@ -94,6 +94,9 @@ export default function TopBar({
         </button>
         <button className="tb-btn" onClick={onNew} title="Reset to default project">
           <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> <span className="tb-text">New</span>
+        </button>
+        <button className="tb-btn" onClick={onOpenProjects} title="Open local projects">
+          <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 8v4M6 10h4']} /> <span className="tb-text">Projects</span>
         </button>
         <button className="tb-btn" onClick={onRandomize} title="Generate a random seed">
           <svg viewBox="0 0 16 16">

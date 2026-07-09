@@ -109,6 +109,14 @@ before the GPU bake begins.
 
 Planet mode has a dedicated planet exporter with cubemap height baking.
 
+## Local projects
+
+The home screen is a local-first project hub. Create a blank terrain or start from Island,
+Mountain Range, Desert, or Fantasy templates; then use **Save** in the editor to persist the
+project in the browser. Projects include versioned terrain data, metadata, an editor-captured
+thumbnail, and a recent-project entry. Storage uses IndexedDB with a localStorage fallback, and
+the **Projects** button reopens the hub. Existing seed JSON files can still be imported.
+
 ## Performance notes
 
 Normals are finite-differenced per fragment (multiple height evaluations per pixel), which

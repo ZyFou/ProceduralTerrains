@@ -1,129 +1,117 @@
-import {
-  APP_NAME,
-  AUTHOR_NAME,
-  AUTHOR_PORTFOLIO_URL,
-  AUTHOR_X_URL,
-  CURSOR_PACK_AUTHOR,
-  CURSOR_PACK_URL,
-  GITHUB_REPO_URL,
-} from '../constants/app.js';
-import { Logo, LandingVersionTile, LandingSeedTile, FEATURES, MODES } from './shared.jsx';
+import { useEffect, useRef, useState } from 'react';
+import { FilePlus2, FolderOpen, Globe2, LayoutTemplate, Plus, Upload } from 'lucide-react';
+import { FaGithub, FaXTwitter } from 'react-icons/fa6';
+import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
+import { projectStats, projectStore, normalizeProject } from '../project/ProjectStore.js';
+import { PROJECT_TEMPLATES, getProjectTemplate } from '../project/ProjectTemplates.js';
+import { Logo } from './shared.jsx';
 
-const MODE_ICONS = {
-  studio: (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M3 15 L8 10 L12 14 L16 8 L21 15" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-    </svg>
-  ),
-  infinite: (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 12c3-6 13-6 16 0s-13 6-16 0z" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="12" cy="12" r="2" fill="currentColor" />
-    </svg>
-  ),
-  planet: (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.5" />
-      <ellipse cx="12" cy="12" rx="8" ry="3" stroke="currentColor" strokeWidth="1.2" opacity="0.5" />
-    </svg>
-  ),
-};
+const dateLabel = (value) => value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value)) : 'Not saved';
 
-export default function Landing({ exiting, bootReady, onLaunch, sessionSeed }) {
+export default function Landing({ exiting, bootReady, onLaunch }) {
+  const [projects, setProjects] = useState([]);
+  const [view, setView] = useState('projects');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [creditsOpen, setCreditsOpen] = useState(false);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    const load = () => projectStore.list().then((items) => {
+      setProjects(items);
+      setSelectedProjectId((current) => current ?? items[0]?.id ?? null);
+    }).catch(() => setProjects([]));
+    load();
+    window.addEventListener('terrain-projects:changed', load);
+    return () => window.removeEventListener('terrain-projects:changed', load);
+  }, []);
+
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const template = getProjectTemplate(selectedTemplateId);
+  const inspector = selectedProject ? {
+    type: 'project', name: selectedProject.metadata.name, description: selectedProject.metadata.description || 'Local terrain project.', stats: projectStats(selectedProject),
+  } : { type: 'template', name: template.name, description: template.description, template };
+  const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
+  const create = (templateId) => {
+    if (!bootReady || exiting) return;
+    dispatch('terrain-project:new', { templateId });
+    onLaunch();
+  };
+  const open = (project) => {
+    if (!bootReady || exiting) return;
+    dispatch('terrain-project:open', { project });
+    onLaunch();
+  };
+  const selectTemplate = (id) => { setSelectedTemplateId(id); setSelectedProjectId(null); setView('templates'); };
+  const onImport = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const raw = JSON.parse(reader.result);
+        const project = await projectStore.save(normalizeProject(raw.terrain ? raw : { terrain: raw, metadata: { name: file.name.replace(/\.json$/i, '') } }));
+        setSelectedProjectId(project.id); setView('projects'); open(project);
+      } catch { /* invalid files leave the workspace untouched */ }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
   return (
-    <div className={`landing landing-overlay landing-b${exiting ? ' exiting' : ''}`}>
-      <div className="landing-scrim" aria-hidden="true" />
-      <div className="landing-b-inner">
-        <header className="landing-b-header">
-          <div className="landing-b-brand">
-            <Logo size={28} />
-            <span>{APP_NAME}</span>
-          </div>
-          <div className="landing-b-meta">
-            <LandingSeedTile seed={sessionSeed} />
-            <LandingVersionTile />
-          </div>
-        </header>
+    <div className={`landing landing-overlay landing-workspace${exiting ? ' exiting' : ''}`}>
+      <header className="landing-workspace-topbar">
+        <div className="landing-workspace-brand"><Logo size={23} /><strong>{APP_NAME}</strong></div>
+        <nav className="landing-workspace-tabs" aria-label="Project workspace">
+          <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}>Projects</button>
+          <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => { setView('templates'); setSelectedProjectId(null); }}>Templates</button>
+        </nav>
+        <div className="landing-workspace-top-actions"><button type="button" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={15} /> Import</button><span>v{APP_VERSION}</span><a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" title="Open GitHub repository" aria-label="Open GitHub repository"><FaGithub size={16} /></a></div>
+      </header>
 
-        <main className="landing-b-main">
-          <section className="landing-b-hero">
-            <p className="landing-b-eyebrow">Terrain Studio</p>
-            <h1 className="landing-b-title">
-              Sculpt worlds
-              <br />
-              <span>in real time</span>
-            </h1>
-            <p className="landing-b-lead">
-              A shader-driven editor to explore, paint and export procedural landscapes —
-              from a fixed tile board to an infinite world, all the way to a full planet.
-            </p>
-            <button
-              type="button"
-              className={`landing-cta${bootReady ? '' : ' loading'}`}
-              onClick={onLaunch}
-              disabled={!bootReady || exiting}
-            >
-              {bootReady ? (
-                <>
-                  Open Editor
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M3 8h9M9 5l3 3-3 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </>
-              ) : (
-                <>
-                  <span className="landing-cta-spinner" aria-hidden="true" />
-                  Loading engine…
-                </>
-              )}
-            </button>
-          </section>
+      <div className="landing-workspace-body">
+        <aside className="landing-workspace-sidebar">
+          <div className="landing-sidebar-section">
+            <span className="landing-sidebar-label">Create</span>
+            <button type="button" className="landing-create-button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}><Plus size={17} /> New terrain</button>
+          </div>
+          <div className="landing-sidebar-section landing-sidebar-templates">
+            <span className="landing-sidebar-label">Templates</span>
+            {PROJECT_TEMPLATES.map((item) => <button type="button" className={selectedTemplateId === item.id && !selectedProject ? 'selected' : ''} key={item.id} onClick={() => selectTemplate(item.id)}><LayoutTemplate size={15} /><span><strong>{item.name}</strong><small>{item.description}</small></span></button>)}
+          </div>
+          <div className="landing-sidebar-footer"><button type="button" onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}><FolderOpen size={16} /> Open project</button><button type="button" onClick={() => fileRef.current?.click()}><Upload size={16} /> Import JSON</button></div>
+          <div className="landing-sidebar-credits">
+            <button type="button" onClick={() => setCreditsOpen(true)}>Credits</button>
+            <div className="landing-sidebar-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer" aria-label="Open X profile" title="X"><FaXTwitter size={14} /></a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={15} /></a></div>
+          </div>
+        </aside>
 
-          <section className="landing-b-modes" aria-label="Available modes">
-            {MODES.map((mode) => (
-              <article key={mode.id} className="landing-b-mode-card">
-                <div className="landing-b-mode-icon">{MODE_ICONS[mode.id]}</div>
-                <div>
-                  <h2>{mode.name}</h2>
-                  <p>{mode.desc}</p>
-                </div>
-              </article>
-            ))}
-          </section>
+        <main className="landing-workspace-main">
+          {view === 'projects' ? <>
+            <div className="landing-main-heading"><div><span>Workspace</span><h1>Recent projects</h1></div><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}><FilePlus2 size={16} /> New terrain</button></div>
+            {projects.length ? <div className="landing-project-table" role="list">
+              <div className="landing-project-table-head"><span>Name</span><span>Template</span><span>Last modified</span></div>
+              {projects.map((project) => { const stats = projectStats(project); return <button type="button" role="listitem" className={project.id === selectedProjectId ? 'selected' : ''} key={project.id} onClick={() => setSelectedProjectId(project.id)} onDoubleClick={() => open(project)}><span className="landing-project-name">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <FolderOpen size={19} />}<strong>{project.metadata.name}</strong></span><span>{project.metadata.tags[0] ?? 'Terrain'}</span><span>{dateLabel(project.metadata.modified)}</span></button>; })}
+            </div> : <div className="landing-empty-workspace"><FolderOpen size={30} /><strong>No projects yet</strong><span>Create a terrain from a template or import an existing project.</span><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}>Create terrain</button></div>}
+          </> : <>
+            <div className="landing-main-heading"><div><span>Workspace</span><h1>Terrain templates</h1></div></div>
+            <div className="landing-template-grid">{PROJECT_TEMPLATES.map((item) => <button type="button" key={item.id} className={item.id === selectedTemplateId ? 'selected' : ''} onClick={() => { setSelectedTemplateId(item.id); setSelectedProjectId(null); }}><LayoutTemplate size={20} /><strong>{item.name}</strong><span>{item.description}</span></button>)}</div>
+          </>}
         </main>
 
-        <footer className="landing-b-footer">
-          <div className="landing-b-pills">
-            {FEATURES.map((f) => (
-              <span key={f.title} className="landing-b-pill">{f.title}</span>
-            ))}
-          </div>
-
-          <div className="landing-site-footer">
-            <p className="landing-site-credit">
-              Made by{' '}
-              <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">
-                {AUTHOR_NAME}
-              </a>
-            </p>
-            <p className="landing-site-credit">
-              Cursors by{' '}
-              <a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">
-                {CURSOR_PACK_AUTHOR}
-              </a>
-            </p>
-            <nav className="landing-site-links" aria-label="Project links">
-              <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-              <span className="landing-site-sep" aria-hidden="true">·</span>
-              <a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer">X</a>
-              <span className="landing-site-sep" aria-hidden="true">·</span>
-              <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">Portfolio</a>
-            </nav>
-            <p className="landing-site-tagline">WebGL2 procedural terrain · React + Three.js</p>
-          </div>
-        </footer>
+        <aside className="landing-workspace-inspector">
+          <div className="landing-inspector-heading"><span>Inspector</span><h2>{inspector.name}</h2></div>
+          <div className="landing-inspector-icon">{inspector.type === 'project' ? <FolderOpen size={30} /> : <LayoutTemplate size={30} />}</div>
+          <dl className="landing-inspector-details">
+            <div><dt>{inspector.type === 'project' ? 'Project' : 'Template'}</dt><dd>{inspector.type === 'project' ? (inspector.stats.seed != null ? `Seed ${inspector.stats.seed}` : 'Terrain project') : inspector.template.name}</dd></div>
+            <div><dt>Description</dt><dd>{inspector.description}</dd></div>
+            {inspector.type === 'project' && <><div><dt>World size</dt><dd>{inspector.stats.worldSize ? `${Math.round(inspector.stats.worldSize / 1000)} km` : '—'}</dd></div><div><dt>Last modified</dt><dd>{dateLabel(selectedProject.metadata.modified)}</dd></div></>}
+          </dl>
+          <button type="button" className="landing-inspector-action" onClick={() => inspector.type === 'project' ? open(selectedProject) : create(inspector.template.id)} disabled={!bootReady || exiting}>{inspector.type === 'project' ? 'Open project' : 'Start project'}</button>
+        </aside>
       </div>
+      {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
+      <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImport} />
     </div>
   );
 }
