@@ -136,6 +136,15 @@ uniform float uMergeDebug;   // 1 = tint merged-group / macro-proxy meshes
 uniform float uColorMode;
 uniform float uEps;
 uniform vec3  uPlinthColor;
+uniform float uAnalysisEnabled;
+uniform float uAnalysisMode;
+uniform float uAnalysisOpacity;
+uniform float uAnalysisMin;
+uniform float uAnalysisMax;
+uniform float uAnalysisThresholdA;
+uniform float uAnalysisThresholdB;
+uniform float uAnalysisContourSpacing;
+uniform float uAnalysisContourStrength;
 
 // Underwater caustics — animated dappled light projected on submerged terrain.
 // Driven by the UnderwaterController: uCausticBlend ramps with camera submersion
@@ -326,9 +335,10 @@ void main() {
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = paintBiomeAt(xz);
+  vec4 splineMask = splineMaskAt(xz);
   bw.desert = clamp(max(bw.desert, paintedBiome.r), 0.0, 1.0);
-  bw.canyon = clamp(max(bw.canyon, paintedBiome.g), 0.0, 1.0);
-  bw.wetland = clamp(max(bw.wetland, paintedBiome.b), 0.0, 1.0);
+  bw.canyon = clamp(max(bw.canyon, max(paintedBiome.g, splineMask.r * (1.0 - splineMask.b))), 0.0, 1.0);
+  bw.wetland = clamp(max(bw.wetland, max(paintedBiome.b, splineMask.r * splineMask.b)), 0.0, 1.0);
   bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
 #ifndef INFINITE_MODE
   if (uImportBiomeMode > 1.5) {
@@ -497,6 +507,26 @@ void main() {
   // underwater caustics on the submerged sea floor (no-op when dry: the
   // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
   col = applyTerrainCaustics(col, xz, hC, nGeo, n);
+
+  // Analysis is a lightweight branch in the existing terrain pass. It reads
+  // the final height function, so paint, erosion and spline edits agree.
+  if (uAnalysisEnabled > 0.5) {
+    vec3 analysis = vec3(0.0);
+    float rangeT = clamp((hC - uAnalysisMin) / max(uAnalysisMax - uAnalysisMin, 0.001), 0.0, 1.0);
+    if (uAnalysisMode < 1.5) {
+      analysis = mix(vec3(0.05, 0.17, 0.42), vec3(0.92, 0.72, 0.24), rangeT);
+      float contour = abs(fract(hC / max(uAnalysisContourSpacing, 1.0)) - .5);
+      analysis = mix(analysis, vec3(0.04), (1.0 - smoothstep(.0, .055, contour)) * uAnalysisContourStrength);
+    } else if (uAnalysisMode < 2.5) {
+      float deg = acos(clamp(nGeo.y, -1.0, 1.0)) * 57.2958;
+      analysis = deg < uAnalysisThresholdA ? mix(vec3(.07,.35,.16), vec3(.75,.78,.16), deg / max(uAnalysisThresholdA, 1.0)) : mix(vec3(.92,.58,.10), vec3(.70,.08,.08), clamp((deg-uAnalysisThresholdA)/max(uAnalysisThresholdB-uAnalysisThresholdA,1.0),0.,1.));
+    } else if (uAnalysisMode < 3.5) analysis = nGeo * .5 + .5;
+    else if (uAnalysisMode < 4.5) { float curv = clamp(((hX + hZ) * .5 - hC) / max(eps * 4.0, .001), -.5, .5); analysis = curv > 0. ? mix(vec3(.35), vec3(.95,.65,.18), curv*2.) : mix(vec3(.35), vec3(.12,.45,.95), -curv*2.); }
+    else if (uAnalysisMode < 5.5) { float depth = max(uSeaLevel - hC, 0.0); analysis = mix(vec3(.08,.35,.55), vec3(.01,.02,.18), clamp(depth / max(uAnalysisMax, 1.0), 0., 1.)); }
+    else if (uAnalysisMode < 6.5) analysis = terrainBiomeDebugColor(bw, h01);
+    else { float p = abs(paintHeightOffsetAt(xz)); float sp = abs(splineHeightOffsetAt(xz)); analysis = vec3(clamp(p/20.,0.,1.), clamp(sp/20.,0.,1.), splineMaskAt(xz).r); }
+    col = mix(col, analysis, uAnalysisOpacity);
+  }
 
   if (uGrid > 0.001) {
     vec2 gw = fwidth(xz) + 1e-5;
@@ -703,6 +733,15 @@ export function createTerrainUniforms() {
     uSkirtDepth:     { value: 40 },
     uPlinthBaseY:    { value: -40 },
     uPlinthColor:    { value: new THREE.Color(0x14110d) },
+    uAnalysisEnabled: { value: 0.0 },
+    uAnalysisMode: { value: 1.0 },
+    uAnalysisOpacity: { value: 0.72 },
+    uAnalysisMin: { value: 0.0 },
+    uAnalysisMax: { value: 600.0 },
+    uAnalysisThresholdA: { value: 35.0 },
+    uAnalysisThresholdB: { value: 55.0 },
+    uAnalysisContourSpacing: { value: 50.0 },
+    uAnalysisContourStrength: { value: .35 },
     uWallThickness:  { value: 12 },
     // Underwater caustics (shared by every terrain material — studio/infinite
     // declare + use them; the planet material harmlessly ignores them). Default
@@ -736,6 +775,13 @@ export function createTerrainUniforms() {
     uPaintHeightTexture: { value: null },
     uPaintBiomeTexture: { value: null },
     uPaintPropsTexture: { value: null },
+    uSplineEnabled: { value: 0.0 },
+    uSplineResolution: { value: 512.0 },
+    uSplineOrigin: { value: new THREE.Vector2(-1024, -1024) },
+    uSplineSpan: { value: new THREE.Vector2(2048, 2048) },
+    uSplineHeightTexture: { value: null },
+    uSplineMaskTexture: { value: null },
+    uSplineAuxTexture: { value: null },
     // Planet-mode baked height/normal cubemap (shared by the planet terrain +
     // water shaders). When uUsePlanetHeightTex is 1, those shaders sample this
     // texture instead of re-evaluating the ~46-octave height field per pixel.

@@ -73,6 +73,9 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
+  const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, splines: [] });
+  const [analysisState, setAnalysisState] = useState({ enabled: false, mode: 'elevation', opacity: .72 });
+  const [creatorHistory, setCreatorHistory] = useState({ actions: [], snapshots: [] });
   const [tileDebug, setTileDebug] = useState({ view: 'off', showLegend: true, opacity: 1, showPreview: true });
   const [tiles, setTiles] = useState([{ cx: 0, cz: 0 }]);
   const [tileAssemblyShape, setTileAssemblyShape] = useState('square');
@@ -205,6 +208,9 @@ export default function App() {
           onTimeOfDayChange: (v) => { setTimeOfDay(v); scheduleRecordRef.current?.(); },
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
+          onSplineState: (s) => { setSplineState(s); scheduleRecordRef.current?.(); },
+          onAnalysisState: setAnalysisState,
+          onCreatorHistory: setCreatorHistory,
           onTileDebug: (t) => { setTileDebug(t); scheduleRecordRef.current?.(); },
           onTiles: (payload) => {
             const list = Array.isArray(payload) ? payload : (payload?.tiles ?? [{ cx: 0, cz: 0 }]);
@@ -575,16 +581,24 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
       if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+      else if (k === 's' && e.shiftKey) { e.preventDefault(); engineRef.current?.createSnapshot('Creator checkpoint'); }
+      return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === 's') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
+      else if (k === 'r' && e.shiftKey) engineRef.current?.createSpline('river');
+      else if (k === 'r') engineRef.current?.createSpline('road');
+      else if (k === 'a') engineRef.current?.setAnalysisSettings({ enabled: !analysisState.enabled });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo]);
+  }, [undo, redo, splineState.enabled, analysisState.enabled]);
 
   // ---- export: blocking overlay, button disabled via panel busy state ----
   const onExport = (options) => {
@@ -1013,6 +1027,18 @@ export default function App() {
     onLoadRealWorldCustom: (spec, opts) => engine().loadRealWorldCustom(spec, opts),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
+    splineState, analysisState, creatorHistory,
+    onCreateSpline: (type) => engine().createSpline(type),
+    onUpdateSpline: (id, patch) => engine().updateSpline(id, patch),
+    onDeleteSpline: (id) => engine().deleteSpline(id),
+    onDuplicateSpline: (id) => engine().duplicateSpline(id),
+    onSelectSpline: (id) => engine().selectSpline(id),
+    onAnalysisMode: (mode) => engine().setAnalysisMode(mode),
+    onAnalysisSettings: (patch) => engine().setAnalysisSettings(patch),
+    onCreateSnapshot: (name) => engine().createSnapshot(name),
+    onRestoreSnapshot: (id) => engine().restoreSnapshot(id),
+    onDeleteSnapshot: (id) => engine().deleteSnapshot(id),
+    onRenameSnapshot: (id, name) => engine().renameSnapshot(id, name),
   };
 
   return (
@@ -1117,6 +1143,8 @@ export default function App() {
               onResetCamera={() => engine().resetView()}
               exploreMode={exploreMode}
               onExploreMode={selectExploreMode}
+              splineMode={splineState.enabled}
+              onToggleSplineMode={() => engine().setSplineEditingEnabled(!splineState.enabled)}
             />
           )}
 

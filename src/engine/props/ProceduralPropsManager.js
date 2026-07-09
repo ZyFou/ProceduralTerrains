@@ -281,7 +281,7 @@ export class ProceduralPropsManager {
     this._cameraDir = new THREE.Vector3();
   }
 
-  update({ mode, camera, params, boardSize, sampler, planetSampler, paintLayers }) {
+  update({ mode, camera, params, boardSize, sampler, planetSampler, paintLayers, splineRevision = -1 }) {
     const enabled = !!params.propsEnabled;
     this.group.visible = enabled;
     if (!enabled || !camera) return;
@@ -295,7 +295,7 @@ export class ProceduralPropsManager {
     const key = [
       mode, params.seed, params.propsDensity, params.propsGrass, params.propsFlowers,
       params.propsRocks, params.propsRockScale, params.propsWindSpeed, params.propsGust,
-      params.propsCullDistance, params.propsLodDistance, params.seaLevel, boardSize,
+      params.propsCullDistance, params.propsLodDistance, params.seaLevel, boardSize, splineRevision,
     ].join('|');
 
     if (key === this._lastKey && paintRevision === this._lastPaintRevision && !moved && !turned && now - this._lastUpdateAt < 700) return;

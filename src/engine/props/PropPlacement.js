@@ -40,6 +40,7 @@ export function fillChance(params, paintDensity = 0) {
  * @returns {object|null}  chosen descriptor from PROP_TYPES, or null
  */
 export function chooseCandidate(sample, params, rand) {
+  if ((sample.excludeProps ?? 0) > 0.45) return null;
   const paint = sample.mask;                 // {grass,flowers,mixed} | null
 
   // Per-type suitability (mask product), with param/paint modulation.

@@ -37,6 +37,13 @@ uniform float uPaintBaseMult; // scales ONLY the procedural base term in heightA
 uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
 uniform sampler2D uPaintPropsTexture;
+uniform float uSplineEnabled;
+uniform float uSplineResolution;
+uniform vec2 uSplineOrigin;
+uniform vec2 uSplineSpan;
+uniform sampler2D uSplineHeightTexture;
+uniform sampler2D uSplineMaskTexture;
+uniform sampler2D uSplineAuxTexture;
 
 // --- Noise Stack: per-layer continuous params (declared once, used by the
 // codegen-injected stackHeight2D / stackHeight3D). MUST match MAX_LAYERS in
@@ -470,6 +477,20 @@ vec4 paintBiomeAt(vec2 xz) {
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
 }
 
+vec2 splineUvAt(vec2 xz) { return (xz - uSplineOrigin) / max(uSplineSpan, vec2(1.0)); }
+float splineHeightOffsetAt(vec2 xz) {
+  if (uSplineEnabled < .5) return 0.0;
+  vec2 uv = splineUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  return texture2D(uSplineHeightTexture, uv).r;
+}
+vec4 splineMaskAt(vec2 xz) {
+  if (uSplineEnabled < .5) return vec4(0.0);
+  vec2 uv = splineUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture2D(uSplineMaskTexture, uv);
+}
+
 // Erosion height offset: signed world-unit delta added on top of the analytic
 // field, sampled over the studio bake region [uBakeOrigin, +uBakeSpan]. Mirrors
 // the paint-offset path; free and zero when disabled or outside the region. The
@@ -483,7 +504,7 @@ float erosionOffsetAt(vec2 xz) {
 
 float heightAt(vec2 xz) {
   return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) * uPaintBaseMult
-    + paintHeightOffsetAt(xz) + erosionOffsetAt(xz);
+    + paintHeightOffsetAt(xz) + splineHeightOffsetAt(xz) + erosionOffsetAt(xz);
 }
 
 // Moisture field for biome blending — now sourced from the climate system.

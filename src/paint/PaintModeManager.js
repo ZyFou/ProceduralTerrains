@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PaintLayerManager } from './PaintLayerManager.js';
 import { PaintBrushCursor } from './PaintBrushCursor.js';
 import { TerrainHeightSampler } from '../engine/terrain/TerrainHeightSampler.js';
+import { TerrainPicker } from '../engine/terrain/TerrainPicker.js';
 
 const DEFAULT_STATE = {
   enabled: false,
@@ -43,6 +44,9 @@ export class PaintModeManager {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.hit = null;
+    this.picker = new TerrainPicker({ camera, domElement, heightAt: (x, z) => this._heightAt(x, z), contains: (x, z) => {
+      const half = this.getBoardSize() / 2; return Math.abs(x) <= half && Math.abs(z) <= half;
+    } });
     this.isPainting = false;
     this._lastStamp = 0;
     this._lastPaintPoint = null;
@@ -176,11 +180,7 @@ export class PaintModeManager {
   }
 
   _updateHit(e) {
-    const rect = this.domElement.getBoundingClientRect();
-    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    this.hit = this._intersectHeightField(this.raycaster.ray);
+    this.hit = this.picker.pickEvent(e, { quality: this.isPainting ? 'preview' : 'final' });
     this.cursor.update(this.hit, this.state.brushSize, this.state.brushShape, this.state.brushRotation);
   }
 

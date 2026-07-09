@@ -28,14 +28,16 @@ export class FlatPropSampler {
    * @param {function} [opts.getHeightOffset]    (x,z) => number   paint height (studio)
    * @param {function} [opts.getPaintBiomeWeights] (x,z) => weights|null
    * @param {function} [opts.getPaintMask]        (x,z) => {grass,flowers,mixed}|null
+   * @param {function} [opts.getPropExclusion]    (x,z) => 0..1 spline exclusion
    */
-  constructor({ cpu, surfaceField, getWaterLevel, getHeightOffset, getPaintBiomeWeights, getPaintMask }) {
+  constructor({ cpu, surfaceField, getWaterLevel, getHeightOffset, getPaintBiomeWeights, getPaintMask, getPropExclusion }) {
     this.cpu = cpu;
     this.surfaceField = surfaceField || null;   // GPU faceted-surface readback
     this.getWaterLevel = getWaterLevel;
     this.getHeightOffset = getHeightOffset || (() => 0);
     this.getPaintBiomeWeights = getPaintBiomeWeights || (() => null);
     this.getPaintMask = getPaintMask || (() => null);
+    this.getPropExclusion = getPropExclusion || (() => 0);
   }
 
   /** Cheap paint-mask density (0..1) for the density pre-gate — no terrain eval. */
@@ -79,6 +81,7 @@ export class FlatPropSampler {
       water: height <= waterLevel + 0.01,
       shoreDistance: height - waterLevel,
       mask: this.getPaintMask(x, z),
+      excludeProps: this.getPropExclusion(x, z),
     };
   }
 }

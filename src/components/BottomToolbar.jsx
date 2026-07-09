@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronUp, Compass } from 'lucide-react';
+import { ChevronUp, Compass, Route } from 'lucide-react';
 
-export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode }) {
+export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode, splineMode, onToggleSplineMode }) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
   const wrapRef = useRef(null);
@@ -56,6 +56,10 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
           <path d="M3 7h10M7 3v10" stroke="currentColor" strokeWidth="0.8" opacity=".6" />
         </svg>
         <span className="camera-bar-label">Top-down</span>
+      </button>
+      <button type="button" className={`camera-bar-btn${splineMode ? ' active' : ''}`} onClick={onToggleSplineMode} aria-label="Spline editor" title="Spline editor (S)">
+        <Route aria-hidden size={14} strokeWidth={1.9} />
+        <span className="camera-bar-label">Splines</span>
       </button>
       <button
         type="button"

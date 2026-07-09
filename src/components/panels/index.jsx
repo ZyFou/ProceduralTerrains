@@ -26,6 +26,9 @@ import { LodPanel, CameraPanel } from '../RightPanels.jsx';
 import PerfSettings, { SurfacePropertiesSettings } from './PerfSettings.jsx';
 import SurfaceLibraryPanel from '../ui/SurfaceLibraryPanel.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
+import SplinesPanel from './SplinesPanel.jsx';
+import AnalysisPanel from './AnalysisPanel.jsx';
+import HistoryPanel from './HistoryPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
 export const PANEL_META = {
@@ -52,10 +55,13 @@ export const PANEL_META = {
   export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
   performance: { label: 'Performance', title: 'Performance', desc: 'GPU, water, fog and cloud budgets.', icon: PANEL_ICONS.performance },
   debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
+  splines: { label: 'Splines', title: 'Splines', desc: 'Editable roads and rivers.', icon: PANEL_ICONS.splines, modes: ['studio'] },
+  analysis: { label: 'Analyze', title: 'Analysis', desc: 'Inspect terrain structure.', icon: PANEL_ICONS.analysis, modes: ['studio'] },
+  history: { label: 'History', title: 'History', desc: 'Creator checkpoints and actions.', icon: PANEL_ICONS.history },
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'analysis', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'history', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -826,7 +832,7 @@ function ExportPanel({ ctx }) {
     exportWater: false, exportPreset: true,
     exportWaterMask: false, exportDepthMap: false, exportShorelineMask: false, exportFoamMask: false,
     excludeWaterFromExport: false, exportWaterMetadata: false,
-    exportTileMode: 'merged',
+    exportTileMode: 'merged', exportSplineMasks: false,
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setOpt((p) => ({ ...p, [k]: v }));
@@ -909,6 +915,7 @@ function ExportPanel({ ctx }) {
           <SelectRow label="Collision Resolution" value={opt.collisionRes} options={COLL_OPTIONS} onChange={(v) => set('collisionRes', v)} />
         )}
         <ToggleRow label="Include Water Plane" value={opt.exportWater} onChange={(v) => set('exportWater', v)} />
+        {ctx.worldMode === 'studio' && <ToggleRow label="Export Spline Masks" value={opt.exportSplineMasks} onChange={(v) => set('exportSplineMasks', v)} />}
         {opt.exportWater && (
           <ToggleRow label="Exclude Water from Export" value={opt.excludeWaterFromExport} onChange={(v) => set('excludeWaterFromExport', v)} />
         )}
@@ -995,6 +1002,7 @@ const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, visuals: VisualsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
+  splines: ({ ctx }) => <SplinesPanel ctx={ctx} />, analysis: ({ ctx }) => <AnalysisPanel ctx={ctx} />, history: ({ ctx }) => <HistoryPanel ctx={ctx} />,
 };
 
 export function renderPanel(id, ctx) {

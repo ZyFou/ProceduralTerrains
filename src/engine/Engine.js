@@ -71,6 +71,10 @@ import {
 import { profiler } from './perf/PerformanceProfiler.js';
 import { GPUProfiler } from './perf/GPUProfiler.js';
 import { APP_VERSION } from '../constants/app.js';
+import { TerrainPicker } from './terrain/TerrainPicker.js';
+import { SplineManager } from '../creator/splines/SplineManager.js';
+import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManager.js';
+import { ProjectHistoryManager } from '../creator/history/ProjectHistoryManager.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
@@ -189,6 +193,11 @@ export class Engine {
     this.planetStyle = new PlanetStyleManager();
     this.paintMode = null;
     this.paintState = null;
+    this.splineManager = null;
+    this.splineState = { enabled: false, selectedId: null, splines: [] };
+    this.terrainAnalysis = null;
+    this.analysisState = null;
+    this.projectHistory = null;
     this.propsManager = null;
     this.propSampler = null;
     this.planetPropSampler = null;
@@ -296,6 +305,7 @@ export class Engine {
     this._initControls();
     this._initTileInteraction();
     this._initPaintMode();
+    this._initCreatorTools();
     this._initProps();
     this._bindMinimapSources();
 
@@ -515,6 +525,31 @@ export class Engine {
     this.propsManager = new ProceduralPropsManager(this.scene);
   }
 
+  _creatorBounds() {
+    const b = this._tileBounds(); const cs = this.cellSize;
+    return { origin: { x: b.minX * cs - cs * .5, z: b.minZ * cs - cs * .5 }, span: { x: this._unionWidth(), z: this._unionDepth() } };
+  }
+
+  _initCreatorTools() {
+    const contains = (x, z) => { const { origin, span } = this._creatorBounds(); return x >= origin.x && x <= origin.x + span.x && z >= origin.z && z <= origin.z + span.z; };
+    const picker = new TerrainPicker({ camera: this.camera, domElement: this.canvas, contains,
+      heightAt: (x, z) => (this._getHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)) + this._samplePaintHeightOffset(x, z) + this._sampleSplineHeightOffset(x, z),
+    });
+    this.splineManager = new SplineManager({ scene: this.scene, camera: this.camera, domElement: this.canvas, controls: this.controls, uniforms: this.uniforms,
+      getBounds: () => this._creatorBounds(), getBaseHeight: (x, z) => this._getHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1), picker, gpuTier: this.gpuTier,
+      onChange: (state) => { this.splineState = state; this._bakedStudioGen = -1; this._terrainGen++; this._needsRender = true; this.cb.onSplineState?.(state); },
+      onStableAction: (label) => { this.projectHistory?.record('splines', label); }, onToast: (message) => this.cb.onToast(message),
+    });
+    this.terrainAnalysis = new TerrainAnalysisManager({ uniforms: this.uniforms, getParams: () => this.params, onChange: (state) => { this.analysisState = state; this._needsRender = true; this.cb.onAnalysisState?.(state); } });
+    this.analysisState = this.terrainAnalysis.serialize();
+    this.projectHistory = new ProjectHistoryManager({
+      getState: () => ({ ...this.serializeState(), creatorTools: this._serializeCreatorTools() }),
+      restoreState: (state) => this.restoreState(state),
+      getThumbnail: () => { try { return this.canvas.toDataURL('image/webp', .78); } catch { return null; } },
+      onChange: (state) => this.cb.onCreatorHistory?.(state),
+    });
+  }
+
   _bindMinimapSources() {
     this.minimap.setSources({
       controls: this.controls,
@@ -540,6 +575,9 @@ export class Engine {
   _samplePaintHeightOffset(x, z) {
     return (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
   }
+
+  _sampleSplineHeightOffset(x, z) { return this.splineManager?.getHeightOffset(x, z) ?? 0; }
+  _serializeCreatorTools() { return { splines: this.splineManager?.serialize?.() ?? [], analysis: this.terrainAnalysis?.serialize?.() ?? {} }; }
 
   // ------------------------------------------------------------ parameters
 
@@ -3070,6 +3108,7 @@ export class Engine {
       return false;
     }
     if (this._erosionBaking) return false;
+    this.projectHistory?.createSnapshot('Before erosion', { automatic: true });
     this._erosionBaking = true;
     try {
       const u = this.uniforms;
@@ -3308,6 +3347,7 @@ export class Engine {
   setExploreMode(mode) {
     mode = mode === 'walk' || mode === 'plane' ? mode : 'none';
     if (mode !== 'none' && this.paintMode?.state.enabled) this.setPaintMode(false);
+    if (mode !== 'none' && this.splineState?.enabled) this.setSplineEditingEnabled(false);
     if (mode === this.exploreMode) return;
 
     const prev = this.exploreMode;
@@ -3490,6 +3530,7 @@ export class Engine {
   }
 
   clearPaintLayers() {
+    this.projectHistory?.createSnapshot('Before clearing paint', { automatic: true });
     this.paintMode?.clear();
     this._bakedStudioGen = -1;   // paint changed the height field → refresh the bake
     this._needsRender = true;
@@ -3505,16 +3546,38 @@ export class Engine {
 
   // Destructive "start fresh": flatten the base AND clear paint layers.
   startEmptyTerrain() {
+    this.projectHistory?.createSnapshot('Before empty terrain', { automatic: true });
     this.paintMode?.startEmpty();
     this._bakedStudioGen = -1;
     this._needsRender = true;
   }
+
+  // ---------------------------------------------------------- creator tools
+
+  setSplineEditingEnabled(enabled) {
+    if (enabled && this.worldMode !== 'studio') { this.cb.onToast('Splines are currently available in Tile mode'); return; }
+    if (enabled && this.exploreMode !== 'none') this.setExploreMode('none');
+    if (enabled && this.paintMode?.state.enabled) this.setPaintMode(false);
+    this.splineManager?.setEditingEnabled(enabled);
+  }
+  createSpline(type) { this.setSplineEditingEnabled(true); this.splineManager?.createSpline(type); }
+  updateSpline(id, patch) { this.splineManager?.updateSpline(id, patch); }
+  deleteSpline(id) { this.splineManager?.deleteSpline(id); }
+  selectSpline(id) { this.splineManager?.selectSpline(id); }
+  duplicateSpline(id) { this.splineManager?.duplicateSpline(id); }
+  setAnalysisMode(mode) { this.terrainAnalysis?.setMode(mode); this.projectHistory?.record('analysis', `Analysis: ${mode}`); }
+  setAnalysisSettings(patch) { this.terrainAnalysis?.setSettings(patch); }
+  async createSnapshot(name) { const s = await this.projectHistory?.createSnapshot(name); if (s) this.cb.onToast(`Snapshot saved · ${s.name}`); return s; }
+  restoreSnapshot(id) { return this.projectHistory?.restoreSnapshot(id); }
+  deleteSnapshot(id) { this.projectHistory?.deleteSnapshot(id); }
+  renameSnapshot(id, name) { this.projectHistory?.renameSnapshot(id, name); }
 
   // -------------------------------------------------------------- world mode
 
   async setWorldMode(mode) {
     if (mode === this.worldMode) return;
     if (this.paintMode?.state.enabled) this.setPaintMode(false);
+    if (this.splineState?.enabled) this.setSplineEditingEnabled(false);
     // player physics is per-mode — always leave it cleanly before switching
     this.setExploreMode('none');
     if (mode === 'planet') await this._loadPlanetModules();
@@ -4086,12 +4149,20 @@ export class Engine {
         surfaceField: this.propSurfaceField,
         getWaterLevel: () => this.params.seaLevel,
         getHeightOffset: (x, z) => (this.worldMode === 'studio'
-          ? (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1)
+          ? this._samplePaintHeightOffset(x, z) + this._sampleSplineHeightOffset(x, z)
           : 0),
         getPaintBiomeWeights: (x, z) => (this.worldMode === 'studio'
           ? (this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null) : null),
-        getPaintMask: (x, z) => (this.worldMode === 'studio'
-          ? (this.paintMode?.layers?.samplePropsMask(x, z) ?? null) : null),
+        getPaintMask: (x, z) => {
+          if (this.worldMode !== 'studio') return null;
+          const base = this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 };
+          const exclusion = this.splineManager?.getPropExclusion(x, z) ?? 0;
+          // Negative density is represented by zero availability; placement
+          // code sees a deterministic empty mask at road/river pixels.
+          const keep = 1 - exclusion;
+          return { grass: base.grass * keep, flowers: base.flowers * keep, mixed: base.mixed * keep };
+        },
+        getPropExclusion: (x, z) => this.worldMode === 'studio' ? (this.splineManager?.getPropExclusion(x, z) ?? 0) : 0,
       });
     }
     // keep the custom-stack reference current
@@ -4620,6 +4691,8 @@ export class Engine {
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
+      creatorTools: this._serializeCreatorTools(),
+      historyMetadata: this.projectHistory?.serializeMetadata?.(),
     };
     // Only embed paint pixel data when something was actually painted —
     // serialize() returns null for an untouched canvas, which would otherwise
@@ -4637,6 +4710,7 @@ export class Engine {
       this.cb.onToast('Not a valid terrain seed file');
       return;
     }
+    this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
     const next = { ...DEFAULT_PARAMS };
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
@@ -4672,6 +4746,8 @@ export class Engine {
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._notifyTiles();
     if (json?.paint) this.paintMode?.load(json.paint);
+    this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
+    this.terrainAnalysis?.load(json?.creatorTools?.analysis);
     this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
 
@@ -4702,6 +4778,7 @@ export class Engine {
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
+      creatorTools: this._serializeCreatorTools(),
     };
   }
 
@@ -4794,6 +4871,11 @@ export class Engine {
       else this.paintMode.layers.clear();
       this.paintMode.setBaseMode(snap.paintBaseMode ?? 'generated');
     }
+
+    // Creator sources are serialised, not their generated render targets. A
+    // restore therefore re-bakes deterministic masks against the restored map.
+    this.splineManager?.load(snap.creatorTools?.splines ?? snap.splines ?? []);
+    this.terrainAnalysis?.load(snap.creatorTools?.analysis);
 
     // erosion offset field (baked delta + masks). The App injects the heavy
     // blob into snap.erosion before calling, mirroring the paint path; a null
@@ -5061,6 +5143,9 @@ export class Engine {
         || options.exportFoamMask || options.exportWaterMetadata) {
         extraZipFiles = await this.waterSystem.exportMasks({ ...options, maskRes: options.maskRes ?? options.meshRes ?? '512' });
       }
+      if (options.exportSplineMasks && this.splineManager?.baker) {
+        Object.assign(extraZipFiles, await this._splineMaskZipFiles());
+      }
       if (this.worldMode === 'planet') {
         // export the full cube-sphere planet mesh
         const { PlanetExporter } = await import('./terrain/PlanetExporter.js');
@@ -5081,6 +5166,24 @@ export class Engine {
       this.profiler.finishLoadingTask(_exportTask);
       this.cb.onStatus('Ready', false);
     }
+  }
+
+  async _splineMaskZipFiles() {
+    const baker = this.splineManager?.baker; if (!baker) return {};
+    const encode = async (source, name, channel = 0, signed = false) => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = baker.resolution;
+      const ctx = canvas.getContext('2d'); const image = ctx.createImageData(canvas.width, canvas.height);
+      for (let i = 0; i < baker.resolution * baker.resolution; i++) {
+        const value = source[i * 4 + channel]; const v = signed ? Math.round(Math.max(0, Math.min(255, 128 + value * 2))) : value;
+        const o = i * 4; image.data[o] = image.data[o + 1] = image.data[o + 2] = v; image.data[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0); const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      return [name, new Uint8Array(await blob.arrayBuffer())];
+    };
+    const entries = await Promise.all([
+      encode(baker.height, 'textures/spline_height_offset.png', 0, true), encode(baker.surface, 'textures/spline_surface_mask.png'), encode(baker.aux, 'textures/spline_prop_exclusion.png'),
+    ]);
+    return Object.fromEntries(entries);
   }
 
   // ------------------------------------------------------------- main loop
@@ -5165,6 +5268,7 @@ export class Engine {
       sampler: this.worldMode === 'planet' ? null : this._getPropSampler(),
       planetSampler: this.worldMode === 'planet' ? this._getPlanetPropSampler() : null,
       paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
+      splineRevision: this.worldMode === 'studio' ? this.splineManager?.baker?.revision : -1,
     });
 
     if (this.worldMode === 'infinite') {
@@ -5790,6 +5894,7 @@ export class Engine {
       this.renderer.setAnimationLoop(null);
     }
     if (this.paintMode) { this.paintMode.dispose(); this.paintMode = null; }
+    if (this.splineManager) { this.splineManager.dispose(); this.splineManager = null; }
     if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }

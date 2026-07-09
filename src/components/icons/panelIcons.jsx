@@ -14,6 +14,9 @@ import {
   Sprout,
   Sun,
   SunMedium,
+  History,
+  Route,
+  ScanLine,
 } from 'lucide-react';
 
 const SIZE = 19;
@@ -39,4 +42,7 @@ export const PANEL_ICONS = {
   export: panelIcon(Download),
   performance: panelIcon(Activity),
   debug: panelIcon(Bug),
+  splines: panelIcon(Route),
+  analysis: panelIcon(ScanLine),
+  history: panelIcon(History),
 };

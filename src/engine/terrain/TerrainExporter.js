@@ -63,9 +63,11 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
     BiomeWeights bw = biomeWeightsAt(cl);
 
     float eps = uEps;
-    float hC = shapeHeight(xz, cl);
-    float hX = shapeHeight(xz + vec2(eps, 0.0), cl);
-    float hZ = shapeHeight(xz + vec2(0.0, eps), cl);
+    // Export the final authoring stack, including paint, erosion and baked
+    // spline offsets, rather than only the procedural source field.
+    float hC = heightAt(xz);
+    float hX = heightAt(xz + vec2(eps, 0.0));
+    float hZ = heightAt(xz + vec2(0.0, eps));
 
     if (uBakeMode == 0) {
       float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
