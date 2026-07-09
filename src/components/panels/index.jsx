@@ -60,7 +60,7 @@ export const PANEL_META = {
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'history', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];

@@ -9,8 +9,8 @@ export class SplineEditor {
     domElement.addEventListener('pointerdown', this._down, true); domElement.addEventListener('pointermove', this._move, true); window.addEventListener('pointerup', this._up, true); window.addEventListener('keydown', this._key);
   }
   setEnabled(value) { this.enabled = !!value; if (!value) this.cancel(); }
-  begin(type) { this.enabled = true; this.creatingType = type; this.manager.createDraft(type); this.manager.toast(`${type === 'river' ? 'River' : 'Road'}: click terrain to place points · Enter to finish`); }
-  cancel() { this.creatingType = null; this.drag = null; this._unlockControls(); this.manager.cancelDraft(); }
+  begin(type) { this.enabled = true; this.creatingType = type; this.manager.createDraft(type); this.manager._emit(); this.manager.toast(`${type === 'river' ? 'River' : 'Road'}: click terrain to place points`); }
+  cancel() { this.creatingType = null; this.drag = null; this._unlockControls(); this.manager.cancelDraft(); this.manager._emit(); }
   _down(e) {
     if (!this.enabled || e.button !== 0) return;
     const hit = this.picker.pickEvent(e, { quality: 'preview' }); if (!hit) return;
@@ -30,7 +30,7 @@ export class SplineEditor {
   _unlockControls() { if (!this._controlsLocked) return; this.controls.enabled = this._previousControlsEnabled ?? true; this._controlsLocked = false; }
   _key(e) {
     if (!this.enabled || /INPUT|TEXTAREA/.test(e.target?.tagName || '')) return;
-    if (e.key === 'Enter') { this.manager.finishDraft(); this.creatingType = null; }
+    if (e.key === 'Enter') { this.manager.finishDraft(); this.creatingType = null; this.manager._emit(); }
     else if (e.key === 'Escape') this.cancel();
     else if (e.key === 'Backspace' && this.creatingType) this.manager.removeDraftPoint();
     else if (e.key === 'Delete') this.manager.deleteSelected();

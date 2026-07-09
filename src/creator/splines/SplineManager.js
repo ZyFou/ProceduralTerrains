@@ -23,10 +23,10 @@ export class SplineManager {
     this.editor = new SplineEditor({ domElement, picker, manager: this, controls });
   }
   setEditingEnabled(enabled) { this.enabled = !!enabled; this.editor.setEnabled(enabled); this._render(); this._emit(); }
-  createSpline(type) { this.editor.begin(type === 'river' ? 'river' : 'road'); }
+  createSpline(type) { if (this.editor.creatingType) return; this.editor.begin(type === 'river' ? 'river' : 'road'); }
   createDraft(type) { this.draft = defaultSpline(type); this._render(); }
-  addDraftPoint(hit) { if (!this.draft) return; this.draft.controlPoints.push(this._point(hit)); this._render(); }
-  removeDraftPoint() { this.draft?.controlPoints.pop(); this._render(); }
+  addDraftPoint(hit) { if (!this.draft) return; this.draft.controlPoints.push(this._point(hit)); this._render(); this._emit(); }
+  removeDraftPoint() { this.draft?.controlPoints.pop(); this._render(); this._emit(); }
   cancelDraft() { this.draft = null; this._render(); }
   finishDraft() {
     if (!this.draft || this.draft.controlPoints.length < 2) { this.cancelDraft(); return; }
@@ -35,7 +35,7 @@ export class SplineManager {
   }
   updateSpline(id, patch, { preview = false } = {}) {
     const s = this._find(id); if (!s || s.locked) return;
-    Object.assign(s, patch, { updatedAt: new Date().toISOString() }); this.bake({ preview });
+    Object.assign(s, patch, { updatedAt: new Date().toISOString() }); this.bake({ preview }); if (!preview) this._scheduleStable(`Changed ${s.type}`);
   }
   deleteSpline(id) { const i = this.splines.findIndex((s) => s.id === id); if (i < 0) return; this.splines.splice(i, 1); if (this.selectedId === id) this.selectedId = null; this.bake(); this._stable('Deleted spline'); }
   duplicateSpline(id) { const s = this._find(id); if (!s) return; const clone = JSON.parse(JSON.stringify(s)); clone.id = uid('spline'); clone.name = `${s.name} copy`; clone.controlPoints.forEach((p) => { p.id = uid('point'); p.x += 10; p.z += 10; }); this.splines.push(clone); this.selectedId = clone.id; this.bake(); this._stable('Duplicated spline'); }
@@ -53,7 +53,11 @@ export class SplineManager {
   _point(hit) { return { id: uid('point'), x: hit.x, y: hit.y, z: hit.z, widthMultiplier: 1, depthMultiplier: 1, lockedToTerrain: true }; }
   _find(id) { return this.splines.find((s) => s.id === id); }
   _stable(label) { this._emit(); this.onStableAction?.(label); }
-  _emit() { this.onChange?.({ enabled: this.enabled, selectedId: this.selectedId, splines: this.serialize() }); }
+  _scheduleStable(label) {
+    clearTimeout(this._stableTimer);
+    this._stableTimer = setTimeout(() => { this._stableTimer = null; this._stable(label); }, 450);
+  }
+  _emit() { this.onChange?.({ enabled: this.enabled, selectedId: this.selectedId, creatingType: this.editor?.creatingType ?? null, draftPointCount: this.draft?.controlPoints?.length ?? 0, splines: this.serialize() }); }
   _render() {
     while (this.group.children.length) { const c = this.group.children.pop(); c.geometry?.dispose?.(); c.material?.dispose?.(); }
     const all = this.draft ? [...this.splines, this.draft] : this.splines;
@@ -72,5 +76,5 @@ export class SplineManager {
     points.forEach((p, i) => { const prev = points[Math.max(0, i - 1)], next = points[Math.min(points.length - 1, i + 1)]; const dx = next.x - prev.x, dz = next.z - prev.z, l = Math.hypot(dx, dz) || 1; const nx = -dz / l, nz = dx / l; const w = s.width * .82; if (i) len += Math.hypot(p.x - prev.x, p.z - prev.z); const y = p.y - s.depth * .45 + .45; v.push(p.x + nx * w, y, p.z + nz * w, p.x - nx * w, y, p.z - nz * w); uv.push(0, len / 16, 1, len / 16); if (i) { const a = (i - 1) * 2; ind.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } });
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(ind); const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x2b91c5, transparent: true, opacity: .58, depthWrite: false, side: THREE.DoubleSide })); mesh.renderOrder = 12; this.group.add(mesh);
   }
-  dispose() { this.editor.dispose(); this.baker.dispose(); this.scene.remove(this.group); this.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
+  dispose() { clearTimeout(this._stableTimer); this.editor.dispose(); this.baker.dispose(); this.scene.remove(this.group); this.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
 }

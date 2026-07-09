@@ -11,6 +11,14 @@ export class ProjectHistoryManager {
   canUndo() { return this.cursor > 0; } canRedo() { return this.cursor < this.actions.length - 1; }
   undo() { if (!this.canUndo()) return false; this.cursor--; this.restoreState(clone(this.actions[this.cursor].after)); this._emit(); return true; }
   redo() { if (!this.canRedo()) return false; this.cursor++; this.restoreState(clone(this.actions[this.cursor].after)); this._emit(); return true; }
+  restoreAction(id) {
+    const index = this.actions.findIndex((action) => action.id === id);
+    if (index < 0) return false;
+    this.cursor = index;
+    this.restoreState(clone(this.actions[index].after));
+    this._emit();
+    return true;
+  }
   async createSnapshot(name, { description = '', automatic = false, tags = [] } = {}) {
     const snap = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || 'Untitled snapshot', description, timestamp: Date.now(), appVersion: '0.17.0', thumbnail: await this.getThumbnail?.(), projectState: clone(this.getState()), tags, automatic };
     this.snapshots.push(snap); if (automatic) { const autos = this.snapshots.filter((s) => s.automatic); while (autos.length > 5) { const old = autos.shift(); this.snapshots = this.snapshots.filter((s) => s.id !== old.id); } }

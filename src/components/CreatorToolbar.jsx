@@ -3,6 +3,11 @@ import { Route } from 'lucide-react';
 export default function CreatorToolbar({ active, onToggle }) {
   return (
     <div className="creator-toolbar" role="toolbar" aria-label="Creator tools">
+      <div className="creator-toolbar-popover" role="tooltip">
+        <strong>Spline editor</strong>
+        <span>Draw editable roads and rivers on the terrain.</span>
+        <kbd>S</kbd>
+      </div>
       <button
         type="button"
         className={`creator-toolbar-btn${active ? ' active' : ''}`}

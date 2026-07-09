@@ -74,7 +74,7 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
-  const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, splines: [] });
+  const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
   const [analysisState, setAnalysisState] = useState({ enabled: false, mode: 'elevation', opacity: .72 });
   const [creatorHistory, setCreatorHistory] = useState({ actions: [], snapshots: [] });
   const [tileDebug, setTileDebug] = useState({ view: 'off', showLegend: true, opacity: 1, showPreview: true });
@@ -1030,6 +1030,8 @@ export default function App() {
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
     splineState, analysisState, creatorHistory,
     onCreateSpline: (type) => engine().createSpline(type),
+    onConfirmSplineCreation: () => engine().confirmSplineCreation(),
+    onCancelSplineCreation: () => engine().cancelSplineCreation(),
     onUpdateSpline: (id, patch) => engine().updateSpline(id, patch),
     onDeleteSpline: (id) => engine().deleteSpline(id),
     onDuplicateSpline: (id) => engine().duplicateSpline(id),
@@ -1038,6 +1040,7 @@ export default function App() {
     onAnalysisSettings: (patch) => engine().setAnalysisSettings(patch),
     onCreateSnapshot: (name) => engine().createSnapshot(name),
     onRestoreSnapshot: (id) => engine().restoreSnapshot(id),
+    onRestoreHistoryAction: (id) => engine().restoreHistoryAction(id),
     onDeleteSnapshot: (id) => engine().deleteSnapshot(id),
     onRenameSnapshot: (id, name) => engine().renameSnapshot(id, name),
   };
@@ -1065,6 +1068,7 @@ export default function App() {
         onRedo={redo}
         canUndo={histState.canUndo}
         canRedo={histState.canRedo}
+        onOpenHistory={() => togglePanel('history')}
         onOpenSettingsSearch={openSettingsSearch}
         settingsSearchOpen={settingsSearchOpen}
       />

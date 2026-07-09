@@ -16,6 +16,7 @@ export default function TopBar({
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
+  onOpenHistory,
 }) {
   const fileRef = useRef(null);
 
@@ -66,6 +67,17 @@ export default function TopBar({
           <svg viewBox="0 0 16 16" aria-hidden>
             <path d="M5.5 4.5L2.5 7.5L5.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M2.5 7.5H9.5a4 4 0 0 1 0 8H7" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          className={`tb-btn tb-icon-btn${activePanel === 'history' ? ' active' : ''}`}
+          onClick={onOpenHistory}
+          title="Creator history"
+          aria-label="Creator history"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <circle cx="8" cy="8" r="5.7" stroke="currentColor" fill="none" strokeWidth="1.25" />
+            <path d="M8 4.6V8l2.5 1.6" stroke="currentColor" fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
         <button

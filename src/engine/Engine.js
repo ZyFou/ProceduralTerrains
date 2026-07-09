@@ -3561,6 +3561,14 @@ export class Engine {
     this.splineManager?.setEditingEnabled(enabled);
   }
   createSpline(type) { this.setSplineEditingEnabled(true); this.splineManager?.createSpline(type); }
+  confirmSplineCreation() {
+    const manager = this.splineManager;
+    if (!manager?.editor?.creatingType) return;
+    manager.finishDraft();
+    manager.editor.creatingType = null;
+    manager._emit();
+  }
+  cancelSplineCreation() { this.splineManager?.editor?.cancel(); }
   updateSpline(id, patch) { this.splineManager?.updateSpline(id, patch); }
   deleteSpline(id) { this.splineManager?.deleteSpline(id); }
   selectSpline(id) { this.splineManager?.selectSpline(id); }
@@ -3569,6 +3577,7 @@ export class Engine {
   setAnalysisSettings(patch) { this.terrainAnalysis?.setSettings(patch); }
   async createSnapshot(name) { const s = await this.projectHistory?.createSnapshot(name); if (s) this.cb.onToast(`Snapshot saved · ${s.name}`); return s; }
   restoreSnapshot(id) { return this.projectHistory?.restoreSnapshot(id); }
+  restoreHistoryAction(id) { return this.projectHistory?.restoreAction(id); }
   deleteSnapshot(id) { this.projectHistory?.deleteSnapshot(id); }
   renameSnapshot(id, name) { this.projectHistory?.renameSnapshot(id, name); }
 
