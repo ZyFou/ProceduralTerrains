@@ -128,7 +128,7 @@ export const PRESETS = {
   archipelago: {
     label: 'Archipelago',
     params: {
-      heightScale: 260, seaLevel: 78, falloff: 0.75, ridge: 0.45,
+      heightScale: 420, seaLevel: 78, falloff: 0.75, ridge: 0.45,
       warp: 1.4, noiseScale: 60, moistBias: 0.25, snowLine: 0.9,
       tempBias: 0.25,
     },
@@ -179,7 +179,7 @@ export const PRESETS = {
     palettePreset: 'cartoon',
     noisePreset: 'cartoon',
     params: {
-      heightScale: 260, seaLevel: 72, noiseScale: 72, noiseStrength: 0.72,
+      heightScale: 420, seaLevel: 72, noiseScale: 72, noiseStrength: 0.72,
       terrainSmoothing: 0.28, octaves: 4, persistence: 0.36, lacunarity: 1.85, ridge: 0.16, warp: 0.28,
       falloff: 0.35, biomeScale: 0.7, moistScale: 0.8, snowLine: 0.82,
       normalStrength: 0.8, aoStrength: 0.35,

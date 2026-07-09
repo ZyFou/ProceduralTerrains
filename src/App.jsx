@@ -31,7 +31,7 @@ import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
-import { getProjectTemplate } from './project/ProjectTemplates.js';
+import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
@@ -49,6 +49,7 @@ export default function App() {
   const minimapOverlayRef = useRef(null);
   const engineRef = useRef(null);
   const activeProjectRef = useRef(null);
+  const templatePreviewQueueRef = useRef(Promise.resolve());
 
   const loading = useLoading();
   const landing = useLanding();
@@ -329,6 +330,11 @@ export default function App() {
     if (!eng) return;
     const template = getProjectTemplate(templateId);
     eng.newProject();
+    // Every launch starts from the Root's session seed; give each chosen
+    // template a stable-but-fresh variant instead of reverting to seed 1337.
+    const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
+    const templateOffset = PROJECT_TEMPLATES.findIndex((item) => item.id === template.id) + 1;
+    eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
     if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
     const project = await saveCurrentProject({ name: template.name, description: template.description, tags: [template.id] });
     if (project) showToast(`${template.name} project created`, 'success');
@@ -344,11 +350,52 @@ export default function App() {
       setCurrentProject(normalizeProject(project));
       showToast(`Opened ${project.metadata?.name ?? 'terrain project'}`, 'success');
     };
+    const previewSeed = (templateId) => {
+      const index = Math.max(0, PROJECT_TEMPLATES.findIndex((item) => item.id === templateId));
+      const base = Number(landingRef.current?.sessionSeed) || 1337;
+      return (base + (index + 1) * 0x9e3779b9) >>> 0;
+    };
+    const captureTemplateThumbnail = async (templateId, { silent = true } = {}) => {
+      const eng = engineRef.current;
+      if (!eng || !canvasRef.current || !landingRef.current?.visible) return;
+      const template = getProjectTemplate(templateId);
+      eng.newProject({ silent });
+      eng.setParam('seed', previewSeed(templateId));
+      if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      const image = eng.capturePreviewThumbnail();
+      try { sessionStorage.setItem(`terrain-template-preview:${templateId}`, image); } catch { /* cache is optional */ }
+      window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId, image } }));
+    };
+    const queueTemplatePreview = (templateId, options) => {
+      templatePreviewQueueRef.current = templatePreviewQueueRef.current
+        .then(() => captureTemplateThumbnail(templateId, options))
+        .catch(() => {});
+    };
+    const onPreviewTemplate = (event) => queueTemplatePreview(event.detail?.templateId ?? 'blank');
+    const onPreloadTemplatePreviews = () => {
+      let completed = 0;
+      PROJECT_TEMPLATES.forEach((template) => {
+        templatePreviewQueueRef.current = templatePreviewQueueRef.current.then(async () => {
+          await captureTemplateThumbnail(template.id, { silent: true });
+          completed += 1;
+          window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
+        }).catch(() => {});
+      });
+      // End the first-run preview bake on Blank so the visible background is a
+      // fresh session terrain rather than the final template in the queue.
+      queueTemplatePreview('blank', { silent: true });
+    };
     window.addEventListener('terrain-project:new', onNewProject);
     window.addEventListener('terrain-project:open', onOpenProject);
+    window.addEventListener('terrain-template:preview', onPreviewTemplate);
+    window.addEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     return () => {
       window.removeEventListener('terrain-project:new', onNewProject);
       window.removeEventListener('terrain-project:open', onOpenProject);
+      window.removeEventListener('terrain-template:preview', onPreviewTemplate);
+      window.removeEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     };
   }, [createProjectFromTemplate, setCurrentProject, showToast]);
 

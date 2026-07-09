@@ -34,13 +34,13 @@ export default function TopBar({
 
   return (
     <header id="topbar">
-      <div className="tb-group tb-brand">
+      <button type="button" className="tb-group tb-brand tb-brand-button tb-btn" onClick={onOpenProjects} title="Return to main menu">
         <svg className="logo" viewBox="0 0 24 24" fill="none">
           <path d="M3 18 L9 7 L13 13 L16 9 L21 18 Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           <circle cx="17.5" cy="5.5" r="1.6" fill="currentColor" />
         </svg>
         <span className="app-name">{APP_NAME}</span>
-      </div>
+      </button>
 
       <div className="tb-group tb-actions">
         <button

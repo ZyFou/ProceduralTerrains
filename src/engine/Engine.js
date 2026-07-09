@@ -1517,7 +1517,7 @@ export class Engine {
     this.setParam('seed', (Math.random() * 0xffffffff) >>> 0);
   }
 
-  newProject() {
+  newProject({ silent = false } = {}) {
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     this._syncPlanetStyleToParams();
@@ -1529,7 +1529,7 @@ export class Engine {
     this.splineManager?.setEditingEnabled(false);
     this.paintMode?.setEnabled(false);
     this.paintMode?.setBaseMode('generated');
-    this.paintMode?.clear();
+    this.paintMode?.clear({ silent });
     this.terrainAnalysis?.load();
 
     this.tileAssemblyShape = 'square';
@@ -1559,7 +1559,7 @@ export class Engine {
     this.setNoiseStack(defaultStack);
 
     this.controls.reset(this.boardSize);
-    this.cb.onToast('New project');
+    if (!silent) this.cb.onToast('New project');
   }
 
   // ---------------------------------------------------------- planet style
@@ -5109,6 +5109,22 @@ export class Engine {
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
       this.cb.onToast('Screenshot exported');
     });
+  }
+
+  capturePreviewThumbnail(width = 480, height = 270) {
+    // Render through the exact same path used by screenshot export, then scale
+    // the actual WebGL canvas into a compact data URL for template previews.
+    if (this.worldMode === 'planet') this.renderer.render(this.scene, this.camera);
+    else if (this.visualPost?.enabled(this.params, this.worldMode)) {
+      this.visualPost.ensureTarget(this.renderer);
+      this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
+      this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
+      this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
+    } else this.underwater.render(this.renderer, this.scene, this.camera);
+    const thumbnail = document.createElement('canvas');
+    thumbnail.width = width; thumbnail.height = height;
+    thumbnail.getContext('2d')?.drawImage(this.renderer.domElement, 0, 0, width, height);
+    return thumbnail.toDataURL('image/webp', 0.8);
   }
 
   exportHeightmap() {

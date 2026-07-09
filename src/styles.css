@@ -77,6 +77,8 @@ body {
 }
 .logo { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
 .app-name { font-weight: 700; letter-spacing: 1.5px; font-size: 13px; color: var(--text-bright); }
+.tb-brand-button { appearance: none; -webkit-appearance: none; background: transparent; color: inherit; font: inherit; text-align: left; }
+.tb-brand-button:hover .app-name { color: var(--accent); }
 .app-version { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
 .tb-right { margin-left: auto; }
 

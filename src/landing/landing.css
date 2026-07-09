@@ -602,6 +602,9 @@ body:has(.landing-overlay) {
   pointer-events: auto;
 }
 .landing-workspace.exiting { opacity: 0; transform: none; filter: none; }
+.landing-workspace.has-live-terrain { background: transparent; }
+.landing-workspace.has-live-terrain .landing-workspace-topbar, .landing-workspace.has-live-terrain .landing-workspace-sidebar, .landing-workspace.has-live-terrain .landing-workspace-inspector { background: rgba(13, 13, 13, .93); backdrop-filter: blur(10px); }
+.landing-workspace.has-live-terrain .landing-workspace-main { background: rgba(5, 5, 5, .72); backdrop-filter: blur(3px); }
 .landing-workspace-topbar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -610,6 +613,8 @@ body:has(.landing-overlay) {
   background: var(--bg-panel);
 }
 .landing-workspace-brand, .landing-workspace-top-actions { display: flex; align-items: center; gap: 10px; padding: 0 18px; }
+.landing-workspace-brand { border: 0; background: transparent; cursor: var(--cursor-pointer); text-align: left; }
+.landing-workspace-brand:hover strong { color: var(--accent); }
 .landing-workspace-brand strong { color: var(--text-bright); font-size: 13px; letter-spacing: .02em; }
 .landing-workspace-top-actions { justify-content: flex-end; color: var(--text-dim); font: 11px var(--mono); }
 .landing-workspace-top-actions a { display: grid; place-items: center; width: 28px; height: 28px; border-left: 1px solid var(--border-subtle); color: var(--text-muted); }
@@ -633,7 +638,8 @@ body:has(.landing-overlay) {
 .landing-create-button:disabled { opacity: .55; cursor: default; }
 .landing-sidebar-templates { display: grid; gap: 3px; overflow: auto; }
 .landing-sidebar-templates > .landing-sidebar-label { margin-bottom: 5px; }
-.landing-sidebar-templates button { display: grid; grid-template-columns: 16px 1fr; gap: 9px; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-muted); text-align: left; cursor: var(--cursor-pointer); }
+.landing-sidebar-templates button { display: grid; grid-template-columns: 42px 1fr; gap: 9px; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-muted); text-align: left; cursor: var(--cursor-pointer); }
+.landing-sidebar-templates button > img { width: 42px; height: 31px; border-radius: 3px; object-fit: cover; }
 .landing-sidebar-templates button:hover { background: var(--bg-control); color: var(--text-main); }
 .landing-sidebar-templates button.selected { background: var(--accent-bg); border-color: var(--border-active); color: var(--accent); }
 .landing-sidebar-templates strong { display: block; color: var(--text-main); font-size: 12px; font-weight: 600; }
@@ -665,6 +671,7 @@ body:has(.landing-overlay) {
 .landing-empty-workspace button { margin-top: 8px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: #fff; padding: 8px 12px; font: 600 12px var(--font); cursor: var(--cursor-pointer); }
 .landing-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 16px; }
 .landing-template-grid button { display: grid; gap: 10px; min-height: 142px; padding: 16px; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-panel); color: var(--text-muted); text-align: left; cursor: var(--cursor-pointer); }
+.landing-template-grid button > img { width: 100%; aspect-ratio: 1.8 / 1; border-radius: 3px; object-fit: cover; }
 .landing-template-grid button:hover, .landing-template-grid button.selected { border-color: var(--border-active); background: var(--accent-bg); }
 .landing-template-grid button.selected { color: var(--accent); }
 .landing-template-grid strong { color: var(--text-main); font-size: 13px; }
@@ -672,6 +679,7 @@ body:has(.landing-overlay) {
 .landing-workspace-inspector { display: flex; flex-direction: column; padding: 22px 18px; border-left: 1px solid var(--border-subtle); }
 .landing-inspector-heading h2 { margin: 0; color: var(--text-bright); font-size: 18px; font-weight: 650; }
 .landing-inspector-icon { display: grid; place-items: center; width: 100%; height: 136px; margin: 20px 0; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-control); color: var(--accent); }
+.landing-inspector-icon img { width: 100%; height: 100%; object-fit: cover; }
 .landing-inspector-details { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--border-subtle); }
 .landing-inspector-details div { display: grid; gap: 5px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
 .landing-inspector-details dt { color: var(--text-dim); font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
@@ -679,6 +687,11 @@ body:has(.landing-overlay) {
 .landing-inspector-action { margin-top: auto; min-height: 34px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: #fff; font: 600 12px var(--font); cursor: var(--cursor-pointer); }
 .landing-inspector-action:hover:not(:disabled) { background: var(--accent-hover); }
 .landing-inspector-action:disabled { opacity: .55; cursor: default; }
+.landing-preview-loader { position: fixed; inset: 0; z-index: 10002; display: grid; justify-items: center; align-content: center; gap: 10px; background: rgba(5, 5, 5, .88); color: var(--text-main); }
+.landing-preview-loader strong { font-size: 14px; }
+.landing-preview-loader small { color: var(--text-muted); font-size: 12px; }
+.landing-preview-spinner { width: 25px; height: 25px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: landing-preview-spin .8s linear infinite; }
+@keyframes landing-preview-spin { to { transform: rotate(360deg); } }
 .landing-credits-backdrop { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; padding: 18px; background: rgba(0, 0, 0, .68); }
 .landing-credits-dialog { display: grid; gap: 16px; width: min(360px, 100%); padding: 20px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel); box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 .landing-credits-dialog span { color: var(--accent); font: 600 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }

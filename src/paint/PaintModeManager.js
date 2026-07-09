@@ -103,9 +103,9 @@ export class PaintModeManager {
     this._emit();
   }
 
-  clear() {
+  clear({ silent = false } = {}) {
     this.layers.clear();
-    this.onToast?.('Paint layers cleared');
+    if (!silent) this.onToast?.('Paint layers cleared');
   }
 
   // Non-destructive: swap which procedural base the paint layers sit on top
