@@ -16,6 +16,7 @@ import LeftToolbar from './components/ui/LeftToolbar.jsx';
 import SideDrawer from './components/ui/SideDrawer.jsx';
 import SettingsSearchOverlay from './components/ui/SettingsSearchOverlay.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
+import CreatorToolbar from './components/CreatorToolbar.jsx';
 import WorldModeBar from './components/WorldModeBar.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import InfiniteHUD from './components/InfiniteHUD.jsx';
@@ -1124,6 +1125,13 @@ export default function App() {
             />
           )}
 
+          {showStudioUI && isStudio && (
+            <CreatorToolbar
+              active={splineState.enabled}
+              onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
+            />
+          )}
+
           {paintMode && (
             <PaintPanel
               paintState={paintState}
@@ -1143,8 +1151,6 @@ export default function App() {
               onResetCamera={() => engine().resetView()}
               exploreMode={exploreMode}
               onExploreMode={selectExploreMode}
-              splineMode={splineState.enabled}
-              onToggleSplineMode={() => engine().setSplineEditingEnabled(!splineState.enabled)}
             />
           )}
 

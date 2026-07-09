@@ -35,7 +35,7 @@ export class SplineManager {
   }
   updateSpline(id, patch, { preview = false } = {}) {
     const s = this._find(id); if (!s || s.locked) return;
-    Object.assign(s, patch, { updatedAt: new Date().toISOString() }); this.bake({ preview }); if (!preview) this._stable('Changed spline'); else this._emit();
+    Object.assign(s, patch, { updatedAt: new Date().toISOString() }); this.bake({ preview });
   }
   deleteSpline(id) { const i = this.splines.findIndex((s) => s.id === id); if (i < 0) return; this.splines.splice(i, 1); if (this.selectedId === id) this.selectedId = null; this.bake(); this._stable('Deleted spline'); }
   duplicateSpline(id) { const s = this._find(id); if (!s) return; const clone = JSON.parse(JSON.stringify(s)); clone.id = uid('spline'); clone.name = `${s.name} copy`; clone.controlPoints.forEach((p) => { p.id = uid('point'); p.x += 10; p.z += 10; }); this.splines.push(clone); this.selectedId = clone.id; this.bake(); this._stable('Duplicated spline'); }
@@ -52,7 +52,7 @@ export class SplineManager {
   load(value) { this.splines = migrateSplines(value); this.selectedId = null; this.bake(); }
   _point(hit) { return { id: uid('point'), x: hit.x, y: hit.y, z: hit.z, widthMultiplier: 1, depthMultiplier: 1, lockedToTerrain: true }; }
   _find(id) { return this.splines.find((s) => s.id === id); }
-  _stable(label) { this._emit(); this.onStableAction?.(label); this.toast?.(label); }
+  _stable(label) { this._emit(); this.onStableAction?.(label); }
   _emit() { this.onChange?.({ enabled: this.enabled, selectedId: this.selectedId, splines: this.serialize() }); }
   _render() {
     while (this.group.children.length) { const c = this.group.children.pop(); c.geometry?.dispose?.(); c.material?.dispose?.(); }

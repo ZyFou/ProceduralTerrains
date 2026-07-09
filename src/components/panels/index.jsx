@@ -27,7 +27,7 @@ import PerfSettings, { SurfacePropertiesSettings } from './PerfSettings.jsx';
 import SurfaceLibraryPanel from '../ui/SurfaceLibraryPanel.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 import SplinesPanel from './SplinesPanel.jsx';
-import AnalysisPanel from './AnalysisPanel.jsx';
+import { AnalysisContent } from './AnalysisPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 
 // ---- toolbar / panel metadata (single source for icons + labels) ----
@@ -56,12 +56,11 @@ export const PANEL_META = {
   performance: { label: 'Performance', title: 'Performance', desc: 'GPU, water, fog and cloud budgets.', icon: PANEL_ICONS.performance },
   debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
   splines: { label: 'Splines', title: 'Splines', desc: 'Editable roads and rivers.', icon: PANEL_ICONS.splines, modes: ['studio'] },
-  analysis: { label: 'Analyze', title: 'Analysis', desc: 'Inspect terrain structure.', icon: PANEL_ICONS.analysis, modes: ['studio'] },
   history: { label: 'History', title: 'History', desc: 'Creator checkpoints and actions.', icon: PANEL_ICONS.history },
 };
 
 // Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'analysis', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'history', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'history', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
@@ -569,6 +568,7 @@ function DebugPanel({ ctx }) {
         tabs={[
           { id: 'monitor', label: 'Monitor' },
           { id: 'viewport', label: 'Viewport' },
+          ...(isStudio ? [{ id: 'analysis', label: 'Analysis' }] : []),
           { id: 'engine', label: 'Engine' },
         ]}
       />
@@ -614,6 +614,7 @@ function DebugPanel({ ctx }) {
       )}
 
       {tab === 'engine' && <EngineDebugOptions ctx={ctx} />}
+      {tab === 'analysis' && isStudio && <AnalysisContent ctx={ctx} />}
 
       <PanelResetButton label="Reset Debug Settings" onClick={() => ctx.onResetPanel?.('debug')} settingId="debug.reset" />
     </SidePanel>
@@ -1002,7 +1003,7 @@ const COMPONENTS = {
   terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, visuals: VisualsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
-  splines: ({ ctx }) => <SplinesPanel ctx={ctx} />, analysis: ({ ctx }) => <AnalysisPanel ctx={ctx} />, history: ({ ctx }) => <HistoryPanel ctx={ctx} />,
+  splines: ({ ctx }) => <SplinesPanel ctx={ctx} />, history: ({ ctx }) => <HistoryPanel ctx={ctx} />,
 };
 
 export function renderPanel(id, ctx) {

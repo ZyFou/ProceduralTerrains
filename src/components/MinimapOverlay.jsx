@@ -20,6 +20,16 @@ const MapIcon = () => (
   </svg>
 );
 
+const PickerIcon = ({ mode }) => {
+  if (mode === 'height') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 12 6 7l2 2 3-5 3 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  if (mode === 'biome') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 14V8m0 0C5 8 3 6 3 3c3 0 5 2 5 5Zm0 2c2.5 0 4.5-1.5 5-4-2.7 0-5 1.5-5 4Z" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
+  if (mode === 'noise') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 5c2-4 4 4 6 0s4 4 6 0M2 11c2-4 4 4 6 0s4 4 6 0" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
+  if (mode === 'water') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 9c1.3 1.3 2.7 1.3 4 0 1.3 1.3 2.7 1.3 4 0 1.3 1.3 2.7 1.3 4 0M3 5c1.7-2 3-3 5-3s3.3 1 5 3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
+  if (mode === 'slope') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 13 8 3l6 10H2Z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /></svg>;
+  if (mode === 'props') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><circle cx="5" cy="10" r="2" stroke="currentColor" strokeWidth="1.2" /><circle cx="11" cy="6" r="2" stroke="currentColor" strokeWidth="1.2" /><path d="M8 14V8" stroke="currentColor" strokeWidth="1.2" /></svg>;
+  return <MapIcon />;
+};
+
 const clampZoom = (value) => Math.max(1, Math.min(6, value));
 
 export default function MinimapOverlay({
@@ -116,8 +126,8 @@ export default function MinimapOverlay({
         <div className="minimap-overlay-body">
           <div className="minimap-toolbar">
             <div className="minimap-segmented">
-              <button type="button" className={`tb-btn minimap-chip${sizeMode === 'compact' ? ' active' : ''}`} onClick={() => setSizeMode('compact')}>Compact</button>
-              <button type="button" className={`tb-btn minimap-chip${sizeMode === 'large' ? ' active' : ''}`} onClick={() => setSizeMode('large')}>Large</button>
+              <button type="button" className={`tb-btn minimap-chip minimap-icon-chip${sizeMode === 'compact' ? ' active' : ''}`} onClick={() => setSizeMode('compact')} title="Compact minimap" aria-label="Compact minimap"><svg viewBox="0 0 16 16" fill="none" aria-hidden><rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" /></svg></button>
+              <button type="button" className={`tb-btn minimap-chip minimap-icon-chip${sizeMode === 'large' ? ' active' : ''}`} onClick={() => setSizeMode('large')} title="Large minimap" aria-label="Large minimap"><svg viewBox="0 0 16 16" fill="none" aria-hidden><rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" strokeWidth="1.3" /></svg></button>
             </div>
             <div className="minimap-zoom-group">
               <span className="minimap-zoom-value">{zoom}x</span>
@@ -129,18 +139,22 @@ export default function MinimapOverlay({
               <button
                 key={value}
                 type="button"
-                className={`tb-btn minimap-chip${mode === value ? ' active' : ''}`}
+                className={`tb-btn minimap-chip minimap-icon-chip${mode === value ? ' active' : ''}`}
                 onClick={() => setMode(value)}
+                title={label}
+                aria-label={label}
               >
-                {label}
+                <PickerIcon mode={value} />
               </button>
             ))}
             <button
               type="button"
-              className={`tb-btn minimap-chip${showChunkGrid ? ' active' : ''}`}
+              className={`tb-btn minimap-chip minimap-icon-chip${showChunkGrid ? ' active' : ''}`}
               onClick={() => setShowChunkGrid((value) => !value)}
+              title="Chunk grid"
+              aria-label="Chunk grid"
             >
-              Chunk Grid
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 2h12v12H2zM2 6h12M6 2v12M10 2v12M2 10h12" stroke="currentColor" strokeWidth="1.05" /></svg>
             </button>
           </div>
 

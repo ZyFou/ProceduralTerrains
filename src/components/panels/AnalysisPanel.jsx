@@ -2,10 +2,10 @@ import SidePanel from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { ANALYSIS_LEGENDS } from '../../creator/analysis/TerrainAnalysisManager.js';
 
-export default function AnalysisPanel({ ctx }) {
+export function AnalysisContent({ ctx }) {
   const s = ctx.analysisState || {};
   const patch = (p) => ctx.onAnalysisSettings(p);
-  return <SidePanel title="Analysis" description="Inspect final terrain structure." onClose={ctx.onClose}>
+  return <>
     <ToggleRow label="Show analysis" value={!!s.enabled} onChange={(v) => patch({ enabled: v })} />
     <SelectRow label="Mode" value={s.mode || 'elevation'} options={[
       { value: 'elevation', label: 'Elevation' }, { value: 'slope', label: 'Slope' }, { value: 'normals', label: 'Normals' }, { value: 'curvature', label: 'Curvature' }, { value: 'waterDepth', label: 'Water depth' }, { value: 'biome', label: 'Biome distribution' }, { value: 'contribution', label: 'Paint + spline contribution' },
@@ -16,5 +16,9 @@ export default function AnalysisPanel({ ctx }) {
     {s.mode === 'slope' && <><SliderCtl def={{ key: 'thresholdA', label: 'Walkable', min: 0, max: 70, step: 1, digits: 0 }} value={s.thresholdA ?? 35} onChange={(v) => patch({ thresholdA: v })} /><SliderCtl def={{ key: 'thresholdB', label: 'Cliff', min: 5, max: 90, step: 1, digits: 0 }} value={s.thresholdB ?? 55} onChange={(v) => patch({ thresholdB: v })} /></>}
     <ToggleRow label="Show legend" value={s.legend !== false} onChange={(v) => patch({ legend: v })} />
     {s.legend !== false && <p className="section-hint">{ANALYSIS_LEGENDS[s.mode] || ANALYSIS_LEGENDS.elevation}</p>}
-  </SidePanel>;
+  </>;
+}
+
+export default function AnalysisPanel({ ctx }) {
+  return <SidePanel title="Analysis" description="Inspect final terrain structure." onClose={ctx.onClose}><AnalysisContent ctx={ctx} /></SidePanel>;
 }
