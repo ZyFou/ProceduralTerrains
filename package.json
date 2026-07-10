@@ -1,7 +1,7 @@
 {
   "name": "terrain-studio",
   "private": true,
-  "version": "0.17.4",
+  "version": "0.18.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
