@@ -10,8 +10,9 @@ describe('project document migration', () => {
   });
 
   it('preserves supplied metadata and reports terrain size', () => {
-    const project = normalizeProject({ metadata: { name: 'Ridge', tags: ['alpine'] }, terrain: { params: { seed: 7, chunkCount: 32, chunkSize: 128 }, tiles: [{}, {}] } });
+    const project = normalizeProject({ metadata: { name: 'Ridge', tags: ['alpine'], thumbnail: 'data:image/webp;base64,thumb' }, terrain: { params: { seed: 7, chunkCount: 32, chunkSize: 128 }, tiles: [{}, {}] } });
     expect(project.metadata.name).toBe('Ridge');
+    expect(project.metadata.thumbnail).toBe('data:image/webp;base64,thumb');
     expect(projectStats(project)).toMatchObject({ seed: 7, tiles: 2, worldSize: 4096 });
   });
 });

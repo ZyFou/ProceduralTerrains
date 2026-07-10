@@ -88,6 +88,12 @@ export const projectStore = {
     emitChange();
   },
 
+  async rename(project, name) {
+    const nextName = String(name ?? '').trim();
+    if (!nextName) throw new Error('A project name is required');
+    return this.save({ ...project, metadata: { ...project.metadata, name: nextName } });
+  },
+
   async duplicate(project) {
     const copy = normalizeProject({ ...project, id: id(), metadata: { ...project.metadata, name: `${project.metadata.name} copy`, created: now() } });
     return this.save(copy);

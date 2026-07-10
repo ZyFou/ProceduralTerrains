@@ -684,9 +684,15 @@ body:has(.landing-overlay) {
 .landing-inspector-details div { display: grid; gap: 5px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
 .landing-inspector-details dt { color: var(--text-dim); font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .landing-inspector-details dd { margin: 0; color: var(--text-main); font-size: 12px; line-height: 1.45; }
-.landing-inspector-action { margin-top: auto; min-height: 34px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: #fff; font: 600 12px var(--font); cursor: var(--cursor-pointer); }
+.landing-inspector-actions { display: grid; gap: 8px; margin-top: auto; }
+.landing-inspector-action { min-height: 34px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: #fff; font: 600 12px var(--font); cursor: var(--cursor-pointer); }
 .landing-inspector-action:hover:not(:disabled) { background: var(--accent-hover); }
 .landing-inspector-action:disabled { opacity: .55; cursor: default; }
+.landing-inspector-manage-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.landing-inspector-tool-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-control); color: var(--text-muted); font: 600 10px var(--font); cursor: var(--cursor-pointer); }
+.landing-inspector-tool-action:hover:not(:disabled) { border-color: var(--border-active); color: var(--text-main); }
+.landing-inspector-tool-action.danger:hover:not(:disabled) { border-color: rgba(220, 91, 91, .7); color: #f18b8b; }
+.landing-inspector-tool-action:disabled { opacity: .5; cursor: default; }
 .landing-preview-loader { position: fixed; inset: 0; z-index: 10002; display: grid; justify-items: center; align-content: center; gap: 10px; background: rgba(5, 5, 5, .88); color: var(--text-main); }
 .landing-preview-loader strong { font-size: 14px; }
 .landing-preview-loader small { color: var(--text-muted); font-size: 12px; }

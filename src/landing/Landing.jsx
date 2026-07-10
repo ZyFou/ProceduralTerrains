@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FilePlus2, FolderOpen, Globe2, LayoutTemplate, Plus, Upload } from 'lucide-react';
+import { Copy, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStats, projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -14,6 +14,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [templateThumbs, setTemplateThumbs] = useState(() => Object.fromEntries(PROJECT_TEMPLATES.map((template) => [template.id, sessionStorage.getItem(`terrain-template-preview:${template.id}`)]).filter(([, image]) => image)));
   const [previewProgress, setPreviewProgress] = useState(() => ({ completed: 0, total: PROJECT_TEMPLATES.length }));
   const fileRef = useRef(null);
@@ -21,7 +22,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
       setProjects(items);
-      setSelectedProjectId((current) => current ?? items[0]?.id ?? null);
+      setSelectedProjectId((current) => current && items.some((project) => project.id === current) ? current : (items[0]?.id ?? null));
     }).catch(() => setProjects([]));
     load();
     window.addEventListener('terrain-projects:changed', load);
@@ -71,6 +72,33 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     reader.readAsText(file);
     event.target.value = '';
   };
+  const renameSelectedProject = async () => {
+    if (!selectedProject || projectActionBusy) return;
+    const nextName = window.prompt('Rename project', selectedProject.metadata.name)?.trim();
+    if (!nextName || nextName === selectedProject.metadata.name) return;
+    setProjectActionBusy(true);
+    try { await projectStore.rename(selectedProject, nextName); } catch { /* the project remains selected */ }
+    finally { setProjectActionBusy(false); }
+  };
+  const duplicateSelectedProject = async () => {
+    if (!selectedProject || projectActionBusy) return;
+    setProjectActionBusy(true);
+    try {
+      const copy = await projectStore.duplicate(selectedProject);
+      setView('projects');
+      setSelectedProjectId(copy.id);
+    } catch { /* the original project remains available */ }
+    finally { setProjectActionBusy(false); }
+  };
+  const deleteSelectedProject = async () => {
+    if (!selectedProject || projectActionBusy || !window.confirm(`Delete “${selectedProject.metadata.name}”? This cannot be undone.`)) return;
+    setProjectActionBusy(true);
+    try {
+      await projectStore.remove(selectedProject.id);
+      setSelectedProjectId(null);
+    } catch { /* the project remains available */ }
+    finally { setProjectActionBusy(false); }
+  };
 
   return (
     <div className={`landing landing-overlay landing-workspace${view === 'templates' ? ' has-live-terrain' : ''}${exiting ? ' exiting' : ''}`}>
@@ -115,13 +143,20 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
         <aside className="landing-workspace-inspector">
           <div className="landing-inspector-heading"><span>Inspector</span><h2>{inspector.name}</h2></div>
-          <div className="landing-inspector-icon">{inspector.type === 'template' && templateThumbs[inspector.template.id] ? <img src={templateThumbs[inspector.template.id]} alt="" /> : (inspector.type === 'project' ? <FolderOpen size={30} /> : <LayoutTemplate size={30} />)}</div>
+          <div className="landing-inspector-icon">{inspector.type === 'template' && templateThumbs[inspector.template.id] ? <img src={templateThumbs[inspector.template.id]} alt="" /> : (inspector.type === 'project' && selectedProject.metadata.thumbnail ? <img src={selectedProject.metadata.thumbnail} alt="" /> : (inspector.type === 'project' ? <FolderOpen size={30} /> : <LayoutTemplate size={30} />))}</div>
           <dl className="landing-inspector-details">
             <div><dt>{inspector.type === 'project' ? 'Project' : 'Template'}</dt><dd>{inspector.type === 'project' ? (inspector.stats.seed != null ? `Seed ${inspector.stats.seed}` : 'Terrain project') : inspector.template.name}</dd></div>
             <div><dt>Description</dt><dd>{inspector.description}</dd></div>
             {inspector.type === 'project' && <><div><dt>World size</dt><dd>{inspector.stats.worldSize ? `${Math.round(inspector.stats.worldSize / 1000)} km` : '—'}</dd></div><div><dt>Last modified</dt><dd>{dateLabel(selectedProject.metadata.modified)}</dd></div></>}
           </dl>
-          <button type="button" className="landing-inspector-action" onClick={() => inspector.type === 'project' ? open(selectedProject) : create(inspector.template.id)} disabled={!bootReady || exiting}>{inspector.type === 'project' ? 'Open project' : 'Start project'}</button>
+          <div className="landing-inspector-actions">
+            <button type="button" className="landing-inspector-action" onClick={() => inspector.type === 'project' ? open(selectedProject) : create(inspector.template.id)} disabled={!bootReady || exiting}>{inspector.type === 'project' ? 'Open project' : 'Start project'}</button>
+            {inspector.type === 'project' && <div className="landing-inspector-manage-actions">
+              <button type="button" className="landing-inspector-tool-action" onClick={renameSelectedProject} disabled={projectActionBusy} title="Rename project"><Pencil size={14} /> Rename</button>
+              <button type="button" className="landing-inspector-tool-action" onClick={duplicateSelectedProject} disabled={projectActionBusy} title="Duplicate project"><Copy size={14} /> Duplicate</button>
+              <button type="button" className="landing-inspector-tool-action danger" onClick={deleteSelectedProject} disabled={projectActionBusy} title="Delete project"><Trash2 size={14} /> Delete</button>
+            </div>}
+          </div>
         </aside>
       </div>
       {(!bootReady || previewProgress.completed < previewProgress.total) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>{bootReady ? 'Rendering terrain previews' : 'Starting terrain editor'}</strong><small>{bootReady ? `${previewProgress.completed} of ${previewProgress.total} real previews ready` : 'Preparing your random terrain workspace…'}</small></div>}

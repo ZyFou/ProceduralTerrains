@@ -308,7 +308,12 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return null;
     const current = activeProjectRef.current;
-    const thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) ?? current?.metadata?.thumbnail ?? null;
+    let thumbnail = null;
+    try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
+    if (!thumbnail) {
+      try { thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) || null; } catch { /* canvas capture is best effort */ }
+    }
+    thumbnail ||= current?.metadata?.thumbnail ?? null;
     const project = normalizeProject({
       id: current?.id,
       metadata: {
