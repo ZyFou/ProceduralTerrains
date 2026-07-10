@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
 import WorldModeBar from './WorldModeBar.jsx';
 
@@ -19,6 +19,31 @@ export default function TopBar({
   onOpenHistory, onOpenProjects,
 }) {
   const fileRef = useRef(null);
+  const fileMenuRef = useRef(null);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!fileMenuOpen) return undefined;
+
+    const onPointerDown = (event) => {
+      if (!fileMenuRef.current?.contains(event.target)) setFileMenuOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setFileMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [fileMenuOpen]);
+
+  const runFileAction = (action) => {
+    setFileMenuOpen(false);
+    action();
+  };
 
   const onFile = (e) => {
     const file = e.target.files[0];
@@ -43,79 +68,44 @@ export default function TopBar({
       </button>
 
       <div className="tb-group tb-actions">
-        <button
-          type="button"
-          className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
-          onClick={onOpenSettingsSearch}
-          title="Search settings (Ctrl+K)"
-          aria-pressed={settingsSearchOpen}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden>
-            <circle cx="7" cy="7" r="4.5" stroke="currentColor" fill="none" strokeWidth="1.2" />
-            <path d="M10.5 10.5L14 14" stroke="currentColor" fill="none" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-          <span className="tb-text">Search settings</span>
-          <span className="tb-shortcut">Ctrl+K</span>
-        </button>
-        <button
-          className="tb-btn tb-icon-btn"
-          onClick={onUndo}
-          disabled={!canUndo}
-          title="Undo (Ctrl+Z)"
-          aria-label="Undo"
-        >
-          <svg viewBox="0 0 16 16" aria-hidden>
-            <path d="M5.5 4.5L2.5 7.5L5.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M2.5 7.5H9.5a4 4 0 0 1 0 8H7" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button
-          className={`tb-btn tb-icon-btn${activePanel === 'history' ? ' active' : ''}`}
-          onClick={onOpenHistory}
-          title="Creator history"
-          aria-label="Creator history"
-        >
-          <svg viewBox="0 0 16 16" aria-hidden>
-            <circle cx="8" cy="8" r="5.7" stroke="currentColor" fill="none" strokeWidth="1.25" />
-            <path d="M8 4.6V8l2.5 1.6" stroke="currentColor" fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button
-          className="tb-btn tb-icon-btn"
-          onClick={onRedo}
-          disabled={!canRedo}
-          title="Redo (Ctrl+Y)"
-          aria-label="Redo"
-        >
-          <svg viewBox="0 0 16 16" aria-hidden>
-            <path d="M10.5 4.5L13.5 7.5L10.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M13.5 7.5H6.5a4 4 0 0 0 0 8H9" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button className="tb-btn" onClick={onNew} title="Reset to default project">
-          <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> <span className="tb-text">New</span>
-        </button>
-        <button className="tb-btn" onClick={onOpenProjects} title="Open local projects">
-          <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 8v4M6 10h4']} /> <span className="tb-text">Projects</span>
-        </button>
+        <div className="tb-dropdown" ref={fileMenuRef}>
+          <button
+            type="button"
+            className={`tb-btn tb-file-btn${fileMenuOpen ? ' active' : ''}`}
+            onClick={() => setFileMenuOpen((open) => !open)}
+            title="File actions"
+            aria-haspopup="menu"
+            aria-expanded={fileMenuOpen}
+          >
+            <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} />
+            <span className="tb-text">File</span>
+            <svg className="tb-file-caret" viewBox="0 0 12 12" aria-hidden>
+              <path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className={`tb-menu${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label="File actions">
+            <button type="button" role="menuitem" onClick={() => runFileAction(onNew)}>
+              <Icon d={['M4 1.5h5.5L13 5v9.5H4z', 'M9.5 1.5V5H13']} /> New
+            </button>
+            <button type="button" role="menuitem" onClick={() => runFileAction(onOpenProjects)}>
+              <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 8v4M6 10h4']} /> Projects
+            </button>
+            <div className="tb-menu-divider" role="separator" />
+            <button type="button" role="menuitem" onClick={() => runFileAction(onSave)}>
+              <Icon d={['M2 2h9.5L14 4.5V14H2z', 'M5 9h6v5H5z', 'M5 2v3.5h5V2']} /> Save
+            </button>
+            <button type="button" role="menuitem" onClick={() => runFileAction(() => fileRef.current?.click())}>
+              <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> Load
+            </button>
+          </div>
+        </div>
         <button className="tb-btn" onClick={onRandomize} title="Generate a random seed">
           <svg viewBox="0 0 16 16">
             <rect x="2" y="2" width="12" height="12" rx="2.5" stroke="currentColor" fill="none" strokeWidth="1.2" />
             <circle cx="5.5" cy="5.5" r="1.1" fill="currentColor" /><circle cx="10.5" cy="10.5" r="1.1" fill="currentColor" />
             <circle cx="10.5" cy="5.5" r="1.1" fill="currentColor" /><circle cx="5.5" cy="10.5" r="1.1" fill="currentColor" />
           </svg>
-          <span className="tb-text">Randomize</span>
-        </button>
-        <button className="tb-btn" onClick={onSave} title="Save seed + parameters as JSON">
-          <svg viewBox="0 0 16 16">
-            <path d="M2 2h9.5L14 4.5V14H2z" stroke="currentColor" fill="none" strokeWidth="1.2" />
-            <rect x="5" y="9" width="6" height="5" stroke="currentColor" fill="none" strokeWidth="1.2" />
-            <rect x="5" y="2" width="5" height="3.5" stroke="currentColor" fill="none" strokeWidth="1.2" />
-          </svg>
-          <span className="tb-text">Save</span>
-        </button>
-        <button className="tb-btn" onClick={() => fileRef.current.click()} title="Load seed + parameters from JSON">
-          <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> <span className="tb-text">Load</span>
+          <span className="tb-text tb-action-label">Randomize</span>
         </button>
         <button
           className={`tb-btn${paintMode ? ' active' : ''}`}
@@ -123,7 +113,7 @@ export default function TopBar({
           title="Paint terrain height, biomes, and masks"
         >
           <svg viewBox="0 0 16 16"><path d="M3 12c2-4 5-7 10-9-2 5-5 8-9 10z" stroke="currentColor" fill="none" strokeWidth="1.2"/><path d="M4 13c-1 .5-1.5 1-2 1 0-.7.4-1.5 1-2" stroke="currentColor" fill="none" strokeWidth="1.2"/></svg>
-          <span className="tb-text">Paint</span>
+          <span className="tb-text tb-action-label">Paint</span>
         </button>
       </div>
 
@@ -141,6 +131,43 @@ export default function TopBar({
             <span className="tb-text">{loading.label}</span>
           </span>
         )}
+        <button
+          type="button"
+          className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
+          onClick={onOpenSettingsSearch}
+          title="Search settings (Ctrl+K)"
+          aria-pressed={settingsSearchOpen}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" fill="none" strokeWidth="1.2" />
+            <path d="M10.5 10.5L14 14" stroke="currentColor" fill="none" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+          <span className="tb-text">Search settings</span>
+          <span className="tb-shortcut">Ctrl+K</span>
+        </button>
+        <button className="tb-btn tb-icon-btn tb-edit-history" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <path d="M5.5 4.5L2.5 7.5L5.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2.5 7.5H9.5a4 4 0 0 1 0 8H7" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          className={`tb-btn tb-icon-btn${activePanel === 'history' ? ' active' : ''}`}
+          onClick={onOpenHistory}
+          title="Creator history"
+          aria-label="Creator history"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <circle cx="8" cy="8" r="5.7" stroke="currentColor" fill="none" strokeWidth="1.25" />
+            <path d="M8 4.6V8l2.5 1.6" stroke="currentColor" fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button className="tb-btn tb-icon-btn tb-edit-history" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)" aria-label="Redo">
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <path d="M10.5 4.5L13.5 7.5L10.5 10.5" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M13.5 7.5H6.5a4 4 0 0 0 0 8H9" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
         <button
           className={`tb-btn primary${activePanel === 'export' ? ' active' : ''}`}
           onClick={() => onOpenPanel('export')}

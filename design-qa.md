@@ -37,4 +37,23 @@ Implementation evidence: browser-rendered capture of `http://127.0.0.1:6061` in 
 - Add explicit rename, duplicate, and delete actions to the project table overflow menu.
 - Add optional project-thumbnail refresh from the inspector.
 
+## Top bar iteration — 2026-07-10
+
+Source visual truth: user-approved top-bar concept from the current conversation.
+
+Implementation evidence: browser-rendered capture of the local editor at desktop viewport.
+
+- **Header hierarchy:** Search remains visible; File consolidates New, Projects, Save, and Load; Randomize and Paint remain adjacent; Tile / Infinite World / Planet stays centered; Export remains primary on the right.
+- **Interaction:** File opens as an accessible menu, exposes New / Projects / Save / Load, closes on Escape, and closes when clicking outside.
+- **Regression check:** Left rail, terrain canvas, world-mode switcher, Export, and bottom status bar remain present and functional.
+- **Console:** No browser errors or warnings observed.
+
+## Top bar annotation pass — 2026-07-10
+
+- **Order:** File, Randomize, Paint, Search, centered world modes, Creator history, Export, then utilities.
+- **Centering:** World modes use a fixed header midpoint, independent of the left and right control widths.
+- **Responsive fit:** At medium desktop widths, low-priority Undo/Redo buttons and Randomize/Paint labels collapse so the centered mode switcher never overlaps the search field.
+- **Browser verification:** Header geometry measured at 1280px: mode center 640px, with the left action group ending at 506px and the mode group starting at 526px.
+- **File menu regression:** New, Projects, Save, and Load remain present and the menu opens successfully after the reorder.
+
 final result: passed

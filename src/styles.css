@@ -59,6 +59,7 @@ body {
 #topbar {
   display: flex;
   align-items: center;
+  position: relative;
   gap: 12px;
   height: 46px;
   flex: 0 0 46px;
@@ -70,10 +71,14 @@ body {
 .tb-group { display: flex; align-items: center; gap: 6px; }
 .tb-brand { gap: 9px; margin-right: 8px; }
 .tb-center {
-  flex: 1 1 auto;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  flex: 0 0 auto;
   justify-content: center;
   min-width: 0;
   gap: 8px;
+  z-index: 1;
 }
 .logo { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
 .app-name { font-weight: 700; letter-spacing: 1.5px; font-size: 13px; color: var(--text-bright); }
@@ -81,6 +86,9 @@ body {
 .tb-brand-button:hover .app-name { color: var(--accent); }
 .app-version { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
 .tb-right { margin-left: auto; }
+.tb-actions { min-width: 0; }
+.tb-right { min-width: 0; }
+.tb-search-btn { max-width: 190px; }
 
 .tb-btn {
   display: inline-flex;
@@ -110,6 +118,8 @@ body {
 }
 .tb-btn svg { width: 14px; height: 14px; }
 .tb-btn .caret { width: 8px; height: 8px; }
+.tb-file-btn { gap: 7px; }
+.tb-file-caret { width: 12px !important; height: 12px !important; margin-left: 1px; }
 .tb-icon-btn { padding: 0 7px; }
 .tb-icon-btn:disabled:hover { background: transparent; color: var(--text-muted); border-color: transparent; }
 .tb-search-btn {
@@ -211,6 +221,9 @@ body {
 }
 .tb-menu.open { display: flex; }
 .tb-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: none;
   border: none;
   color: var(--text-main);
@@ -221,7 +234,10 @@ body {
   border-radius: 4px;
   cursor: var(--cursor-pointer);
 }
+.tb-menu button svg { width: 14px; height: 14px; color: var(--text-muted); flex: 0 0 auto; }
 .tb-menu button:hover { background: var(--accent-bg); color: var(--accent); }
+.tb-menu button:hover svg { color: var(--accent); }
+.tb-menu-divider { height: 1px; margin: 4px 6px; background: var(--border-subtle); }
 
 /* ============ APP SHELL (toolbar | viewport | floating drawer) ============ */
 .app-shell {
@@ -3199,9 +3215,23 @@ input[type="color"].palette-color-input {
 }
 
 /* ============ RESPONSIVE ============ */
+@media (max-width: 1360px) and (min-width: 821px) {
+  .tb-actions { gap: 2px; }
+  .tb-actions .tb-btn { padding-left: 7px; padding-right: 7px; }
+  .tb-actions .tb-action-label,
+  .tb-actions .tb-edit-history { display: none; }
+  .tb-right .tb-search-btn {
+    width: 145px;
+    max-width: 145px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .tb-right .tb-search-btn .tb-shortcut { display: none; }
+}
 @media (max-width: 1180px) {
   /* collapse secondary top-bar button labels; keep icons */
   .tb-actions .tb-text { display: none; }
+  .tb-right .tb-edit-history { display: none; }
   .tb-search-btn .tb-text { display: none; }
 }
 @media (max-width: 900px) {
@@ -3816,7 +3846,7 @@ input[type="color"].palette-color-input {
   .app-name { display: none; }
   .app-version { display: none; }
   .tb-group, .tb-segment { flex: 0 0 auto; gap: 2px; }
-  .tb-center { flex: 0 0 auto; margin: 0; gap: 4px; }
+  .tb-center { position: static; transform: none; flex: 0 0 auto; margin: 0; gap: 4px; }
   .tb-right { margin-left: auto; flex-shrink: 0; }
   #topbar .tb-segment { display: none; }
   .viewport-mode-bar { display: flex; }
