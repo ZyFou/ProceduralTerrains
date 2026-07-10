@@ -75,7 +75,7 @@ export const PERF_PRESETS = {
     label: 'Performance',
     onDemandStudio: true,
     renderScale: 0.65, resolutionScale: 0.5, lodDistanceScale: 0.5,
-    viewRadius: 6, maxCreatesPerFrame: 4, triangleBudget: 500_000,
+    viewRadius: 6, maxCreatesPerFrame: 0, triangleBudget: 500_000,
     cullingAggressiveness: 1.5,
     waterQuality: 0, waterReflection: 0.6, waterDetail: 0.4, waterWaves: 0.7,
     waterDistance: 0.6, fogDistance: 0.8,
@@ -93,7 +93,7 @@ export const PERF_PRESETS = {
     label: 'Balanced',
     onDemandStudio: true,
     renderScale: 0.8, resolutionScale: 0.75, lodDistanceScale: 0.75,
-    viewRadius: 10, maxCreatesPerFrame: 6, triangleBudget: 900_000,
+    viewRadius: 10, maxCreatesPerFrame: 0, triangleBudget: 900_000,
     cullingAggressiveness: 1.2,
     waterQuality: 1, waterReflection: 0.85, waterDetail: 0.7, waterWaves: 0.85,
     waterDistance: 0.8, fogDistance: 0.9,
@@ -111,7 +111,7 @@ export const PERF_PRESETS = {
     label: 'High',
     onDemandStudio: false,
     renderScale: 1.0, resolutionScale: 1.0, lodDistanceScale: 1.0,
-    viewRadius: 12, maxCreatesPerFrame: 8, triangleBudget: 1_600_000,
+    viewRadius: 12, maxCreatesPerFrame: 0, triangleBudget: 1_600_000,
     cullingAggressiveness: 1.0,
     waterQuality: 2, waterReflection: 1.0, waterDetail: 1.0, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.0,
@@ -129,7 +129,7 @@ export const PERF_PRESETS = {
     label: 'Ultra',
     onDemandStudio: false,
     renderScale: 1.0, resolutionScale: 1.25, lodDistanceScale: 1.4,
-    viewRadius: 16, maxCreatesPerFrame: 12, triangleBudget: 2_600_000,
+    viewRadius: 16, maxCreatesPerFrame: 0, triangleBudget: 2_600_000,
     cullingAggressiveness: 0.8,
     waterQuality: 2, waterReflection: 1.2, waterDetail: 1.2, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.2,
@@ -259,7 +259,7 @@ export function sanitizePerfSettings(settings) {
   s.viewRadius = Math.round(clamp(+s.viewRadius || 12, PERF_LIMITS.viewRadius));
   {
     const creates = Number(s.maxCreatesPerFrame);
-    s.maxCreatesPerFrame = Math.round(clamp(Number.isFinite(creates) ? creates : 6, PERF_LIMITS.maxCreatesPerFrame));
+    s.maxCreatesPerFrame = Math.round(clamp(Number.isFinite(creates) ? creates : 0, PERF_LIMITS.maxCreatesPerFrame));
   }
   s.triangleBudget = Math.round(clamp(+s.triangleBudget || 1_500_000, PERF_LIMITS.triangleBudget));
   s.cullingAggressiveness = clamp(+s.cullingAggressiveness || 1, PERF_LIMITS.cullingAggressiveness);

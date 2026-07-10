@@ -12,7 +12,7 @@ import { MergeQuadtree } from './MergeQuadtree.js';
 
 const LOD_RESOLUTIONS = [64, 32, 16, 8];
 const DEFAULT_LOD_DISTANCES = [4, 8, 14];   // × chunkSize
-const DEFAULT_MAX_CREATES = 6;
+const DEFAULT_MAX_CREATES = 0;
 
 export class InfiniteWorld {
   /**

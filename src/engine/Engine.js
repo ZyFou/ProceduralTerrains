@@ -1982,7 +1982,7 @@ export class Engine {
 
   _studioChunkCreatesPerFrame() {
     const n = Number(this.perf?.maxCreatesPerFrame);
-    if (!Number.isFinite(n)) return 6;
+    if (!Number.isFinite(n)) return 0;
     if (n <= 0) return Infinity;
     return Math.max(1, Math.round(n));
   }

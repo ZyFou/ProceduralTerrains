@@ -1245,7 +1245,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && (
+          {showStudioUI && isStudio && !landingMode && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
