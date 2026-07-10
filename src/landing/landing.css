@@ -657,7 +657,7 @@ body:has(.landing-overlay) {
 .landing-main-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding-bottom: 21px; border-bottom: 1px solid var(--border-subtle); }
 .landing-main-heading span { margin-bottom: 6px; }
 .landing-main-heading h1 { margin: 0; color: var(--text-bright); font-size: 21px; line-height: 1; font-weight: 650; letter-spacing: -.02em; }
-.landing-project-table { display: grid; margin-top: 15px; border-top: 1px solid var(--border-subtle); }
+.landing-project-table { display: grid; margin-top: 15px; }
 .landing-project-table-head, .landing-project-table > button { display: grid; grid-template-columns: minmax(200px, 1.6fr) minmax(120px, .7fr) minmax(150px, .7fr); gap: 18px; align-items: center; min-height: 54px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); }
 .landing-project-table-head { min-height: 30px; color: var(--text-dim); font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .landing-project-table > button { border-right: 1px solid transparent; border-left: 1px solid transparent; background: transparent; color: var(--text-muted); font: 12px var(--font); text-align: left; cursor: var(--cursor-pointer); }

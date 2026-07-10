@@ -335,6 +335,9 @@ export default function App() {
     if (!eng) return;
     const template = getProjectTemplate(templateId);
     eng.newProject();
+    // A new terrain is a new document. Do not let saveCurrentProject reuse the
+    // id of whichever project was previously open.
+    setCurrentProject(null);
     // Every launch starts from the Root's session seed; give each chosen
     // template a stable-but-fresh variant instead of reverting to seed 1337.
     const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
@@ -354,6 +357,12 @@ export default function App() {
       eng.loadSeedJSON(project.terrain);
       setCurrentProject(normalizeProject(project));
       showToast(`Opened ${project.metadata?.name ?? 'terrain project'}`, 'success');
+    };
+    const onPreviewProject = (event) => {
+      const project = event.detail?.project;
+      const eng = engineRef.current;
+      if (!project?.terrain || !eng) return;
+      eng.loadSeedJSON(project.terrain, { silent: true });
     };
     const previewSeed = (templateId) => {
       const index = Math.max(0, PROJECT_TEMPLATES.findIndex((item) => item.id === templateId));
@@ -391,14 +400,19 @@ export default function App() {
       // End the first-run preview bake on Blank so the visible background is a
       // fresh session terrain rather than the final template in the queue.
       queueTemplatePreview('blank', { silent: true });
+      templatePreviewQueueRef.current = templatePreviewQueueRef.current
+        .then(() => window.dispatchEvent(new Event('terrain-template:preload-complete')))
+        .catch(() => {});
     };
     window.addEventListener('terrain-project:new', onNewProject);
     window.addEventListener('terrain-project:open', onOpenProject);
+    window.addEventListener('terrain-project:preview', onPreviewProject);
     window.addEventListener('terrain-template:preview', onPreviewTemplate);
     window.addEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     return () => {
       window.removeEventListener('terrain-project:new', onNewProject);
       window.removeEventListener('terrain-project:open', onOpenProject);
+      window.removeEventListener('terrain-project:preview', onPreviewProject);
       window.removeEventListener('terrain-template:preview', onPreviewTemplate);
       window.removeEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     };

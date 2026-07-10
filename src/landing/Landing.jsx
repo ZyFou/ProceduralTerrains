@@ -15,6 +15,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+  const [templatePreviewsReady, setTemplatePreviewsReady] = useState(false);
   const [templateThumbs, setTemplateThumbs] = useState(() => Object.fromEntries(PROJECT_TEMPLATES.map((template) => [template.id, sessionStorage.getItem(`terrain-template-preview:${template.id}`)]).filter(([, image]) => image)));
   const [previewProgress, setPreviewProgress] = useState(() => ({ completed: 0, total: PROJECT_TEMPLATES.length }));
   const fileRef = useRef(null);
@@ -35,13 +36,20 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       if (templateId && image) setTemplateThumbs((current) => ({ ...current, [templateId]: image }));
     };
     const onPreviewProgress = (event) => setPreviewProgress(event.detail ?? { completed: 0, total: PROJECT_TEMPLATES.length });
+    const onPreviewComplete = () => setTemplatePreviewsReady(true);
     window.addEventListener('terrain-template:thumbnail', onThumbnail);
     window.addEventListener('terrain-template:progress', onPreviewProgress);
+    window.addEventListener('terrain-template:preload-complete', onPreviewComplete);
     const preloadTimer = window.setTimeout(() => window.dispatchEvent(new Event('terrain-template:preload')), 100);
-    return () => { window.removeEventListener('terrain-template:thumbnail', onThumbnail); window.removeEventListener('terrain-template:progress', onPreviewProgress); window.clearTimeout(preloadTimer); };
+    return () => { window.removeEventListener('terrain-template:thumbnail', onThumbnail); window.removeEventListener('terrain-template:progress', onPreviewProgress); window.removeEventListener('terrain-template:preload-complete', onPreviewComplete); window.clearTimeout(preloadTimer); };
   }, [bootReady]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  useEffect(() => {
+    if (!bootReady || !templatePreviewsReady || view !== 'projects' || !selectedProject) return;
+    window.dispatchEvent(new CustomEvent('terrain-project:preview', { detail: { project: selectedProject } }));
+  }, [bootReady, selectedProject, templatePreviewsReady, view]);
+
   const template = getProjectTemplate(selectedTemplateId);
   const inspector = selectedProject ? {
     type: 'project', name: selectedProject.metadata.name, description: selectedProject.metadata.description || 'Local terrain project.', stats: projectStats(selectedProject),
@@ -58,6 +66,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     onLaunch();
   };
   const selectTemplate = (id) => { setSelectedTemplateId(id); setSelectedProjectId(null); setView('templates'); dispatch('terrain-template:preview', { templateId: id }); };
+  const openTemplates = () => selectTemplate(PROJECT_TEMPLATES[0].id);
+  const selectProject = (project) => { setSelectedProjectId(project.id); setView('projects'); };
   const onImport = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -101,12 +111,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   };
 
   return (
-    <div className={`landing landing-overlay landing-workspace${view === 'templates' ? ' has-live-terrain' : ''}${exiting ? ' exiting' : ''}`}>
+    <div className={`landing landing-overlay landing-workspace${view === 'templates' || selectedProject ? ' has-live-terrain' : ''}${exiting ? ' exiting' : ''}`}>
       <header className="landing-workspace-topbar">
         <button type="button" className="landing-workspace-brand" onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }} title="Return to main menu"><Logo size={23} /><strong>{APP_NAME}</strong></button>
         <nav className="landing-workspace-tabs" aria-label="Project workspace">
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}>Projects</button>
-          <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => { setView('templates'); setSelectedProjectId(null); }}>Templates</button>
+          <button type="button" className={view === 'templates' ? 'active' : ''} onClick={openTemplates}>Templates</button>
         </nav>
         <div className="landing-workspace-top-actions"><button type="button" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={15} /> Import</button><span>v{APP_VERSION}</span><a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" title="Open GitHub repository" aria-label="Open GitHub repository"><FaGithub size={16} /></a></div>
       </header>
@@ -133,7 +143,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <div className="landing-main-heading"><div><span>Workspace</span><h1>Recent projects</h1></div><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}><FilePlus2 size={16} /> New terrain</button></div>
             {projects.length ? <div className="landing-project-table" role="list">
               <div className="landing-project-table-head"><span>Name</span><span>Template</span><span>Last modified</span></div>
-              {projects.map((project) => { const stats = projectStats(project); return <button type="button" role="listitem" className={project.id === selectedProjectId ? 'selected' : ''} key={project.id} onClick={() => setSelectedProjectId(project.id)} onDoubleClick={() => open(project)}><span className="landing-project-name">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <FolderOpen size={19} />}<strong>{project.metadata.name}</strong></span><span>{project.metadata.tags[0] ?? 'Terrain'}</span><span>{dateLabel(project.metadata.modified)}</span></button>; })}
+              {projects.map((project) => { const stats = projectStats(project); return <button type="button" role="listitem" className={project.id === selectedProjectId ? 'selected' : ''} key={project.id} onClick={() => selectProject(project)} onDoubleClick={() => open(project)}><span className="landing-project-name">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <FolderOpen size={19} />}<strong>{project.metadata.name}</strong></span><span>{project.metadata.tags[0] ?? 'Terrain'}</span><span>{dateLabel(project.metadata.modified)}</span></button>; })}
             </div> : <div className="landing-empty-workspace"><FolderOpen size={30} /><strong>No projects yet</strong><span>Create a terrain from a template or import an existing project.</span><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}>Create terrain</button></div>}
           </> : <>
             <div className="landing-main-heading"><div><span>Workspace</span><h1>Terrain templates</h1></div></div>

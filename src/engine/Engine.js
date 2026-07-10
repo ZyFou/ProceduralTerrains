@@ -4733,13 +4733,13 @@ export class Engine {
     this.cb.onToast('Seed saved as JSON');
   }
 
-  loadSeedJSON(json) {
+  loadSeedJSON(json, { silent = false } = {}) {
     const src = json?.params && typeof json.params === 'object' ? json.params : json;
     if (!src || typeof src !== 'object' || !('seed' in src)) {
       this.cb.onToast('Not a valid terrain seed file');
       return;
     }
-    this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
+    if (!silent) this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
     const next = { ...DEFAULT_PARAMS };
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
@@ -4777,7 +4777,7 @@ export class Engine {
     if (json?.paint) this.paintMode?.load(json.paint);
     this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
     this.terrainAnalysis?.load(json?.creatorTools?.analysis);
-    this.cb.onToast(`Loaded seed ${this.params.seed}`);
+    if (!silent) this.cb.onToast(`Loaded seed ${this.params.seed}`);
   }
 
   // ------------------------------------------------------- undo / redo state
