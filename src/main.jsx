@@ -3,6 +3,7 @@ import Root from './Root.jsx';
 import { LoadingProvider } from './state/loading.jsx';
 import './cursors.css';
 import './styles.css';
+import './landing/mobile.css';
 
 // No StrictMode on purpose: its dev double-mount would create (and tear down)
 // a second WebGL context + full terrain board on every load.
