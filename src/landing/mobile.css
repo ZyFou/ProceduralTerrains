@@ -1,0 +1,406 @@
+/* Mobile project hub overrides.
+   Keep the desktop workspace unchanged while giving phones a single-column,
+   touch-friendly flow with an always-available project action. */
+
+@media (max-width: 650px) {
+  .landing-workspace {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .landing-workspace-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 54px 42px;
+    min-height: 96px;
+    background: rgba(13, 13, 13, 0.98);
+    backdrop-filter: blur(14px);
+  }
+
+  .landing-workspace-brand {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    padding: 0 14px;
+  }
+
+  .landing-workspace-brand strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .landing-workspace-top-actions {
+    grid-column: 2;
+    grid-row: 1;
+    gap: 5px;
+    padding: 0 10px 0 0;
+  }
+
+  .landing-workspace-top-actions > span {
+    display: none;
+  }
+
+  .landing-workspace-top-actions button {
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
+  .landing-workspace-top-actions a {
+    width: 34px;
+    height: 34px;
+    border-left: 0;
+    border-radius: 5px;
+  }
+
+  .landing-workspace-tabs {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .landing-workspace-tabs button {
+    min-width: 0;
+    min-height: 42px;
+    border: 0;
+    border-right: 1px solid var(--border-subtle);
+  }
+
+  .landing-workspace-tabs button:last-child {
+    border-right: 0;
+  }
+
+  .landing-workspace-body {
+    display: flex;
+    flex-direction: column;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  /* The desktop sidebar duplicates controls already available in the mobile
+     header and workspace. Keep only its credits row and place it last. */
+  .landing-workspace-sidebar {
+    order: 2;
+    display: flex;
+    min-height: auto;
+    border-right: 0;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 0;
+  }
+
+  .landing-workspace-sidebar .landing-sidebar-section,
+  .landing-workspace-sidebar .landing-sidebar-footer {
+    display: none;
+  }
+
+  .landing-sidebar-credits {
+    width: 100%;
+    padding: 14px 16px calc(82px + env(safe-area-inset-bottom));
+    border-top: 0;
+    background: var(--bg-panel);
+  }
+
+  .landing-sidebar-credits > button {
+    min-height: 34px;
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  .landing-sidebar-socials a {
+    width: 34px;
+    height: 34px;
+  }
+
+  .landing-workspace-main {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+    min-height: calc(100dvh - 96px);
+    overflow: visible;
+    padding: 20px 16px 96px;
+  }
+
+  .landing-main-heading {
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+
+  .landing-main-heading h1 {
+    font-size: clamp(22px, 7vw, 28px);
+    line-height: 1.05;
+  }
+
+  .landing-main-heading > button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 7px;
+  }
+
+  .landing-empty-workspace {
+    min-height: calc(100dvh - 280px);
+    padding: 40px 12px;
+    gap: 12px;
+  }
+
+  .landing-empty-workspace svg {
+    width: 42px;
+    height: 42px;
+  }
+
+  .landing-empty-workspace strong {
+    font-size: 18px;
+  }
+
+  .landing-empty-workspace span {
+    max-width: 300px;
+    font-size: 13px;
+  }
+
+  .landing-empty-workspace button {
+    min-height: 44px;
+    margin-top: 10px;
+    padding: 0 18px;
+    border-radius: 7px;
+    font-size: 13px;
+  }
+
+  /* Project rows become cards instead of a compressed desktop table. */
+  .landing-project-table {
+    gap: 10px;
+    margin-top: 14px;
+    border-top: 0;
+  }
+
+  .landing-project-table-head {
+    display: none;
+  }
+
+  .landing-project-table > button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    min-height: 66px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--bg-panel);
+  }
+
+  .landing-project-table > button > span:nth-child(2) {
+    display: none;
+  }
+
+  .landing-project-table > button > span:nth-child(3) {
+    display: block;
+    color: var(--text-dim);
+    font-size: 10.5px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .landing-project-name {
+    min-width: 0;
+  }
+
+  .landing-project-name strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .landing-project-name img {
+    width: 54px;
+    height: 42px;
+    flex: 0 0 auto;
+    border-radius: 5px;
+  }
+
+  /* Two-column, image-first template cards fit common phone widths. */
+  .landing-template-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .landing-template-grid button {
+    align-content: start;
+    min-height: 178px;
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .landing-template-grid button > img {
+    width: 100%;
+    height: 92px;
+    border-radius: 5px;
+    object-fit: cover;
+  }
+
+  .landing-template-grid button > svg {
+    width: 100%;
+    height: 92px;
+    padding: 30px;
+    border-radius: 5px;
+    background: var(--bg-control);
+  }
+
+  .landing-template-grid strong {
+    font-size: 13px;
+  }
+
+  .landing-template-grid span {
+    font-size: 10.5px;
+    line-height: 1.4;
+  }
+
+  /* The desktop inspector is the only place that can start a selected
+     template or open a selected project. On phones it becomes a persistent
+     bottom action bar, so those actions can never fall outside the viewport. */
+  .landing-workspace-inspector {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 66px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border-strong);
+    border-left: 0;
+    background: rgba(13, 13, 13, 0.98);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(14px);
+  }
+
+  .landing-inspector-heading {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .landing-inspector-heading > span {
+    margin-bottom: 3px;
+    font-size: 9px;
+  }
+
+  .landing-inspector-heading h2 {
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .landing-inspector-icon,
+  .landing-inspector-details,
+  .landing-inspector-manage-actions {
+    display: none;
+  }
+
+  .landing-inspector-actions {
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .landing-inspector-action {
+    min-height: 42px;
+    margin: 0;
+    padding: 0 15px;
+    border-radius: 7px;
+    white-space: nowrap;
+  }
+
+  .landing-preview-loader {
+    width: calc(100% - 24px);
+    max-width: 360px;
+  }
+
+  .landing-credits-dialog {
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 390px) {
+  .landing-workspace-brand {
+    padding-left: 10px;
+  }
+
+  .landing-workspace-brand strong {
+    font-size: 12px;
+  }
+
+  .landing-workspace-top-actions {
+    padding-right: 6px;
+  }
+
+  .landing-workspace-top-actions button {
+    padding: 0 8px;
+  }
+
+  .landing-workspace-main {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .landing-main-heading {
+    align-items: flex-start;
+  }
+
+  .landing-main-heading > button {
+    padding: 0 10px;
+  }
+
+  .landing-template-grid {
+    gap: 8px;
+  }
+
+  .landing-template-grid button {
+    min-height: 168px;
+    padding: 8px;
+  }
+
+  .landing-template-grid button > img,
+  .landing-template-grid button > svg {
+    height: 84px;
+  }
+
+  .landing-workspace-inspector {
+    gap: 8px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .landing-inspector-action {
+    padding: 0 12px;
+  }
+}
+
+@media (max-width: 340px) {
+  .landing-workspace-brand strong {
+    display: none;
+  }
+
+  .landing-template-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-template-grid button {
+    min-height: 150px;
+  }
+}
