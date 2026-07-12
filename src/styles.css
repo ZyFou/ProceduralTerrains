@@ -3896,8 +3896,8 @@ input[type="color"].palette-color-input {
 
   .minimap-overlay-container {
     top: auto;
-    left: max(10px, env(safe-area-inset-left));
-    right: auto;
+    left: auto;
+    right: max(10px, env(safe-area-inset-right));
     bottom: calc(12px + env(safe-area-inset-bottom));
     width: auto;
     background: var(--bg-panel-soft);
@@ -3909,13 +3909,16 @@ input[type="color"].palette-color-input {
   .minimap-overlay-container.collapsed {
     width: auto;
     padding: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
     overflow: visible;
   }
   .minimap-overlay-container.collapsed .minimap-fab {
     display: flex;
-    background: transparent;
-    border: none;
-    box-shadow: none;
+    background: var(--bg-panel-soft);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-panel);
   }
   .minimap-overlay-container.collapsed .minimap-panel { display: none; }
   .minimap-overlay-container:not(.collapsed) .minimap-fab { display: none; }
@@ -3929,8 +3932,8 @@ input[type="color"].palette-color-input {
     bottom: calc(12px + env(safe-area-inset-bottom));
   }
   .minimap-overlay-container.drawer-open {
-    right: auto;
-    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    left: auto;
     opacity: 0;
     pointer-events: none;
   }

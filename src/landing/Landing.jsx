@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { CircleHelp, Copy, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStats, projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -118,14 +118,14 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}>Projects</button>
           <button type="button" className={view === 'templates' ? 'active' : ''} onClick={openTemplates}>Templates</button>
         </nav>
-        <div className="landing-workspace-top-actions"><button type="button" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={15} /> Import</button><span>v{APP_VERSION}</span><a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" title="Open GitHub repository" aria-label="Open GitHub repository"><FaGithub size={16} /></a></div>
+        <div className="landing-workspace-top-actions"><button type="button" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={15} /> Import</button><button type="button" className="landing-mobile-credits-trigger" onClick={() => setCreditsOpen(true)} aria-label="Open credits and links" title="Credits and links"><CircleHelp size={18} /></button><span>v{APP_VERSION}</span><a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" title="Open GitHub repository" aria-label="Open GitHub repository"><FaGithub size={16} /></a></div>
       </header>
 
       <div className="landing-workspace-body">
         <aside className="landing-workspace-sidebar">
           <div className="landing-sidebar-section">
             <span className="landing-sidebar-label">Create</span>
-            <button type="button" className="landing-create-button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}><Plus size={17} /> New terrain</button>
+            <button type="button" className="landing-create-button" onClick={() => create('blank')} disabled={!bootReady || exiting}><Plus size={17} /> New terrain</button>
           </div>
           <div className="landing-sidebar-section landing-sidebar-templates">
             <span className="landing-sidebar-label">Templates</span>
@@ -138,17 +138,22 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           </div>
         </aside>
 
-        <main className="landing-workspace-main">
+        <main className={`landing-workspace-main${view === 'templates' ? ' landing-workspace-templates' : ''}`}>
           {view === 'projects' ? <>
-            <div className="landing-main-heading"><div><span>Workspace</span><h1>Recent projects</h1></div><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}><FilePlus2 size={16} /> New terrain</button></div>
+            <div className="landing-main-heading"><div><span>Workspace</span><h1>Recent projects</h1></div><button type="button" onClick={() => create('blank')} disabled={!bootReady || exiting}><FilePlus2 size={16} /> New terrain</button></div>
             {projects.length ? <div className="landing-project-table" role="list">
               <div className="landing-project-table-head"><span>Name</span><span>Template</span><span>Last modified</span></div>
               {projects.map((project) => { const stats = projectStats(project); return <button type="button" role="listitem" className={project.id === selectedProjectId ? 'selected' : ''} key={project.id} onClick={() => selectProject(project)} onDoubleClick={() => open(project)}><span className="landing-project-name">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <FolderOpen size={19} />}<strong>{project.metadata.name}</strong></span><span>{project.metadata.tags[0] ?? 'Terrain'}</span><span>{dateLabel(project.metadata.modified)}</span></button>; })}
-            </div> : <div className="landing-empty-workspace"><FolderOpen size={30} /><strong>No projects yet</strong><span>Create a terrain from a template or import an existing project.</span><button type="button" onClick={() => selectTemplate('blank')} disabled={!bootReady || exiting}>Create terrain</button></div>}
+            </div> : <div className="landing-empty-workspace"><FolderOpen size={30} /><strong>No projects yet</strong><span>Create a terrain from a template or import an existing project.</span><button type="button" onClick={() => create('blank')} disabled={!bootReady || exiting}>Create terrain</button></div>}
           </> : <>
             <div className="landing-main-heading"><div><span>Workspace</span><h1>Terrain templates</h1></div></div>
             <div className="landing-template-grid">{PROJECT_TEMPLATES.map((item) => <button type="button" key={item.id} className={item.id === selectedTemplateId ? 'selected' : ''} onClick={() => selectTemplate(item.id)}>{templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : <LayoutTemplate size={20} />}<strong>{item.name}</strong><span>{item.description}</span></button>)}</div>
-          </>}
+            <button type="button" className="landing-mobile-template-start" onClick={() => create(template.id)} disabled={!bootReady || exiting}><FilePlus2 size={16} /> Create {template.name} terrain</button>
+            </>}
+          <footer className="landing-mobile-credits">
+            <button type="button" onClick={() => setCreditsOpen(true)}>Credits</button>
+            <div className="landing-sidebar-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer" aria-label="Open X profile" title="X"><FaXTwitter size={14} /></a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={15} /></a></div>
+          </footer>
         </main>
 
         <aside className="landing-workspace-inspector">
@@ -170,7 +175,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </aside>
       </div>
       {(!bootReady || previewProgress.completed < previewProgress.total) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>{bootReady ? 'Rendering terrain previews' : 'Starting terrain editor'}</strong><small>{bootReady ? `${previewProgress.completed} of ${previewProgress.total} real previews ready` : 'Preparing your random terrain workspace…'}</small></div>}
-      {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
+      {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} /> X / Twitter</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} /> Portfolio</a></div><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
+      <nav className="landing-mobile-nav" aria-label="Mobile workspace navigation">
+        <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}><FolderOpen size={19} /><span>Projects</span></button>
+        <button type="button" className="landing-mobile-nav-create" onClick={() => create(view === 'templates' ? template.id : 'blank')} disabled={!bootReady || exiting}><span><Plus size={22} /></span><b>{view === 'templates' ? 'Use template' : 'Create'}</b></button>
+        <button type="button" className={view === 'templates' ? 'active' : ''} onClick={openTemplates}><LayoutTemplate size={19} /><span>Templates</span></button>
+      </nav>
       <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImport} />
     </div>
   );
