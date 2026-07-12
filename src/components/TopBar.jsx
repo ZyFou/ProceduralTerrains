@@ -58,7 +58,7 @@ export default function TopBar({
   };
 
   return (
-    <header id="topbar">
+    <header id="topbar" className={fileMenuOpen ? 'file-menu-open' : ''}>
       <button type="button" className="tb-group tb-brand tb-brand-button tb-btn" onClick={onOpenProjects} title="Return to main menu">
         <svg className="logo" viewBox="0 0 24 24" fill="none">
           <path d="M3 18 L9 7 L13 13 L16 9 L21 18 Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />

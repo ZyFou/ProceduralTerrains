@@ -3841,6 +3841,9 @@ input[type="color"].palette-color-input {
     touch-action: pan-x;
   }
   #topbar::-webkit-scrollbar { display: none; }
+  #topbar.file-menu-open { overflow: visible; z-index: 40; }
+  #topbar.file-menu-open .tb-dropdown { z-index: 2; }
+  #topbar.file-menu-open .tb-menu { z-index: 41; }
   .tb-brand { margin-right: 0; flex: 0 0 auto; padding-right: 2px; }
   .tb-brand .logo { width: 18px; height: 18px; }
   .app-name { display: none; }
