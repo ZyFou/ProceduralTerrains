@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair } from 'lucide-react';
+import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair, Map } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
-  CURATED_LOCATIONS, ELEVATION_SOURCE, CUSTOM_AREA_LIMITS, describeCustomArea,
-  formatCoordinateDisplay, parseCoordinateInput,
+  CURATED_LOCATIONS, ELEVATION_SOURCE, IMAGERY_STYLES, CUSTOM_AREA_LIMITS, describeCustomArea,
+  formatCoordinateDisplay, parseCoordinateInput, resolveImageryStyle,
 } from '../../engine/terrain/RealWorldHeightmap.js';
 
 const IMPORT_MODE_OPTIONS = [
@@ -14,10 +14,16 @@ const IMPORT_MODE_OPTIONS = [
   { value: 'blend', label: 'Blend With Procedural' },
 ];
 
+const IMAGERY_STYLE_OPTIONS = Object.values(IMAGERY_STYLES).map((s) => ({
+  value: s.id,
+  label: s.label,
+}));
+
 const MAP_META = {
-  noise: { label: 'Noise Map', icon: <Waves size={15} strokeWidth={1.75} />, defaultOpen: false },
-  height: { label: 'Height Map', icon: <Mountain size={15} strokeWidth={1.75} />, defaultOpen: true },
-  biome: { label: 'Biome Map', icon: <Palette size={15} strokeWidth={1.75} />, defaultOpen: false },
+  noise: { label: 'Noise Map', icon: <Waves size={15} strokeWidth={1.75} />, defaultOpen: false, filePick: true },
+  height: { label: 'Height Map', icon: <Mountain size={15} strokeWidth={1.75} />, defaultOpen: true, filePick: true },
+  biome: { label: 'Biome Map', icon: <Palette size={15} strokeWidth={1.75} />, defaultOpen: false, filePick: true },
+  imagery: { label: 'Map Texture', icon: <Map size={15} strokeWidth={1.75} />, defaultOpen: true, filePick: false },
 };
 
 function FilePicker({ fileName, onPick }) {
@@ -50,6 +56,22 @@ function FilePicker({ fileName, onPick }) {
   );
 }
 
+function ImageryStyleSelect({ ctx }) {
+  const styleId = ctx.realWorldImageryStyle || 'satellite';
+  const style = resolveImageryStyle(styleId);
+  return (
+    <>
+      <SelectRow
+        label="Texture Style"
+        value={style.id}
+        options={IMAGERY_STYLE_OPTIONS}
+        onChange={(v) => ctx.onRealWorldImageryStyle?.(v)}
+      />
+      <p className="section-hint realworld-attribution">{style.attribution}</p>
+    </>
+  );
+}
+
 function ImportMapSection({ type, map, ctx, forceOpen = false }) {
   const meta = MAP_META[type];
   const settings = map?.settings ?? {
@@ -62,6 +84,7 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
   };
   const set = (key, value) => ctx.onTileMapSetting(type, key, value);
   const active = settings.mode !== 'disabled' && !!map;
+  const isImagery = type === 'imagery';
 
   return (
     <CollapsibleGroup
@@ -72,10 +95,17 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
       statusDot={active ? 'active' : undefined}
       settingId={`terrain.${type}Map`}
     >
-      <FilePicker
-        fileName={map?.fileName}
-        onPick={(file) => ctx.onImportTileMap(type, file)}
-      />
+      {meta.filePick ? (
+        <FilePicker
+          fileName={map?.fileName}
+          onPick={(file) => ctx.onImportTileMap(type, file)}
+        />
+      ) : (
+        <ImageryStyleSelect ctx={ctx} />
+      )}
+      {map?.fileName && !meta.filePick && (
+        <span className="file-picker-name">{map.fileName}</span>
+      )}
       {map?.preview && (
         <img
           src={map.preview}
@@ -97,11 +127,6 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
         options={IMPORT_MODE_OPTIONS}
         onChange={(v) => set('mode', v)}
       />
-      {settings.mode === 'replace' && (
-        <p className="section-hint">
-          {meta.label} is replacing procedural data. Some procedural settings may have reduced or no effect for this map type.
-        </p>
-      )}
       {settings.mode === 'blend' && (
         <SliderCtl
           def={{ label: 'Blend Strength', min: 0, max: 1, step: 0.01, digits: 2 }}
@@ -109,8 +134,12 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
           onChange={(v) => set('blend', v)}
         />
       )}
-      <ToggleRow label="Invert" value={!!settings.invert} onChange={(v) => set('invert', v)} />
-      <ToggleRow label="Normalize" value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
+      {!isImagery && (
+        <>
+          <ToggleRow label="Invert" value={!!settings.invert} onChange={(v) => set('invert', v)} />
+          <ToggleRow label="Normalize" value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
+        </>
+      )}
       {type === 'height' && (
         <>
           <SliderCtl
@@ -164,10 +193,7 @@ function RealWorldBrowser({ ctx }) {
       icon={<Globe size={15} strokeWidth={1.75} />}
       defaultOpen={false}
     >
-      <p className="section-hint">
-        Loads real Earth elevation as the height map. Fetches public terrain tiles from the internet.
-        Adding board tiles afterwards loads the neighboring real-world terrain automatically.
-      </p>
+      <ImageryStyleSelect ctx={ctx} />
       <div className="settings-search-wrap realworld-search">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
           <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
@@ -368,7 +394,7 @@ export default function ImportMapsContent({ ctx }) {
       </p>
       <RealWorldBrowser ctx={ctx} />
       <CustomAreaPicker ctx={ctx} />
-      {['height', 'noise', 'biome'].map((type) => (
+      {['height', 'imagery', 'noise', 'biome'].map((type) => (
         <ImportMapSection
           key={type}
           type={type}

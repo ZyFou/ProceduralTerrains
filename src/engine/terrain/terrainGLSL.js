@@ -62,14 +62,17 @@ uniform float uTileDebugView;                   // 0 off, 1 noise, 2 height, 3 b
 uniform sampler2D uImportNoiseTex;
 uniform sampler2D uImportHeightTex;
 uniform sampler2D uImportBiomeTex;
+uniform sampler2D uImportImageryTex;
 uniform float uImportNoiseMode;                 // 0 disabled/preview, 2 replace, 3 blend
 uniform float uImportHeightMode;
 uniform float uImportBiomeMode;
+uniform float uImportImageryMode;
 uniform float uImportNoiseBlend;
 uniform float uImportHeightBlend;
 uniform float uImportHeightStrength;
 uniform float uImportHeightOffset;
 uniform float uImportBiomeBlend;
+uniform float uImportImageryBlend;
 
 // Studio height bake region (world XZ). Single cell: origin=(-half,-half), span=boardSize.
 uniform vec2 uBakeOrigin;

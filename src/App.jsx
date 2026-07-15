@@ -85,7 +85,8 @@ export default function App() {
   const [tiles, setTiles] = useState([{ cx: 0, cz: 0 }]);
   const [tileAssemblyShape, setTileAssemblyShape] = useState('square');
   const [diskRadiusCells, setDiskRadiusCells] = useState(0);
-  const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null });
+  const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null, imagery: null });
+  const [realWorldImageryStyle, setRealWorldImageryStyle] = useState('satellite');
 
   const [worldMode, setWorldMode] = useState('studio');
   const [infiniteStats, setInfiniteStats] = useState(null);
@@ -228,6 +229,7 @@ export default function App() {
             scheduleRecordRef.current?.();
           },
           onImportedMaps: setImportedMaps,
+          onRealWorldImageryStyle: setRealWorldImageryStyle,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
             setTileDebug({ ...DEFAULT_TILE_DEBUG });
@@ -1151,6 +1153,8 @@ export default function App() {
     onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),
     onLoadRealWorldLocation: (id, opts) => engine().loadRealWorldLocation(id, opts),
     onLoadRealWorldCustom: (spec, opts) => engine().loadRealWorldCustom(spec, opts),
+    realWorldImageryStyle,
+    onRealWorldImageryStyle: (style) => engine().setRealWorldImageryStyle(style),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
     splineState, analysisState, creatorHistory,

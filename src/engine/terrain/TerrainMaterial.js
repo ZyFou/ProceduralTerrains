@@ -486,6 +486,20 @@ void main() {
   td.albedo = surf.albedo;
   n = surf.normal;
 
+#ifndef INFINITE_MODE
+  // Geo-aligned OpenTopoMap (or file) imagery — same UV region as the real-world
+  // height import. Applied after surface materials so the map reads as true albedo.
+  if (uImportImageryMode > 1.5) {
+    vec2 iuv = importHeightUvAt(xz);
+    if (iuv.x >= 0.0 && iuv.x <= 1.0 && iuv.y >= 0.0 && iuv.y <= 1.0) {
+      vec3 mapCol = texture2D(uImportImageryTex, clamp(iuv, 0.0, 1.0)).rgb;
+      td.albedo = (uImportImageryMode > 2.5)
+        ? mix(td.albedo, mapCol, uImportImageryBlend)
+        : mapCol;
+    }
+  }
+#endif
+
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
   float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
@@ -844,14 +858,17 @@ export function createTerrainUniforms() {
     uImportNoiseTex: { value: null },
     uImportHeightTex:{ value: null },
     uImportBiomeTex: { value: null },
+    uImportImageryTex: { value: null },
     uImportNoiseMode:{ value: 0.0 },
     uImportHeightMode:{ value: 0.0 },
     uImportBiomeMode:{ value: 0.0 },
+    uImportImageryMode:{ value: 0.0 },
     uImportNoiseBlend:{ value: 1.0 },
     uImportHeightBlend:{ value: 1.0 },
     uImportHeightStrength:{ value: 1.0 },
     uImportHeightOffset:{ value: 0.0 },
     uImportBiomeBlend:{ value: 1.0 },
+    uImportImageryBlend:{ value: 1.0 },
     // World rect the imported height map covers (originX, originZ, spanX, spanZ).
     // Kept in sync with the single origin cell by _syncImportedMapUniforms unless
     // a real-world import widens it to the tile-assembly union.

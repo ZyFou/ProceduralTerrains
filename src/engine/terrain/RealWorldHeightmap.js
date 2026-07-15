@@ -1,8 +1,11 @@
 // ============================================================================
-// Real-world heightmap source: fetches public elevation tiles for a curated
-// list of famous locations and decodes them into a normalized height field that
-// the existing Tile-mode import pipeline can consume (Engine.loadRealWorldLocation
-// → importedMaps.height.floatData → _rebuildImportedTexture).
+// Real-world heightmap + map-texture source: fetches public elevation tiles
+// (Terrarium / AWS) and geo-aligned RGB imagery for a curated list of famous
+// locations. Elevation feeds the Tile-mode height import pipeline
+// (Engine.loadRealWorldLocation → importedMaps.height.floatData →
+// _rebuildImportedTexture); imagery (satellite or topo) feeds
+// importedMaps.imagery on the same geoRef / Web Mercator grid so albedo lines
+// up with the mesh.
 //
 // Source: AWS Open Data "Terrain Tiles" in Terrarium encoding — public, no API
 // key, CORS-enabled, derived from SRTM/NED/etc. Elevation is packed across RGB:
@@ -19,6 +22,59 @@ const MAX_TILES_PER_AXIS = 6;          // safety cap: at most 6×6 = 36 tile fet
 const SEA_FILL = 'rgb(128,0,0)';       // Terrarium encoding of 0 m (decodes to elevation 0)
 
 export const ELEVATION_SOURCE = 'Elevation: Terrain Tiles (Terrarium) via AWS Open Data — Mapzen, SRTM & others';
+
+/** @typedef {'satellite' | 'opentopo'} ImageryStyleId */
+
+function wrapTileX(x, z) {
+  const max = Math.pow(2, z);
+  return ((x % max) + max) % max;
+}
+
+// Geo imagery styles — same Web Mercator grid as Terrarium elevation.
+// Satellite is the default (photo-like landcover); OpenTopoMap keeps the
+// cartographic overlay (roads / labels) as an optional view.
+export const IMAGERY_STYLES = {
+  satellite: {
+    id: 'satellite',
+    label: 'Satellite',
+    shortLabel: 'Satellite',
+    attribution: 'Imagery: Esri World Imagery — Esri, Maxar, Earthstar Geographics & others',
+    missingFill: '#243028',
+    tileUrl(z, x, y) {
+      // ArcGIS tile services use {z}/{y}/{x} (row/col), not OSM {z}/{x}/{y}.
+      const wx = wrapTileX(x, z);
+      return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${wx}`;
+    },
+  },
+  opentopo: {
+    id: 'opentopo',
+    label: 'Topo Map',
+    shortLabel: 'OpenTopoMap',
+    attribution: 'Map: © OpenTopoMap (CC-BY-SA) — © OpenStreetMap contributors, SRTM',
+    missingFill: '#d8d8d8',
+    tileUrl(z, x, y) {
+      const wx = wrapTileX(x, z);
+      const hosts = [
+        'https://a.tile.opentopomap.org',
+        'https://b.tile.opentopomap.org',
+        'https://c.tile.opentopomap.org',
+      ];
+      return `${hosts[(wx + y) % hosts.length]}/${z}/${wx}/${y}.png`;
+    },
+  },
+};
+
+export const DEFAULT_IMAGERY_STYLE = 'satellite';
+/** @deprecated use imageryAttributionFor(style) */
+export const IMAGERY_SOURCE = IMAGERY_STYLES.satellite.attribution;
+
+export function resolveImageryStyle(id) {
+  return IMAGERY_STYLES[id] || IMAGERY_STYLES[DEFAULT_IMAGERY_STYLE];
+}
+
+export function imageryAttributionFor(id) {
+  return resolveImageryStyle(id).attribution;
+}
 
 // Curated, roughly-square bounding boxes around recognizable terrain.
 export const CURATED_LOCATIONS = [
@@ -113,7 +169,16 @@ export const CUSTOM_AREA_LIMITS = {
 const MERCATOR_LAT_MAX = 85.051;
 const clampRange = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-const COORD_COMPONENT_RE = /^([+-]?)(\d+(?:\.\d+)?)\s*(?:°|\u00b0|deg)?\s*([NnSsEeWw])?$/;
+// Matches decimal degrees or DMS: 46.07621°N | 43° 20' 39.239" N
+const COORD_TOKEN_RE = /([+-]?)(\d+(?:\.\d+)?)\s*(?:°|deg)?(?:\s*(\d+(?:\.\d+)?)\s*['′])?(?:\s*(\d+(?:\.\d+)?)\s*["″])?\s*([NnSsEeWw])?/g;
+
+function normalizeCoordText(text) {
+  return String(text)
+    .trim()
+    .replace(/\u00b0/g, '°')
+    .replace(/[′ʼ]/g, "'")
+    .replace(/[″ʺ]/g, '"');
+}
 
 function applyHemisphere(deg, hemi) {
   if (!hemi) return deg;
@@ -123,35 +188,47 @@ function applyHemisphere(deg, hemi) {
   return deg;
 }
 
-function parseCoordComponent(raw, kind) {
-  const m = String(raw).trim().match(COORD_COMPONENT_RE);
-  if (!m) return null;
-  let value = parseFloat(`${m[1] || ''}${m[2]}`);
-  if (!Number.isFinite(value)) return null;
-  value = applyHemisphere(value, m[3]);
-  if (m[3]) {
-    const h = m[3].toUpperCase();
-    if (kind === 'lat' && h !== 'N' && h !== 'S') return null;
-    if (kind === 'lon' && h !== 'E' && h !== 'W') return null;
-  }
-  return value;
+function hemiOk(hemi, kind) {
+  if (!hemi) return true;
+  const h = hemi.toUpperCase();
+  if (kind === 'lat') return h === 'N' || h === 'S';
+  return h === 'E' || h === 'W';
+}
+
+function parseCoordToken(match, kind) {
+  const sign = match[1] || '';
+  const deg = parseFloat(`${sign}${match[2]}`);
+  const min = match[3] != null ? parseFloat(match[3]) : 0;
+  const sec = match[4] != null ? parseFloat(match[4]) : 0;
+  const hemi = match[5] || null;
+  if (![deg, min, sec].every(Number.isFinite)) return null;
+  if (!hemiOk(hemi, kind)) return null;
+  if (min < 0 || min >= 60 || sec < 0 || sec >= 60) return null;
+  const absDeg = Math.abs(deg) + min / 60 + sec / 3600;
+  const signed = deg < 0 || sign === '-' ? -absDeg : absDeg;
+  return applyHemisphere(signed, hemi);
 }
 
 /**
  * Parse pasted or typed coordinates into decimal { lat, lon }.
- * Accepts "46.07621°N, 6.96224°E", "37.21160°N, 112.98409°W", signed
- * decimals, and optional spaces around the separator.
+ * Accepts "46.07621°N, 6.96224°E", "37.21160°N, 112.98409°W",
+ * DMS like 43° 20' 39.239" N 3° 12' 56.862" E, and signed decimals.
  */
 export function parseCoordinateInput(text) {
   if (text == null) return null;
-  const s = String(text).trim();
+  const s = normalizeCoordText(text);
   if (!s) return null;
 
-  const parts = s.split(/[,;\t]/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length !== 2) return null;
+  const tokens = [...s.matchAll(COORD_TOKEN_RE)].filter((m) => m[0].trim().length > 0);
+  if (tokens.length !== 2) return null;
 
-  const lat = parseCoordComponent(parts[0], 'lat');
-  const lon = parseCoordComponent(parts[1], 'lon');
+  // Reject leftover junk between/around the two coordinate tokens.
+  const rebuilt = tokens.map((t) => t[0]).join('').replace(/[\s,;\t]+/g, '');
+  const stripped = s.replace(/[\s,;\t]+/g, '');
+  if (rebuilt !== stripped) return null;
+
+  const lat = parseCoordToken(tokens[0], 'lat');
+  const lon = parseCoordToken(tokens[1], 'lon');
   if (lat == null || lon == null) return null;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
   return { lat, lon };
@@ -233,18 +310,58 @@ function pickZoom(loc) {
   return 1;
 }
 
-function loadTile(z, x, y, signal) {
+function loadTile(url, signal) {
   return new Promise((resolve) => {
-    const max = Math.pow(2, z);
-    const wx = ((x % max) + max) % max;            // wrap longitude
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);             // tolerate a missing tile
     if (signal) signal.addEventListener('abort', () => { img.src = ''; resolve(null); }, { once: true });
-    img.src = `${ENDPOINT}/${z}/${wx}/${y}.png`;
+    img.src = url;
   });
+}
+
+function elevationTileUrl(z, x, y) {
+  return `${ENDPOINT}/${z}/${wrapTileX(x, z)}/${y}.png`;
+}
+
+/**
+ * Stitch + crop slippy tiles covering a lat/lon bbox at a fixed zoom.
+ * @returns {Promise<{imageData:ImageData,width:number,height:number,ok:number}>}
+ */
+async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, signal } = {}) {
+  const fx0 = lonToTileX(bbox.minLon, z);
+  const fx1 = lonToTileX(bbox.maxLon, z);
+  const fy0 = latToTileY(bbox.maxLat, z);   // north edge → smaller tile-Y
+  const fy1 = latToTileY(bbox.minLat, z);   // south edge → larger tile-Y
+  const tx0 = Math.floor(fx0), tx1 = Math.floor(fx1);
+  const ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
+  const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
+
+  const stitch = document.createElement('canvas');
+  stitch.width = nx * TILE; stitch.height = ny * TILE;
+  const sctx = stitch.getContext('2d', { willReadFrequently: true });
+
+  const total = nx * ny;
+  let done = 0, ok = 0;
+  for (let ty = ty0; ty <= ty1; ty++) {
+    for (let tx = tx0; tx <= tx1; tx++) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const img = await loadTile(tileUrl(z, tx, ty), signal);
+      const dx = (tx - tx0) * TILE, dy = (ty - ty0) * TILE;
+      if (img) { sctx.drawImage(img, dx, dy); ok++; }
+      else { sctx.fillStyle = missingFill; sctx.fillRect(dx, dy, TILE, TILE); }
+      done++; onProgress?.(done / total);
+    }
+  }
+
+  const cropX = Math.max(0, Math.round((fx0 - tx0) * TILE));
+  const cropY = Math.max(0, Math.round((fy0 - ty0) * TILE));
+  const cropW = Math.min(stitch.width - cropX, Math.max(1, Math.round((fx1 - fx0) * TILE)));
+  const cropH = Math.min(stitch.height - cropY, Math.max(1, Math.round((fy1 - fy0) * TILE)));
+  const imageData = sctx.getImageData(cropX, cropY, cropW, cropH);
+  return { imageData, width: imageData.width, height: imageData.height, ok };
 }
 
 function makePreview(floatData, W, H, maxSide = 160) {
@@ -269,6 +386,30 @@ function makePreview(floatData, W, H, maxSide = 160) {
   return c.toDataURL('image/png');
 }
 
+function makeColorPreview(rgba, W, H, maxSide = 160) {
+  const scale = Math.min(1, maxSide / Math.max(W, H));
+  const pw = Math.max(1, Math.round(W * scale));
+  const ph = Math.max(1, Math.round(H * scale));
+  const c = document.createElement('canvas');
+  c.width = pw; c.height = ph;
+  const cx = c.getContext('2d');
+  const out = cx.createImageData(pw, ph);
+  for (let y = 0; y < ph; y++) {
+    for (let x = 0; x < pw; x++) {
+      const sx = Math.min(W - 1, Math.floor(x / scale));
+      const sy = Math.min(H - 1, Math.floor(y / scale));
+      const si = (sy * W + sx) * 4;
+      const o = (y * pw + x) * 4;
+      out.data[o] = rgba[si];
+      out.data[o + 1] = rgba[si + 1];
+      out.data[o + 2] = rgba[si + 2];
+      out.data[o + 3] = 255;
+    }
+  }
+  cx.putImageData(out, 0, 0);
+  return c.toDataURL('image/png');
+}
+
 /** Effective slippy zoom a bbox will be fetched at (after the tile cap). */
 export function effectiveZoomFor(loc) { return pickZoom(loc); }
 
@@ -279,47 +420,40 @@ export function effectiveZoomFor(loc) { return pickZoom(loc); }
  * @throws if every tile failed to load (likely CORS or offline).
  */
 export async function fetchBboxElevation(bbox, z, { onProgress, signal } = {}) {
-  const fx0 = lonToTileX(bbox.minLon, z);
-  const fx1 = lonToTileX(bbox.maxLon, z);
-  const fy0 = latToTileY(bbox.maxLat, z);   // north edge → smaller tile-Y
-  const fy1 = latToTileY(bbox.minLat, z);   // south edge → larger tile-Y
-  const tx0 = Math.floor(fx0), tx1 = Math.floor(fx1);
-  const ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
-  const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
-
-  const stitch = document.createElement('canvas');
-  stitch.width = nx * TILE; stitch.height = ny * TILE;
-  const sctx = stitch.getContext('2d', { willReadFrequently: true });
-
-  const total = nx * ny;
-  let done = 0, ok = 0;
-  for (let ty = ty0; ty <= ty1; ty++) {
-    for (let tx = tx0; tx <= tx1; tx++) {
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      const img = await loadTile(z, tx, ty, signal);
-      const dx = (tx - tx0) * TILE, dy = (ty - ty0) * TILE;
-      if (img) { sctx.drawImage(img, dx, dy); ok++; }
-      else { sctx.fillStyle = SEA_FILL; sctx.fillRect(dx, dy, TILE, TILE); }
-      done++; onProgress?.(done / total);
-    }
-  }
+  const { imageData, width: W, height: H, ok } = await fetchBboxStitched(
+    bbox, z, elevationTileUrl, SEA_FILL, { onProgress, signal },
+  );
   if (ok === 0) {
     throw new Error('No elevation tiles could be loaded (network or CORS blocked).');
   }
-
-  // Crop the stitched grid to the exact bounding box.
-  const cropX = Math.max(0, Math.round((fx0 - tx0) * TILE));
-  const cropY = Math.max(0, Math.round((fy0 - ty0) * TILE));
-  const cropW = Math.min(stitch.width - cropX, Math.max(1, Math.round((fx1 - fx0) * TILE)));
-  const cropH = Math.min(stitch.height - cropY, Math.max(1, Math.round((fy1 - fy0) * TILE)));
-  const id = sctx.getImageData(cropX, cropY, cropW, cropH);
-
-  const W = id.width, H = id.height, data = id.data;
+  const data = imageData.data;
   const elev = new Float32Array(W * H);
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     elev[p] = data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768;
   }
   return { elev, width: W, height: H };
+}
+
+/**
+ * Fetch geo-aligned RGB imagery for the same bbox/zoom as elevation.
+ * @param {ImageryStyleId} [opts.style]
+ * @returns {Promise<{rgba:Uint8ClampedArray,width:number,height:number,style:string}>}
+ * @throws if every tile failed to load (likely CORS or offline).
+ */
+export async function fetchBboxImagery(bbox, z, { style, onProgress, signal } = {}) {
+  const styleDef = resolveImageryStyle(style);
+  const { imageData, width: W, height: H, ok } = await fetchBboxStitched(
+    bbox, z, styleDef.tileUrl.bind(styleDef), styleDef.missingFill, { onProgress, signal },
+  );
+  if (ok === 0) {
+    throw new Error(`No ${styleDef.shortLabel} tiles could be loaded (network or CORS blocked).`);
+  }
+  return {
+    rgba: new Uint8ClampedArray(imageData.data),
+    width: W,
+    height: H,
+    style: styleDef.id,
+  };
 }
 
 /**
@@ -450,6 +584,77 @@ export function compositeCellPatches(cells, tiles, { maxSide = 4096 } = {}) {
     minElev: minE,
     maxElev: maxE,
     preview: makePreview(floatData, W, H),
+    bounds: { minX, minZ, maxX, maxZ, cols, rows },
+  };
+}
+
+// Bilinear sample of an RGBA patch at normalized (u, v); v 0 = north (row 0).
+function sampleColorPatch(patch, u, v, out, oi) {
+  const { rgba, width: w, height: h } = patch;
+  const x = Math.min(Math.max(u, 0), 1) * (w - 1);
+  const y = Math.min(Math.max(v, 0), 1) * (h - 1);
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+  const fx = x - x0, fy = y - y0;
+  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4;
+  const i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+  for (let c = 0; c < 3; c++) {
+    const a = rgba[i00 + c] + (rgba[i10 + c] - rgba[i00 + c]) * fx;
+    const b = rgba[i01 + c] + (rgba[i11 + c] - rgba[i01 + c]) * fx;
+    out[oi + c] = Math.round(a + (b - a) * fy);
+  }
+  out[oi + 3] = 255;
+}
+
+/**
+ * Composite per-cell OpenTopoMap RGB patches into one imagery atlas covering
+ * the tile-assembly bounding rect (same layout as compositeCellPatches).
+ *
+ * @param cells  object keyed 'cx,cz' → { rgba, width, height }
+ * @param tiles  occupied board cells [{cx, cz}, …]
+ */
+export function compositeCellImagery(cells, tiles, { maxSide = 4096 } = {}) {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const t of tiles) {
+    if (t.cx < minX) minX = t.cx;
+    if (t.cz < minZ) minZ = t.cz;
+    if (t.cx > maxX) maxX = t.cx;
+    if (t.cz > maxZ) maxZ = t.cz;
+  }
+  if (!tiles.length) { minX = minZ = maxX = maxZ = 0; }
+  const cols = maxX - minX + 1, rows = maxZ - minZ + 1;
+
+  const anchor = cells['0,0'] ?? Object.values(cells)[0];
+  if (!anchor) throw new Error('No imagery patches to composite.');
+  const scale = Math.min(1, maxSide / (cols * anchor.width), maxSide / (rows * anchor.height));
+  const cw = Math.max(1, Math.round(anchor.width * scale));
+  const ch = Math.max(1, Math.round(anchor.height * scale));
+  const W = cols * cw, H = rows * ch;
+
+  const rgba = new Uint8ClampedArray(W * H * 4);
+  // Uncovered cells stay light grey so gaps read as empty rather than black.
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = 216; rgba[i + 1] = 216; rgba[i + 2] = 216; rgba[i + 3] = 255;
+  }
+
+  for (const t of tiles) {
+    const patch = cells[`${t.cx},${t.cz}`];
+    if (!patch) continue;
+    const ox = (t.cx - minX) * cw, oy = (t.cz - minZ) * ch;
+    for (let y = 0; y < ch; y++) {
+      const v = ch > 1 ? y / (ch - 1) : 0;
+      for (let x = 0; x < cw; x++) {
+        const u = cw > 1 ? x / (cw - 1) : 0;
+        sampleColorPatch(patch, u, v, rgba, ((oy + y) * W + ox + x) * 4);
+      }
+    }
+  }
+
+  return {
+    rgba,
+    width: W,
+    height: H,
+    preview: makeColorPreview(rgba, W, H),
     bounds: { minX, minZ, maxX, maxZ, cols, rows },
   };
 }
