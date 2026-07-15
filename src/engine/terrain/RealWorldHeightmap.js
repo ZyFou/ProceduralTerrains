@@ -113,6 +113,57 @@ export const CUSTOM_AREA_LIMITS = {
 const MERCATOR_LAT_MAX = 85.051;
 const clampRange = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+const COORD_COMPONENT_RE = /^([+-]?)(\d+(?:\.\d+)?)\s*(?:°|\u00b0|deg)?\s*([NnSsEeWw])?$/;
+
+function applyHemisphere(deg, hemi) {
+  if (!hemi) return deg;
+  const h = hemi.toUpperCase();
+  if (h === 'S' || h === 'W') return -Math.abs(deg);
+  if (h === 'N' || h === 'E') return Math.abs(deg);
+  return deg;
+}
+
+function parseCoordComponent(raw, kind) {
+  const m = String(raw).trim().match(COORD_COMPONENT_RE);
+  if (!m) return null;
+  let value = parseFloat(`${m[1] || ''}${m[2]}`);
+  if (!Number.isFinite(value)) return null;
+  value = applyHemisphere(value, m[3]);
+  if (m[3]) {
+    const h = m[3].toUpperCase();
+    if (kind === 'lat' && h !== 'N' && h !== 'S') return null;
+    if (kind === 'lon' && h !== 'E' && h !== 'W') return null;
+  }
+  return value;
+}
+
+/**
+ * Parse pasted or typed coordinates into decimal { lat, lon }.
+ * Accepts "46.07621°N, 6.96224°E", "37.21160°N, 112.98409°W", signed
+ * decimals, and optional spaces around the separator.
+ */
+export function parseCoordinateInput(text) {
+  if (text == null) return null;
+  const s = String(text).trim();
+  if (!s) return null;
+
+  const parts = s.split(/[,;\t]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+
+  const lat = parseCoordComponent(parts[0], 'lat');
+  const lon = parseCoordComponent(parts[1], 'lon');
+  if (lat == null || lon == null) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+/** Format decimal degrees for the custom-area coordinate field. */
+export function formatCoordinateDisplay({ lat, lon }) {
+  const latH = lat >= 0 ? 'N' : 'S';
+  const lonH = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(5)}°${latH}, ${Math.abs(lon).toFixed(5)}°${lonH}`;
+}
+
 /**
  * Build a location object (same shape as CURATED_LOCATIONS entries) from a
  * centre + size + requested zoom. Every input is clamped to CUSTOM_AREA_LIMITS

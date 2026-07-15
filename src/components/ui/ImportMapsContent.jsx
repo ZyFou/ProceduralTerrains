@@ -4,6 +4,7 @@ import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
   CURATED_LOCATIONS, ELEVATION_SOURCE, CUSTOM_AREA_LIMITS, describeCustomArea,
+  formatCoordinateDisplay, parseCoordinateInput,
 } from '../../engine/terrain/RealWorldHeightmap.js';
 
 const IMPORT_MODE_OPTIONS = [
@@ -219,6 +220,17 @@ function RealWorldBrowser({ ctx }) {
   );
 }
 
+const CUSTOM_AREA_DEFAULT = { lat: 45.90, lon: 6.90, sizeKm: 30, zoom: 12 };
+const customAreaDraft = {
+  spec: { ...CUSTOM_AREA_DEFAULT },
+  coordText: formatCoordinateDisplay(CUSTOM_AREA_DEFAULT),
+};
+
+function syncCustomAreaDraft(spec, coordText) {
+  customAreaDraft.spec = { ...spec };
+  customAreaDraft.coordText = coordText;
+}
+
 const CUSTOM_AREA_SLIDERS = {
   lat: { label: 'Latitude', ...CUSTOM_AREA_LIMITS.lat, digits: 2, unit: '°' },
   lon: { label: 'Longitude', ...CUSTOM_AREA_LIMITS.lon, digits: 2, unit: '°' },
@@ -227,22 +239,54 @@ const CUSTOM_AREA_SLIDERS = {
 };
 
 function CustomAreaPicker({ ctx }) {
-  // Default: Chamonix / Mont Blanc valley — instantly recognizable relief.
-  const [spec, setSpec] = useState({ lat: 45.90, lon: 6.90, sizeKm: 30, zoom: 12 });
+  const [spec, setSpec] = useState(() => ({ ...customAreaDraft.spec }));
+  const [coordText, setCoordText] = useState(() => customAreaDraft.coordText);
+  const [coordError, setCoordError] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Live description of what the sliders will actually fetch (tile cap,
-  // Mercator clamps and the z 0..15 data range are all applied inside).
   const info = useMemo(() => describeCustomArea(spec), [spec]);
-  const set = (key) => (v) => setSpec((s) => ({ ...s, [key]: v }));
+  const set = (key) => (v) => {
+    setSpec((s) => {
+      const next = { ...s, [key]: v };
+      const nextCoord = (key === 'lat' || key === 'lon')
+        ? formatCoordinateDisplay(next)
+        : customAreaDraft.coordText;
+      if (key === 'lat' || key === 'lon') {
+        setCoordText(nextCoord);
+        setCoordError('');
+      }
+      syncCustomAreaDraft(next, nextCoord);
+      return next;
+    });
+  };
+
+  const commitCoordText = () => {
+    const parsed = parseCoordinateInput(coordText);
+    if (!parsed) {
+      const current = formatCoordinateDisplay(spec);
+      if (coordText.trim() && coordText.trim() !== current) {
+        setCoordError('Use e.g. 46.07621°N, 6.96224°E');
+        return null;
+      }
+      return spec;
+    }
+    setCoordError('');
+    const next = { ...spec, lat: parsed.lat, lon: parsed.lon };
+    const nextCoord = formatCoordinateDisplay(parsed);
+    setSpec(next);
+    setCoordText(nextCoord);
+    syncCustomAreaDraft(next, nextCoord);
+    return next;
+  };
 
   const load = async () => {
-    if (busy) return;
+    const toLoad = commitCoordText();
+    if (!toLoad || busy) return;
     setBusy(true);
     setProgress(0);
     try {
-      await ctx.onLoadRealWorldCustom?.(spec, { onProgress: (p) => setProgress(p) });
+      await ctx.onLoadRealWorldCustom?.(toLoad, { onProgress: (p) => setProgress(p) });
     } finally {
       setBusy(false);
       setProgress(0);
@@ -256,9 +300,32 @@ function CustomAreaPicker({ ctx }) {
       defaultOpen={false}
       settingId="terrain.realWorldCustom"
     >
-      <p className="section-hint">
-        Pick any place on Earth by coordinates. Values are kept in range automatically — the info below always shows what will really load.
-      </p>
+      <div className="stat-row">
+        <span className="stat-label">Coordinates</span>
+      </div>
+      <div className="seed-input-wrap">
+        <input
+          type="text"
+          value={coordText}
+          onChange={(e) => {
+            const next = e.target.value;
+            setCoordText(next);
+            syncCustomAreaDraft(spec, next);
+            if (coordError) setCoordError('');
+          }}
+          onBlur={commitCoordText}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              load();
+            }
+          }}
+          placeholder="46.07621°N, 6.96224°E"
+          aria-label="Latitude and longitude"
+          spellCheck={false}
+        />
+      </div>
+      {coordError && <p className="section-hint import-map-error">{coordError}</p>}
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lat} value={spec.lat} onChange={set('lat')} settingId="terrain.realWorldLat" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lon} value={spec.lon} onChange={set('lon')} settingId="terrain.realWorldLon" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.sizeKm} value={spec.sizeKm} onChange={set('sizeKm')} settingId="terrain.realWorldSize" />
