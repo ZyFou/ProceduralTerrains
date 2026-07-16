@@ -14,6 +14,12 @@ import { searchSettings } from './components/panels/settingsSearch.js';
 import TopBar from './components/TopBar.jsx';
 import LeftToolbar from './components/ui/LeftToolbar.jsx';
 import SideDrawer from './components/ui/SideDrawer.jsx';
+import {
+  loadToolsRailLayout,
+  saveToolsRailLayout,
+  loadDrawerLayout,
+  saveDrawerLayout,
+} from './components/ui/toolsRailLayout.js';
 import SettingsSearchOverlay from './components/ui/SettingsSearchOverlay.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import CreatorToolbar from './components/CreatorToolbar.jsx';
@@ -79,6 +85,9 @@ export default function App() {
   const fileDragDepthRef = useRef(0);
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
+  const [toolsRailLayout, setToolsRailLayout] = useState(loadToolsRailLayout);
+  const [drawerLayout, setDrawerLayout] = useState(loadDrawerLayout);
+  const appShellRef = useRef(null);
   const [paintState, setPaintState] = useState({ enabled: false });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
   const [analysisState, setAnalysisState] = useState({ enabled: false, mode: 'elevation', opacity: .72 });
@@ -1087,6 +1096,18 @@ export default function App() {
   const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
   const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
   const drawerOpen = !!effectivePanel;
+  const toolsRailAttr = toolsRailLayout.edge ?? 'left';
+  const drawerSideAttr = drawerLayout.side ?? 'right';
+
+  const handleToolsRailLayout = useCallback((next) => {
+    setToolsRailLayout(next);
+    saveToolsRailLayout(next);
+  }, []);
+
+  const handleDrawerLayout = useCallback((next) => {
+    setDrawerLayout(next);
+    saveDrawerLayout(next);
+  }, []);
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
@@ -1308,9 +1329,22 @@ export default function App() {
         settingsSearchOpen={settingsSearchOpen}
       />
 
-      <div id="main" className="app-shell">
+      <div
+        id="main"
+        className="app-shell"
+        ref={appShellRef}
+        data-tools-rail={toolsRailAttr}
+        data-drawer-side={drawerSideAttr}
+      >
         {showToolPanels && (
-          <LeftToolbar activePanel={effectivePanel} worldMode={worldMode} onSelect={togglePanel} />
+          <LeftToolbar
+            activePanel={effectivePanel}
+            worldMode={worldMode}
+            onSelect={togglePanel}
+            layout={toolsRailLayout}
+            onLayoutChange={handleToolsRailLayout}
+            shellRef={appShellRef}
+          />
         )}
 
         <div className="viewport-area">
@@ -1434,7 +1468,15 @@ export default function App() {
         </div>
 
         {showToolPanels && (
-          <SideDrawer activePanel={effectivePanel} ctx={ctx} onClose={() => setActivePanel(null)} />
+          <SideDrawer
+            activePanel={effectivePanel}
+            ctx={ctx}
+            onClose={() => setActivePanel(null)}
+            layout={drawerLayout}
+            onLayoutChange={handleDrawerLayout}
+            shellRef={appShellRef}
+            toolsRailEdge={toolsRailAttr}
+          />
         )}
       </div>
 

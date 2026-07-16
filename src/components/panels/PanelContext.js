@@ -4,3 +4,8 @@ import { createContext } from 'react';
 // side drawer. The legacy right inspector uses the same component with folder
 // chrome tuned for the denser inspector layout.
 export const FlatPanelContext = createContext(false);
+
+/** Desktop drawer chrome: header drag-to-snap (no grab icon). */
+export const DrawerChromeContext = createContext({
+  onHeaderPointerDown: null,
+});
