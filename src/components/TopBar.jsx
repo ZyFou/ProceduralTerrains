@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
-import WorldModeBar from './WorldModeBar.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
   <svg viewBox={viewBox}>
@@ -11,25 +10,32 @@ const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
 );
 
 export default function TopBar({
-  previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
-  onTogglePreview, onResetView, onToggleHelp, onSetWorldMode,
+  previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
+  onTogglePreview, onToggleHelp,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
-  loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
+  loading, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
   onOpenHistory, onOpenProjects,
+  onOpenUiSettings,
 }) {
   const fileRef = useRef(null);
   const fileMenuRef = useRef(null);
+  const layoutMenuRef = useRef(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (!fileMenuOpen) return undefined;
+    if (!fileMenuOpen && !layoutMenuOpen) return undefined;
 
     const onPointerDown = (event) => {
       if (!fileMenuRef.current?.contains(event.target)) setFileMenuOpen(false);
+      if (!layoutMenuRef.current?.contains(event.target)) setLayoutMenuOpen(false);
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') setFileMenuOpen(false);
+      if (event.key === 'Escape') {
+        setFileMenuOpen(false);
+        setLayoutMenuOpen(false);
+      }
     };
 
     document.addEventListener('pointerdown', onPointerDown);
@@ -38,10 +44,15 @@ export default function TopBar({
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [fileMenuOpen]);
+  }, [fileMenuOpen, layoutMenuOpen]);
 
   const runFileAction = (action) => {
     setFileMenuOpen(false);
+    action();
+  };
+
+  const runLayoutAction = (action) => {
+    setLayoutMenuOpen(false);
     action();
   };
 
@@ -58,7 +69,7 @@ export default function TopBar({
   };
 
   return (
-    <header id="topbar" className={fileMenuOpen ? 'file-menu-open' : ''}>
+    <header id="topbar" className={fileMenuOpen || layoutMenuOpen ? 'file-menu-open' : ''}>
       <button type="button" className="tb-group tb-brand tb-brand-button tb-btn" onClick={onOpenProjects} title="Return to main menu">
         <svg className="logo" viewBox="0 0 24 24" fill="none">
           <path d="M3 18 L9 7 L13 13 L16 9 L21 18 Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
@@ -120,10 +131,6 @@ export default function TopBar({
         </button>
       </div>
 
-      <div className="tb-group tb-center">
-        <WorldModeBar worldMode={worldMode} onSetWorldMode={onSetWorldMode} modeLocked={modeLocked} />
-      </div>
-
       <div className="tb-group tb-right">
         {loading && (
           <span className="tb-loading" title={loading.detail || loading.label}>
@@ -134,6 +141,46 @@ export default function TopBar({
             <span className="tb-text">{loading.label}</span>
           </span>
         )}
+        <div className="tb-dropdown" ref={layoutMenuRef}>
+          <button
+            type="button"
+            className={`tb-btn tb-layout-btn${layoutMenuOpen ? ' active' : ''}`}
+            onClick={() => {
+              setLayoutMenuOpen((open) => !open);
+              setFileMenuOpen(false);
+            }}
+            title="Layout settings"
+            aria-haspopup="menu"
+            aria-expanded={layoutMenuOpen}
+          >
+            <Icon d={['M2.5 3.5h11v9h-11z', 'M2.5 6.5h11', 'M6 6.5v6']} />
+            <span className="tb-text">Layout</span>
+            <svg className="tb-file-caret" viewBox="0 0 12 12" aria-hidden>
+              <path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className={`tb-menu tb-layout-menu${layoutMenuOpen ? ' open' : ''}`} role="menu" aria-label="Layout settings">
+            <div className="tb-menu-section-label">Workspace Layout</div>
+            <button type="button" role="menuitem" disabled title="Preset options will be added next">
+              <Icon d={['M2.5 3.5h11v9h-11z', 'M2.5 6.5h11', 'M6 6.5v6']} /> Default layout
+            </button>
+            <button type="button" role="menuitem" disabled title="Preset options will be added next">
+              <Icon d={['M2.5 3.5h11v9h-11z', 'M6 3.5v9']} /> Modular layout
+            </button>
+            <div className="tb-menu-divider" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runLayoutAction(() => onOpenUiSettings?.())}
+            >
+              <Icon d={[
+                'M8 2.8l.9 1.7 1.9.4-1.3 1.4.2 1.9L8 7.4l-1.7.8.2-1.9-1.3-1.4 1.9-.4z',
+                'M3 12.5h10',
+              ]} />
+              Settings
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
@@ -185,9 +232,6 @@ export default function TopBar({
             <path d="M6.2 6.2c0-1 .8-1.8 1.8-1.8s1.8.7 1.8 1.7c0 1.4-1.8 1.5-1.8 2.9" stroke="currentColor" fill="none" strokeWidth="1.2" />
             <circle cx="8" cy="11.4" r=".8" fill="currentColor" />
           </svg>
-        </button>
-        <button className="tb-btn" onClick={onResetView} title="Reset camera view">
-          <Icon d={['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.7 1.8v2.8h-2.8']} />
         </button>
         <button className={`tb-btn${previewMode ? ' active' : ''}`} onClick={onTogglePreview} title="Hide panels for a clean preview">
           <svg viewBox="0 0 16 16">

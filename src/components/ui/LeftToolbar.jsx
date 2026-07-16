@@ -24,6 +24,7 @@ export default function LeftToolbar({
   layout,
   onLayoutChange,
   shellRef,
+  showLabels = true,
 }) {
   const railRef = useRef(null);
   const menuRef = useRef(null);
@@ -152,6 +153,7 @@ export default function LeftToolbar({
     desktop && `left-toolbar--${edge}`,
     desktop && 'left-toolbar--overlay',
     dragging && 'is-dragging',
+    !showLabels && 'left-toolbar--icons-only',
   ].filter(Boolean).join(' ');
 
   return (
@@ -189,7 +191,7 @@ export default function LeftToolbar({
               onClick={() => onSelect(id)}
             >
               {meta.icon}
-              <span className="toolbar-btn-label">{display.label}</span>
+              {showLabels && <span className="toolbar-btn-label">{display.label}</span>}
             </button>
           );
         })}

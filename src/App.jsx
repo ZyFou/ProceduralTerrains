@@ -20,6 +20,8 @@ import {
   loadDrawerLayout,
   saveDrawerLayout,
 } from './components/ui/toolsRailLayout.js';
+import { loadUiPrefs, saveUiPrefs } from './components/ui/uiPrefs.js';
+import UiSettingsPanel from './components/ui/UiSettingsPanel.jsx';
 import SettingsSearchOverlay from './components/ui/SettingsSearchOverlay.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import CreatorToolbar from './components/CreatorToolbar.jsx';
@@ -87,6 +89,8 @@ export default function App() {
   const [activePanel, setActivePanel] = useState(null);
   const [toolsRailLayout, setToolsRailLayout] = useState(loadToolsRailLayout);
   const [drawerLayout, setDrawerLayout] = useState(loadDrawerLayout);
+  const [uiPrefs, setUiPrefs] = useState(loadUiPrefs);
+  const [uiSettingsOpen, setUiSettingsOpen] = useState(false);
   const appShellRef = useRef(null);
   const [paintState, setPaintState] = useState({ enabled: false });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
@@ -1093,6 +1097,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [settingsSearchOpen, searchEnabled]);
 
+  useEffect(() => {
+    if (!uiSettingsOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setUiSettingsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [uiSettingsOpen]);
+
   const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
   const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
   const drawerOpen = !!effectivePanel;
@@ -1107,6 +1123,11 @@ export default function App() {
   const handleDrawerLayout = useCallback((next) => {
     setDrawerLayout(next);
     saveDrawerLayout(next);
+  }, []);
+
+  const handleUiPrefs = useCallback((next) => {
+    setUiPrefs(next);
+    saveUiPrefs(next);
   }, []);
 
   const block = blockingTask(loading.tasks);
@@ -1303,8 +1324,6 @@ export default function App() {
       )}
       <TopBar
         previewMode={previewMode}
-        worldMode={worldMode}
-        modeLocked={modeLocked}
         onNew={() => createProjectFromTemplate('blank')}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => saveCurrentProject()}
@@ -1312,9 +1331,7 @@ export default function App() {
         onLoadJSON={loadProjectJSON}
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
-        onResetView={() => engine().resetView()}
         onToggleHelp={() => setHelpVisible((v) => !v)}
-        onSetWorldMode={selectWorldMode}
         paintMode={paintMode}
         onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
         onOpenPanel={togglePanel}
@@ -1327,6 +1344,7 @@ export default function App() {
         onOpenHistory={() => togglePanel('history')}
         onOpenSettingsSearch={openSettingsSearch}
         settingsSearchOpen={settingsSearchOpen}
+        onOpenUiSettings={() => setUiSettingsOpen(true)}
       />
 
       <div
@@ -1344,6 +1362,7 @@ export default function App() {
             layout={toolsRailLayout}
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
+            showLabels={uiPrefs.toolbarLabels}
           />
         )}
 
@@ -1480,12 +1499,22 @@ export default function App() {
         )}
       </div>
 
-      {!previewMode && (
+      {!previewMode && !landingMode && (
         <WorldModeBar
-          floating
           worldMode={worldMode}
           onSetWorldMode={selectWorldMode}
           modeLocked={modeLocked}
+          modeDisplay={uiPrefs.modeDisplay}
+          visible={!paintMode}
+        />
+      )}
+
+      {uiSettingsOpen && (
+        <UiSettingsPanel
+          open={uiSettingsOpen}
+          prefs={uiPrefs}
+          onChange={handleUiPrefs}
+          onClose={() => setUiSettingsOpen(false)}
         />
       )}
 
