@@ -35,7 +35,7 @@ export class EditorControls {
     this.onFirstInteract = null;
     this.enabled = true;           // false while the studio player walks
     this.autoOrbit = false;        // slow showcase spin (landing page)
-    this.autoOrbitSpeed = 0.11;    // radians per second
+    this.autoOrbitSpeed = 0.045;   // radians per second
     this.inputMode = 'all';        // 'all' or 'orbitOnly' while paint mode owns left drag
     this._interacted = false;
     this._drag = null;             // { button, x, y }
@@ -102,9 +102,12 @@ export class EditorControls {
 
   reset(boardSize) {
     this.goalTarget.set(0, 0, 0);
-    this.goalRadius = boardSize * 1.4;
+    // The landing showcase (autoOrbit) frames tighter and lower than the
+    // editor default; previews reset the camera repeatedly while it's active.
+    const showcase = this.autoOrbit;
+    this.goalRadius = boardSize * (showcase ? 0.82 : 1.4);
     this.goalTheta = 45 * DEG;
-    this.goalPhi = this.mode === 'topdown' ? 0.5 * DEG : 55 * DEG;
+    this.goalPhi = this.mode === 'topdown' ? 0.5 * DEG : (showcase ? 66 : 55) * DEG;
 
     this.target.copy(this.goalTarget);
     this.radius = this.goalRadius;
