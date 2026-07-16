@@ -6,12 +6,14 @@ const STORAGE_KEY = 'pt-ui-prefs';
  * @typedef {object} UiPrefs
  * @property {boolean} toolbarLabels  Show labels under left-toolbar icons
  * @property {ModeDisplay} modeDisplay
+ * @property {boolean} cameraControls Show bottom camera toolbar
  */
 
 /** @type {UiPrefs} */
 export const DEFAULT_UI_PREFS = {
   toolbarLabels: true,
   modeDisplay: 'both',
+  cameraControls: true,
 };
 
 export function loadUiPrefs() {
@@ -37,5 +39,6 @@ export function normalizeUiPrefs(input) {
   return {
     toolbarLabels: input?.toolbarLabels !== false,
     modeDisplay,
+    cameraControls: input?.cameraControls !== false,
   };
 }

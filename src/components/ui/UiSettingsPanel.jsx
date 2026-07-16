@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { Settings, X } from 'lucide-react';
 
 const MODE_DISPLAY_OPTIONS = [
   { id: 'both', label: 'Icons + names' },
@@ -7,7 +7,7 @@ const MODE_DISPLAY_OPTIONS = [
 ];
 
 /**
- * UI appearance settings — opened from Layout → Settings.
+ * UI appearance settings — opened from Edit → Settings.
  */
 export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
   if (!open) return null;
@@ -19,9 +19,12 @@ export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
       <button type="button" className="ui-settings-backdrop" aria-label="Close settings" onClick={onClose} />
       <div className="ui-settings-panel">
         <header className="ui-settings-header">
-          <div>
-            <h2 className="ui-settings-title">Settings</h2>
-            <p className="ui-settings-desc">Interface appearance and chrome density.</p>
+          <div className="ui-settings-heading">
+            <Settings size={16} strokeWidth={1.75} aria-hidden className="ui-settings-heading-icon" />
+            <div>
+              <h2 className="ui-settings-title">Settings</h2>
+              <p className="ui-settings-desc">Interface appearance and chrome density.</p>
+            </div>
           </div>
           <button type="button" className="side-panel-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
             <X size={15} strokeWidth={2} aria-hidden />
@@ -57,6 +60,18 @@ export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
                 </button>
               ))}
             </div>
+          </section>
+
+          <section className="ui-settings-section">
+            <h3 className="ui-settings-section-title">Viewport</h3>
+            <label className="ui-settings-row">
+              <span className="ui-settings-row-label">Show camera controls</span>
+              <input
+                type="checkbox"
+                checked={prefs.cameraControls !== false}
+                onChange={(e) => set({ cameraControls: e.target.checked })}
+              />
+            </label>
           </section>
         </div>
       </div>

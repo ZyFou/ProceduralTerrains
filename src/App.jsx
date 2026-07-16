@@ -1332,6 +1332,7 @@ export default function App() {
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
         onToggleHelp={() => setHelpVisible((v) => !v)}
+        onResetView={() => engine().resetView()}
         paintMode={paintMode}
         onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
         onOpenPanel={togglePanel}
@@ -1435,7 +1436,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && (
+          {showStudioUI && uiPrefs.cameraControls !== false && (
             <BottomToolbar
               camMode={camMode}
               onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
