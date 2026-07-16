@@ -109,10 +109,10 @@ function SeedRow({ seed, onParam, onRandomizeSeed }) {
   );
 }
 
-const RegenButton = ({ onRegenerate }) => (
-  <button type="button" className="action-btn primary" onClick={onRegenerate}>
-    <RefreshCw size={14} strokeWidth={1.75} aria-hidden />
-    Regenerate
+const RandomizeTerrainButton = ({ onRandomize }) => (
+  <button type="button" className="action-btn primary" onClick={onRandomize} title="Pick a new seed and rebuild the terrain">
+    <Dices size={14} strokeWidth={1.75} aria-hidden />
+    Randomize terrain
   </button>
 );
 
@@ -173,7 +173,7 @@ function TerrainPanel({ ctx }) {
     <SidePanel title="Terrain" description="Shape and surface generation." onClose={ctx.onClose}
       footer={onErosionTab
         ? <ErosionTabFooter erosion={erosion} />
-        : <RegenButton onRegenerate={ctx.onRegenerate} />}>
+        : <RandomizeTerrainButton onRandomize={ctx.onRandomizeTerrain} />}>
       <PanelTabs active={tab} onChange={setTab} tabs={tabs} />
       {tab === 'shape' && (
         <>
@@ -741,7 +741,7 @@ function EngineDebugOptions({ ctx }) {
           label="Auto Update"
           value={params.autoUpdate}
           onChange={(v) => onParam('autoUpdate', v)}
-          info="Rebuild the terrain live as shape settings change. When off, edits are deferred until you press Regenerate."
+          info="Rebuild the terrain live as shape settings change. When off, edits stay pending until Auto Update is turned back on."
           settingId="debug.autoUpdate"
         />
       </CollapsibleGroup>

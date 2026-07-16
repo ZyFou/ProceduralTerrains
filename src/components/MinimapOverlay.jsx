@@ -42,7 +42,6 @@ export default function MinimapOverlay({
   onHoverInfoRequest,
 }) {
   const [collapsed, setCollapsed] = useState(true);
-  const [sizeMode, setSizeMode] = useState('compact');
   const [mode, setMode] = useState('color');
   const [zoom, setZoom] = useState(1);
   const [showChunkGrid, setShowChunkGrid] = useState(false);
@@ -84,7 +83,7 @@ export default function MinimapOverlay({
   }, []);
 
   return (
-    <div className={`minimap-overlay-container ${sizeMode}${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}`}>
+    <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}`}>
       <button
         type="button"
         className="minimap-fab"
@@ -125,10 +124,6 @@ export default function MinimapOverlay({
 
         <div className="minimap-overlay-body">
           <div className="minimap-toolbar">
-            <div className="minimap-segmented">
-              <button type="button" className={`tb-btn minimap-chip minimap-icon-chip${sizeMode === 'compact' ? ' active' : ''}`} onClick={() => setSizeMode('compact')} title="Compact minimap" aria-label="Compact minimap"><svg viewBox="0 0 16 16" fill="none" aria-hidden><rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" /></svg></button>
-              <button type="button" className={`tb-btn minimap-chip minimap-icon-chip${sizeMode === 'large' ? ' active' : ''}`} onClick={() => setSizeMode('large')} title="Large minimap" aria-label="Large minimap"><svg viewBox="0 0 16 16" fill="none" aria-hidden><rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" strokeWidth="1.3" /></svg></button>
-            </div>
             <div className="minimap-zoom-group">
               <span className="minimap-zoom-value">{zoom}x</span>
             </div>

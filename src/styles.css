@@ -1728,6 +1728,8 @@ input[type="color"].palette-color-input {
 .minimap-wrap {
   position: relative;
   width: 100%;
+  max-width: 216px;
+  margin: 0 auto;
   aspect-ratio: 1;
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -1858,6 +1860,16 @@ input[type="color"].palette-color-input {
   border-radius: 8px;
   background: var(--bg-panel-soft);
   box-shadow: var(--shadow-panel);
+  transition: left 0.18s ease, bottom 0.18s ease;
+}
+/* Keep spline toggle clear of the tools rail overlay */
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .app-shell[data-tools-rail="left"] .creator-toolbar {
+    left: calc(64px + 18px);
+  }
+  .app-shell[data-tools-rail="bottom"] .creator-toolbar {
+    bottom: calc(58px + 18px);
+  }
 }
 .creator-toolbar-btn {
   display: grid;
@@ -3667,11 +3679,20 @@ input[type="color"].palette-color-input {
   overflow: hidden;
   transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.minimap-overlay-container.large {
-  width: 336px;
-}
 .minimap-overlay-container.drawer-open {
   right: calc(min(340px, 92vw) + 18px);
+}
+/* Keep minimap / fab clear of the tools rail overlay */
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .app-shell[data-tools-rail="right"] .minimap-overlay-container {
+    right: calc(64px + 18px);
+  }
+  .app-shell[data-tools-rail="right"] .minimap-overlay-container.drawer-open {
+    right: calc(min(340px, 92vw) + 64px + 18px);
+  }
+  .app-shell[data-tools-rail="bottom"] .minimap-overlay-container {
+    bottom: calc(58px + 18px);
+  }
 }
 .minimap-overlay-header {
   display: flex;
@@ -3763,14 +3784,6 @@ input[type="color"].palette-color-input {
   border-color: var(--border-subtle);
 }
 .minimap-panel { display: contents; }
-.minimap-overlay-container.compact .minimap-wrap {
-  max-width: 216px;
-  margin: 0 auto;
-}
-.minimap-overlay-container.large .minimap-wrap {
-  max-width: 304px;
-  margin: 0 auto;
-}
 
 /* Floating world-mode switcher (canvas overlay, under top bar) */
 .viewport-mode-bar {

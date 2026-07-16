@@ -852,6 +852,11 @@ export default function App() {
     });
   };
 
+  const onRandomizeTerrain = () => {
+    engine().randomizeSeed();
+    engine().regenerate();
+  };
+
   const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
@@ -1236,6 +1241,7 @@ export default function App() {
     onSettingsTargetHandled: () => setSettingsTarget(null),
     onPreset: (key) => engine().applyPresetByKey(key),
     onRandomizeSeed: () => engine().randomizeSeed(),
+    onRandomizeTerrain,
     onRegenerate,
     planetStyleProps,
     onStyleTuning: (key, v) => engine().setPlanetStyleTuning(key, v),

@@ -1652,8 +1652,15 @@ export class Engine {
       return;
     }
 
+    if (key === 'autoUpdate') {
+      // Replacing the old Regenerate footer: turning Auto Update back on
+      // applies any shape edits that were deferred while it was off.
+      if (value) this.applyAll({ force: false });
+      return;
+    }
+
     if (SHAPE_KEYS.has(key) && !this.params.autoUpdate) {
-      this.cb.onStatus('Pending changes — press Regenerate', true);
+      this.cb.onStatus('Pending changes — enable Auto Update to apply', true);
       return;
     }
     this._afterParamChange(REBUILD_KEYS.has(key));
