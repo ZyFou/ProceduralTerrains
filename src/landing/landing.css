@@ -709,6 +709,13 @@ body:has(.landing-overlay) {
 .landing-credits-socials { display: flex; flex-wrap: wrap; gap: 12px; }
 .landing-credits-socials a { display: inline-flex; align-items: center; gap: 6px; }
 .landing-credits-dialog > button { justify-self: end; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-control); color: var(--text-main); font: 600 12px var(--font); cursor: var(--cursor-pointer); }
+.landing-confirm-dialog { width: min(340px, 100%); }
+.landing-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.landing-confirm-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-control); color: var(--text-main); font: 600 12px var(--font); cursor: var(--cursor-pointer); }
+.landing-confirm-actions button:hover { border-color: var(--border-strong); }
+.landing-confirm-actions button.danger { border-color: rgba(239, 68, 68, .45); background: rgba(239, 68, 68, .12); color: var(--danger); }
+.landing-confirm-actions button.danger:hover { background: rgba(239, 68, 68, .2); border-color: var(--danger); }
+.landing-confirm-actions button:disabled { opacity: .55; cursor: default; }
 
 @media (max-width: 900px) {
   .landing-workspace-body { grid-template-columns: 210px minmax(0, 1fr); }

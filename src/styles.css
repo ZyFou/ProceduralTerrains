@@ -237,6 +237,33 @@ body {
 .tb-menu button svg { width: 14px; height: 14px; color: var(--text-muted); flex: 0 0 auto; }
 .tb-menu button:hover { background: var(--accent-bg); color: var(--accent); }
 .tb-menu button:hover svg { color: var(--accent); }
+
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 5, 0.55);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.file-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 40px;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-panel);
+}
+.file-drop-card svg { color: var(--accent); }
 .tb-menu-divider { height: 1px; margin: 4px 6px; background: var(--border-subtle); }
 
 /* ============ APP SHELL (toolbar | viewport | floating drawer) ============ */

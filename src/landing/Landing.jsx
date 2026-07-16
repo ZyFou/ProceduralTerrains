@@ -14,10 +14,13 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [templatePreviewsReady, setTemplatePreviewsReady] = useState(false);
   const [templateThumbs, setTemplateThumbs] = useState(() => Object.fromEntries(PROJECT_TEMPLATES.map((template) => [template.id, sessionStorage.getItem(`terrain-template-preview:${template.id}`)]).filter(([, image]) => image)));
   const [previewProgress, setPreviewProgress] = useState(() => ({ completed: 0, total: PROJECT_TEMPLATES.length }));
+  const [fileDragActive, setFileDragActive] = useState(false);
+  const fileDragDepthRef = useRef(0);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -68,19 +71,49 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const selectTemplate = (id) => { setSelectedTemplateId(id); setSelectedProjectId(null); setView('templates'); dispatch('terrain-template:preview', { templateId: id }); };
   const openTemplates = () => selectTemplate(PROJECT_TEMPLATES[0].id);
   const selectProject = (project) => { setSelectedProjectId(project.id); setView('projects'); };
-  const onImport = (event) => {
-    const file = event.target.files?.[0];
+  const importProjectFile = (file, { openAfter } = {}) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const raw = JSON.parse(reader.result);
         const project = await projectStore.save(normalizeProject(raw.terrain ? raw : { terrain: raw, metadata: { name: file.name.replace(/\.json$/i, '') } }));
-        setSelectedProjectId(project.id); setView('projects'); open(project);
+        setSelectedProjectId(project.id); setView('projects');
+        if (openAfter) open(project);
       } catch { /* invalid files leave the workspace untouched */ }
     };
     reader.readAsText(file);
+  };
+  const onImport = (event) => {
+    const file = event.target.files?.[0];
+    importProjectFile(file, { openAfter: true });
     event.target.value = '';
+  };
+  const hasFileDrag = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const onFileDragEnter = (e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current += 1;
+    setFileDragActive(true);
+  };
+  const onFileDragOver = (e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onFileDragLeave = (e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setFileDragActive(false);
+  };
+  const onFileDrop = (e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = 0;
+    setFileDragActive(false);
+    const file = e.dataTransfer.files?.[0];
+    importProjectFile(file, { openAfter: false });
   };
   const renameSelectedProject = async () => {
     if (!selectedProject || projectActionBusy) return;
@@ -100,18 +133,36 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     } catch { /* the original project remains available */ }
     finally { setProjectActionBusy(false); }
   };
-  const deleteSelectedProject = async () => {
-    if (!selectedProject || projectActionBusy || !window.confirm(`Delete “${selectedProject.metadata.name}”? This cannot be undone.`)) return;
+  const requestDeleteSelectedProject = () => {
+    if (!selectedProject || projectActionBusy) return;
+    setDeleteTarget(selectedProject);
+  };
+  const confirmDeleteProject = async () => {
+    if (!deleteTarget || projectActionBusy) return;
     setProjectActionBusy(true);
     try {
-      await projectStore.remove(selectedProject.id);
+      await projectStore.remove(deleteTarget.id);
       setSelectedProjectId(null);
     } catch { /* the project remains available */ }
-    finally { setProjectActionBusy(false); }
+    finally { setProjectActionBusy(false); setDeleteTarget(null); }
   };
 
   return (
-    <div className={`landing landing-overlay landing-workspace${view === 'templates' || selectedProject ? ' has-live-terrain' : ''}${exiting ? ' exiting' : ''}`}>
+    <div
+      className={`landing landing-overlay landing-workspace${view === 'templates' || selectedProject ? ' has-live-terrain' : ''}${exiting ? ' exiting' : ''}`}
+      onDragEnter={onFileDragEnter}
+      onDragOver={onFileDragOver}
+      onDragLeave={onFileDragLeave}
+      onDrop={onFileDrop}
+    >
+      {fileDragActive && (
+        <div className="file-drop-overlay" role="presentation">
+          <div className="file-drop-card">
+            <Upload size={28} aria-hidden />
+            <span>Drop terrain file to add it to your projects</span>
+          </div>
+        </div>
+      )}
       <header className="landing-workspace-topbar">
         <button type="button" className="landing-workspace-brand" onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }} title="Return to main menu"><Logo size={23} /><strong>{APP_NAME}</strong></button>
         <nav className="landing-workspace-tabs" aria-label="Project workspace">
@@ -169,13 +220,23 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             {inspector.type === 'project' && <div className="landing-inspector-manage-actions">
               <button type="button" className="landing-inspector-tool-action" onClick={renameSelectedProject} disabled={projectActionBusy} title="Rename project"><Pencil size={14} /> Rename</button>
               <button type="button" className="landing-inspector-tool-action" onClick={duplicateSelectedProject} disabled={projectActionBusy} title="Duplicate project"><Copy size={14} /> Duplicate</button>
-              <button type="button" className="landing-inspector-tool-action danger" onClick={deleteSelectedProject} disabled={projectActionBusy} title="Delete project"><Trash2 size={14} /> Delete</button>
+              <button type="button" className="landing-inspector-tool-action danger" onClick={requestDeleteSelectedProject} disabled={projectActionBusy} title="Delete project"><Trash2 size={14} /> Delete</button>
             </div>}
           </div>
         </aside>
       </div>
       {(!bootReady || previewProgress.completed < previewProgress.total) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>{bootReady ? 'Rendering terrain previews' : 'Starting terrain editor'}</strong><small>{bootReady ? `${previewProgress.completed} of ${previewProgress.total} real previews ready` : 'Preparing your random terrain workspace…'}</small></div>}
       {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} /> X / Twitter</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} /> Portfolio</a></div><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
+      {deleteTarget && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => !projectActionBusy && setDeleteTarget(null)}>
+        <section className="landing-credits-dialog landing-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div><span>Delete project</span><h2 id="delete-project-title">Delete &ldquo;{deleteTarget.metadata.name}&rdquo;?</h2></div>
+          <p>This cannot be undone.</p>
+          <div className="landing-confirm-actions">
+            <button type="button" onClick={() => setDeleteTarget(null)} disabled={projectActionBusy}>Cancel</button>
+            <button type="button" className="danger" onClick={confirmDeleteProject} disabled={projectActionBusy}><Trash2 size={14} /> Delete</button>
+          </div>
+        </section>
+      </div>}
       <nav className="landing-mobile-nav" aria-label="Mobile workspace navigation">
         <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => { setView('projects'); setSelectedProjectId(projects[0]?.id ?? null); }}><FolderOpen size={19} /><span>Projects</span></button>
         <button type="button" className="landing-mobile-nav-create" onClick={() => create(view === 'templates' ? template.id : 'blank')} disabled={!bootReady || exiting}><span><Plus size={22} /></span><b>{view === 'templates' ? 'Use template' : 'Create'}</b></button>

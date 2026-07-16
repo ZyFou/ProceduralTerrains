@@ -75,6 +75,8 @@ export default function App() {
 
   const [camMode, setCamMode] = useState('orbit');
   const [helpVisible, setHelpVisible] = useState(false);
+  const [fileDragActive, setFileDragActive] = useState(false);
+  const fileDragDepthRef = useRef(0);
   const [previewMode, setPreviewMode] = useState(false);
   const [activePanel, setActivePanel] = useState(null);
   const [paintState, setPaintState] = useState({ enabled: false });
@@ -332,6 +334,82 @@ export default function App() {
     return saved;
   }, [setCurrentProject, showToast]);
 
+  const loadProjectJSON = useCallback((json) => {
+    if (!json) return showToast('Could not parse project file', 'error');
+    if (json.terrain) {
+      engineRef.current?.loadSeedJSON(json.terrain);
+      setCurrentProject(normalizeProject(json));
+      return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
+    }
+    engineRef.current?.loadSeedJSON(json);
+    setCurrentProject(null);
+  }, [setCurrentProject, showToast]);
+
+  const loadProjectFile = useCallback((file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { loadProjectJSON(JSON.parse(reader.result)); }
+      catch { loadProjectJSON(null); }
+    };
+    reader.readAsText(file);
+  }, [loadProjectJSON]);
+
+  const hasFileDrag = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+  const onFileDragEnter = useCallback((e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current += 1;
+    setFileDragActive(true);
+  }, []);
+
+  const onFileDragOver = useCallback((e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onFileDragLeave = useCallback((e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setFileDragActive(false);
+  }, []);
+
+  const onFileDrop = useCallback((e) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = 0;
+    setFileDragActive(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) loadProjectFile(file);
+  }, [loadProjectFile]);
+
+  const downloadCurrentProject = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    const current = activeProjectRef.current;
+    const project = normalizeProject({
+      id: current?.id,
+      metadata: { ...current?.metadata },
+      terrain: eng.createProjectPayload(),
+      exportHistory: current?.exportHistory ?? [],
+    });
+    const name = project.metadata?.name || 'terrain';
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'terrain';
+    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded ${name}`, 'success');
+  }, [showToast]);
+
   const createProjectFromTemplate = useCallback(async (templateId = 'blank') => {
     const eng = engineRef.current;
     if (!eng) return;
@@ -393,6 +471,14 @@ export default function App() {
     const onPreloadTemplatePreviews = () => {
       let completed = 0;
       PROJECT_TEMPLATES.forEach((template) => {
+        let cached = null;
+        try { cached = sessionStorage.getItem(`terrain-template-preview:${template.id}`); } catch { /* cache is optional */ }
+        if (cached) {
+          completed += 1;
+          window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, image: cached } }));
+          window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
+          return;
+        }
         templatePreviewQueueRef.current = templatePreviewQueueRef.current.then(async () => {
           await captureTemplateThumbnail(template.id, { silent: true });
           completed += 1;
@@ -1175,7 +1261,25 @@ export default function App() {
   };
 
   return (
-    <div id="app" className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}>
+    <div
+      id="app"
+      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}
+      onDragEnter={landingMode ? undefined : onFileDragEnter}
+      onDragOver={landingMode ? undefined : onFileDragOver}
+      onDragLeave={landingMode ? undefined : onFileDragLeave}
+      onDrop={landingMode ? undefined : onFileDrop}
+    >
+      {!landingMode && fileDragActive && (
+        <div className="file-drop-overlay" role="presentation">
+          <div className="file-drop-card">
+            <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+              <path d="M12 3v11M12 3 8.2 6.8M12 3l3.8 3.8" stroke="currentColor" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Drop terrain file to load</span>
+          </div>
+        </div>
+      )}
       <TopBar
         previewMode={previewMode}
         worldMode={worldMode}
@@ -1183,16 +1287,8 @@ export default function App() {
         onNew={() => createProjectFromTemplate('blank')}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => saveCurrentProject()}
-        onLoadJSON={(json) => {
-          if (!json) return showToast('Could not parse project file', 'error');
-          if (json.terrain) {
-            engine().loadSeedJSON(json.terrain);
-            setCurrentProject(normalizeProject(json));
-            return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
-          }
-          engine().loadSeedJSON(json);
-          setCurrentProject(null);
-        }}
+        onDownload={downloadCurrentProject}
+        onLoadJSON={loadProjectJSON}
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
         onResetView={() => engine().resetView()}

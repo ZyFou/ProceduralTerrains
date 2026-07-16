@@ -11,7 +11,7 @@ const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
 );
 
 export default function TopBar({
-  previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON,
+  previewMode, worldMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onResetView, onToggleHelp, onSetWorldMode,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, modeLocked, onOpenSettingsSearch, settingsSearchOpen,
@@ -96,6 +96,9 @@ export default function TopBar({
             </button>
             <button type="button" role="menuitem" onClick={() => runFileAction(() => fileRef.current?.click())}>
               <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> Load
+            </button>
+            <button type="button" role="menuitem" onClick={() => runFileAction(onDownload)}>
+              <Icon d={['M8 2v8M8 2 5.8 4.2M8 2l2.2 2.2', 'M3 9v4h10V9']} /> Download
             </button>
           </div>
         </div>
