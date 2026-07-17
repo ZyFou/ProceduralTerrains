@@ -37,9 +37,15 @@ function fallbackWrite(projects) { localStorage.setItem(FALLBACK_KEY, JSON.strin
 
 export function normalizeProject(input = {}) {
   const legacyTerrain = input.terrain ?? input;
+  const editorMode = legacyTerrain?.editorMode === 'nodes'
+    ? 'nodes'
+    : legacyTerrain?.editorMode === 'procedural'
+      ? 'procedural'
+      : legacyTerrain?.generationSource === 'graph' ? 'nodes' : 'procedural';
   const terrain = {
     ...legacyTerrain,
-    generationSource: legacyTerrain?.generationSource === 'graph' ? 'graph' : 'classic',
+    editorMode,
+    generationSource: editorMode === 'nodes' ? 'graph' : 'classic',
     graph: legacyTerrain?.graph ?? null,
     graphView: legacyTerrain?.graphView && typeof legacyTerrain.graphView === 'object'
       ? { x: Number(legacyTerrain.graphView.x) || 0, y: Number(legacyTerrain.graphView.y) || 0, zoom: Number(legacyTerrain.graphView.zoom) || 1 }

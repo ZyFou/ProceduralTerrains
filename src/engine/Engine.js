@@ -49,10 +49,10 @@ import {
   patchParamsFromDefaults, resetWaterParams, resetCloudParams, resetSkyboxParams,
   resetVisualParams, lightingStyleDefaults, waterColorDefaults, DEFAULT_TIME_OF_DAY, DEFAULT_DEBUG_FLAGS,
 } from './panelResets.js';
-import { EARTH_PALETTE } from './style/ColorPalette.js';
+import { EARTH_PALETTE, PALETTE_KEYS } from './style/ColorPalette.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
 import { compileTerrainGraph } from './terrain/graph/GraphCompiler.js';
-import { createGraphFromStack, migrateGraphDocument } from './terrain/graph/GraphDocument.js';
+import { createBlankGraph, migrateGraphDocument } from './terrain/graph/GraphDocument.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
@@ -83,6 +83,12 @@ import { hasExportErrors, validateExport } from '../export/ExportValidator.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
+const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
+  key,
+  key === 'snow' || key === 'foam' ? [0.88, 0.89, 0.91]
+    : key === 'rock' || key === 'rockHi' ? [0.62, 0.63, 0.65]
+      : [0.74, 0.75, 0.77],
+]));
 
 // ============================================================================
 // Terrain Studio engine. Framework-agnostic: owns the renderer/scene, the
@@ -154,6 +160,7 @@ export class Engine {
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
+    this.projectMode = 'procedural';
     this.generationSource = 'classic';
     this.terrainGraph = null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
@@ -1695,9 +1702,32 @@ export class Engine {
     this.setParam('seed', (Math.random() * 0xffffffff) >>> 0);
   }
 
-  newProject({ silent = false } = {}) {
+  newProject({ silent = false, projectMode = 'procedural' } = {}) {
+    this.projectMode = projectMode === 'nodes' ? 'nodes' : 'procedural';
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
+    if (this.projectMode === 'nodes') {
+      Object.assign(this.params, {
+        falloff: 0,
+        seaLevel: 0,
+        waterMode: 'off',
+        waterEnabled: false,
+        propsEnabled: false,
+        surfaceTextureAmount: 0,
+        visualsTerrainColorVariation: 0.08,
+        visualsTerrainHeightDetail: 0.12,
+        visualsWetShoreStrength: 0,
+      });
+      this.planetStyle.setStyle({
+        planetPreset: 'custom',
+        palettePreset: 'custom',
+        palette: NODE_NEUTRAL_PALETTE,
+        paletteSaturation: 0.16,
+        paletteContrast: 0.94,
+        paletteTint: [1, 1, 1],
+        customEdits: false,
+      });
+    }
     this._syncPlanetStyleToParams();
 
     // A new project must not inherit any authoring data from the previous
@@ -1709,13 +1739,16 @@ export class Engine {
     this.paintMode?.setBaseMode('generated');
     this.paintMode?.clear({ silent });
     this.terrainAnalysis?.load();
-    this.generationSource = 'classic';
-    this.terrainGraph = null;
+    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
+    this.terrainGraph = this.projectMode === 'nodes' ? createBlankGraph() : null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
-    this._graphProgram = null;
-    this._graphDiagnostics = [];
-    this.cb.onGenerationSource?.('classic');
-    this.cb.onTerrainGraph?.(null);
+    const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
+    this._graphProgram = compiled?.ok ? compiled.program : null;
+    this._graphDiagnostics = compiled?.diagnostics || [];
+    this.cb.onProjectMode?.(this.projectMode);
+    this.cb.onGenerationSource?.(this.generationSource);
+    this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
+    this.cb.onGraphState?.({ valid: !this.terrainGraph || compiled?.ok === true, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
     this.cb.onGraphView?.({ ...this.graphView });
 
     this.tileAssemblyShape = 'square';
@@ -1743,9 +1776,10 @@ export class Engine {
 
     const defaultStack = migrateStack(undefined);
     this.setNoiseStack(defaultStack);
+    this._syncCpuHeightProgram();
 
     this.controls.reset(this.boardSize);
-    if (!silent) this.cb.onToast('New project');
+    if (!silent) this.cb.onToast(this.projectMode === 'nodes' ? 'New Nodes terrain' : 'New procedural terrain');
   }
 
   // ---------------------------------------------------------- planet style
@@ -2054,7 +2088,7 @@ export class Engine {
 
   setGenerationSource(source, { silent = false } = {}) {
     const next = source === 'graph' ? 'graph' : 'classic';
-    if (next === 'graph' && !this.terrainGraph) this.terrainGraph = createGraphFromStack(this.noiseStack);
+    if (next === 'graph' && !this.terrainGraph) this.terrainGraph = createBlankGraph();
     if (next === 'graph' && !this._graphProgram) {
       const compiled = compileTerrainGraph(this.terrainGraph);
       this._graphDiagnostics = compiled.diagnostics || [];
@@ -5027,6 +5061,7 @@ export class Engine {
       diskRadiusCells: this.circleRadiusCells,
       creatorTools: this._serializeCreatorTools(),
       historyMetadata: this.projectHistory?.serializeMetadata?.(),
+      editorMode: this.projectMode,
       generationSource: this.generationSource,
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
@@ -5071,9 +5106,16 @@ export class Engine {
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
-    this.terrainGraph = json?.graph ? migrateGraphDocument(json.graph, this.noiseStack) : null;
+    this.projectMode = json?.editorMode === 'nodes'
+      ? 'nodes'
+      : json?.editorMode === 'procedural'
+        ? 'procedural'
+        : json?.generationSource === 'graph' ? 'nodes' : 'procedural';
+    this.terrainGraph = this.projectMode === 'nodes'
+      ? (json?.graph ? migrateGraphDocument(json.graph, this.noiseStack) : createBlankGraph())
+      : null;
     this.graphView = { ...this.graphView, ...(json?.graphView || {}) };
-    this.generationSource = json?.generationSource === 'graph' ? 'graph' : 'classic';
+    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
     this._graphProgram = compiled?.ok ? compiled.program : null;
     this._graphDiagnostics = compiled?.diagnostics || [];
@@ -5093,6 +5135,7 @@ export class Engine {
       ? this._circleTiles(this.circleRadiusCells)
       : this._sanitizeTiles(json?.tiles);
     this.cb.onParams({ ...this.params });
+    this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
     this.cb.onGraphState?.({ valid: !!this._graphProgram || this.generationSource === 'classic', compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
@@ -5138,6 +5181,7 @@ export class Engine {
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
       creatorTools: this._serializeCreatorTools(),
+      projectMode: this.projectMode,
       generationSource: this.generationSource,
       terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
@@ -5219,8 +5263,14 @@ export class Engine {
       this._graphProgram = compiled.ok ? compiled.program : this._graphProgram;
       this._graphDiagnostics = compiled.diagnostics || [];
     }
-    this.generationSource = snap.generationSource === 'graph' ? 'graph' : 'classic';
+    this.projectMode = snap.projectMode === 'nodes'
+      ? 'nodes'
+      : snap.projectMode === 'procedural'
+        ? 'procedural'
+        : snap.generationSource === 'graph' ? 'nodes' : 'procedural';
+    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
+    this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onGraphState?.({ valid: this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
     this._syncCpuHeightProgram();

@@ -43,6 +43,7 @@ import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplate
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
+const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
 const NodeWorkspace = lazy(() => import('./components/nodes/NodeWorkspace.jsx'));
 
@@ -125,8 +126,7 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [webglError, setWebglError] = useState(null);
   const [activeProject, setActiveProject] = useState(null);
-  const [workspaceMode, setWorkspaceMode] = useState('classic');
-  const [generationSource, setGenerationSource] = useState('classic');
+  const [projectMode, setProjectMode] = useState('procedural');
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
   const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0 });
@@ -263,17 +263,7 @@ export default function App() {
             setTerrainGraph(next);
             scheduleRecordRef.current?.();
           },
-          onGenerationSource: (source) => {
-            setGenerationSource(source);
-            if (source === 'graph' && window.innerWidth >= 821) setWorkspaceMode('nodes');
-            else {
-              setWorkspaceMode('classic');
-              if (source === 'graph' && window.innerWidth < 821) {
-                queueMicrotask(() => engineRef.current?.setGenerationSource('classic', { silent: true }));
-                pushToastRef.current('Graph preserved. Classic is shown on this compact screen.', 'info');
-              }
-            }
-          },
+          onProjectMode: setProjectMode,
           onGraphState: setGraphState,
           onGraphView: setGraphView,
         },
@@ -374,14 +364,22 @@ export default function App() {
     return saved;
   }, [setCurrentProject, showToast]);
 
-  const loadProjectJSON = useCallback((json) => {
+  const loadProjectJSON = useCallback(async (json) => {
     if (!json) return showToast('Could not parse project file', 'error');
     if (json.terrain) {
-      engineRef.current?.loadSeedJSON(json.terrain);
-      setCurrentProject(normalizeProject(json));
+      const project = normalizeProject(json);
+      if (project.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+        await runModeSwitchRef.current('studio', { silent: true });
+      }
+      engineRef.current?.loadSeedJSON(project.terrain);
+      setCurrentProject(project);
       return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
     }
-    engineRef.current?.loadSeedJSON(json);
+    const terrain = normalizeProject({ terrain: json }).terrain;
+    if (terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+      await runModeSwitchRef.current('studio', { silent: true });
+    }
+    engineRef.current?.loadSeedJSON(terrain);
     setCurrentProject(null);
   }, [setCurrentProject, showToast]);
 
@@ -450,11 +448,15 @@ export default function App() {
     showToast(`Downloaded ${name}`, 'success');
   }, [showToast]);
 
-  const createProjectFromTemplate = useCallback(async (templateId = 'blank') => {
+  const createProjectFromTemplate = useCallback(async (templateId = 'blank', { editorMode = 'procedural' } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
     const template = getProjectTemplate(templateId);
-    eng.newProject();
+    const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
+      await runModeSwitchRef.current('studio', { silent: true });
+    }
+    eng.newProject({ projectMode: nextMode });
     // A new terrain is a new document. Do not let saveCurrentProject reuse the
     // id of whichever project was previously open.
     setCurrentProject(null);
@@ -463,20 +465,27 @@ export default function App() {
     const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
     const templateOffset = PROJECT_TEMPLATES.findIndex((item) => item.id === template.id) + 1;
     eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
-    if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-    const project = await saveCurrentProject({ name: template.name, description: template.description, tags: [template.id] });
-    if (project) showToast(`${template.name} project created`, 'success');
+    if (nextMode === 'procedural' && template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+    const metadata = nextMode === 'nodes'
+      ? { name: 'Nodes Terrain', description: 'Analytical node terrain', tags: ['nodes'] }
+      : { name: template.name, description: template.description, tags: [template.id] };
+    const project = await saveCurrentProject(metadata);
+    if (project) showToast(`${nextMode === 'nodes' ? 'Nodes' : template.name} project created`, 'success');
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
-    const onNewProject = (event) => { createProjectFromTemplate(event.detail?.templateId ?? 'blank'); };
-    const onOpenProject = (event) => {
+    const onNewProject = (event) => { createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' }); };
+    const onOpenProject = async (event) => {
       const project = event.detail?.project;
       const eng = engineRef.current;
       if (!project?.terrain || !eng) return;
-      eng.loadSeedJSON(project.terrain);
-      setCurrentProject(normalizeProject(project));
-      showToast(`Opened ${project.metadata?.name ?? 'terrain project'}`, 'success');
+      const normalized = normalizeProject(project);
+      if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+        await runModeSwitchRef.current('studio', { silent: true });
+      }
+      eng.loadSeedJSON(normalized.terrain);
+      setCurrentProject(normalized);
+      showToast(`Opened ${normalized.metadata?.name ?? 'terrain project'}`, 'success');
     };
     const onPreviewProject = (event) => {
       const project = event.detail?.project;
@@ -493,7 +502,7 @@ export default function App() {
       const eng = engineRef.current;
       if (!eng || !canvasRef.current || !landingRef.current?.visible) return;
       const template = getProjectTemplate(templateId);
-      eng.newProject({ silent });
+      eng.newProject({ silent, projectMode: 'procedural' });
       eng.setParam('seed', previewSeed(templateId));
       if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -896,29 +905,8 @@ export default function App() {
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
   const showToolPanels = !previewMode && !paintMode && !planetExploring;
-  const searchEnabled = showToolPanels;
-  const nodesWorkspaceActive = isStudio && workspaceMode === 'nodes' && !previewMode && !paintMode && !landing?.visible;
-
-  const selectWorkspaceMode = useCallback((next) => {
-    if (next === 'nodes' && window.innerWidth < 821) {
-      setWorkspaceMode('classic');
-      showToast('Nodes needs at least 821 px. Classic remains active.', 'info');
-      return;
-    }
-    setWorkspaceMode(next);
-    engineRef.current?.setGenerationSource(next === 'nodes' ? 'graph' : 'classic');
-  }, [showToast]);
-
-  useEffect(() => {
-    const onResize = () => {
-      if (window.innerWidth >= 821 || workspaceMode !== 'nodes') return;
-      setWorkspaceMode('classic');
-      engineRef.current?.setGenerationSource('classic', { silent: true });
-      showToast('The graph is preserved. Classic is shown on compact screens.', 'info');
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [workspaceMode, showToast]);
+  const searchEnabled = showToolPanels && projectMode === 'procedural';
+  const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
 
   const handleTerrainGraphChange = useCallback((next, meta = {}) => {
     setTerrainGraph(next);
@@ -1194,8 +1182,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [uiSettingsOpen]);
 
-  const togglePanel = (id) => setActivePanel((cur) => (cur === id ? null : id));
-  const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) ? activePanel : null;
+  const projectPanelAvailable = (id) => projectMode !== 'nodes' || NODE_PANEL_IDS.includes(id);
+  const togglePanel = (id) => {
+    if (!projectPanelAvailable(id)) return;
+    setActivePanel((cur) => (cur === id ? null : id));
+  };
+  const effectivePanel = showToolPanels && panelAvailable(activePanel, worldMode) && projectPanelAvailable(activePanel) ? activePanel : null;
   const drawerOpen = !!effectivePanel;
   const toolsRailAttr = toolsRailLayout.edge ?? 'left';
   const drawerSideAttr = drawerLayout.side ?? 'right';
@@ -1413,8 +1405,9 @@ export default function App() {
         </div>
       )}
       <TopBar
+        projectMode={projectMode}
         previewMode={previewMode}
-        onNew={() => createProjectFromTemplate('blank')}
+        onNew={() => createProjectFromTemplate('blank', { editorMode: projectMode })}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => saveCurrentProject()}
         onDownload={downloadCurrentProject}
@@ -1454,6 +1447,7 @@ export default function App() {
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
             showLabels={uiPrefs.toolbarLabels}
+            panelIds={projectMode === 'nodes' ? NODE_PANEL_IDS : undefined}
           />
         )}
 
@@ -1616,15 +1610,13 @@ export default function App() {
         )}
       </div>
 
-      {!previewMode && !landingMode && (
+      {!previewMode && !landingMode && projectMode === 'procedural' && (
         <WorldModeBar
           worldMode={worldMode}
           onSetWorldMode={selectWorldMode}
           modeLocked={modeLocked}
           modeDisplay={uiPrefs.modeDisplay}
           visible={!paintMode}
-          workspaceMode={workspaceMode}
-          onSetWorkspaceMode={selectWorkspaceMode}
         />
       )}
 

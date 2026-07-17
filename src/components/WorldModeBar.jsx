@@ -1,4 +1,4 @@
-import { Boxes, Globe2, Grid2x2, Map, SlidersHorizontal } from 'lucide-react';
+import { Globe2, Grid2x2, Map } from 'lucide-react';
 
 const MODES = [
   { id: 'studio', label: 'Tile', Icon: Grid2x2 },
@@ -16,8 +16,6 @@ export default function WorldModeBar({
   modeLocked,
   modeDisplay = 'both',
   visible = true,
-  workspaceMode = 'classic',
-  onSetWorkspaceMode,
 }) {
   if (!visible) return null;
 
@@ -47,19 +45,6 @@ export default function WorldModeBar({
           </button>
         );
       })}
-      {worldMode === 'studio' && onSetWorkspaceMode ? (
-        <>
-          <span className="mode-bar-divider" aria-hidden />
-          <div className="workspace-mode-segment" role="group" aria-label="Tile workspace">
-            <button type="button" className={`camera-bar-btn mode-bar-btn${workspaceMode === 'classic' ? ' active' : ''}`} onClick={() => onSetWorkspaceMode('classic')} aria-pressed={workspaceMode === 'classic'} title="Classic workspace">
-              <SlidersHorizontal size={14} /><span className="mode-bar-label">Classic</span>
-            </button>
-            <button type="button" className={`camera-bar-btn mode-bar-btn${workspaceMode === 'nodes' ? ' active' : ''}`} onClick={() => onSetWorkspaceMode('nodes')} aria-pressed={workspaceMode === 'nodes'} title="Nodes workspace">
-              <Boxes size={14} /><span className="mode-bar-label">Nodes</span>
-            </button>
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }

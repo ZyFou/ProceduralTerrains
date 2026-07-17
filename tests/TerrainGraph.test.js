@@ -138,6 +138,16 @@ describe('terrain graph document', () => {
 });
 
 describe('analytical terrain graph compiler', () => {
+  it('compiles an unconnected Terrain Output as a valid flat slab', () => {
+    const graph = createBlankGraph();
+    const result = compileTerrainGraph(graph);
+    expect(validateGraph(graph).ok).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.program.slotCount).toBe(0);
+    expect(result.program.body2d).toContain('return 0.0');
+    expect(result.program.evaluate2D(12.5, -7.25, ctx)).toBe(0);
+  });
+
   it('characterizes every registry entry as plain JSON with typed analytical ports', () => {
     for (const definition of listGraphNodeDefinitions({ includeHidden: true })) {
       expect(getGraphNodeDefinition(definition.id)).toBe(definition);

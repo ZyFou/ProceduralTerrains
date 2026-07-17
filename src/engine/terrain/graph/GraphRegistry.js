@@ -65,7 +65,7 @@ const definitions = [
     description: 'The original biome-aware terrain generator, driven by the global Terrain controls.',
     executionKind: 'analytical', inputs: [], outputs: [output()], inspector: [], defaults: {},
     structuralParams: [], uniformSlots: () => 0,
-    glslCompiler: execute('classicTerrain'), cpuEvaluator: execute('classicTerrain'),
+    glslCompiler: execute('classicTerrain'), cpuEvaluator: execute('classicTerrain'), hiddenFromPalette: true,
   },
   ...SOURCE_TYPES.map(sourceDefinition),
   {
@@ -129,8 +129,8 @@ const definitions = [
   },
   {
     id: 'terrainOutput', label: 'Terrain Output', category: 'Output', color: 'output',
-    description: 'The permanent output consumed by the Tile renderer.',
-    executionKind: 'analytical', inputs: [input('height', 'Height')], outputs: [],
+    description: 'Connect the graph height here. Unconnected stays flat.',
+    executionKind: 'analytical', inputs: [input('height', 'Height', false)], outputs: [],
     inspector: [
       { key: 'normalize', label: 'Normalize Output', type: 'boolean', default: false },
       number('outMin', 'Output Min', -4, 4, 0.01, 0),

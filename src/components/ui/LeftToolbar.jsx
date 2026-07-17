@@ -25,6 +25,7 @@ export default function LeftToolbar({
   onLayoutChange,
   shellRef,
   showLabels = true,
+  panelIds = PANEL_ORDER,
 }) {
   const railRef = useRef(null);
   const menuRef = useRef(null);
@@ -177,7 +178,7 @@ export default function LeftToolbar({
         onPointerDown={startDrag}
         onContextMenu={onContextMenu}
       >
-        {PANEL_ORDER.filter((id) => panelAvailable(id, worldMode)).map((id) => {
+        {panelIds.filter((id) => panelAvailable(id, worldMode)).map((id) => {
           const meta = PANEL_META[id];
           const display = getPanelDisplay(id, worldMode);
           return (

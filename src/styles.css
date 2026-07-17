@@ -114,6 +114,8 @@ body {
 }
 .tb-actions { min-width: 0; }
 .tb-search-btn { max-width: 210px; }
+.tb-workspace-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.tb-workspace-pill svg { color: var(--accent); }
 .tb-menu-btn { gap: 5px; padding: 0 8px; }
 
 .tb-btn {
@@ -3873,7 +3875,7 @@ input[type="color"].palette-color-input {
   min-width: 320px;
   min-height: 220px;
   overflow: hidden;
-  background: #101318;
+  background: var(--bg-main);
   border: 1px solid var(--border-subtle);
   box-shadow: 0 -14px 40px rgba(0, 0, 0, .28);
 }
@@ -3887,9 +3889,14 @@ input[type="color"].palette-color-input {
   align-items: center;
   gap: 10px;
   padding: 0 10px 0 12px;
-  background: rgba(24, 28, 35, .96);
+  background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
 }
+.node-dock-header--draggable { cursor: grab; }
+.node-dock-header--draggable:active { cursor: grabbing; }
+.node-dock-header--draggable button { cursor: var(--cursor-pointer); }
+.node-dock-drag-cue { margin-left: auto; color: var(--text-dim); }
+.node-panel-snap-layer { z-index: 38; }
 .node-graph-toolbar { position: absolute; inset: 0 0 auto; z-index: 9; }
 .node-dock-heading { min-width: 112px; display: flex; flex-direction: column; line-height: 1.1; }
 .node-dock-heading strong { font-size: 11px; font-weight: 650; color: var(--text-bright); }
@@ -3941,7 +3948,7 @@ input[type="color"].palette-color-input {
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
-  background: rgba(20, 24, 30, .92);
+  background: var(--bg-panel);
 }
 .graph-edge-bottom .node-graph-resizer { top: 0; left: 0; right: 0; height: 5px; cursor: ns-resize; }
 .graph-edge-top .node-graph-resizer { bottom: 0; left: 0; right: 0; height: 5px; cursor: ns-resize; }
@@ -3951,7 +3958,7 @@ input[type="color"].palette-color-input {
 .graph-edge-top .node-graph-resizer svg { transform: rotate(90deg); }
 
 .node-flow-frame { position: absolute; inset: 42px 0 0; overflow: hidden; }
-.node-graph-dock .react-flow { background: #101318; }
+.node-graph-dock .react-flow { background: var(--bg-main); }
 .node-graph-dock .react-flow__pane { cursor: grab; }
 .node-graph-dock .react-flow__pane.dragging { cursor: grabbing; }
 .node-graph-dock .react-flow__controls {
@@ -3983,7 +3990,7 @@ input[type="color"].palette-color-input {
   min-height: 82px;
   border: 1px solid color-mix(in srgb, var(--node-blue) 72%, #27303b);
   border-radius: 5px;
-  background: rgba(25, 29, 36, .98);
+  background: #0d0d0d;
   box-shadow: 0 7px 20px rgba(0, 0, 0, .3);
   color: var(--text-main);
   overflow: visible;
@@ -4047,7 +4054,7 @@ input[type="color"].palette-color-input {
   flex-direction: column;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: rgba(19, 23, 29, .94);
+  background: rgba(13, 13, 13, .96);
   box-shadow: 0 12px 28px rgba(0,0,0,.32);
   backdrop-filter: blur(8px);
   overflow: hidden;
@@ -4075,7 +4082,7 @@ input[type="color"].palette-color-input {
   flex-direction: column;
   border: 1px solid var(--border-active);
   border-radius: var(--radius-sm);
-  background: rgba(20, 24, 30, .98);
+  background: #0d0d0d;
   box-shadow: 0 20px 54px rgba(0,0,0,.52);
   overflow: hidden;
 }
@@ -4100,7 +4107,7 @@ input[type="color"].palette-color-input {
   border-right: 1px solid var(--border-subtle);
   box-shadow: -12px 0 30px rgba(0,0,0,.22);
 }
-.node-inspector { height: 100%; display: flex; flex-direction: column; background: rgba(22, 26, 32, .98); }
+.node-inspector { height: 100%; display: flex; flex-direction: column; background: var(--bg-panel); }
 .node-inspector__header { position: relative; flex: 0 0 48px; }
 .node-inspector__body { flex: 1; min-height: 0; padding: 12px; overflow: auto; }
 .node-inspector-description { margin: 0 0 14px; color: var(--text-dim); font-size: 9px; line-height: 1.5; }

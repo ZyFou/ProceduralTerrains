@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Search, SquareArrowOutUpRight, Trash2, Upload } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -23,6 +23,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [templatePreviewsReady, setTemplatePreviewsReady] = useState(false);
@@ -74,9 +75,10 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   const template = getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
-  const create = (templateId) => {
+  const create = (templateId, editorMode = 'procedural') => {
     if (!bootReady || exiting) return;
-    dispatch('terrain-project:new', { templateId });
+    setCreateOpen(false);
+    dispatch('terrain-project:new', { templateId, editorMode });
     onLaunch();
   };
   const open = (project) => {
@@ -84,7 +86,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     dispatch('terrain-project:open', { project });
     onLaunch();
   };
-  const openApp = () => projects.length ? open(projects[0]) : create('blank');
+  const openApp = () => projects.length ? open(projects[0]) : setCreateOpen(true);
   const goHome = () => { setView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
   const selectTemplate = (id) => { setSelectedTemplateId(id); setSelectedProjectId(null); setView('templates'); dispatch('terrain-template:preview', { templateId: id }); };
   const openTemplates = () => selectTemplate(selectedTemplateId ?? PROJECT_TEMPLATES[0].id);
@@ -165,7 +167,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
         <span className="lp-card-info">
           <strong>{project.metadata.name}</strong>
-          <small><Clock size={11} aria-hidden /> {relTime(project.metadata.modified)}</small>
+          <small><Clock size={11} aria-hidden /> {relTime(project.metadata.modified)} <span className={`lp-project-kind ${project.terrain.editorMode}`}>{project.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}</span></small>
         </span>
       </button>
       <button
@@ -192,7 +194,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       <FolderOpen size={24} />
       <strong>No projects yet</strong>
       <span>Create a terrain from a template or drop a project file anywhere on this page.</span>
-      <button type="button" className="lp-primary" onClick={() => create('blank')} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
+      <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
     </div>
   );
 
@@ -235,7 +237,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <h1>Craft <em>stunning worlds</em> with procedural power</h1>
               <p>{APP_NAME} helps you generate, sculpt, and texture realistic environments in minutes — not months.</p>
               <div className="lp-hero-actions">
-                <button type="button" className="lp-primary" onClick={() => create('blank')} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
+                <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
                 <button type="button" className="lp-secondary" onClick={openTemplates}><LayoutTemplate size={14} /> Browse templates</button>
               </div>
             </section>
@@ -258,7 +260,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                   <h2>All projects</h2>
                   <div className="lp-head-actions">
                     <button type="button" className="lp-secondary sm" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
-                    <button type="button" className="lp-primary sm" onClick={() => create('blank')} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
+                    <button type="button" className="lp-primary sm" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
                   </div>
                 </div>
                 <div className="lp-search">
@@ -286,7 +288,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <div className="lp-card-grid">
                 {filtered.map((item) => (
                   <article className={`lp-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={item.id}>
-                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id)} onDoubleClick={() => create(item.id)}>
+                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id)} onDoubleClick={() => create(item.id, 'procedural')}>
                       <span className="lp-card-thumb">{templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : <LayoutTemplate size={22} />}</span>
                       <span className="lp-card-info">
                         <strong>{item.name}</strong>
@@ -297,7 +299,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                 ))}
               </div>
               <p className="lp-template-hint">Selecting a template previews it live in the background.</p>
-              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id)} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name} terrain</button>
+              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, 'procedural')} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name} terrain</button>
             </section>
             );
           })()}
@@ -317,6 +319,29 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       </div>
 
       {(!bootReady || previewProgress.completed < previewProgress.total) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>{bootReady ? 'Rendering terrain previews' : 'Starting terrain editor'}</strong><small>{bootReady ? `${previewProgress.completed} of ${previewProgress.total} real previews ready` : 'Preparing your random terrain workspace…'}</small></div>}
+      {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
+        <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div><span>New project</span><h2 id="create-terrain-title">Choose how to build your terrain</h2><p>Each project uses one authoring workflow. You can export from either.</p></div>
+            <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={16} /></button>
+          </header>
+          <div className="landing-create-options">
+            <button type="button" onClick={() => create('blank', 'procedural')} disabled={!bootReady || exiting}>
+              <span className="landing-create-icon"><SlidersHorizontal size={22} /></span>
+              <strong>Procedural</strong>
+              <small>The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.</small>
+              <span className="landing-create-action">Create procedural terrain <ArrowRight size={13} /></span>
+            </button>
+            <button type="button" onClick={() => create('blank', 'nodes')} disabled={!bootReady || exiting}>
+              <span className="landing-create-icon nodes"><Boxes size={22} /></span>
+              <strong>Nodes</strong>
+              <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
+              <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
+            </button>
+          </div>
+          <footer><button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates(); }}><LayoutTemplate size={13} /> Browse procedural templates</button></footer>
+        </section>
+      </div>}
       {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} /> X / Twitter</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} /> Portfolio</a></div><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
       {deleteTarget && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => !projectActionBusy && setDeleteTarget(null)}>
         <section className="landing-credits-dialog landing-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title" onMouseDown={(event) => event.stopPropagation()}>

@@ -109,7 +109,10 @@ function nodeFunction(graph, node, slot) {
       const p = `uLayerParamsA[${slot}]`;
       return `float ${fn}(vec2 xz, Climate c) { float h=${source}(xz,c); float steps=max(${p}.x,1.0); float t=h*steps; float s=smoothstep(0.5-${p}.y*0.5,0.5+${p}.y*0.5,fract(t)); float terr=(floor(t)+s)/steps; return mix(h,terr,clamp(${p}.z,0.0,1.0)); }`;
     },
-    terrainOutput: () => `float ${fn}(vec2 xz, Climate c) { return ${upstream(graph, node, 'height')}(xz,c); }`,
+    terrainOutput: () => {
+      const height = upstream(graph, node, 'height');
+      return `float ${fn}(vec2 xz, Climate c) { return ${height ? `${height}(xz,c)` : '0.0'}; }`;
+    },
   };
   return definition?.glslCompiler?.(compiler) || '';
 }
@@ -158,7 +161,10 @@ function cpuEvaluator(graph) {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const output = findOutputNode(graph);
   const evalNode = (id, x, z, ctx) => {
-    const node = nodes.get(id); const get = (port, px = x, pz = z) => evalNode(inputEdge(graph, id, port).source, px, pz, ctx);
+    const node = nodes.get(id); const get = (port, px = x, pz = z) => {
+      const edge = inputEdge(graph, id, port);
+      return edge ? evalNode(edge.source, px, pz, ctx) : 0;
+    };
     const definition = getGraphNodeDefinition(node.type);
     const evaluator = {
       currentTerrain: () => evalStack2D(migrateStack(node.params?.stack), x, z, { ...ctx, uniforms: { ...ctx.uniforms, uAmplitude: { value: 1 } } }),

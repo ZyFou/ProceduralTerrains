@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Clock3,
+  Boxes,
   Download,
   Eye,
   EyeOff,
@@ -34,6 +35,7 @@ const Caret = () => (
 );
 
 export default function TopBar({
+  projectMode = 'procedural',
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onToggleHelp, onResetView,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
@@ -173,25 +175,27 @@ export default function TopBar({
             >
               <Settings size={14} strokeWidth={1.75} aria-hidden /> Settings
             </button>
-            <div className="tb-menu-divider" role="separator" />
-            <button
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRandomize?.();
-              }}
-            >
-              <Dices size={14} strokeWidth={1.75} aria-hidden /> Randomize seed
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={paintMode ? 'active' : ''}
-              onClick={() => runMenuAction(setEditMenuOpen, onTogglePaintMode)}
-            >
-              <Pencil size={14} strokeWidth={1.75} aria-hidden /> {paintMode ? 'Exit paint' : 'Paint mode'}
-            </button>
+            {projectMode === 'procedural' ? <>
+              <div className="tb-menu-divider" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRandomize?.();
+                }}
+              >
+                <Dices size={14} strokeWidth={1.75} aria-hidden /> Randomize seed
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={paintMode ? 'active' : ''}
+                onClick={() => runMenuAction(setEditMenuOpen, onTogglePaintMode)}
+              >
+                <Pencil size={14} strokeWidth={1.75} aria-hidden /> {paintMode ? 'Exit paint' : 'Paint mode'}
+              </button>
+            </> : null}
           </div>
         </div>
 
@@ -247,17 +251,21 @@ export default function TopBar({
             <span className="tb-text">{loading.label}</span>
           </span>
         )}
-        <button
-          type="button"
-          className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
-          onClick={onOpenSettingsSearch}
-          title="Search settings (Ctrl+K)"
-          aria-pressed={settingsSearchOpen}
-        >
-          <Search size={13} strokeWidth={1.75} aria-hidden />
-          <span className="tb-text">Search settings</span>
-          <span className="tb-shortcut">Ctrl+K</span>
-        </button>
+        {projectMode === 'nodes' ? (
+          <span className="tb-workspace-pill"><Boxes size={13} aria-hidden /> Nodes workspace</span>
+        ) : (
+          <button
+            type="button"
+            className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
+            onClick={onOpenSettingsSearch}
+            title="Search settings (Ctrl+K)"
+            aria-pressed={settingsSearchOpen}
+          >
+            <Search size={13} strokeWidth={1.75} aria-hidden />
+            <span className="tb-text">Search settings</span>
+            <span className="tb-shortcut">Ctrl+K</span>
+          </button>
+        )}
       </div>
 
       <div className="tb-group tb-right">

@@ -5,7 +5,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert,
-  Dock, Eye, EyeOff, GripVertical, Maximize2, PanelLeftClose, PanelRightClose,
+  Eye, EyeOff, GripVertical, Maximize2,
   Play, Plus, Search, Trash2, X,
 } from 'lucide-react';
 import {
@@ -14,6 +14,7 @@ import {
   updateGraphNode, updateGraphNodeParams,
 } from '../../engine/terrain/graph/GraphDocument.js';
 import { getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
+import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v1';
 const DEFAULT_LAYOUT = { graphEdge: 'bottom', graphRatio: 0.38, inspectorSide: 'right', inspectorWidth: 320, paletteCollapsed: false, previewVisible: false };
@@ -99,20 +100,18 @@ function InspectorField({ field, value, onChange }) {
   );
 }
 
-function NodeInspector({ node, graphState, onRename, onParam, onDelete, side, onToggleSide }) {
+function NodeInspector({ node, graphState, onRename, onParam, onDelete, onHeaderPointerDown }) {
   const definition = node ? (getGraphNodeDefinition(node.type) || {
     label: `Unknown: ${node.type}`, description: 'This node type is unavailable in this version.', inspector: [], permanent: false,
   }) : null;
   return (
     <aside className="node-inspector" aria-label="Selected node properties">
-      <header className="node-dock-header node-inspector__header">
+      <header className="node-dock-header node-inspector__header node-dock-header--draggable" onPointerDown={onHeaderPointerDown}>
         <div className="node-dock-heading">
           <span className="node-dock-kicker">Properties</span>
           <strong>{definition?.label || 'Nothing selected'}</strong>
         </div>
-        <button type="button" className="node-icon-button" onClick={onToggleSide} title={`Move inspector ${side === 'right' ? 'left' : 'right'}`}>
-          {side === 'right' ? <PanelLeftClose size={15} /> : <PanelRightClose size={15} />}
-        </button>
+        <GripVertical className="node-dock-drag-cue" size={15} aria-hidden />
       </header>
       {node && definition ? (
         <div className="node-inspector__body">
@@ -164,14 +163,22 @@ export default function NodeWorkspace({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [instance, setInstance] = useState(null);
+  const [draggingDock, setDraggingDock] = useState(null);
+  const [snapHint, setSnapHint] = useState(null);
   const rootRef = useRef(null);
   const graphDockRef = useRef(null);
   const pointerRef = useRef({ x: window.innerWidth * 0.5, y: window.innerHeight * 0.65 });
   const copyRef = useRef([]);
+  const dockDragRef = useRef(null);
 
   useEffect(() => { setLocalGraph(graph); graphRef.current = graph; }, [graph]);
   useEffect(() => { graphRef.current = localGraph; }, [localGraph]);
   useEffect(() => { saveLayout(layout); onPreviewVisibilityChange?.(layout.previewVisible); }, [layout, onPreviewVisibilityChange]);
+  useEffect(() => {
+    if (!instance) return undefined;
+    const frame = requestAnimationFrame(() => instance.fitView({ padding: 0.2, maxZoom: 1, duration: 220 }));
+    return () => cancelAnimationFrame(frame);
+  }, [instance, layout.graphEdge, layout.inspectorSide]);
 
   const definitions = useMemo(() => listGraphNodeDefinitions(), []);
   const grouped = useMemo(() => definitions.reduce((map, definition) => {
@@ -253,8 +260,48 @@ export default function NodeWorkspace({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [deleteSelection, duplicateSelection, instance, openSearch, selectedNodes]);
 
-  const updateLayout = (patch) => setLayout((current) => ({ ...current, ...patch }));
-  const cycleDock = () => updateLayout({ graphEdge: GRAPH_EDGES[(GRAPH_EDGES.indexOf(layout.graphEdge) + 1) % GRAPH_EDGES.length] });
+  const updateLayout = useCallback((patch) => setLayout((current) => ({ ...current, ...patch })), []);
+  const beginDockDrag = useCallback((kind, event) => {
+    if (event.button !== 0 || event.target.closest('button, input, select, textarea, a')) return;
+    if (!window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 821px)').matches) return;
+    event.preventDefault();
+    dockDragRef.current = { kind, startX: event.clientX, startY: event.clientY, armed: false };
+  }, []);
+
+  useEffect(() => {
+    const move = (event) => {
+      const drag = dockDragRef.current;
+      const root = rootRef.current;
+      if (!drag || !root) return;
+      if (!drag.armed) {
+        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+        drag.armed = true;
+        setDraggingDock(drag.kind);
+      }
+      const edges = drag.kind === 'graph' ? GRAPH_EDGES : ['left', 'right'];
+      setSnapHint(resolveNearestEdge(event.clientX, event.clientY, root.getBoundingClientRect(), edges));
+    };
+    const finish = (event) => {
+      const drag = dockDragRef.current;
+      const root = rootRef.current;
+      dockDragRef.current = null;
+      setDraggingDock(null);
+      setSnapHint(null);
+      if (!drag?.armed || !root) return;
+      const edges = drag.kind === 'graph' ? GRAPH_EDGES : ['left', 'right'];
+      const edge = resolveNearestEdge(event.clientX ?? drag.startX, event.clientY ?? drag.startY, root.getBoundingClientRect(), edges);
+      updateLayout(drag.kind === 'graph' ? { graphEdge: edge } : { inspectorSide: edge });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+  }, [updateLayout]);
+
   const beginGraphResize = (event) => {
     event.preventDefault();
     const rect = rootRef.current.getBoundingClientRect(); const edge = layout.graphEdge;
@@ -282,13 +329,18 @@ export default function NodeWorkspace({
 
   return (
     <section ref={rootRef} className={`nodes-workspace graph-edge-${layout.graphEdge} inspector-${layout.inspectorSide}${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Terrain Nodes workspace">
+      {draggingDock ? (
+        <div className={`panel-snap-layer node-panel-snap-layer${draggingDock === 'inspector' ? ' panel-snap-layer--drawer' : ''}`} aria-hidden>
+          {(draggingDock === 'graph' ? GRAPH_EDGES : ['left', 'right']).map((edge) => <div key={edge} className={`panel-snap-zone panel-snap-zone--${edge}${snapHint === edge ? ' active' : ''}`} />)}
+        </div>
+      ) : null}
       {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: inspectorOffset + 14 }}>{preview}</div> : null}
       <div ref={graphDockRef} className="node-graph-dock" style={dockStyle} onPointerMove={(event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={(event) => {
         event.preventDefault(); const type = event.dataTransfer.getData('application/x-terrain-node'); if (!type || !instance) return;
         addNodeAt(type, instance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
       }}>
         <div className="node-graph-resizer" onPointerDown={beginGraphResize}><GripVertical size={14} /></div>
-        <header className="node-dock-header node-graph-toolbar">
+        <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
           <div className="node-dock-heading"><span className="node-dock-kicker">Terrain</span><strong>Analytical Graph</strong></div>
           <div className="node-graph-status">
             {graphState?.valid === false ? <><CircleAlert size={13} /><span>Last valid terrain</span></> : <><Play size={12} /><span>Realtime</span></>}
@@ -297,8 +349,7 @@ export default function NodeWorkspace({
             <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
             <button type="button" className="node-icon-button" onClick={() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 280 })} title="Fit graph"><Maximize2 size={14} /></button>
             <button type="button" className={`node-icon-button${layout.previewVisible ? ' active' : ''}`} onClick={() => updateLayout({ previewVisible: !layout.previewVisible })} title="Toggle 2D preview">{layout.previewVisible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-            <button type="button" className="node-icon-button" onClick={cycleDock} title={`Dock graph to ${GRAPH_EDGES[(GRAPH_EDGES.indexOf(layout.graphEdge) + 1) % GRAPH_EDGES.length]}`}><Dock size={14} /></button>
-            <button type="button" className="node-toolbar-button subtle" onClick={onStartBlank}>Start Blank</button>
+            <button type="button" className="node-toolbar-button subtle" onClick={onStartBlank}>Clear graph</button>
           </div>
         </header>
 
@@ -370,7 +421,7 @@ export default function NodeWorkspace({
           }}
           colorMode="dark" proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Lines} gap={24} size={0.7} color="rgba(127, 146, 170, .11)" />
+          <Background variant={BackgroundVariant.Lines} gap={24} size={0.7} color="rgba(255, 255, 255, .075)" />
           <Controls showInteractive={false} position="bottom-right" />
         </ReactFlow>
         </div>
@@ -399,8 +450,8 @@ export default function NodeWorkspace({
         <div className="node-inspector-dock" style={{ [layout.inspectorSide]: 0, width: layout.inspectorWidth }}>
           <div className="node-inspector-resizer" onPointerDown={beginInspectorResize} />
           <NodeInspector
-            node={selectedNode} graphState={graphState} side={layout.inspectorSide}
-            onToggleSide={() => updateLayout({ inspectorSide: layout.inspectorSide === 'right' ? 'left' : 'right' })}
+            node={selectedNode} graphState={graphState}
+            onHeaderPointerDown={(event) => beginDockDrag('inspector', event)}
             onRename={(label) => commit(updateGraphNode(graphRef.current, selectedNode.id, { label }), { structural: false, history: true })}
             onParam={(key, value, structural) => commit(updateGraphNodeParams(graphRef.current, selectedNode.id, { [key]: value }), { structural, history: true })}
             onDelete={() => { const next = removeGraphNodes(graphRef.current, [selectedNode.id]); commit(next, { structural: true, history: true }); setSelectedNodes(new Set()); }}
