@@ -1,48 +1,41 @@
-# Nodes Workspace Design QA
+# Nodes Template Catalog Design QA
 
 ## Evidence
 
-- Visual references: the three supplied Gaea workspace screenshots, used for hierarchy and interaction density rather than visual cloning.
-- Browser-rendered implementation: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-1440x900.png`.
-- Responsive captures: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-1280x720.png` and `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-1024x768.png`.
-- Comparison method: both Gaea references and the 1440×900 implementation capture were reviewed together in one visual comparison input.
-- State: standalone Nodes project, blank graph with one permanent Terrain Output, flat unconnected slab, preview hidden, graph docked below, inspector snapped right.
+- Native design source: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/template-catalog-procedural-source.png`.
+- Final Nodes catalog: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/template-catalog-nodes-final-1280x720.png`.
+- Authored template workspace: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/node-template-alpine-1280x720.png`.
+- Viewport: 1280×720.
+- State: Templates page, Nodes tab selected, Blank graph preview active; Alpine ridges was also created and inspected in the Nodes workspace.
+- Comparison method: the existing Procedural catalog and the new Nodes catalog were reviewed together as the product-native visual reference and implementation.
 
 ## Findings
 
 No actionable P0, P1, or P2 issues remain.
 
-- Hierarchy: the implementation retains the reference pattern of a dominant terrain renderer, graph workspace below, quick-node palette on the graph edge, and selected-node properties on the right.
-- Project separation: Nodes is visibly a standalone workspace. Tile, Infinite World, Planet, Classic/Nodes switching, Noise Stack authoring, and paint tools are absent.
-- Blank state: a new Nodes project renders a neutral white-grey flat slab and contains only Terrain Output. No procedural terrain is inherited or revealed as a fallback.
-- Color and styling: graph, inspector, dock chrome, and controls use the application's native black/graphite tokens instead of the previous blue-grey surface. Typed node accents remain restrained and readable.
-- Docking: graph and inspector headers use the existing drag-to-snap overlay and targets. There are no left/right or edge-cycle buttons.
-- Responsiveness: 1440×900, 1280×720, and 1024×768 remain usable without page overflow; toolbar labels progressively compact while the graph and inspector retain usable dimensions.
-- Assets and icons: existing product assets and Lucide icons are used consistently. No substitute illustrations, emoji controls, or handcrafted icon assets were introduced.
-- Accessibility: major regions, buttons, selected-node properties, graph controls, and workspace state are exposed with semantic labels.
-- Runtime: the final clean-tab verification reported no browser console errors or warnings.
+- Hierarchy: the Nodes catalog preserves the existing template page composition, search placement, card density, live-preview split, and primary creation action.
+- Workflow separation: Procedural and Nodes are explicit template tabs. Selecting either changes the template catalog and the project type used by Create.
+- Project-type handoff: landing previews are cancelled synchronously before a project is opened or created, so a stale preview can no longer overwrite the user's Procedural or Nodes selection during the exit animation.
+- Template coverage: Blank graph, Alpine ridges, Layered highlands, Wind dunes, Crater basin, and River valleys provide distinct analytical starting points while keeping Blank graph as the default.
+- Graph quality: every authored template has one permanent Terrain Output, valid typed connections, reachable nodes only, and stays within the 12-slot analytical limit.
+- Color and styling: the catalog uses the product's native black/graphite surfaces, blue selection accents, typography, borders, spacing, and Lucide icon language.
+- Preview behavior: Blank graph renders the intended neutral slab. Alpine ridges produces a normalized realtime terrain and its graph remains visible beside the quick-node palette.
+- Accessibility: template-type controls use tab semantics, search is labelled, template cards expose their names/descriptions/workflow, and the create action reflects the selected template.
 
 ## Primary Interactions Tested
 
-- Created and reopened a Nodes project from the home flow and confirmed its project-type badge persists.
-- Confirmed the blank Terrain Output program evaluates to zero and renders the flat slab.
-- Added an FBM node and connected it to Terrain Output; the slab changed to realtime terrain relief.
-- Cleared the graph and confirmed the renderer returned to the flat slab.
-- Drag-snapped the graph from right to bottom and the inspector from left to right; layout preferences persisted.
-- Opened the Export drawer from the Nodes workspace and confirmed screenshot, heightmap, GLB, OBJ, and terrain export actions remain available.
-- Confirmed the Nodes tools rail excludes Procedural-only world-mode controls while retaining colors, water, clouds, visuals, skybox, lighting, export, performance, and debug.
+- Started from a Procedural landing preview, created Nodes, and confirmed the resulting workspace remained Nodes.
+- Started from a Nodes landing preview, created Procedural, and confirmed the resulting workspace remained Procedural.
+- Switched between Procedural and Nodes template catalogs and confirmed the selected catalog controls live preview and creation.
+- Created the Blank graph template and confirmed it contains only Terrain Output and the flat slab.
+- Created Alpine ridges and confirmed Ridged → Domain Warp → Terrace → Terrain Output renders in realtime.
+- Verified the six Nodes templates can be searched, selected, previewed, and created.
 
-## Intentional Differences From Gaea
+## Runtime Verification
 
-- The product keeps Procedural Terrains' own typography, icons, spacing, and accent colors.
-- The default Nodes scene is deliberately blank, per product direction, so the reference screenshots' authored mountains and materials are not reproduced.
-- The optional secondary preview remains hidden by default and can be enabled from the graph toolbar.
-
-## Verification
-
-- Automated tests: 108 passed across 9 test files.
-- Production build: passed; React Flow remains in a separate lazy-loaded `NodeWorkspace` chunk.
-- Visual breakpoints: 1440×900, 1280×720, 1024×768.
+- Automated tests: 116 passed across 10 test files.
+- Production build: passed; React Flow remains a separate lazy-loaded `NodeWorkspace` chunk.
 - Browser console: clean on a fresh final verification tab.
+- Regression fixed during QA: authored graph nodes initially overlapped the quick palette; the flow frame now reserves the palette width and the post-fix Alpine workspace was rechecked.
 
 final result: passed

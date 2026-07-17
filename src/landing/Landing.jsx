@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, LayoutTemplate, Pencil, Plus, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
 import { PROJECT_TEMPLATES, getProjectTemplate } from '../project/ProjectTemplates.js';
+import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
 import { Logo } from './shared.jsx';
+
+const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
+
+function initialTemplateThumbs() {
+  const entries = [];
+  for (const template of PROJECT_TEMPLATES) {
+    const image = sessionStorage.getItem(`terrain-template-preview:${template.id}`);
+    if (image) entries.push([template.id, image]);
+  }
+  for (const template of NODE_PROJECT_TEMPLATES) {
+    const image = sessionStorage.getItem(nodeTemplatePreviewCacheKey(template.id));
+    if (image) entries.push([template.id, image]);
+  }
+  return Object.fromEntries(entries);
+}
 
 const relTime = (value) => {
   if (!value) return 'Not saved';
@@ -21,13 +37,14 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [projects, setProjects] = useState([]);
   const [view, setView] = useState('home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
+  const [templateKind, setTemplateKind] = useState('procedural');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [templatePreviewsReady, setTemplatePreviewsReady] = useState(false);
-  const [templateThumbs, setTemplateThumbs] = useState(() => Object.fromEntries(PROJECT_TEMPLATES.map((template) => [template.id, sessionStorage.getItem(`terrain-template-preview:${template.id}`)]).filter(([, image]) => image)));
+  const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
   const [previewProgress, setPreviewProgress] = useState(() => ({ completed: 0, total: PROJECT_TEMPLATES.length }));
   const [menuFor, setMenuFor] = useState(null);
   const [query, setQuery] = useState('');
@@ -73,7 +90,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     window.dispatchEvent(new CustomEvent('terrain-project:preview', { detail: { project: selectedProject } }));
   }, [bootReady, selectedProject, templatePreviewsReady, view]);
 
-  const template = getProjectTemplate(selectedTemplateId);
+  const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
   const create = (templateId, editorMode = 'procedural') => {
     if (!bootReady || exiting) return;
@@ -88,8 +105,20 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   };
   const openApp = () => projects.length ? open(projects[0]) : setCreateOpen(true);
   const goHome = () => { setView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
-  const selectTemplate = (id) => { setSelectedTemplateId(id); setSelectedProjectId(null); setView('templates'); dispatch('terrain-template:preview', { templateId: id }); };
-  const openTemplates = () => selectTemplate(selectedTemplateId ?? PROJECT_TEMPLATES[0].id);
+  const selectTemplate = (id, editorMode = templateKind) => {
+    const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    setTemplateKind(nextKind);
+    setSelectedTemplateId(id);
+    setSelectedProjectId(null);
+    setView('templates');
+    dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
+  };
+  const openTemplates = (editorMode = templateKind) => {
+    const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    const catalog = nextKind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+    const currentExists = catalog.some((item) => item.id === selectedTemplateId);
+    selectTemplate(currentExists ? selectedTemplateId : catalog[0].id, nextKind);
+  };
   const importProjectFile = (file, { openAfter } = {}) => {
     if (!file) return;
     const reader = new FileReader();
@@ -220,7 +249,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         <button type="button" className="lp-brand" onClick={goHome} title="Return to home"><Logo size={24} /><strong>{APP_NAME}</strong></button>
         <nav className="lp-nav-links" aria-label="Main navigation">
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => setView('projects')}>Projects</button>
-          <button type="button" className={view === 'templates' ? 'active' : ''} onClick={openTemplates}>Templates</button>
+          <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => openTemplates()}>Templates</button>
           <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">Docs</a>
         </nav>
         <div className="lp-nav-actions">
@@ -238,7 +267,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <p>{APP_NAME} helps you generate, sculpt, and texture realistic environments in minutes — not months.</p>
               <div className="lp-hero-actions">
                 <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
-                <button type="button" className="lp-secondary" onClick={openTemplates}><LayoutTemplate size={14} /> Browse templates</button>
+                <button type="button" className="lp-secondary" onClick={() => openTemplates()}><LayoutTemplate size={14} /> Browse templates</button>
               </div>
             </section>
 
@@ -276,30 +305,38 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
           {view === 'templates' && (() => {
             const q = query.trim().toLowerCase();
-            const filtered = PROJECT_TEMPLATES.filter((item) => item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q));
+            const catalog = templateKind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+            const filtered = catalog.filter((item) => item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q));
             return (
             <section className="lp-section lp-view">
-              <div className="lp-section-head"><h2>Terrain templates</h2></div>
+              <div className="lp-section-head lp-template-section-head">
+                <div><h2>Terrain templates</h2><p>Choose one authoring workflow. The selected terrain previews live behind this page.</p></div>
+                <div className="lp-template-kind-switch" role="tablist" aria-label="Template type">
+                  <button type="button" role="tab" aria-selected={templateKind === 'procedural'} className={templateKind === 'procedural' ? 'active' : ''} onClick={() => openTemplates('procedural')}><SlidersHorizontal size={13} /> Procedural</button>
+                  <button type="button" role="tab" aria-selected={templateKind === 'nodes'} className={templateKind === 'nodes' ? 'active' : ''} onClick={() => openTemplates('nodes')}><Boxes size={13} /> Nodes</button>
+                </div>
+              </div>
               <div className="lp-search">
                 <Search size={14} aria-hidden />
-                <input type="search" placeholder="Search templates…" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search templates" />
+                <input type="search" placeholder={`Search ${templateKind === 'nodes' ? 'Nodes' : 'procedural'} templates…`} value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search templates" />
               </div>
               {filtered.length === 0 && <p className="lp-no-results">No template matches &ldquo;{query.trim()}&rdquo;.</p>}
               <div className="lp-card-grid">
                 {filtered.map((item) => (
                   <article className={`lp-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={item.id}>
-                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id)} onDoubleClick={() => create(item.id, 'procedural')}>
-                      <span className="lp-card-thumb">{templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : <LayoutTemplate size={22} />}</span>
+                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
+                      <span className={`lp-card-thumb${templateKind === 'nodes' ? ' nodes' : ''}`}>{templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : (() => { const Icon = NODE_TEMPLATE_ICONS[item.icon] || LayoutTemplate; return <Icon size={22} />; })()}</span>
                       <span className="lp-card-info">
                         <strong>{item.name}</strong>
                         <small>{item.description}</small>
                       </span>
+                      <span className={`lp-template-kind-badge ${templateKind}`}>{templateKind === 'nodes' ? 'Nodes' : 'Procedural'}</span>
                     </button>
                   </article>
                 ))}
               </div>
               <p className="lp-template-hint">Selecting a template previews it live in the background.</p>
-              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, 'procedural')} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name} terrain</button>
+              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
             </section>
             );
           })()}
@@ -332,14 +369,17 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <small>The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.</small>
               <span className="landing-create-action">Create procedural terrain <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => create('blank', 'nodes')} disabled={!bootReady || exiting}>
+            <button type="button" onClick={() => create('nodes-blank', 'nodes')} disabled={!bootReady || exiting}>
               <span className="landing-create-icon nodes"><Boxes size={22} /></span>
               <strong>Nodes</strong>
               <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
               <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
             </button>
           </div>
-          <footer><button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates(); }}><LayoutTemplate size={13} /> Browse procedural templates</button></footer>
+          <footer>
+            <button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates('procedural'); }}><SlidersHorizontal size={13} /> Procedural templates</button>
+            <button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates('nodes'); }}><Boxes size={13} /> Nodes templates</button>
+          </footer>
         </section>
       </div>}
       {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} /> X / Twitter</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} /> Portfolio</a></div><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}

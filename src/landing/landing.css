@@ -252,6 +252,13 @@ body:has(.landing-overlay) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .lp-section-head h2 { margin: 0; color: var(--text-bright); font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; }
+.lp-template-section-head { align-items: flex-end; }
+.lp-template-section-head > div:first-child { min-width: 0; }
+.lp-template-section-head p { margin: 4px 0 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.4; }
+.lp-template-kind-switch { display: inline-flex; flex: none; padding: 3px; border: 1px solid var(--border-subtle); border-radius: 8px; background: rgba(255,255,255,.025); }
+.lp-template-kind-switch button { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-dim); font: 600 10.5px var(--font); cursor: var(--cursor-pointer); }
+.lp-template-kind-switch button:hover { color: var(--text-main); }
+.lp-template-kind-switch button.active { background: var(--bg-control); color: var(--text-bright); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .lp-head-actions { display: flex; gap: 8px; }
 .lp-view { min-height: 340px; }
 
@@ -298,6 +305,7 @@ body:has(.landing-overlay) {
 .lp-card:hover, .lp-card.menu-open { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); }
 .lp-card.selected { border-color: var(--accent); background: var(--accent-bg); }
 .lp-card-main {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -321,11 +329,14 @@ body:has(.landing-overlay) {
   color: var(--text-dim);
 }
 .lp-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lp-card-thumb.nodes { background: #0d0d0d; color: #7aa7ff; }
 .lp-card-info { display: grid; gap: 5px; padding: 10px 4px 0; }
 .lp-card-info strong { color: var(--text-bright); font-size: 12.5px; font-weight: 600; padding-right: 20px; }
 .lp-card-info small { display: flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; line-height: 1.4; }
 .lp-project-kind { margin-left: auto; padding: 2px 5px; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; color: var(--text-muted); font: 600 8px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .lp-project-kind.nodes { border-color: rgba(37,99,235,.35); background: rgba(37,99,235,.12); color: #8bb4ff; }
+.lp-template-kind-badge { position: absolute; top: 12px; right: 12px; padding: 3px 6px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; background: rgba(5,5,5,.82); color: var(--text-muted); font: 650 7.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(6px); }
+.lp-template-kind-badge.nodes { border-color: rgba(37,99,235,.4); background: rgba(13,23,44,.88); color: #8bb4ff; }
 .lp-card-menu-btn {
   position: absolute;
   right: 6px;
@@ -452,7 +463,7 @@ body:has(.landing-overlay) {
 .landing-create-options strong { color: var(--text-bright); font-size: 16px; }
 .landing-create-options small { margin-top: 7px; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
 .landing-create-action { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 20px; color: var(--accent); font-size: 11px; font-weight: 650; }
-.landing-create-dialog > footer { display: flex; justify-content: center; margin-top: 16px; }
+.landing-create-dialog > footer { display: flex; justify-content: center; flex-wrap: wrap; gap: 18px; margin-top: 16px; }
 
 /* ============ Responsive ============ */
 @media (max-width: 1180px) {
@@ -492,6 +503,9 @@ body:has(.landing-overlay) {
   .lp-footer { flex-direction: column; align-items: flex-start; gap: 10px; }
   .lp-head-actions .lp-secondary.sm span { display: none; }
   .lp-template-create { width: 100%; }
+  .lp-template-section-head { align-items: flex-start; flex-direction: column; }
+  .lp-template-kind-switch { width: 100%; }
+  .lp-template-kind-switch button { flex: 1; justify-content: center; }
   .landing-create-dialog { padding: 18px; }
   .landing-create-options { grid-template-columns: 1fr; }
   .landing-create-options > button { min-height: 170px; }

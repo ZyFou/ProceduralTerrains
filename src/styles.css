@@ -3958,6 +3958,7 @@ input[type="color"].palette-color-input {
 .graph-edge-top .node-graph-resizer svg { transform: rotate(90deg); }
 
 .node-flow-frame { position: absolute; inset: 42px 0 0; overflow: hidden; }
+.node-graph-dock:has(.node-quick-palette) .node-flow-frame { left: 174px; border-left: 1px solid var(--border-subtle); }
 .node-graph-dock .react-flow { background: var(--bg-main); }
 .node-graph-dock .react-flow__pane { cursor: grab; }
 .node-graph-dock .react-flow__pane.dragging { cursor: grabbing; }

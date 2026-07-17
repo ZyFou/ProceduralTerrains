@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest';
+import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
+import {
+  TERRAIN_OUTPUT_ID, graphCapacity, reachableNodeIds, validateGraph,
+} from '../src/engine/terrain/graph/GraphDocument.js';
+import {
+  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
+} from '../src/project/NodeProjectTemplates.js';
+
+describe('Nodes project templates', () => {
+  it('provides a blank graph plus several authored terrain starting points', () => {
+    expect(NODE_PROJECT_TEMPLATES[0]).toMatchObject({ id: 'nodes-blank', name: 'Blank graph' });
+    expect(NODE_PROJECT_TEMPLATES.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(NODE_PROJECT_TEMPLATES.map((template) => template.id)).size).toBe(NODE_PROJECT_TEMPLATES.length);
+  });
+
+  it.each(NODE_PROJECT_TEMPLATES.map((template) => [template.id]))('%s is valid, reachable, and realtime-safe', (templateId) => {
+    const graph = createNodeTemplateGraph(templateId);
+    const validation = validateGraph(graph);
+    const compiled = compileTerrainGraph(graph);
+    expect(validation).toEqual({ ok: true, diagnostics: [] });
+    expect(compiled.ok).toBe(true);
+    expect(graph.nodes.filter((node) => node.id === TERRAIN_OUTPUT_ID)).toHaveLength(1);
+    expect(reachableNodeIds(graph).size).toBe(graph.nodes.length);
+    expect(graphCapacity(graph)).toBeLessThanOrEqual(12);
+  });
+
+  it('returns fresh documents and safely falls back to Blank graph', () => {
+    const first = createNodeTemplateGraph('nodes-alpine');
+    const second = createNodeTemplateGraph('nodes-alpine');
+    first.nodes[0].position.x = 999;
+    expect(second.nodes[0].position.x).not.toBe(999);
+    expect(getNodeProjectTemplate('missing').id).toBe('nodes-blank');
+    expect(createNodeTemplateGraph('missing').edges).toEqual([]);
+  });
+});

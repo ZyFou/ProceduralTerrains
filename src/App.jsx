@@ -40,6 +40,9 @@ import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
 import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
+import {
+  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
+} from './project/NodeProjectTemplates.js';
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
@@ -61,6 +64,8 @@ export default function App() {
   const engineRef = useRef(null);
   const activeProjectRef = useRef(null);
   const templatePreviewQueueRef = useRef(Promise.resolve());
+  const landingPreviewActiveRef = useRef(true);
+  const landingPreviewSessionRef = useRef(0);
 
   const loading = useLoading();
   const landing = useLanding();
@@ -451,8 +456,10 @@ export default function App() {
   const createProjectFromTemplate = useCallback(async (templateId = 'blank', { editorMode = 'procedural' } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
-    const template = getProjectTemplate(templateId);
     const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
+    landingPreviewActiveRef.current = false;
+    landingPreviewSessionRef.current += 1;
     if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
       await runModeSwitchRef.current('studio', { silent: true });
     }
@@ -463,22 +470,35 @@ export default function App() {
     // Every launch starts from the Root's session seed; give each chosen
     // template a stable-but-fresh variant instead of reverting to seed 1337.
     const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
-    const templateOffset = PROJECT_TEMPLATES.findIndex((item) => item.id === template.id) + 1;
+    const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+    const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
     eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
-    if (nextMode === 'procedural' && template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+    if (nextMode === 'nodes') eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true });
+    else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
     const metadata = nextMode === 'nodes'
-      ? { name: 'Nodes Terrain', description: 'Analytical node terrain', tags: ['nodes'] }
+      ? {
+        name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
+        description: template.description,
+        tags: ['nodes', template.id],
+      }
       : { name: template.name, description: template.description, tags: [template.id] };
     const project = await saveCurrentProject(metadata);
-    if (project) showToast(`${nextMode === 'nodes' ? 'Nodes' : template.name} project created`, 'success');
+    if (project) showToast(`${template.name} project created`, 'success');
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
-    const onNewProject = (event) => { createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' }); };
+    const stopLandingPreviews = () => {
+      landingPreviewActiveRef.current = false;
+      landingPreviewSessionRef.current += 1;
+    };
+    const onNewProject = (event) => {
+      createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
+    };
     const onOpenProject = async (event) => {
       const project = event.detail?.project;
       const eng = engineRef.current;
       if (!project?.terrain || !eng) return;
+      stopLandingPreviews();
       const normalized = normalizeProject(project);
       if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
@@ -487,37 +507,58 @@ export default function App() {
       setCurrentProject(normalized);
       showToast(`Opened ${normalized.metadata?.name ?? 'terrain project'}`, 'success');
     };
-    const onPreviewProject = (event) => {
+    const onPreviewProject = async (event) => {
       const project = event.detail?.project;
       const eng = engineRef.current;
-      if (!project?.terrain || !eng) return;
-      eng.loadSeedJSON(project.terrain, { silent: true });
+      const session = landingPreviewSessionRef.current;
+      if (!landingPreviewActiveRef.current || !project?.terrain || !eng) return;
+      const normalized = normalizeProject(project);
+      if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+        await runModeSwitchRef.current('studio', { silent: true });
+      }
+      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current) return;
+      eng.loadSeedJSON(normalized.terrain, { silent: true });
     };
-    const previewSeed = (templateId) => {
-      const index = Math.max(0, PROJECT_TEMPLATES.findIndex((item) => item.id === templateId));
+    const previewSeed = (templateId, editorMode = 'procedural') => {
+      const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+      const index = Math.max(0, catalog.findIndex((item) => item.id === templateId));
       const base = Number(landingRef.current?.sessionSeed) || 1337;
       return (base + (index + 1) * 0x9e3779b9) >>> 0;
     };
-    const captureTemplateThumbnail = async (templateId, { silent = true } = {}) => {
+    const captureTemplateThumbnail = async (templateId, { silent = true, editorMode = 'procedural', session = landingPreviewSessionRef.current } = {}) => {
       const eng = engineRef.current;
-      if (!eng || !canvasRef.current || !landingRef.current?.visible) return;
-      const template = getProjectTemplate(templateId);
-      eng.newProject({ silent, projectMode: 'procedural' });
-      eng.setParam('seed', previewSeed(templateId));
-      if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || !eng || !canvasRef.current || !landingRef.current?.visible || landingRef.current?.exiting) return;
+      const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
+      const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
+      if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
+        await runModeSwitchRef.current('studio', { silent: true });
+      }
+      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
+      eng.newProject({ silent, projectMode: nextMode });
+      eng.setParam('seed', previewSeed(template.id, nextMode));
+      if (nextMode === 'nodes') eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true });
+      else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      await new Promise((resolve) => window.setTimeout(resolve, nextMode === 'nodes' ? 260 : 100));
+      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
       const image = eng.capturePreviewThumbnail();
-      try { sessionStorage.setItem(`terrain-template-preview:${templateId}`, image); } catch { /* cache is optional */ }
-      window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId, image } }));
+      const cacheKey = nextMode === 'nodes' ? nodeTemplatePreviewCacheKey(template.id) : `terrain-template-preview:${template.id}`;
+      try { sessionStorage.setItem(cacheKey, image); } catch { /* cache is optional */ }
+      window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, editorMode: nextMode, image } }));
     };
     const queueTemplatePreview = (templateId, options) => {
+      const session = landingPreviewSessionRef.current;
       templatePreviewQueueRef.current = templatePreviewQueueRef.current
-        .then(() => captureTemplateThumbnail(templateId, options))
+        .then(() => captureTemplateThumbnail(templateId, { ...options, session }))
         .catch(() => {});
     };
-    const onPreviewTemplate = (event) => queueTemplatePreview(event.detail?.templateId ?? 'blank');
+    const onPreviewTemplate = (event) => {
+      if (!landingPreviewActiveRef.current) return;
+      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
+    };
     const onPreloadTemplatePreviews = () => {
+      landingPreviewActiveRef.current = true;
+      const session = ++landingPreviewSessionRef.current;
       let completed = 0;
       PROJECT_TEMPLATES.forEach((template) => {
         let cached = null;
@@ -529,16 +570,19 @@ export default function App() {
           return;
         }
         templatePreviewQueueRef.current = templatePreviewQueueRef.current.then(async () => {
-          await captureTemplateThumbnail(template.id, { silent: true });
+          await captureTemplateThumbnail(template.id, { silent: true, editorMode: 'procedural', session });
+          if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current) return;
           completed += 1;
           window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
         }).catch(() => {});
       });
       // End the first-run preview bake on Blank so the visible background is a
       // fresh session terrain rather than the final template in the queue.
-      queueTemplatePreview('blank', { silent: true });
+      queueTemplatePreview('blank', { silent: true, editorMode: 'procedural' });
       templatePreviewQueueRef.current = templatePreviewQueueRef.current
-        .then(() => window.dispatchEvent(new Event('terrain-template:preload-complete')))
+        .then(() => {
+          if (landingPreviewActiveRef.current && session === landingPreviewSessionRef.current) window.dispatchEvent(new Event('terrain-template:preload-complete'));
+        })
         .catch(() => {});
     };
     window.addEventListener('terrain-project:new', onNewProject);
