@@ -330,6 +330,13 @@ float ridgedFBM(vec2 p) {
 // Build the full height GLSL block for a generated 2D stack body. The body is a
 // sequence of per-layer blocks that read pw/h and the uLayer* uniform arrays.
 export function buildHeightGLSL(stackBody2D) {
+  let graphFunctions = '';
+  if (typeof stackBody2D === 'string' && stackBody2D.includes('/*__TERRAIN_GRAPH_FUNCTIONS__*/')) {
+    const [, remainder = ''] = stackBody2D.split('/*__TERRAIN_GRAPH_FUNCTIONS__*/');
+    const [functions = '', body = ''] = remainder.split('/*__TERRAIN_GRAPH_BODY__*/');
+    graphFunctions = functions;
+    stackBody2D = body;
+  }
   return /* glsl */ `
 ${NOISE_STACK_PRIMS2D_GLSL}
 ${NOISE_STACK_MASKS2D_GLSL}
@@ -388,6 +395,8 @@ float legacyShape2D(vec2 xz, Climate c) {
 
   return h;
 }
+
+${graphFunctions}
 
 // Codegen-injected noise stack. Accumulates h from the ordered layers; pw is
 // the (possibly domain-warped) noise-domain coordinate shared by all layers.

@@ -64,7 +64,10 @@ export class Minimap {
   }
 
   setCanvases(baseCanvas, overlayCanvas) {
-    if (!baseCanvas || !overlayCanvas) return;
+    if (!baseCanvas || !overlayCanvas) {
+      this.baseCanvas = null; this.overlayCanvas = null; this.baseCtx = null; this.overlayCtx = null;
+      return;
+    }
     if (this.baseCanvas === baseCanvas && this.overlayCanvas === overlayCanvas) return;
     this.baseCanvas = baseCanvas;
     this.overlayCanvas = overlayCanvas;

@@ -51,6 +51,8 @@ import {
 } from './panelResets.js';
 import { EARTH_PALETTE } from './style/ColorPalette.js';
 import { generateStackGLSL, packStackUniforms } from './terrain/noise/noiseStackCodegen.js';
+import { compileTerrainGraph } from './terrain/graph/GraphCompiler.js';
+import { createGraphFromStack, migrateGraphDocument } from './terrain/graph/GraphDocument.js';
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
@@ -152,6 +154,11 @@ export class Engine {
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
+    this.generationSource = 'classic';
+    this.terrainGraph = null;
+    this.graphView = { x: 0, y: 0, zoom: 1 };
+    this._graphProgram = null;
+    this._graphDiagnostics = [];
     this._soloLayerId = null;       // solo-preview gate (uniform-only, no recompile)
     this.appliedChunkCount = 0;
     this.appliedChunkSize = 0;
@@ -572,6 +579,7 @@ export class Engine {
         octaves: Math.round(this.params.octaves),
         infinite: false,
       }), this.noiseStack);
+      this._minimapSampler.setHeightProgram(this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null);
     }
     return this._minimapSampler;
   }
@@ -1701,6 +1709,14 @@ export class Engine {
     this.paintMode?.setBaseMode('generated');
     this.paintMode?.clear({ silent });
     this.terrainAnalysis?.load();
+    this.generationSource = 'classic';
+    this.terrainGraph = null;
+    this.graphView = { x: 0, y: 0, zoom: 1 };
+    this._graphProgram = null;
+    this._graphDiagnostics = [];
+    this.cb.onGenerationSource?.('classic');
+    this.cb.onTerrainGraph?.(null);
+    this.cb.onGraphView?.({ ...this.graphView });
 
     this.tileAssemblyShape = 'square';
     this.circleRadiusCells = 0;
@@ -1899,15 +1915,20 @@ export class Engine {
 
   _packNoiseUniforms() {
     const u = this.uniforms;
-    if (u.uStackNormalize) u.uStackNormalize.value = this.noiseStack?.normalizeOutput ? 1.0 : 0.0;
-    if (u.uStackOutMin) u.uStackOutMin.value = Number.isFinite(this.noiseStack?.outputMin) ? this.noiseStack.outputMin : 0.0;
+    const graphActive = this.worldMode === 'studio' && this.generationSource === 'graph' && this._graphProgram;
+    const graphPack = graphActive ? this._graphProgram.packUniforms() : null;
+    const normalize = graphPack ? graphPack.normalize : this.noiseStack?.normalizeOutput;
+    const outputMin = graphPack ? graphPack.outMin : this.noiseStack?.outputMin;
+    const outputMax = graphPack ? graphPack.outMax : this.noiseStack?.outputMax;
+    if (u.uStackNormalize) u.uStackNormalize.value = normalize ? 1.0 : 0.0;
+    if (u.uStackOutMin) u.uStackOutMin.value = Number.isFinite(outputMin) ? outputMin : 0.0;
     if (u.uStackOutMax) {
-      const outMin = Number.isFinite(this.noiseStack?.outputMin) ? this.noiseStack.outputMin : 0.0;
-      const outMax = Number.isFinite(this.noiseStack?.outputMax) ? this.noiseStack.outputMax : 1.35;
+      const outMin = Number.isFinite(outputMin) ? outputMin : 0.0;
+      const outMax = Number.isFinite(outputMax) ? outputMax : 1.35;
       u.uStackOutMax.value = Math.max(outMin + 0.0001, outMax);
     }
 
-    const p = packStackUniforms(this.noiseStack, { solo: this._soloLayerId });
+    const p = graphPack || packStackUniforms(this.noiseStack, { solo: this._soloLayerId });
     for (let i = 0; i < p.strength.length; i++) {
       u.uLayerStrength.value[i] = p.strength[i];
       u.uLayerScale.value[i] = p.scale[i];
@@ -1945,8 +1966,10 @@ export class Engine {
         // Planet chunks each own a material built from a factory; rebuild the
         // whole planet (and re-bake the height cubemap) with the new stack.
         this._rebuildPlanet();
-      } else {
+      } else if (this.worldMode !== 'studio' || this.generationSource !== 'graph') {
         this._rebuildStackMaterialsAsync();
+      } else {
+        this._applyUniforms();
       }
     } else {
       this._applyUniforms();
@@ -1965,17 +1988,119 @@ export class Engine {
     this.minimap.requestRedraw();
   }
 
+  _activeHeightProgram(mode = this.worldMode) {
+    return mode === 'studio' && this.generationSource === 'graph' && this._graphProgram
+      ? this._graphProgram
+      : this._stackGLSL;
+  }
+
+  _syncCpuHeightProgram() {
+    const program = this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null;
+    for (const sampler of [this.cpuHeightSampler, this.heightSampler?.cpu, this._minimapSampler, this._propCpuSampler]) {
+      sampler?.setHeightProgram?.(program);
+    }
+  }
+
+  setTerrainGraph(graph, { structural = true, silent = false } = {}) {
+    const nextGraph = migrateGraphDocument(graph, this.noiseStack);
+    const compiled = compileTerrainGraph(nextGraph);
+    this.terrainGraph = nextGraph;
+    this._graphDiagnostics = compiled.diagnostics || [];
+    const previousProgram = this._graphProgram;
+    const previousSig = this._graphProgram?.sig;
+    if (compiled.ok) this._graphProgram = compiled.program;
+    this.cb.onTerrainGraph?.(structuredClone(this.terrainGraph));
+    this.cb.onGraphState?.({
+      valid: compiled.ok,
+      compiling: false,
+      diagnostics: structuredClone(this._graphDiagnostics),
+      slotCount: compiled.program?.slotCount ?? this._graphProgram?.slotCount ?? 0,
+    });
+
+    if (!compiled.ok) {
+      if (!silent) this.cb.onToast?.(this._graphDiagnostics[0]?.message || 'Terrain graph is invalid');
+      return { ok: false, diagnostics: this._graphDiagnostics };
+    }
+
+    this._syncCpuHeightProgram();
+    const needsCompile = structural || previousSig !== compiled.program.sig;
+    if (this.worldMode === 'studio' && this.generationSource === 'graph') {
+      if (needsCompile) {
+        this.cb.onGraphState?.({ valid: true, compiling: true, diagnostics: [], slotCount: compiled.program.slotCount });
+        this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph' }).then((result) => {
+          if (result?.error && this._graphProgram === compiled.program) {
+            this._graphProgram = previousProgram;
+            this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. The last valid terrain is still active.' }];
+            this._syncCpuHeightProgram();
+            this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: previousProgram?.slotCount || 0 });
+            if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
+          } else if (result?.swapped && this._graphProgram === compiled.program) {
+            this.cb.onGraphState?.({ valid: true, compiling: false, diagnostics: [], slotCount: compiled.program.slotCount });
+          }
+        });
+      }
+      else {
+        this._applyUniforms();
+        this._terrainGen++;
+        this._bakedStudioGen = -1;
+        this.heightSampler?.invalidate?.();
+        this.propSurfaceField?.invalidate?.();
+        this.minimap.requestRedraw();
+        this._needsRender = true;
+      }
+    }
+    return { ok: true, program: compiled.program };
+  }
+
+  setGenerationSource(source, { silent = false } = {}) {
+    const next = source === 'graph' ? 'graph' : 'classic';
+    if (next === 'graph' && !this.terrainGraph) this.terrainGraph = createGraphFromStack(this.noiseStack);
+    if (next === 'graph' && !this._graphProgram) {
+      const compiled = compileTerrainGraph(this.terrainGraph);
+      this._graphDiagnostics = compiled.diagnostics || [];
+      if (compiled.ok) this._graphProgram = compiled.program;
+    }
+    this.generationSource = next;
+    this.cb.onGenerationSource?.(next);
+    this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
+    this.cb.onGraphState?.({ valid: !!this._graphProgram && this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this._syncCpuHeightProgram();
+    if (this.worldMode === 'studio') {
+      this._applyUniforms();
+      const candidate = this._activeHeightProgram();
+      this._rebuildStackMaterialsAsync(candidate, { label: next === 'graph' ? 'Compiling terrain graph' : 'Restoring Classic terrain' }).then((result) => {
+        if (next !== 'graph' || !result?.error || this._graphProgram !== candidate) return;
+        this._graphProgram = null;
+        this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. Classic terrain remains active.' }];
+        this._syncCpuHeightProgram();
+        this._applyUniforms();
+        this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: 0 });
+        if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
+      });
+    }
+    if (!silent) this.cb.onToast?.(next === 'graph' ? 'Nodes now drive Tile terrain' : 'Classic Noise Stack restored');
+  }
+
+  setGraphView(view) {
+    this.graphView = {
+      x: Number(view?.x) || 0,
+      y: Number(view?.y) || 0,
+      zoom: Math.max(0.1, Math.min(4, Number(view?.zoom) || 1)),
+    };
+    this.cb.onGraphView?.({ ...this.graphView });
+  }
+
   /**
    * Recompile the studio/infinite height materials for the new generated stack
    * GLSL in the background, then update the LIVE materials' shader source in
    * place once the identical programs are cached (no freeze, no mesh swap).
    * Same warm-then-swap pattern as _setOctavesAsync.
    */
-  async _rebuildStackMaterialsAsync() {
+  async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), { label = 'Compiling noise stack' } = {}) {
     const token = ++this._octToken;
-    this.cb.onStatus('Compiling noise stack…', true);
+    this.cb.onStatus(`${label}…`, true);
     const oct = Math.round(this.params.octaves);
-    const sg = this._stackGLSL;
+    const sg = program || this._stackGLSL;
 
     const warm = [
       createTerrainMaterial(this.uniforms, oct, sg),
@@ -1993,26 +2118,29 @@ export class Engine {
     };
     emitProgress({
       id: 'noise-stack',
-      label: 'Compiling noise stack',
+      label,
       done: 0,
       total: warm.length * 2,
     });
 
+    let compileError = null;
     try {
       // stagger: one program per yielded task so editing the noise stack never freezes.
       await this._compileMaterialVariants(warm, {
         stagger: true,
         onProgress: (done, total) => emitProgress({
           id: 'noise-stack',
-          label: 'Compiling noise stack',
+          label,
           done,
           total,
         }),
       });
     } catch (e) {
       console.warn('Noise stack shader compile failed', e);
+      compileError = e;
     }
-    if (token === this._octToken && !this._disposed) {
+    let swapped = false;
+    if (!compileError && token === this._octToken && !this._disposed) {
       // update live materials in place (programs already cached from `warm`)
       rebuildTerrainShaderSource(this.terrainMaterial, sg);
       rebuildWaterShaderSource(this.waterMaterial, sg);
@@ -2028,9 +2156,13 @@ export class Engine {
       this._minimapDirtyAt = performance.now();
       this.minimap.requestRedraw();
       this._needsRender = true;
+      swapped = true;
+    } else if (compileError && token === this._octToken && !this._disposed && !this._compiling) {
+      this.cb.onStatus('Ready', false);
     }
     emitProgress(null);
     this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
+    return { swapped, error: compileError };
   }
 
   _applyStudioAssemblyLayout(maxHeight = this._maxHeight()) {
@@ -2801,7 +2933,8 @@ export class Engine {
     this._terrainUpgradePromise = (async () => {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
-      const warm = createTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+      const heightProgram = this._activeHeightProgram('studio');
+      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram);
       this._bgWorkStart('terrain-full', 'Loading full terrain colors…');
       let swapped = false;
       let ready = false;
@@ -2819,9 +2952,10 @@ export class Engine {
         // not-ready program would trigger a blocking link = the freeze.
         if (!this._disposed && ready &&
             this.terrainMaterial.userData.minimalFragment &&
-            this.terrainMaterial.defines.OCTAVES === oct) {
+            this.terrainMaterial.defines.OCTAVES === oct &&
+            this._activeHeightProgram('studio').sig === heightProgram.sig) {
           const tSwap = performance.now();
-          rebuildTerrainShaderSource(this.terrainMaterial, this._stackGLSL);
+          rebuildTerrainShaderSource(this.terrainMaterial, heightProgram);
           swapMs = performance.now() - tSwap;
           swapped = true;
           this._needsRender = true;
@@ -2952,10 +3086,11 @@ export class Engine {
     const token = ++this._octToken;
     this.cb.onStatus('Compiling shaders…', true);
 
+    const studioProgram = this._activeHeightProgram('studio');
     const warm = [
-      createTerrainMaterial(this.uniforms, oct, this._stackGLSL),
+      createTerrainMaterial(this.uniforms, oct, studioProgram),
     ];
-    if (!this._waterDeferred) warm.push(createWaterMaterial(this.uniforms, oct, this._stackGLSL));
+    if (!this._waterDeferred) warm.push(createWaterMaterial(this.uniforms, oct, studioProgram));
     if (this.worldMode === 'infinite') {
       warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL));
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL));
@@ -2988,7 +3123,7 @@ export class Engine {
           // a minimal boot fragment + the new define is NOT in the program
           // cache — upgrade the source to the full fragment (which the warm
           // clone above just compiled) so the relink stays a cache hit
-          if (m.userData?.minimalFragment) rebuildTerrainShaderSource(m, this._stackGLSL);
+          if (m.userData?.minimalFragment) rebuildTerrainShaderSource(m, m === this.terrainMaterial || m === this.waterMaterial ? studioProgram : this._stackGLSL);
           m.needsUpdate = true;
         }
       }
@@ -3239,6 +3374,7 @@ export class Engine {
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
+      this.cpuHeightSampler.setHeightProgram(this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null);
       this.cpuHeightSampler.erosion = this.erosionField;
     }
     return this.cpuHeightSampler;
@@ -3795,6 +3931,8 @@ export class Engine {
   }
 
   _enterInfiniteMode() {
+    this._packNoiseUniforms();
+    this._syncCpuHeightProgram();
     // Infinite exploration stays fully procedural; Studio paint layers are
     // board-local overrides and are restored when returning to Studio mode.
     this.uniforms.uPaintEnabled.value = 0;
@@ -3993,9 +4131,10 @@ export class Engine {
       this._applyCloudSettings();
     }
 
+    this._syncCpuHeightProgram();
     this._applyUniforms();
     this.uniforms.uPaintEnabled.value = 1;
-    this._rebuildStackMaterialsAsync();
+    this._rebuildStackMaterialsAsync(this._activeHeightProgram());
 
     this.scene.background = new THREE.Color(0x0b0e14);
     this._applyStudioFogFromStyle();
@@ -4147,7 +4286,7 @@ export class Engine {
     const b = this._tileBounds();
     const _t0 = performance.now();
     this.terrainHeightBaker.bake(
-      Math.round(this.params.octaves), this._stackGLSL, b.cols, b.rows
+      Math.round(this.params.octaves), this._activeHeightProgram('studio'), b.cols, b.rows
     );
     this.profiler.setMetric('lastBakeMs', performance.now() - _t0);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
@@ -4320,6 +4459,7 @@ export class Engine {
         octaves: Math.round(this.params.octaves),
         infinite: this.worldMode === 'infinite',
       }), this.noiseStack);
+      cpu.setHeightProgram(this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null);
       cpu.erosion = this.erosionField;   // props anchor to the eroded field too
       this._propCpuSampler = cpu;
       // GPU readback of the ACTUAL rendered (faceted) surface — props anchor to
@@ -4879,7 +5019,7 @@ export class Engine {
     this._syncPlanetStyleToParams();
     const data = {
       app: 'terrain-studio',
-      version: 1,
+      version: 2,
       savedAt: new Date().toISOString(),
       params: this.params,
       tiles: this.tiles.map((t) => ({ ...t })),
@@ -4887,6 +5027,9 @@ export class Engine {
       diskRadiusCells: this.circleRadiusCells,
       creatorTools: this._serializeCreatorTools(),
       historyMetadata: this.projectHistory?.serializeMetadata?.(),
+      generationSource: this.generationSource,
+      graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
+      graphView: { ...this.graphView },
     };
     // Only embed paint pixel data when something was actually painted —
     // serialize() returns null for an untouched canvas, which would otherwise
@@ -4924,6 +5067,16 @@ export class Engine {
       }
     }
     this.params = normalizeSurfaceTextureParams(next, src);
+    this.noiseStack = migrateStack(src.noiseStack);
+    this.params.noiseStack = this.noiseStack;
+    this._stackGLSL = generateStackGLSL(this.noiseStack);
+    this._stackSig = this._stackGLSL.sig;
+    this.terrainGraph = json?.graph ? migrateGraphDocument(json.graph, this.noiseStack) : null;
+    this.graphView = { ...this.graphView, ...(json?.graphView || {}) };
+    this.generationSource = json?.generationSource === 'graph' ? 'graph' : 'classic';
+    const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
+    this._graphProgram = compiled?.ok ? compiled.program : null;
+    this._graphDiagnostics = compiled?.diagnostics || [];
     this._migrateLegacyCloudPerf(src);
     if (src.planetStyle) this.planetStyle.importJSON({ planetStyle: src.planetStyle });
     else if (src.planetPreset) this.planetStyle.applyPlanetPreset(src.planetPreset);
@@ -4940,7 +5093,14 @@ export class Engine {
       ? this._circleTiles(this.circleRadiusCells)
       : this._sanitizeTiles(json?.tiles);
     this.cb.onParams({ ...this.params });
+    this.cb.onGenerationSource?.(this.generationSource);
+    this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
+    this.cb.onGraphState?.({ valid: !!this._graphProgram || this.generationSource === 'classic', compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this.cb.onGraphView?.({ ...this.graphView });
     this.applyAll({ force: true });
+    this._syncCpuHeightProgram();
+    if (this.worldMode === 'planet') this._rebuildPlanet();
+    else this._rebuildStackMaterialsAsync(this._activeHeightProgram());
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._notifyTiles();
@@ -4978,6 +5138,9 @@ export class Engine {
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
       creatorTools: this._serializeCreatorTools(),
+      generationSource: this.generationSource,
+      terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
+      graphView: { ...this.graphView },
     };
   }
 
@@ -5049,6 +5212,19 @@ export class Engine {
     // noise stack: structural edits recompile in the background, continuous
     // edits just repack uniforms (setNoiseStack handles both + fires onParams).
     this.setNoiseStack(migrateStack(snap.params.noiseStack));
+    this.terrainGraph = snap.terrainGraph ? migrateGraphDocument(snap.terrainGraph, this.noiseStack) : null;
+    this.graphView = { ...this.graphView, ...(snap.graphView || {}) };
+    if (this.terrainGraph) {
+      const compiled = compileTerrainGraph(this.terrainGraph);
+      this._graphProgram = compiled.ok ? compiled.program : this._graphProgram;
+      this._graphDiagnostics = compiled.diagnostics || [];
+    }
+    this.generationSource = snap.generationSource === 'graph' ? 'graph' : 'classic';
+    this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
+    this.cb.onGenerationSource?.(this.generationSource);
+    this.cb.onGraphState?.({ valid: this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this._syncCpuHeightProgram();
+    if (this.worldMode === 'studio') this._rebuildStackMaterialsAsync(this._activeHeightProgram());
 
     // global culling toggles live on the board / world objects, not in params.
     this.setCullingEnabled(snap.cullingEnabled !== false);
@@ -5378,7 +5554,7 @@ export class Engine {
         const { TerrainExporter } = await import('./terrain/TerrainExporter.js');
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
-          { ...exportOptions, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._stackGLSL
+          { ...exportOptions, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._activeHeightProgram()
         );
       }
       return true;

@@ -1,59 +1,68 @@
-# Design QA — Tool-oriented Project Workspace
+# Nodes Workspace Design QA
 
-Source visual truth: `C:\Users\zyfod\.codex\generated_images\019f48ab-efb9-72a0-a267-fae27eab7688\exec-51532559-1b7d-4965-bb45-3ccc25d137ea.png` (selected third workspace direction).
+## Evidence
 
-Implementation evidence: browser-rendered capture of `http://127.0.0.1:6061` in the Codex in-app browser, desktop viewport. Verified in both Projects and Templates states with one local Island project.
+- Source visual truth: `/var/folders/p4/2wybsmsn2xn2_0msnyqy_wlr0000gn/T/codex-clipboard-9132ac0d-9fcd-44c2-90a0-110946fc1a94.png` (primary), plus the two supplied Gaea workspace references.
+- Browser-rendered implementation: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-workspace-1440x900.png`
+- Responsive captures: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-workspace-1280x720.png` and `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/nodes-workspace-821x720.png`
+- Full-view combined comparison: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/reference-vs-nodes-1440.png` (reference left, implementation right)
+- Focused graph comparison: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/reference-vs-nodes-focused.png` (reference left, implementation right)
+- Viewport: 1440×900 primary; 1280×720 and 821×720 responsive; 820×720 fallback boundary.
+- State: Tile → Nodes, first-entry `Current Terrain → Terrain Output`, Current Terrain selected, preview hidden by default.
 
 ## Findings
 
-- No actionable P0, P1, or P2 differences.
-- [P3] The mock includes image thumbnails for every template; the implementation intentionally uses the editor’s icon system for template choices and reserves thumbnails for actual saved projects. This avoids misleading stock terrain previews and keeps the project manager tool-oriented.
-- [P3] The mock’s inspector has an image preview; the implementation uses a reserved inspector icon surface until a saved project supplies its real canvas thumbnail.
+No actionable P0, P1, or P2 differences remain.
 
-## Fidelity surfaces
+- Fonts and typography: the implementation intentionally uses Procedural Terrains' existing compact sans-serif tokens, uppercase dock kickers, and native hierarchy instead of copying Gaea's typography. Labels remain legible and truncate safely in the compact layout.
+- Spacing and layout rhythm: the renderer/graph split, left quick-node palette, right inspector, dock headers, graph controls, and persistent tools rail reproduce the supplied workspace hierarchy while retaining the product's existing spacing, borders, radii, and elevation.
+- Colors and visual tokens: native black/graphite surfaces, blue focus state, green realtime state, amber output node, and typed-node accents map cleanly to the current editor tokens. Contrast and selected/focus states remain visible.
+- Image quality and asset fidelity: the main image is the real WebGL terrain renderer and the optional 2D panel is the existing minimap renderer. No placeholder imagery, CSS art, emoji, or substitute product assets were introduced. The terrain content differs from the references because it reflects the live project seed, which is expected.
+- Copy and content: `Analytical Graph`, `Realtime`, `Current Terrain`, `Terrain Output`, compatibility-snapshot guidance, capacity status, and diagnostics are concise and self-contained.
+- Icons: the workspace uses the same Lucide icon family as the existing editor, with consistent size and stroke weight.
+- Responsiveness: no horizontal page overflow at 1440, 1280, 821, or 820 px. Nodes remains available at 821 px; below 821 px it falls back to Classic and shows the preservation notice as specified.
+- Accessibility and interaction states: semantic buttons/inputs, visible selection, labeled inspector fields, keyboard search, deletion protection for Terrain Output, and input-scoped shortcuts were verified. The final clean browser pass reported no console errors or warnings.
 
-- **Fonts and typography:** Uses the editor’s existing UI and mono-token hierarchy, with compact labels, 21px workspace titles, and 12px list rows.
-- **Spacing and layout rhythm:** Fixed 54px topbar, 252px create/template sidebar, fluid central project workspace, and 292px inspector. No action introduces a popup or reflows a different region.
-- **Colors and tokens:** Uses only the editor’s base tokens: #050505, #0d0d0d, #141414, #1a1a1a, #262626, and #2563eb; the prior grey cinematic overlay is removed.
-- **Image quality and asset fidelity:** Actual saved project thumbnails are sourced from the WebGL canvas. Template choices are represented as editor tool controls rather than decorative terrain imagery.
-- **Copy and content:** Project, template, inspector, import, and creation labels match the selected tool-workspace framing.
+## Primary Interactions Tested
 
-## Interaction evidence
+- Opened Nodes from Tile and confirmed first-entry graph preservation.
+- Opened Shift+A search, created an FBM node, selected it, and edited continuous and structural numeric properties.
+- Exercised node duplication while confirming Terrain Output remained unique.
+- Exercised Start Blank, missing-input diagnostics, and last-valid terrain behavior.
+- Switched Classic ↔ Nodes, entered Infinite World, and returned to Tile with the graph restored.
+- Opened and closed the real docked 2D preview.
+- Verified layout behavior at 1440×900, 1280×720, 821×720, and the 820 px Classic fallback.
+- Verified connection replacement, cycles, typed ports, copy/paste graph semantics, and undo snapshot content in automated tests.
 
-1. **Projects workspace — healthy:** Recent Island project is displayed in the central table; selecting it populates the inspector.
-2. **Templates tab — healthy:** Opening Templates switches the centre content to the template grid and changes the inspector to Blank terrain, without any floating UI.
-3. **Persistent controls — healthy:** New terrain, Open project, Import, templates, and inspector action stay inside fixed columns.
-4. **Console — healthy:** No browser console errors.
+## Comparison History
 
-## Implementation checklist
+### Iteration 1
 
-- [x] Replaced the marketing landing composition with a fixed editor workspace.
-- [x] Removed terrain backdrop, hero copy, footer, dropdowns, and project popups from this surface.
-- [x] Added Projects/Templates navigation, persistent template selection, central project list, and contextual inspector.
-- [x] Preserved local project creation, import, persistence, and editor hand-off.
+- Earlier finding [P1]: controlled React Flow nodes did not retain click selection, so the right inspector stayed empty.
+- Fix: applied node and edge `select` changes to controlled selection state.
+- Post-fix evidence: the final 1440×900 capture shows Current Terrain selected with its compatibility snapshot in the inspector; browser state reported one selected node.
 
-## Follow-up polish
+### Iteration 2
 
-- Add explicit rename, duplicate, and delete actions to the project table overflow menu.
-- Add optional project-thumbnail refresh from the inspector.
+- Earlier finding [P2]: a connection could disappear visually after node membership changed and the graph was restored.
+- Fix: remount React Flow only when the node-id set changes, preserving controlled graph state while rebuilding handle geometry.
+- Post-fix evidence: the final clean browser pass reported two nodes and one rendered edge; the full and focused comparisons show the Current Terrain → Terrain Output connection.
 
-## Top bar iteration — 2026-07-10
+## Open Questions
 
-Source visual truth: user-approved top-bar concept from the current conversation.
+- The references show a secondary 2D preview open by default in some layouts. The implementation keeps it hidden by default because the approved plan explicitly made it optional; the real minimap preview remains one click away.
 
-Implementation evidence: browser-rendered capture of the local editor at desktop viewport.
+## Implementation Checklist
 
-- **Header hierarchy:** Search remains visible; File consolidates New, Projects, Save, and Load; Randomize and Paint remain adjacent; Tile / Infinite World / Planet stays centered; Export remains primary on the right.
-- **Interaction:** File opens as an accessible menu, exposes New / Projects / Save / Load, closes on Escape, and closes when clicking outside.
-- **Regression check:** Left rail, terrain canvas, world-mode switcher, Export, and bottom status bar remain present and functional.
-- **Console:** No browser errors or warnings observed.
+- [x] Native renderer-first hierarchy with bottom graph and right inspector.
+- [x] Quick-node palette, search, typed custom nodes, selection, and inspector states.
+- [x] Resizable/snappable docks and persistent local layout preferences.
+- [x] Responsive breakpoint and Classic fallback notice.
+- [x] Full-view and focused combined comparisons reviewed after fixes.
+- [x] Clean browser console pass.
 
-## Top bar annotation pass — 2026-07-10
+## Follow-up Polish
 
-- **Order:** File, Randomize, Paint, Search, centered world modes, Creator history, Export, then utilities.
-- **Centering:** World modes use a fixed header midpoint, independent of the left and right control widths.
-- **Responsive fit:** At medium desktop widths, low-priority Undo/Redo buttons and Randomize/Paint labels collapse so the centered mode switcher never overlaps the search field.
-- **Browser verification:** Header geometry measured at 1280px: mode center 640px, with the left action group ending at 506px and the mode group starting at 526px.
-- **File menu regression:** New, Projects, Save, and Load remain present and the menu opens successfully after the reorder.
+- [P3] At exactly 821 px the workspace is intentionally dense; Fit View and panning keep the graph usable, but an optional auto-collapsed palette preset could create more initial canvas space in a later refinement.
 
 final result: passed

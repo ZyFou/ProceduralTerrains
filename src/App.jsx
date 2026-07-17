@@ -40,9 +40,11 @@ import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
 import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
+import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
+const NodeWorkspace = lazy(() => import('./components/nodes/NodeWorkspace.jsx'));
 
 const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
 const yesNo = (value) => (value ? 'On' : 'Off');
@@ -123,6 +125,14 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [webglError, setWebglError] = useState(null);
   const [activeProject, setActiveProject] = useState(null);
+  const [workspaceMode, setWorkspaceMode] = useState('classic');
+  const [generationSource, setGenerationSource] = useState('classic');
+  const [terrainGraph, setTerrainGraph] = useState(null);
+  const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
+  const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0 });
+  const [nodesPreviewVisible, setNodesPreviewVisible] = useState(false);
+  const graphCompileTimerRef = useRef(null);
+  const pendingGraphRef = useRef(null);
 
   // ---- toasts ----
   const [toasts, setToasts] = useState([]);
@@ -249,6 +259,23 @@ export default function App() {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
             setTileDebug({ ...DEFAULT_TILE_DEBUG });
           },
+          onTerrainGraph: (next) => {
+            setTerrainGraph(next);
+            scheduleRecordRef.current?.();
+          },
+          onGenerationSource: (source) => {
+            setGenerationSource(source);
+            if (source === 'graph' && window.innerWidth >= 821) setWorkspaceMode('nodes');
+            else {
+              setWorkspaceMode('classic');
+              if (source === 'graph' && window.innerWidth < 821) {
+                queueMicrotask(() => engineRef.current?.setGenerationSource('classic', { silent: true }));
+                pushToastRef.current('Graph preserved. Classic is shown on this compact screen.', 'info');
+              }
+            }
+          },
+          onGraphState: setGraphState,
+          onGraphView: setGraphView,
         },
       });
     } catch (err) {
@@ -807,6 +834,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (e.defaultPrevented) return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       if (e.ctrlKey || e.metaKey) {
@@ -869,6 +897,58 @@ export default function App() {
   const showStudioUI = !previewMode && !paintMode && studioLike;
   const showToolPanels = !previewMode && !paintMode && !planetExploring;
   const searchEnabled = showToolPanels;
+  const nodesWorkspaceActive = isStudio && workspaceMode === 'nodes' && !previewMode && !paintMode && !landing?.visible;
+
+  const selectWorkspaceMode = useCallback((next) => {
+    if (next === 'nodes' && window.innerWidth < 821) {
+      setWorkspaceMode('classic');
+      showToast('Nodes needs at least 821 px. Classic remains active.', 'info');
+      return;
+    }
+    setWorkspaceMode(next);
+    engineRef.current?.setGenerationSource(next === 'nodes' ? 'graph' : 'classic');
+  }, [showToast]);
+
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth >= 821 || workspaceMode !== 'nodes') return;
+      setWorkspaceMode('classic');
+      engineRef.current?.setGenerationSource('classic', { silent: true });
+      showToast('The graph is preserved. Classic is shown on compact screens.', 'info');
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [workspaceMode, showToast]);
+
+  const handleTerrainGraphChange = useCallback((next, meta = {}) => {
+    setTerrainGraph(next);
+    pendingGraphRef.current = next;
+    if (meta.structural) {
+      if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+      graphCompileTimerRef.current = setTimeout(() => {
+        graphCompileTimerRef.current = null;
+        const pending = pendingGraphRef.current;
+        pendingGraphRef.current = null;
+        if (pending) engineRef.current?.setTerrainGraph(pending, { structural: true });
+      }, 200);
+    } else if (!graphCompileTimerRef.current) {
+      pendingGraphRef.current = null;
+      engineRef.current?.setTerrainGraph(next, { structural: false });
+    }
+  }, []);
+
+  const handleStartBlankGraph = useCallback(() => {
+    if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    graphCompileTimerRef.current = null; pendingGraphRef.current = null;
+    const next = createBlankGraph();
+    setTerrainGraph(next);
+    engineRef.current?.setTerrainGraph(next, { structural: true });
+  }, []);
+
+  const handleGraphView = useCallback((next) => {
+    setGraphView(next);
+    engineRef.current?.setGraphView(next);
+  }, []);
 
   const formatSearchValue = useCallback((item) => {
     const id = item.settingId;
@@ -1141,8 +1221,12 @@ export default function App() {
 
   useLayoutEffect(() => {
     if (!showStudioUI || !isStudio || !engineRef.current) return;
+    if (nodesWorkspaceActive && !nodesPreviewVisible) {
+      engineRef.current.setMinimapCanvases(null, null);
+      return;
+    }
     engineRef.current.setMinimapCanvases(minimapBaseRef.current, minimapOverlayRef.current);
-  }, [showStudioUI, isStudio, effectivePanel]);
+  }, [showStudioUI, isStudio, effectivePanel, nodesWorkspaceActive, nodesPreviewVisible]);
 
   const landingMode = landing?.visible;
   const landingActive = landing?.visible && !landing?.exiting;
@@ -1311,7 +1395,7 @@ export default function App() {
   return (
     <div
       id="app"
-      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}`}
+      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}`}
       onDragEnter={landingMode ? undefined : onFileDragEnter}
       onDragOver={landingMode ? undefined : onFileDragOver}
       onDragLeave={landingMode ? undefined : onFileDragLeave}
@@ -1406,13 +1490,13 @@ export default function App() {
             />
           )}
 
-          <div id="help-card" className={helpVisible && studioLike ? '' : 'hidden'}>
+          <div id="help-card" className={helpVisible && studioLike && !nodesWorkspaceActive ? '' : 'hidden'}>
             <div className="help-row"><span className="help-ic">↻</span> Drag to orbit camera</div>
             <div className="help-row"><span className="help-ic">🤏</span> Pinch to zoom • move two fingers to pan</div>
             <div className="help-row"><span className="help-ic">🖱</span> Mouse: left pan • right orbit</div>
           </div>
 
-          {showStudioUI && isStudio && (
+          {showStudioUI && isStudio && !nodesWorkspaceActive && (
             <MinimapOverlay
               boardSize={boardSize}
               baseRef={minimapBaseRef}
@@ -1424,7 +1508,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && !landingMode && (
+          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
@@ -1442,7 +1526,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && uiPrefs.cameraControls !== false && (
+          {showStudioUI && uiPrefs.cameraControls !== false && !nodesWorkspaceActive && (
             <BottomToolbar
               camMode={camMode}
               onTopDown={() => { engine().setCameraView('top'); setCamMode('topdown'); }}
@@ -1489,6 +1573,32 @@ export default function App() {
 
           {exploreMode === 'plane' && <PlaneHUD stats={infiniteStats} />}
 
+          {nodesWorkspaceActive && terrainGraph ? (
+            <Suspense fallback={<div className="nodes-workspace-loading">Loading node editor…</div>}>
+              <NodeWorkspace
+                graph={terrainGraph}
+                graphView={graphView}
+                graphState={{ ...graphState, onDiagnostic: (message) => showToast(message, 'error') }}
+                onGraphChange={handleTerrainGraphChange}
+                onGraphViewChange={handleGraphView}
+                onStartBlank={handleStartBlankGraph}
+                inspectorReplaced={!!effectivePanel}
+                onPreviewVisibilityChange={setNodesPreviewVisible}
+                preview={(
+                  <MinimapOverlay
+                    docked
+                    boardSize={boardSize}
+                    baseRef={minimapBaseRef}
+                    overlayRef={minimapOverlayRef}
+                    onConfigChange={(next) => engine()?.setMinimapConfig(next)}
+                    onHoverChange={(hover) => engine()?.setMinimapHover(hover)}
+                    onHoverInfoRequest={(x, y) => engine()?.getMinimapInfoAt(x, y) ?? null}
+                  />
+                )}
+              />
+            </Suspense>
+          ) : null}
+
           <CompileProgressChip progress={compileProgress} />
           {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>
@@ -1513,6 +1623,8 @@ export default function App() {
           modeLocked={modeLocked}
           modeDisplay={uiPrefs.modeDisplay}
           visible={!paintMode}
+          workspaceMode={workspaceMode}
+          onSetWorkspaceMode={selectWorkspaceMode}
         />
       )}
 

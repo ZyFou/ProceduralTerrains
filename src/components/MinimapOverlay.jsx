@@ -40,8 +40,9 @@ export default function MinimapOverlay({
   onConfigChange,
   onHoverChange,
   onHoverInfoRequest,
+  docked = false,
 }) {
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(!docked);
   const [mode, setMode] = useState('color');
   const [zoom, setZoom] = useState(1);
   const [showChunkGrid, setShowChunkGrid] = useState(false);
@@ -83,8 +84,8 @@ export default function MinimapOverlay({
   }, []);
 
   return (
-    <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}`}>
-      <button
+    <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}${docked ? ' docked' : ''}`}>
+      {!docked && <button
         type="button"
         className="minimap-fab"
         onClick={() => setCollapsed(false)}
@@ -93,7 +94,7 @@ export default function MinimapOverlay({
         aria-expanded={!collapsed}
       >
         <MapIcon />
-      </button>
+      </button>}
 
       <div className="minimap-panel">
         <div className="minimap-overlay-header">
@@ -102,7 +103,7 @@ export default function MinimapOverlay({
             <span className="minimap-title-text">Mini Map</span>
           </span>
           <div className="minimap-header-actions">
-            <button
+            {!docked && <button
               type="button"
               className="minimap-toggle-btn"
               onClick={() => setCollapsed((value) => !value)}
@@ -118,7 +119,7 @@ export default function MinimapOverlay({
                   <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
               )}
-            </button>
+            </button>}
           </div>
         </div>
 

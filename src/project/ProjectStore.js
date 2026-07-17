@@ -37,10 +37,18 @@ function fallbackWrite(projects) { localStorage.setItem(FALLBACK_KEY, JSON.strin
 
 export function normalizeProject(input = {}) {
   const legacyTerrain = input.terrain ?? input;
+  const terrain = {
+    ...legacyTerrain,
+    generationSource: legacyTerrain?.generationSource === 'graph' ? 'graph' : 'classic',
+    graph: legacyTerrain?.graph ?? null,
+    graphView: legacyTerrain?.graphView && typeof legacyTerrain.graphView === 'object'
+      ? { x: Number(legacyTerrain.graphView.x) || 0, y: Number(legacyTerrain.graphView.y) || 0, zoom: Number(legacyTerrain.graphView.zoom) || 1 }
+      : { x: 0, y: 0, zoom: 1 },
+  };
   const metadata = input.metadata ?? {};
   const created = metadata.created ?? input.created ?? now();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: input.id ?? id(),
     metadata: {
       name: String(metadata.name ?? input.name ?? 'Untitled terrain').trim() || 'Untitled terrain',
@@ -52,7 +60,7 @@ export function normalizeProject(input = {}) {
       thumbnail: metadata.thumbnail ?? null,
       dependencies: Array.isArray(metadata.dependencies) ? metadata.dependencies : [],
     },
-    terrain: legacyTerrain,
+    terrain,
     exportHistory: Array.isArray(input.exportHistory) ? input.exportHistory : [],
   };
 }
