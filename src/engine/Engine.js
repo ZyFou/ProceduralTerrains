@@ -2126,6 +2126,11 @@ export class Engine {
     this.cb.onGraphView?.({ ...this.graphView });
   }
 
+  rebuildActiveHeightProgram({ label = 'Compiling terrain', atomic = false } = {}) {
+    this._syncCpuHeightProgram();
+    return this._rebuildStackMaterialsAsync(this._activeHeightProgram(), { label, atomic });
+  }
+
   /**
    * Recompile the studio/infinite height materials for the new generated stack
    * GLSL in the background, then update the LIVE materials' shader source in
@@ -5168,7 +5173,7 @@ export class Engine {
     this._syncCpuHeightProgram();
     const ready = this.worldMode === 'planet'
       ? Promise.resolve(this._rebuildPlanet())
-      : this._rebuildStackMaterialsAsync(this._activeHeightProgram(), { label: 'Loading terrain', atomic: true });
+      : this.rebuildActiveHeightProgram({ label: 'Loading terrain', atomic: true });
     const loadedSeed = this.params.seed;
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);

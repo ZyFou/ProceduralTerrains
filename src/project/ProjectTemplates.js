@@ -9,3 +9,10 @@ export const PROJECT_TEMPLATES = [
 export function getProjectTemplate(id) {
   return PROJECT_TEMPLATES.find((template) => template.id === id) ?? PROJECT_TEMPLATES[0];
 }
+
+// Preview images are render artifacts rather than project data. Version their
+// cache independently so a shader/transition fix cannot keep serving an older
+// flat render for a procedural template.
+export function projectTemplatePreviewCacheKey(id) {
+  return `terrain-template-preview:procedural-v2:${id}`;
+}

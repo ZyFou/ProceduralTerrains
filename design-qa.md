@@ -38,6 +38,8 @@ No actionable P0, P1, or P2 issues remain.
 - Created a non-flat Mountain Range Procedural project and confirmed the terrain height rendered.
 - Created an Alpine Ridges Nodes project immediately afterward and confirmed the non-flat graph height rendered on entry.
 - Loaded the saved Mountain Range Procedural project, then loaded the saved Alpine Ridges Nodes project; the first visible Nodes frame was elevated and Ready.
+- Switched the home template preview from Blank Graph Nodes to the Procedural Mountain Range; the background changed from a flat slab to elevated mountains before project creation, and the created editor terrain remained elevated.
+- Reloaded with a saved Blank Nodes project as the newest recent project, confirmed its home preview was flat, then opened Templates and selected Procedural Mountain Range inside the delayed-preload race window; the gallery preview and created project both rendered full elevation.
 - Filtered the picker with `mount`; the palette reduced to three relevant results and exposed a clear control.
 - Clicked Mountain once in the picker; one disconnected Mountain node appeared in the graph and its settings opened in the inspector.
 - Confirmed the picker’s left inset, right canvas gap, category scroll, and graph organization frame at 1280×1200.
@@ -49,7 +51,7 @@ No actionable P0, P1, or P2 issues remain.
 
 ## Runtime Verification
 
-- Automated tests: 133 passed across 11 test files, including a rapid out-of-order height-transition regression.
+- Automated tests: 136 passed across 12 test files, including both direction-specific height-transition regressions, the rapid out-of-order load case, and versioned procedural-template preview caching.
 - Production build: passed. The existing Vite large-chunk advisory remains unchanged.
 - Browser console: no errors or warnings.
 

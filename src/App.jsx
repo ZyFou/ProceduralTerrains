@@ -39,7 +39,7 @@ import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
-import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
+import { getProjectTemplate, PROJECT_TEMPLATES, projectTemplatePreviewCacheKey } from './project/ProjectTemplates.js';
 import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
 } from './project/NodeProjectTemplates.js';
@@ -476,8 +476,10 @@ export default function App() {
     if (nextMode === 'nodes') {
       const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
       await graphResult?.ready;
+    } else {
+      if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+      await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
     }
-    else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
     const metadata = nextMode === 'nodes'
       ? {
         name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
@@ -542,12 +544,15 @@ export default function App() {
       if (nextMode === 'nodes') {
         const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
         await graphResult?.ready;
-      } else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+      } else {
+        if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+        await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
+      }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await new Promise((resolve) => window.setTimeout(resolve, nextMode === 'nodes' ? 260 : 100));
       if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
       const image = eng.capturePreviewThumbnail();
-      const cacheKey = nextMode === 'nodes' ? nodeTemplatePreviewCacheKey(template.id) : `terrain-template-preview:${template.id}`;
+      const cacheKey = nextMode === 'nodes' ? nodeTemplatePreviewCacheKey(template.id) : projectTemplatePreviewCacheKey(template.id);
       try { sessionStorage.setItem(cacheKey, image); } catch { /* cache is optional */ }
       window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, editorMode: nextMode, image } }));
     };
@@ -556,18 +561,35 @@ export default function App() {
       templatePreviewQueueRef.current = templatePreviewQueueRef.current
         .then(() => captureTemplateThumbnail(templateId, { ...options, session }))
         .catch(() => {});
+      return templatePreviewQueueRef.current;
     };
     const onPreviewTemplate = (event) => {
-      if (!landingPreviewActiveRef.current) return;
-      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
+      // A template click can beat Landing's delayed preload after returning
+      // from an open project. Resume now instead of leaving Blank Nodes' flat
+      // graph shader on the live terrain.
+      if (!landingRef.current?.visible || landingRef.current?.exiting) return;
+      landingPreviewActiveRef.current = true;
+      // Every explicit selection owns a fresh session. This also invalidates a
+      // recent-project preview that may still be awaiting a world-mode switch.
+      const session = ++landingPreviewSessionRef.current;
+      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' })
+        .then(() => {
+          if (landingPreviewActiveRef.current && session === landingPreviewSessionRef.current) {
+            window.dispatchEvent(new Event('terrain-template:preload-complete'));
+          }
+        });
     };
-    const onPreloadTemplatePreviews = () => {
+    const onPreloadTemplatePreviews = (event) => {
       landingPreviewActiveRef.current = true;
       const session = ++landingPreviewSessionRef.current;
+      const restoreMode = event.detail?.editorMode === 'nodes' ? 'nodes' : 'procedural';
+      const restoreTemplateId = event.detail?.view === 'templates'
+        ? (event.detail?.templateId ?? (restoreMode === 'nodes' ? 'nodes-blank' : 'blank'))
+        : 'blank';
       let completed = 0;
       PROJECT_TEMPLATES.forEach((template) => {
         let cached = null;
-        try { cached = sessionStorage.getItem(`terrain-template-preview:${template.id}`); } catch { /* cache is optional */ }
+        try { cached = sessionStorage.getItem(projectTemplatePreviewCacheKey(template.id)); } catch { /* cache is optional */ }
         if (cached) {
           completed += 1;
           window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, image: cached } }));
@@ -581,9 +603,10 @@ export default function App() {
           window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
         }).catch(() => {});
       });
-      // End the first-run preview bake on Blank so the visible background is a
-      // fresh session terrain rather than the final template in the queue.
-      queueTemplatePreview('blank', { silent: true, editorMode: 'procedural' });
+      // End the bake on the user's current selection. This is essential when
+      // the gallery was opened from a flat Blank Nodes project: a delayed
+      // preload must not overwrite the requested procedural terrain.
+      queueTemplatePreview(restoreTemplateId, { silent: true, editorMode: restoreMode });
       templatePreviewQueueRef.current = templatePreviewQueueRef.current
         .then(() => {
           if (landingPreviewActiveRef.current && session === landingPreviewSessionRef.current) window.dispatchEvent(new Event('terrain-template:preload-complete'));

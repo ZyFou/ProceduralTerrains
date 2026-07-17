@@ -3,7 +3,7 @@ import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
-import { PROJECT_TEMPLATES, getProjectTemplate } from '../project/ProjectTemplates.js';
+import { PROJECT_TEMPLATES, getProjectTemplate, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
 import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
 import { Logo } from './shared.jsx';
 
@@ -12,7 +12,7 @@ const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3,
 function initialTemplateThumbs() {
   const entries = [];
   for (const template of PROJECT_TEMPLATES) {
-    const image = sessionStorage.getItem(`terrain-template-preview:${template.id}`);
+    const image = sessionStorage.getItem(projectTemplatePreviewCacheKey(template.id));
     if (image) entries.push([template.id, image]);
   }
   for (const template of NODE_PROJECT_TEMPLATES) {
@@ -51,6 +51,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
   const fileRef = useRef(null);
+  const templateSelectionRef = useRef(null);
+  templateSelectionRef.current = { view, templateId: selectedTemplateId, editorMode: templateKind };
 
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
@@ -72,7 +74,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     window.addEventListener('terrain-template:thumbnail', onThumbnail);
     window.addEventListener('terrain-template:progress', onPreviewProgress);
     window.addEventListener('terrain-template:preload-complete', onPreviewComplete);
-    const preloadTimer = window.setTimeout(() => window.dispatchEvent(new Event('terrain-template:preload')), 100);
+    const preloadTimer = window.setTimeout(() => {
+      const selection = templateSelectionRef.current;
+      window.dispatchEvent(new CustomEvent('terrain-template:preload', {
+        detail: selection?.view === 'templates' ? selection : undefined,
+      }));
+    }, 100);
     return () => { window.removeEventListener('terrain-template:thumbnail', onThumbnail); window.removeEventListener('terrain-template:progress', onPreviewProgress); window.removeEventListener('terrain-template:preload-complete', onPreviewComplete); window.clearTimeout(preloadTimer); };
   }, [bootReady]);
   useEffect(() => {

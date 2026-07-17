@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Engine } from '../src/engine/Engine.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
+import { defaultLegacyStack } from '../src/engine/terrain/noise/NoiseStack.js';
+import { generateStackGLSL } from '../src/engine/terrain/noise/noiseStackCodegen.js';
 import { createNodeTemplateGraph } from '../src/project/NodeProjectTemplates.js';
 
 function liveMaterial(octaves = 3) {
@@ -34,6 +36,7 @@ function heightTransitionHarness() {
     minimap: { requestRedraw: vi.fn() },
     cb: { onStatus: vi.fn(), onCompileProgress: vi.fn() },
     _applyUniforms: vi.fn(),
+    _syncCpuHeightProgram: vi.fn(),
   });
   return engine;
 }
@@ -67,5 +70,27 @@ describe('atomic terrain height transitions', () => {
     expect(engine.waterMaterial.fragmentShader).toContain('graph_template_alpine_ridges');
     expect(engine.terrainMaterial.vertexShader).not.toContain('graph_template_dunes_dunes');
     expect(engine.waterSystem.onStackRebuilt).toHaveBeenCalledWith(nodesProgram, 6);
+  });
+
+  it('replaces a flat Blank Nodes shader when a procedural template becomes active', async () => {
+    const blankNodesProgram = compileTerrainGraph(createNodeTemplateGraph('nodes-blank')).program;
+    const proceduralProgram = generateStackGLSL(defaultLegacyStack());
+    const engine = heightTransitionHarness();
+    engine._compileMaterialVariants = vi.fn(async () => {});
+
+    await engine._rebuildStackMaterialsAsync(blankNodesProgram, { atomic: true });
+    expect(engine.terrainMaterial.vertexShader).toContain('float graph_terrain_output');
+    expect(engine.terrainMaterial.vertexShader).toContain('return 0.0');
+
+    engine.generationSource = 'classic';
+    engine._stackGLSL = proceduralProgram;
+    const result = await engine.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
+
+    expect(result.swapped).toBe(true);
+    expect(engine._compiling).toBe(0);
+    expect(engine.terrainMaterial.vertexShader).toContain('// 0: legacy (Classic Terrain)');
+    expect(engine.waterMaterial.fragmentShader).toContain('// 0: legacy (Classic Terrain)');
+    expect(engine.terrainMaterial.vertexShader).not.toContain('float graph_terrain_output');
+    expect(engine._syncCpuHeightProgram).toHaveBeenCalledTimes(1);
   });
 });
