@@ -1,12 +1,14 @@
 import { cloneStack, defaultLegacyStack, migrateStack } from '../noise/NoiseStack.js';
 import { ANALYTIC_HEIGHT, GRAPH_CAPACITY, getGraphNodeDefinition, nodeDefaults } from './GraphRegistry.js';
 
-export const GRAPH_DOCUMENT_VERSION = 1;
+export const GRAPH_DOCUMENT_VERSION = 2;
 export const TERRAIN_OUTPUT_ID = 'terrain-output';
 export const DEFAULT_GRAPH_VIEW = Object.freeze({ x: 0, y: 0, zoom: 1 });
+export const GRAPH_MODES = Object.freeze(['noise', 'terrain']);
 
 const clone = (value) => structuredClone(value);
 const uid = (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+const graphMode = (mode, fallback = 'terrain') => GRAPH_MODES.includes(mode) ? mode : fallback;
 
 export class GraphValidationError extends Error {
   constructor(code, message, details = {}) { super(message); this.name = 'GraphValidationError'; this.code = code; this.details = details; }
@@ -24,11 +26,13 @@ export function makeGraphNode(type, position = { x: 0, y: 0 }, overrides = {}) {
   };
 }
 
-export function createBlankGraph() {
+export function createBlankGraph(mode = 'terrain') {
   return {
     version: GRAPH_DOCUMENT_VERSION,
+    mode: graphMode(mode),
     nodes: [makeGraphNode('terrainOutput', { x: 520, y: 90 })],
     edges: [],
+    groups: [],
   };
 }
 
@@ -46,8 +50,10 @@ export function createGraphFromStack(stack = defaultLegacyStack()) {
   });
   return {
     version: GRAPH_DOCUMENT_VERSION,
+    mode: 'noise',
     nodes: [current, output],
     edges: [{ id: uid('edge'), source: current.id, sourceHandle: 'height', target: output.id, targetHandle: 'height', type: ANALYTIC_HEIGHT }],
+    groups: [],
   };
 }
 
@@ -82,7 +88,27 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
       target: edge.target === oldOutputId ? TERRAIN_OUTPUT_ID : edge.target,
       targetHandle: edge.targetHandle || 'height', type: edge.type || ANALYTIC_HEIGHT,
     }));
-  return { version: GRAPH_DOCUMENT_VERSION, nodes: normalizedNodes, edges };
+  const claimedNodes = new Set();
+  const groupIds = new Set();
+  const groups = (Array.isArray(raw.groups) ? raw.groups : [])
+    .filter((group) => group && typeof group.id === 'string' && !groupIds.has(group.id) && groupIds.add(group.id))
+    .map((group, index) => {
+      const nodeIds = [...new Set(Array.isArray(group.nodeIds) ? group.nodeIds : [])]
+        .filter((nodeId) => idSet.has(nodeId) && !claimedNodes.has(nodeId) && claimedNodes.add(nodeId));
+      return {
+        id: group.id,
+        label: String(group.label || `Group ${index + 1}`),
+        position: { x: Number(group.position?.x) || 0, y: Number(group.position?.y) || 0 },
+        width: Math.max(220, Number(group.width) || 420),
+        height: Math.max(100, Number(group.height) || 240),
+        nodeIds,
+        collapsed: group.collapsed === true,
+        color: ['slate', 'green', 'cyan', 'amber', 'violet'].includes(group.color) ? group.color : 'slate',
+      };
+    })
+    .filter((group) => group.nodeIds.length > 0);
+  const inferredMode = raw.mode ?? (Number(raw.version) < 2 ? 'noise' : 'terrain');
+  return { version: GRAPH_DOCUMENT_VERSION, mode: graphMode(inferredMode), nodes: normalizedNodes, edges, groups };
 }
 
 export function findOutputNode(graph) { return graph.nodes.find((node) => node.type === 'terrainOutput') || null; }
@@ -206,10 +232,69 @@ export function moveGraphNodes(graph, positions) {
   return { ...graph, nodes: graph.nodes.map((node) => positions[node.id] ? { ...node, position: { ...positions[node.id] } } : node) };
 }
 
+export function setGraphMode(graph, mode) {
+  const nextMode = graphMode(mode, graphMode(graph.mode));
+  return nextMode === graph.mode ? graph : { ...graph, mode: nextMode };
+}
+
+export function groupGraphNodes(graph, nodeIds, options = {}) {
+  const existing = new Set(graph.nodes.map((node) => node.id));
+  const members = [...new Set(nodeIds)].filter((nodeId) => existing.has(nodeId));
+  if (!members.length) return { graph, groupId: null };
+  const memberSet = new Set(members);
+  const groups = (graph.groups || [])
+    .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((nodeId) => !memberSet.has(nodeId)) }))
+    .filter((group) => group.nodeIds.length > 0);
+  const id = options.id || uid('group');
+  const group = {
+    id,
+    label: String(options.label || `Group ${groups.length + 1}`),
+    position: { x: Number(options.position?.x) || 0, y: Number(options.position?.y) || 0 },
+    width: Math.max(220, Number(options.width) || 420),
+    height: Math.max(100, Number(options.height) || 240),
+    nodeIds: members,
+    collapsed: options.collapsed === true,
+    color: ['slate', 'green', 'cyan', 'amber', 'violet'].includes(options.color) ? options.color : 'slate',
+  };
+  return { graph: { ...graph, groups: [...groups, group] }, groupId: id };
+}
+
+export function updateGraphGroup(graph, groupId, patch) {
+  return {
+    ...graph,
+    groups: (graph.groups || []).map((group) => group.id === groupId
+      ? { ...group, ...clone(patch), id: group.id, nodeIds: [...group.nodeIds] }
+      : group),
+  };
+}
+
+export function moveGraphGroup(graph, groupId, position) {
+  const group = (graph.groups || []).find((candidate) => candidate.id === groupId);
+  if (!group) return graph;
+  const nextPosition = { x: Number(position?.x) || 0, y: Number(position?.y) || 0 };
+  const dx = nextPosition.x - group.position.x, dy = nextPosition.y - group.position.y;
+  const members = new Set(group.nodeIds);
+  return {
+    ...graph,
+    groups: graph.groups.map((candidate) => candidate.id === groupId ? { ...candidate, position: nextPosition } : candidate),
+    nodes: graph.nodes.map((node) => members.has(node.id)
+      ? { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } }
+      : node),
+  };
+}
+
+export function removeGraphGroups(graph, groupIds) {
+  const ids = new Set(groupIds);
+  return { ...graph, groups: (graph.groups || []).filter((group) => !ids.has(group.id)) };
+}
+
 export function removeGraphNodes(graph, nodeIds) {
   const ids = new Set(nodeIds);
   for (const node of graph.nodes) if (ids.has(node.id) && getGraphNodeDefinition(node.type)?.permanent) ids.delete(node.id);
-  return { ...graph, nodes: graph.nodes.filter((node) => !ids.has(node.id)), edges: graph.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)) };
+  const groups = (graph.groups || [])
+    .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((nodeId) => !ids.has(nodeId)) }))
+    .filter((group) => group.nodeIds.length > 0);
+  return { ...graph, nodes: graph.nodes.filter((node) => !ids.has(node.id)), edges: graph.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)), groups };
 }
 
 export function connectGraphNodes(graph, connection) {

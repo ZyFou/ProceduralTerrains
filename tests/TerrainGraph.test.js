@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { makeLayer, makeStack } from '../src/engine/terrain/noise/NoiseStack.js';
 import {
   GraphValidationError, TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
-  createGraphFromStack, downstreamNodeIds, duplicateGraphSelection, graphCapacity, inputEdge,
-  migrateGraphDocument, moveGraphNodes, reachableNodeIds, removeGraphNodes, topologicalSort,
-  updateGraphNodeParams, validateGraph,
+  createGraphFromStack, downstreamNodeIds, duplicateGraphSelection, graphCapacity, groupGraphNodes, inputEdge,
+  migrateGraphDocument, moveGraphGroup, moveGraphNodes, reachableNodeIds, removeGraphGroups, removeGraphNodes,
+  setGraphMode, topologicalSort, updateGraphGroup, updateGraphNodeParams, validateGraph,
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
@@ -39,6 +39,15 @@ function graphForRegistryNode(type) {
 }
 
 describe('terrain graph document', () => {
+  it('starts in Terrain Graph mode and can switch sub-modes without changing the recipe', () => {
+    const graph = createBlankGraph();
+    expect(graph).toMatchObject({ version: 2, mode: 'terrain', groups: [] });
+    const noise = setGraphMode(graph, 'noise');
+    expect(noise.mode).toBe('noise');
+    expect(noise.nodes).toEqual(graph.nodes);
+    expect(setGraphMode(noise, 'unknown')).toBe(noise);
+  });
+
   it('creates a permanent current-terrain compatibility path', () => {
     const stack = makeStack([makeLayer('legacy'), makeLayer('fbm')], { normalizeOutput: true, outputMin: -0.2, outputMax: 1.6 });
     const graph = createGraphFromStack(stack);
@@ -127,6 +136,24 @@ describe('terrain graph document', () => {
     expect(result.graph.edges.filter((edge) => result.nodeIds.includes(edge.source) && result.nodeIds.includes(edge.target))).toHaveLength(1);
   });
 
+  it('groups nodes into movable, collapsible organization frames that survive migration', () => {
+    let graph = createBlankGraph();
+    graph = addGraphNode(graph, 'mountain', { x: 80, y: 120 }); const mountain = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'terrace', { x: 320, y: 120 }); const terrace = graph.nodes.at(-1);
+    const grouped = groupGraphNodes(graph, [mountain.id, terrace.id], {
+      id: 'geology', label: 'Geology', position: { x: 40, y: 60 }, width: 520, height: 240, color: 'amber',
+    });
+    graph = grouped.graph;
+    expect(grouped.groupId).toBe('geology');
+    expect(graph.groups[0]).toMatchObject({ label: 'Geology', nodeIds: [mountain.id, terrace.id], collapsed: false, color: 'amber' });
+    graph = updateGraphGroup(graph, 'geology', { collapsed: true, label: 'Rock pass' });
+    graph = moveGraphGroup(graph, 'geology', { x: 70, y: 100 });
+    expect(graph.nodes.find((node) => node.id === mountain.id).position).toEqual({ x: 110, y: 160 });
+    const migrated = migrateGraphDocument(JSON.parse(JSON.stringify(graph)));
+    expect(migrated.groups[0]).toMatchObject({ id: 'geology', label: 'Rock pass', collapsed: true, position: { x: 70, y: 100 } });
+    expect(removeGraphGroups(migrated, ['geology']).groups).toEqual([]);
+  });
+
   it('reports capacity overflow only for the output dependency chain', () => {
     const stack = makeStack(Array.from({ length: 12 }, () => makeLayer('fbm')));
     let graph = createGraphFromStack(stack);
@@ -158,6 +185,25 @@ describe('analytical terrain graph compiler', () => {
       expect([...definition.inputs, ...definition.outputs].every((port) => port.type === 'analytic-height')).toBe(true);
       expect(JSON.parse(JSON.stringify(definition.defaults))).toEqual(definition.defaults);
     }
+  });
+
+  it('offers deterministic noise and five landforms only in the Terrain Graph palette', () => {
+    const terrainIds = new Set(listGraphNodeDefinitions({ mode: 'terrain' }).map((definition) => definition.id));
+    const noiseIds = new Set(listGraphNodeDefinitions({ mode: 'noise' }).map((definition) => definition.id));
+    for (const type of ['deterministicNoise', 'mountain', 'mountainRange', 'ridge', 'island', 'singleCrater']) expect(terrainIds.has(type)).toBe(true);
+    for (const type of ['mountain', 'mountainRange', 'ridge', 'island', 'singleCrater']) expect(noiseIds.has(type)).toBe(false);
+    expect(noiseIds.has('deterministicNoise')).toBe(true);
+  });
+
+  it('rebuilds deterministic noise identically for the same seed and differently for another seed', () => {
+    const make = (seed) => {
+      let graph = createBlankGraph('terrain');
+      graph = addGraphNode(graph, 'deterministicNoise', { x: 0, y: 0 }, { params: { seed, scale: 1.2, octaves: 6 } });
+      graph = connectGraphNodes(graph, { source: graph.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID });
+      return compileTerrainGraph(graph).program.evaluate2D(42.25, -19.5, ctx);
+    };
+    expect(make(7842)).toBe(make(7842));
+    expect(make(7843)).not.toBeCloseTo(make(7842), 8);
   });
 
   it.each(listGraphNodeDefinitions().map((definition) => [definition.id]))('compiles, packs, and evaluates the %s registry node', (type) => {

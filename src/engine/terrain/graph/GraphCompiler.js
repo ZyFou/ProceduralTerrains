@@ -1,6 +1,7 @@
 import { blendGlslStmt, blendJs } from '../noise/blendModes.js';
 import { activeLayers, migrateStack } from '../noise/NoiseStack.js';
 import { evalStack2D, generateStackGLSL, packStackUniforms } from '../noise/noiseStackCodegen.js';
+import { fbm2, vnoise2 } from '../noise/cpuNoise.js';
 import { getNoiseType } from '../noise/noiseTypes.js';
 import { getGraphNodeDefinition } from './GraphRegistry.js';
 import { findOutputNode, inputEdge, reachableNodeIds, topologicalSort, validateGraph } from './GraphDocument.js';
@@ -23,11 +24,19 @@ function emptyPack() {
 
 function sourceLayer(node) {
   const definition = getGraphNodeDefinition(node.type);
+  const seedKey = definition?.seedParam || 'seedOffset';
   return {
     id: node.id, type: definition.noiseType, enabled: true, name: node.label,
     blendMode: 'replace', strength: num(node.params.strength, 1), opacity: 1,
-    seedOffset: num(node.params.seedOffset), params: { ...node.params }, masks: [],
+    seedOffset: num(node.params[seedKey]), params: { ...node.params }, masks: [],
   };
+}
+
+function glslFbm(name, expression, octaves, persistence = '0.5', lacunarity = '2.0') {
+  return `float ${name}=0.0;
+  { float amp=0.5, norm=0.0; vec2 q=${expression};
+    for(int i=0;i<${octaves};i++){ ${name}+=amp*vnoise(q); norm+=amp; amp*=${persistence}; q=ROT2*q*${lacunarity}; }
+    ${name}/=max(norm,1e-4); }`;
 }
 
 function sourceFunction(node, slot) {
@@ -72,6 +81,74 @@ function nodeFunction(graph, node, slot) {
     currentTerrain: () => currentTerrainFunction(node),
     classicTerrain: () => `float ${fn}(vec2 xz, Climate c) { return legacyShape2D(xz, c); }`,
     source: () => sourceFunction(node, slot),
+    mountain: () => {
+      const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 5))));
+      return `float ${fn}(vec2 xz, Climate c) {
+  float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  ${glslFbm('detail', 'p*2.6+vec2(seed,seed*1.7+3.1)', oct, 'pb.x', 'pb.y')}
+  float ridge=1.0-abs(detail*2.0-1.0);
+  float silhouette=pow(max(1.0-length(p)/max(pa.x,0.001),0.0),max(pa.y,0.01));
+  return height*silhouette*mix(1.0,ridge,clamp(pa.z,0.0,1.0));
+}`;
+    },
+    mountainRange: () => {
+      const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 6))));
+      return `float ${fn}(vec2 xz, Climate c) {
+  float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  vec2 dir=vec2(cos(pa.x),sin(pa.x)), side=vec2(-dir.y,dir.x);
+  float along=dot(p,dir), across=dot(p,side);
+  across+=(vnoise(vec2(along*1.25+seed,seed*0.37))-0.5)*pb.x;
+  float envelope=exp(-pow(abs(across)/max(pa.y,0.01),2.0))*exp(-pow(abs(along)/max(pa.z,0.01),4.0));
+  ${glslFbm('detail', 'vec2(along*0.75,across*3.2)+vec2(seed,seed*1.7+3.1)', oct, 'pb.y', 'pb.z')}
+  float ridge=pow(max(1.0-abs(detail*2.0-1.0),0.0),max(pa.w,0.01));
+  return height*envelope*mix(0.42,1.18,ridge);
+}`;
+    },
+    ridge: () => {
+      const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 5))));
+      return `float ${fn}(vec2 xz, Climate c) {
+  float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  vec2 dir=vec2(cos(pa.x),sin(pa.x)), side=vec2(-dir.y,dir.x);
+  float along=dot(p,dir), across=dot(p,side);
+  float bend=(vnoise(vec2(along*max(pa.w,0.01)+seed,seed*0.41))-0.5)*pb.x;
+  float crest=exp(-pow(abs(across+bend)/max(pa.y,0.01),max(pa.z,0.5)));
+  ${glslFbm('detail', 'p*3.0+vec2(seed,seed*1.7+3.1)', oct, 'pb.y', 'pb.z')}
+  return height*crest*mix(0.62,1.18,detail);
+}`;
+    },
+    island: () => {
+      const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 6))));
+      return `float ${fn}(vec2 xz, Climate c) {
+  float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  float radius=max(pa.x,0.01), coast=clamp(pa.y,0.01,0.95);
+  float mask=1.0-smoothstep(radius*(1.0-coast),radius,length(p));
+  ${glslFbm('detail', 'p*1.85+vec2(seed,seed*1.7+3.1)', oct, 'pb.x', 'pb.y')}
+  float interior=mix(1.0,pa.z+(1.0-pa.z)*detail,clamp(pa.w,0.0,1.0));
+  return height*mask*max(interior,0.0);
+}`;
+    },
+    singleCrater: () => {
+      const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 4))));
+      return `float ${fn}(vec2 xz, Climate c) {
+  float depth=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  float r=length(p)/max(pa.x,0.01);
+  float bowl=-pow(max(1.0-r,0.0),1.65);
+  float rim=pa.y*exp(-pow((r-1.0)/max(pa.z,0.01),2.0));
+  ${glslFbm('damage', 'p*4.0+vec2(seed,seed*1.7+3.1)', oct)}
+  float breakup=(damage-0.5)*pa.w*(1.0-smoothstep(1.0,1.4,r));
+  return depth*(bowl+rim+breakup);
+}`;
+    },
     domainWarp: () => {
       const oct = Math.max(1, Math.min(6, Math.round(num(node.params.octaves, 4))));
       return `float ${fn}(vec2 xz, Climate c) {
@@ -135,7 +212,7 @@ function packUniforms(graph, ordered, slotById) {
   const packed = emptyPack();
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const id of ordered) {
-    const node = nodes.get(id); const slot = slotById.get(id);
+    const node = nodes.get(id); const slot = slotById.get(id); const definition = getGraphNodeDefinition(node.type);
     if (node.type === 'currentTerrain') {
       const stackPack = packStackUniforms(migrateStack(node.params?.stack));
       const count = activeLayers(migrateStack(node.params?.stack)).length;
@@ -146,6 +223,29 @@ function packUniforms(graph, ordered, slotById) {
     if (getGraphNodeDefinition(node.type)?.noiseType) {
       const one = packStackUniforms({ version: 1, layers: [sourceLayer(node)] });
       for (const key of ['strength', 'scale', 'seed', 'paramsA', 'paramsB', 'maskA', 'maskB', 'maskC']) packed[key][slot] = structuredClone(one[key][0]);
+    } else if (definition?.landform) {
+      packed.scale[slot] = num(node.params.scale, 1);
+      packed.seed[slot] = num(node.params.seed) * 31.7;
+      if (node.type === 'mountain') {
+        packed.strength[slot] = num(node.params.height, 1.15);
+        packed.paramsA[slot] = [num(node.params.radius, 1.25), num(node.params.sharpness, 1.65), num(node.params.roughness, 0.55), 0];
+        packed.paramsB[slot] = [num(node.params.persistence, 0.5), num(node.params.lacunarity, 2), 0, 0];
+      } else if (node.type === 'mountainRange') {
+        packed.strength[slot] = num(node.params.height, 1.2);
+        packed.paramsA[slot] = [num(node.params.direction, 0.7), num(node.params.width, 0.42), num(node.params.length, 2.4), num(node.params.sharpness, 1.8)];
+        packed.paramsB[slot] = [num(node.params.roughness, 0.65), num(node.params.persistence, 0.5), num(node.params.lacunarity, 2.1), 0];
+      } else if (node.type === 'ridge') {
+        packed.strength[slot] = num(node.params.height, 0.95);
+        packed.paramsA[slot] = [num(node.params.direction, 1.15), num(node.params.width, 0.28), num(node.params.sharpness, 2.2), num(node.params.breakup, 1.3)];
+        packed.paramsB[slot] = [num(node.params.roughness, 0.45), num(node.params.persistence, 0.48), num(node.params.lacunarity, 2.05), 0];
+      } else if (node.type === 'island') {
+        packed.strength[slot] = num(node.params.height, 1.05);
+        packed.paramsA[slot] = [num(node.params.radius, 1.35), num(node.params.coast, 0.28), num(node.params.plateau, 0.32), num(node.params.roughness, 0.72)];
+        packed.paramsB[slot] = [num(node.params.persistence, 0.5), num(node.params.lacunarity, 2), 0, 0];
+      } else if (node.type === 'singleCrater') {
+        packed.strength[slot] = num(node.params.depth, 0.75);
+        packed.paramsA[slot] = [num(node.params.radius, 0.9), num(node.params.rimHeight, 0.42), num(node.params.rimWidth, 0.18), num(node.params.roughness, 0.2)];
+      }
     } else if (node.type === 'domainWarp') {
       packed.strength[slot] = num(node.params.strength, 0.7); packed.scale[slot] = num(node.params.scale, 1); packed.seed[slot] = num(node.params.seedOffset) * 31.7;
     } else if (node.type === 'combine') packed.paramsA[slot][0] = num(node.params.mix, 0.5);
@@ -166,14 +266,76 @@ function cpuEvaluator(graph) {
       return edge ? evalNode(edge.source, px, pz, ctx) : 0;
     };
     const definition = getGraphNodeDefinition(node.type);
+    const u = ctx.uniforms;
+    const point = () => {
+      const scale = num(node.params.scale, 1);
+      return {
+        px: x * u.uFrequency.value * scale,
+        pz: z * u.uFrequency.value * scale,
+        seed: num(node.params.seed) * 31.7,
+      };
+    };
+    const fractal = (px, pz, octaves = node.params.octaves, persistence = node.params.persistence, lacunarity = node.params.lacunarity) => fbm2(px, pz, octaves, num(persistence, 0.5), num(lacunarity, 2));
+    const smoothstep = (edge0, edge1, value) => {
+      const t = Math.max(0, Math.min(1, (value - edge0) / Math.max(edge1 - edge0, 1e-6)));
+      return t * t * (3 - 2 * t);
+    };
     const evaluator = {
       currentTerrain: () => evalStack2D(migrateStack(node.params?.stack), x, z, { ...ctx, uniforms: { ...ctx.uniforms, uAmplitude: { value: 1 } } }),
       classicTerrain: () => ctx.legacy2d?.(x, z) || 0,
       source: () => {
-        const def = getNoiseType(definition.noiseType), layer = sourceLayer(node), u = ctx.uniforms;
+        const def = getNoiseType(definition.noiseType), layer = sourceLayer(node);
         const sx = u.uSeedOffset.value.x, sz = u.uSeedOffset.value.y, freq = u.uFrequency.value;
-        const seed = num(node.params.seedOffset) * 31.7, scale = def.scaleKey ? num(node.params[def.scaleKey], 1) : 1;
+        const seed = num(node.params[definition.seedParam || 'seedOffset']) * 31.7, scale = def.scaleKey ? num(node.params[def.scaleKey], 1) : 1;
         return (def.eval2d?.((x * freq + sx) * scale + seed, (z * freq + sz) * scale + seed * 1.7 + 3.1, layer, ctx) || 0) * num(node.params.strength, 1);
+      },
+      mountain: () => {
+        const { px, pz, seed } = point();
+        const radius = Math.max(num(node.params.radius, 1.25), 0.001);
+        const silhouette = Math.pow(Math.max(1 - Math.hypot(px, pz) / radius, 0), Math.max(num(node.params.sharpness, 1.65), 0.01));
+        const detail = fractal(px * 2.6 + seed, pz * 2.6 + seed * 1.7 + 3.1);
+        const ridge = 1 - Math.abs(detail * 2 - 1);
+        return num(node.params.height, 1.15) * silhouette * (1 + (ridge - 1) * num(node.params.roughness, 0.55));
+      },
+      mountainRange: () => {
+        const { px, pz, seed } = point(), direction = num(node.params.direction, 0.7);
+        const dx = Math.cos(direction), dz = Math.sin(direction);
+        const along = px * dx + pz * dz;
+        let across = px * -dz + pz * dx;
+        across += (vnoise2(along * 1.25 + seed, seed * 0.37) - 0.5) * num(node.params.roughness, 0.65);
+        const envelope = Math.exp(-Math.pow(Math.abs(across) / Math.max(num(node.params.width, 0.42), 0.01), 2))
+          * Math.exp(-Math.pow(Math.abs(along) / Math.max(num(node.params.length, 2.4), 0.01), 4));
+        const detail = fractal(along * 0.75 + seed, across * 3.2 + seed * 1.7 + 3.1);
+        const ridge = Math.pow(Math.max(1 - Math.abs(detail * 2 - 1), 0), Math.max(num(node.params.sharpness, 1.8), 0.01));
+        return num(node.params.height, 1.2) * envelope * (0.42 + (1.18 - 0.42) * ridge);
+      },
+      ridge: () => {
+        const { px, pz, seed } = point(), direction = num(node.params.direction, 1.15);
+        const dx = Math.cos(direction), dz = Math.sin(direction);
+        const along = px * dx + pz * dz;
+        const across = px * -dz + pz * dx;
+        const bend = (vnoise2(along * Math.max(num(node.params.breakup, 1.3), 0.01) + seed, seed * 0.41) - 0.5) * num(node.params.roughness, 0.45);
+        const crest = Math.exp(-Math.pow(Math.abs(across + bend) / Math.max(num(node.params.width, 0.28), 0.01), Math.max(num(node.params.sharpness, 2.2), 0.5)));
+        const detail = fractal(px * 3 + seed, pz * 3 + seed * 1.7 + 3.1);
+        return num(node.params.height, 0.95) * crest * (0.62 + (1.18 - 0.62) * detail);
+      },
+      island: () => {
+        const { px, pz, seed } = point();
+        const radius = Math.max(num(node.params.radius, 1.35), 0.01), coast = Math.max(0.01, Math.min(0.95, num(node.params.coast, 0.28)));
+        const mask = 1 - smoothstep(radius * (1 - coast), radius, Math.hypot(px, pz));
+        const detail = fractal(px * 1.85 + seed, pz * 1.85 + seed * 1.7 + 3.1);
+        const shaped = num(node.params.plateau, 0.32) + (1 - num(node.params.plateau, 0.32)) * detail;
+        const interior = 1 + (shaped - 1) * num(node.params.roughness, 0.72);
+        return num(node.params.height, 1.05) * mask * Math.max(interior, 0);
+      },
+      singleCrater: () => {
+        const { px, pz, seed } = point();
+        const radius = Math.max(num(node.params.radius, 0.9), 0.01), r = Math.hypot(px, pz) / radius;
+        const bowl = -Math.pow(Math.max(1 - r, 0), 1.65);
+        const rim = num(node.params.rimHeight, 0.42) * Math.exp(-Math.pow((r - 1) / Math.max(num(node.params.rimWidth, 0.18), 0.01), 2));
+        const damage = fractal(px * 4 + seed, pz * 4 + seed * 1.7 + 3.1, node.params.octaves, 0.5, 2);
+        const breakup = (damage - 0.5) * num(node.params.roughness, 0.2) * (1 - smoothstep(1, 1.4, r));
+        return num(node.params.depth, 0.75) * (bowl + rim + breakup);
       },
       domainWarp: () => {
         const def = getNoiseType('domainWarp'), u = ctx.uniforms, seed = num(node.params.seedOffset) * 31.7;

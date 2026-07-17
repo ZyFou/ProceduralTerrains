@@ -4,14 +4,15 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  Boxes, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert,
-  Eye, EyeOff, GripVertical, Maximize2,
-  Play, Plus, Search, Trash2, X,
+  Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
+  Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
+  Play, Plus, Search, Trash2, Ungroup, X,
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
-  duplicateGraphSelection, moveGraphNodes, removeGraphEdges, removeGraphNodes,
-  updateGraphNode, updateGraphNodeParams,
+  duplicateGraphSelection, groupGraphNodes, moveGraphGroup, moveGraphNodes,
+  removeGraphEdges, removeGraphGroups, removeGraphNodes, setGraphMode,
+  updateGraphGroup, updateGraphNode, updateGraphNodeParams,
 } from '../../engine/terrain/graph/GraphDocument.js';
 import { getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
@@ -64,7 +65,23 @@ function TerrainNode({ data, selected }) {
   );
 }
 
-const nodeTypes = { terrainNode: TerrainNode };
+function TerrainGroup({ data, selected }) {
+  const { group } = data;
+  return (
+    <div className={`terrain-flow-group tone-${group.color || 'slate'}${selected ? ' selected' : ''}${group.collapsed ? ' collapsed' : ''}`}>
+      <div className="terrain-flow-group__header">
+        <ChevronDown size={12} className={group.collapsed ? 'collapsed' : ''} aria-hidden />
+        <strong>{group.label}</strong>
+        <span>{group.nodeIds.length} nodes</span>
+        <button type="button" className="nodrag" onClick={(event) => { event.stopPropagation(); data.onToggle(group.id); }}>
+          {group.collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = { terrainNode: TerrainNode, terrainGroup: TerrainGroup };
 
 function InspectorField({ field, value, onChange }) {
   if (field.type === 'boolean') {
@@ -100,20 +117,52 @@ function InspectorField({ field, value, onChange }) {
   );
 }
 
-function NodeInspector({ node, graphState, onRename, onParam, onDelete, onHeaderPointerDown }) {
+function NodeInspector({
+  node, group, graphState, onRename, onParam, onDelete, onGroupPatch, onUngroup, onHeaderPointerDown,
+}) {
   const definition = node ? (getGraphNodeDefinition(node.type) || {
     label: `Unknown: ${node.type}`, description: 'This node type is unavailable in this version.', inspector: [], permanent: false,
   }) : null;
+  const inspectorSections = definition?.inspector?.reduce((sections, field) => {
+    const label = field.section || 'Parameters';
+    const entry = sections.find((section) => section.label === label);
+    if (entry) entry.fields.push(field); else sections.push({ label, fields: [field] });
+    return sections;
+  }, []) || [];
+  const title = group ? 'Group' : definition?.label || 'Nothing selected';
   return (
     <aside className="node-inspector" aria-label="Selected node properties">
       <header className="node-dock-header node-inspector__header node-dock-header--draggable" onPointerDown={onHeaderPointerDown}>
         <div className="node-dock-heading">
           <span className="node-dock-kicker">Properties</span>
-          <strong>{definition?.label || 'Nothing selected'}</strong>
+          <strong>{title}</strong>
         </div>
         <GripVertical className="node-dock-drag-cue" size={15} aria-hidden />
       </header>
-      {node && definition ? (
+      {group ? (
+        <div className="node-inspector__body">
+          <label className="node-inspector-field node-name-field">
+            <span>Name</span>
+            <input value={group.label} onChange={(event) => onGroupPatch({ label: event.target.value })} />
+          </label>
+          <p className="node-inspector-description">A visual frame for moving, collapsing, and organizing related terrain operations.</p>
+          <div className="node-inspector-section">
+            <h4>Organization</h4>
+            <label className="node-inspector-field">
+              <span>Frame color</span>
+              <select value={group.color || 'slate'} onChange={(event) => onGroupPatch({ color: event.target.value })}>
+                <option value="slate">Slate</option><option value="green">Green</option><option value="cyan">Cyan</option><option value="amber">Amber</option><option value="violet">Violet</option>
+              </select>
+            </label>
+            <label className="node-inspector-toggle">
+              <span>Collapsed</span>
+              <input type="checkbox" checked={group.collapsed === true} onChange={(event) => onGroupPatch({ collapsed: event.target.checked })} />
+            </label>
+            <div className="node-group-summary"><strong>{group.nodeIds.length}</strong><span>nodes in this group</span></div>
+          </div>
+          <button type="button" className="node-danger-button node-ungroup-button" onClick={onUngroup}><Ungroup size={14} /> Remove group frame</button>
+        </div>
+      ) : node && definition ? (
         <div className="node-inspector__body">
           <label className="node-inspector-field node-name-field">
             <span>Name</span>
@@ -127,8 +176,13 @@ function NodeInspector({ node, graphState, onRename, onParam, onDelete, onHeader
               <small>Its Noise Stack is frozen so first entry preserves the current terrain.</small>
             </div>
           ) : null}
-          {definition.inspector.map((field) => (
-            <InspectorField key={field.key} field={field} value={node.params?.[field.key] ?? field.default} onChange={(value, structural) => onParam(field.key, value, structural)} />
+          {inspectorSections.map((section) => (
+            <section className="node-inspector-section" key={section.label}>
+              <h4>{section.label}</h4>
+              {section.fields.map((field) => (
+                <InspectorField key={field.key} field={field} value={node.params?.[field.key] ?? field.default} onChange={(value, structural) => onParam(field.key, value, structural)} />
+              ))}
+            </section>
           ))}
           {!definition.permanent ? (
             <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} /> Delete node</button>
@@ -137,8 +191,8 @@ function NodeInspector({ node, graphState, onRename, onParam, onDelete, onHeader
       ) : (
         <div className="node-inspector-empty">
           <Boxes size={26} />
-          <strong>Select a node</strong>
-          <span>Its parameters will appear here.</span>
+          <strong>Select a node or group</strong>
+          <span>Its settings will appear here.</span>
         </div>
       )}
       <footer className={`node-graph-health${graphState?.valid === false ? ' invalid' : ''}`}>
@@ -156,11 +210,13 @@ export default function NodeWorkspace({
   const [localGraph, setLocalGraph] = useState(graph);
   const graphRef = useRef(graph);
   const [selectedNodes, setSelectedNodes] = useState(new Set());
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [selectedEdges, setSelectedEdges] = useState(new Set());
   const [nodeMeasurements, setNodeMeasurements] = useState({});
   const [layout, setLayout] = useState(loadLayout);
   const [searchState, setSearchState] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [paletteQuery, setPaletteQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [instance, setInstance] = useState(null);
   const [draggingDock, setDraggingDock] = useState(null);
@@ -180,51 +236,114 @@ export default function NodeWorkspace({
     return () => cancelAnimationFrame(frame);
   }, [instance, layout.graphEdge, layout.inspectorSide]);
 
-  const definitions = useMemo(() => listGraphNodeDefinitions(), []);
+  const commit = useCallback((next, meta = {}) => {
+    graphRef.current = next; setLocalGraph(next); onGraphChange?.(next, meta);
+  }, [onGraphChange]);
+
+  const toggleGroup = useCallback((groupId) => {
+    const group = (graphRef.current.groups || []).find((candidate) => candidate.id === groupId);
+    if (!group) return;
+    commit(updateGraphGroup(graphRef.current, groupId, { collapsed: !group.collapsed }), { structural: false, history: true });
+  }, [commit]);
+
+  const graphMode = localGraph.mode === 'noise' ? 'noise' : 'terrain';
+  useEffect(() => { setPaletteQuery(''); }, [graphMode]);
+  const definitions = useMemo(() => listGraphNodeDefinitions({ mode: graphMode }), [graphMode]);
   const grouped = useMemo(() => definitions.reduce((map, definition) => {
     const list = map.get(definition.category) || []; list.push(definition); map.set(definition.category, list); return map;
   }, new Map()), [definitions]);
+  const paletteGroups = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    if (!query) return grouped;
+    return new Map([...grouped].map(([category, items]) => [category, items.filter((definition) => (
+      `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query)
+    ))]).filter(([, items]) => items.length));
+  }, [grouped, paletteQuery]);
+  const paletteResultCount = useMemo(() => [...paletteGroups.values()].reduce((total, items) => total + items.length, 0), [paletteGroups]);
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return definitions.filter((definition) => !query || `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query));
   }, [definitions, searchQuery]);
 
   const invalidNodes = useMemo(() => new Set((graphState?.diagnostics || []).map((diagnostic) => diagnostic.nodeId).filter(Boolean)), [graphState]);
-  const flowNodes = useMemo(() => localGraph.nodes.map((node) => ({
-    id: node.id, type: 'terrainNode', position: node.position,
-    measured: nodeMeasurements[node.id],
-    data: { node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id) },
-    selected: selectedNodes.has(node.id), deletable: node.type !== 'terrainOutput',
-  })), [localGraph.nodes, selectedNodes, invalidNodes, nodeMeasurements]);
-  const flowEdges = useMemo(() => localGraph.edges.map((edge) => ({
+  const collapsedNodes = useMemo(() => new Set((localGraph.groups || [])
+    .filter((group) => group.collapsed).flatMap((group) => group.nodeIds)), [localGraph.groups]);
+  const flowNodes = useMemo(() => [
+    ...(localGraph.groups || []).map((group) => ({
+      id: group.id, type: 'terrainGroup', position: group.position,
+      data: { group, onToggle: toggleGroup }, selected: selectedGroups.has(group.id), deletable: true,
+      zIndex: group.collapsed ? 3 : 0,
+      measured: { width: group.collapsed ? 240 : group.width, height: group.collapsed ? 42 : group.height },
+      style: { width: group.collapsed ? 240 : group.width, height: group.collapsed ? 42 : group.height },
+    })),
+    ...localGraph.nodes.filter((node) => !collapsedNodes.has(node.id)).map((node) => ({
+      id: node.id, type: 'terrainNode', position: node.position,
+      measured: nodeMeasurements[node.id], zIndex: 2,
+      data: { node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id) },
+      selected: selectedNodes.has(node.id), deletable: node.type !== 'terrainOutput',
+    })),
+  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, nodeMeasurements, collapsedNodes, toggleGroup]);
+  const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
     ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false,
     className: `terrain-flow-edge edge-${getGraphNodeDefinition(localGraph.nodes.find((node) => node.id === edge.source)?.type)?.color || 'blue'}`,
-  })), [localGraph.edges, localGraph.nodes, selectedEdges]);
-
-  const commit = useCallback((next, meta = {}) => {
-    graphRef.current = next; setLocalGraph(next); onGraphChange?.(next, meta);
-  }, [onGraphChange]);
+  })), [localGraph.edges, localGraph.nodes, selectedEdges, collapsedNodes]);
 
   const addNodeAt = useCallback((type, position) => {
     const next = addGraphNode(graphRef.current, type, position);
     const added = next.nodes.at(-1);
     commit(next, { structural: true, history: true });
     setSelectedNodes(new Set([added.id]));
+    setSelectedGroups(new Set());
     setSearchState(null); setSearchQuery(''); setSearchIndex(0);
   }, [commit]);
 
+  const addNodeFromPalette = useCallback((type) => {
+    const rect = graphDockRef.current?.getBoundingClientRect();
+    const screenPosition = rect ? {
+      x: Math.min(rect.right - 120, rect.left + Math.max(260, rect.width * 0.54)),
+      y: Math.min(rect.bottom - 80, rect.top + Math.max(110, rect.height * 0.48)),
+    } : pointerRef.current;
+    addNodeAt(type, instance?.screenToFlowPosition(screenPosition) || { x: 180, y: 120 });
+  }, [addNodeAt, instance]);
+
+  const createGroupFromSelection = useCallback(() => {
+    const nodes = graphRef.current.nodes.filter((node) => selectedNodes.has(node.id));
+    if (!nodes.length) return;
+    const bounds = nodes.reduce((box, node) => {
+      const measured = nodeMeasurements[node.id] || { width: 176, height: 90 };
+      return {
+        minX: Math.min(box.minX, node.position.x), minY: Math.min(box.minY, node.position.y),
+        maxX: Math.max(box.maxX, node.position.x + measured.width), maxY: Math.max(box.maxY, node.position.y + measured.height),
+      };
+    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+    const result = groupGraphNodes(graphRef.current, nodes.map((node) => node.id), {
+      label: 'Terrain section', position: { x: bounds.minX - 28, y: bounds.minY - 48 },
+      width: bounds.maxX - bounds.minX + 56, height: bounds.maxY - bounds.minY + 76,
+    });
+    if (!result.groupId) return;
+    commit(result.graph, { structural: false, history: true });
+    setSelectedNodes(new Set()); setSelectedEdges(new Set()); setSelectedGroups(new Set([result.groupId]));
+  }, [commit, nodeMeasurements, selectedNodes]);
+
+  const ungroupSelection = useCallback((ids = [...selectedGroups]) => {
+    if (!ids.length) return;
+    commit(removeGraphGroups(graphRef.current, ids), { structural: false, history: true });
+    setSelectedGroups(new Set());
+  }, [commit, selectedGroups]);
+
   const deleteSelection = useCallback(() => {
     let next = removeGraphEdges(graphRef.current, selectedEdges);
+    next = removeGraphGroups(next, selectedGroups);
     next = removeGraphNodes(next, selectedNodes);
     commit(next, { structural: true, history: true });
-    setSelectedNodes(new Set()); setSelectedEdges(new Set());
-  }, [commit, selectedEdges, selectedNodes]);
+    setSelectedNodes(new Set()); setSelectedGroups(new Set()); setSelectedEdges(new Set());
+  }, [commit, selectedEdges, selectedGroups, selectedNodes]);
 
   const duplicateSelection = useCallback((ids = [...selectedNodes]) => {
     const result = duplicateGraphSelection(graphRef.current, ids, { x: 36, y: 36 });
     if (!result.nodeIds.length) return;
     commit(result.graph, { structural: true, history: true });
-    setSelectedNodes(new Set(result.nodeIds)); setSelectedEdges(new Set());
+    setSelectedNodes(new Set(result.nodeIds)); setSelectedGroups(new Set()); setSelectedEdges(new Set());
   }, [commit, selectedNodes]);
 
   const openSearch = useCallback(() => {
@@ -250,15 +369,16 @@ export default function NodeWorkspace({
         if (key === 'c') { event.preventDefault(); copyRef.current = [...selectedNodes].filter((id) => id !== TERRAIN_OUTPUT_ID); }
         else if (key === 'v') { event.preventDefault(); duplicateSelection(copyRef.current); }
         else if (key === 'd') { event.preventDefault(); duplicateSelection(); }
-        else if (key === 'a') { event.preventDefault(); setSelectedNodes(new Set(graphRef.current.nodes.map((node) => node.id))); }
+        else if (key === 'a') { event.preventDefault(); setSelectedNodes(new Set(graphRef.current.nodes.map((node) => node.id))); setSelectedGroups(new Set()); }
         return;
       }
-      if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); }
+      if (key === 'g') { event.preventDefault(); if (event.shiftKey) ungroupSelection(); else createGroupFromSelection(); }
+      else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); }
       else if (key === 'f') { event.preventDefault(); instance?.fitView({ padding: 0.18, duration: 280 }); }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [deleteSelection, duplicateSelection, instance, openSearch, selectedNodes]);
+  }, [createGroupFromSelection, deleteSelection, duplicateSelection, instance, openSearch, selectedNodes, ungroupSelection]);
 
   const updateLayout = useCallback((patch) => setLayout((current) => ({ ...current, ...patch })), []);
   const beginDockDrag = useCallback((kind, event) => {
@@ -321,7 +441,8 @@ export default function NodeWorkspace({
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true });
   };
 
-  const selectedNode = localGraph.nodes.find((node) => selectedNodes.has(node.id)) || null;
+  const selectedGroup = (localGraph.groups || []).find((group) => selectedGroups.has(group.id)) || null;
+  const selectedNode = selectedGroup ? null : localGraph.nodes.find((node) => selectedNodes.has(node.id)) || null;
   const inspectorOffset = inspectorReplaced ? 0 : layout.inspectorWidth;
   const dockStyle = layout.graphEdge === 'bottom' || layout.graphEdge === 'top'
     ? { [layout.graphEdge]: 0, left: layout.inspectorSide === 'left' ? inspectorOffset : 0, right: layout.inspectorSide === 'right' ? inspectorOffset : 0, height: `${layout.graphRatio * 100}%` }
@@ -341,56 +462,86 @@ export default function NodeWorkspace({
       }}>
         <div className="node-graph-resizer" onPointerDown={beginGraphResize}><GripVertical size={14} /></div>
         <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
-          <div className="node-dock-heading"><span className="node-dock-kicker">Terrain</span><strong>Analytical Graph</strong></div>
+          <div className="node-dock-heading"><span className="node-dock-kicker">Nodes</span><strong>{graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise'}</strong></div>
+          <div className="node-mode-switch" role="tablist" aria-label="Node editor sub-mode">
+            <button type="button" role="tab" aria-selected={graphMode === 'noise'} className={graphMode === 'noise' ? 'active' : ''} onClick={() => commit(setGraphMode(graphRef.current, 'noise'), { structural: false, history: true })}>Noise</button>
+            <button type="button" role="tab" aria-selected={graphMode === 'terrain'} className={graphMode === 'terrain' ? 'active' : ''} onClick={() => commit(setGraphMode(graphRef.current, 'terrain'), { structural: false, history: true })}>Terrain</button>
+          </div>
           <div className="node-graph-status">
             {graphState?.valid === false ? <><CircleAlert size={13} /><span>Last valid terrain</span></> : <><Play size={12} /><span>Realtime</span></>}
           </div>
           <div className="node-toolbar-actions">
             <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
+            <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title="Group selected nodes (G)"><FolderPlus size={13} /> Group</button>
+            <button type="button" className="node-icon-button" onClick={() => ungroupSelection()} disabled={!selectedGroups.size} title="Remove selected group frame (Shift+G)"><Ungroup size={13} /></button>
             <button type="button" className="node-icon-button" onClick={() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 280 })} title="Fit graph"><Maximize2 size={14} /></button>
             <button type="button" className={`node-icon-button${layout.previewVisible ? ' active' : ''}`} onClick={() => updateLayout({ previewVisible: !layout.previewVisible })} title="Toggle 2D preview">{layout.previewVisible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-            <button type="button" className="node-toolbar-button subtle" onClick={onStartBlank}>Clear graph</button>
+            <button type="button" className="node-toolbar-button subtle" onClick={() => onStartBlank?.(graphMode)}>Clear graph</button>
           </div>
         </header>
 
         {!layout.paletteCollapsed ? (
           <aside className="node-quick-palette">
-            <header><span>Quick nodes</span><button type="button" onClick={() => updateLayout({ paletteCollapsed: true })} title="Collapse palette"><ChevronLeft size={14} /></button></header>
+            <header><span>{graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes'}</span><small>{definitions.length}</small><button type="button" onClick={() => updateLayout({ paletteCollapsed: true })} title="Collapse palette"><ChevronLeft size={14} /></button></header>
+            <label className="node-palette-filter">
+              <Search size={12} aria-hidden />
+              <input value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder="Find a node…" aria-label={`Find ${graphMode} nodes`} />
+              {paletteQuery ? <button type="button" onClick={() => setPaletteQuery('')} title="Clear node filter"><X size={11} /></button> : null}
+            </label>
             <div className="node-palette-scroll">
-              {[...grouped].map(([category, items]) => (
+              {[...paletteGroups].map(([category, items]) => (
                 <section key={category}><h4>{category}</h4>{items.map((definition) => (
-                  <button key={definition.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onDoubleClick={() => addNodeAt(definition.id, instance?.screenToFlowPosition(pointerRef.current) || { x: 160, y: 120 })}>
+                  <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => addNodeFromPalette(definition.id)}>
                     <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
                   </button>
                 ))}</section>
               ))}
+              {!paletteResultCount ? <div className="node-palette-empty"><Search size={16} /><span>No nodes match “{paletteQuery}”</span></div> : null}
             </div>
-            <footer><kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>search</span></footer>
+            <footer><span>{paletteResultCount} shown</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>all nodes</span></footer>
           </aside>
         ) : <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title="Show quick nodes"><ChevronRight size={15} /></button>}
 
         <div className="node-flow-frame">
         <ReactFlow
-          key={flowNodes.map((node) => node.id).sort().join('|')}
+          key={[...(localGraph.groups || []), ...localGraph.nodes].map((item) => item.id).sort().join('|')}
           nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={setInstance}
           defaultViewport={graphView || { x: 0, y: 0, zoom: 1 }} minZoom={0.18} maxZoom={2.2}
           snapToGrid snapGrid={[12, 12]} connectionRadius={30} selectionOnDrag panOnDrag={[1, 2]}
+          elevateNodesOnSelect={false}
           deleteKeyCode={null} multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
           onMoveEnd={(_, viewport) => onGraphViewChange?.(viewport)}
-          onSelectionChange={({ nodes, edges }) => { setSelectedNodes(new Set(nodes.map((node) => node.id))); setSelectedEdges(new Set(edges.map((edge) => edge.id))); }}
+          onSelectionChange={({ nodes, edges }) => {
+            setSelectedNodes(new Set(nodes.filter((node) => node.type === 'terrainNode').map((node) => node.id)));
+            setSelectedGroups(new Set(nodes.filter((node) => node.type === 'terrainGroup').map((node) => node.id)));
+            setSelectedEdges(new Set(edges.map((edge) => edge.id)));
+          }}
           onNodesChange={(changes) => {
             const selections = changes.filter((change) => change.type === 'select');
-            if (selections.length) setSelectedNodes((current) => {
-              const next = new Set(current);
-              for (const change of selections) {
-                if (change.selected) next.add(change.id); else next.delete(change.id);
+            const groupIds = new Set((graphRef.current.groups || []).map((group) => group.id));
+            if (selections.length) {
+              setSelectedNodes((current) => {
+                const next = new Set(current);
+                for (const change of selections.filter((item) => !groupIds.has(item.id))) { if (change.selected) next.add(change.id); else next.delete(change.id); }
+                return next;
+              });
+              setSelectedGroups((current) => {
+                const next = new Set(current);
+                for (const change of selections.filter((item) => groupIds.has(item.id))) { if (change.selected) next.add(change.id); else next.delete(change.id); }
+                return next;
+              });
+            }
+            const positionChanges = changes.filter((change) => change.type === 'position' && change.position);
+            if (positionChanges.length) setLocalGraph((current) => {
+              let next = current; const positions = {};
+              for (const change of positionChanges) {
+                if (groupIds.has(change.id)) next = moveGraphGroup(next, change.id, change.position);
+                else positions[change.id] = change.position;
               }
-              return next;
+              if (Object.keys(positions).length) next = moveGraphNodes(next, positions);
+              graphRef.current = next; return next;
             });
-            const positions = {};
-            for (const change of changes) if (change.type === 'position' && change.position) positions[change.id] = change.position;
-            if (Object.keys(positions).length) setLocalGraph((current) => { const next = moveGraphNodes(current, positions); graphRef.current = next; return next; });
-            const dimensions = changes.filter((change) => change.type === 'dimensions' && change.dimensions);
+            const dimensions = changes.filter((change) => change.type === 'dimensions' && change.dimensions && !groupIds.has(change.id));
             if (dimensions.length) setNodeMeasurements((current) => {
               const next = { ...current }; let changed = false;
               for (const change of dimensions) {
@@ -450,11 +601,13 @@ export default function NodeWorkspace({
         <div className="node-inspector-dock" style={{ [layout.inspectorSide]: 0, width: layout.inspectorWidth }}>
           <div className="node-inspector-resizer" onPointerDown={beginInspectorResize} />
           <NodeInspector
-            node={selectedNode} graphState={graphState}
+            node={selectedNode} group={selectedGroup} graphState={graphState}
             onHeaderPointerDown={(event) => beginDockDrag('inspector', event)}
             onRename={(label) => commit(updateGraphNode(graphRef.current, selectedNode.id, { label }), { structural: false, history: true })}
             onParam={(key, value, structural) => commit(updateGraphNodeParams(graphRef.current, selectedNode.id, { [key]: value }), { structural, history: true })}
             onDelete={() => { const next = removeGraphNodes(graphRef.current, [selectedNode.id]); commit(next, { structural: true, history: true }); setSelectedNodes(new Set()); }}
+            onGroupPatch={(patch) => commit(updateGraphGroup(graphRef.current, selectedGroup.id, patch), { structural: false, history: true })}
+            onUngroup={() => ungroupSelection([selectedGroup.id])}
           />
         </div>
       ) : null}

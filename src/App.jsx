@@ -376,7 +376,7 @@ export default function App() {
       if (project.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
       }
-      engineRef.current?.loadSeedJSON(project.terrain);
+      await engineRef.current?.loadSeedJSON(project.terrain);
       setCurrentProject(project);
       return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
     }
@@ -384,7 +384,7 @@ export default function App() {
     if (terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
       await runModeSwitchRef.current('studio', { silent: true });
     }
-    engineRef.current?.loadSeedJSON(terrain);
+    await engineRef.current?.loadSeedJSON(terrain);
     setCurrentProject(null);
   }, [setCurrentProject, showToast]);
 
@@ -473,7 +473,10 @@ export default function App() {
     const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
     const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
     eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
-    if (nextMode === 'nodes') eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true });
+    if (nextMode === 'nodes') {
+      const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
+      await graphResult?.ready;
+    }
     else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
     const metadata = nextMode === 'nodes'
       ? {
@@ -503,7 +506,7 @@ export default function App() {
       if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
       }
-      eng.loadSeedJSON(normalized.terrain);
+      await eng.loadSeedJSON(normalized.terrain);
       setCurrentProject(normalized);
       showToast(`Opened ${normalized.metadata?.name ?? 'terrain project'}`, 'success');
     };
@@ -517,7 +520,7 @@ export default function App() {
         await runModeSwitchRef.current('studio', { silent: true });
       }
       if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current) return;
-      eng.loadSeedJSON(normalized.terrain, { silent: true });
+      await eng.loadSeedJSON(normalized.terrain, { silent: true });
     };
     const previewSeed = (templateId, editorMode = 'procedural') => {
       const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
@@ -536,8 +539,10 @@ export default function App() {
       if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
       eng.newProject({ silent, projectMode: nextMode });
       eng.setParam('seed', previewSeed(template.id, nextMode));
-      if (nextMode === 'nodes') eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true });
-      else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+      if (nextMode === 'nodes') {
+        const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
+        await graphResult?.ready;
+      } else if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await new Promise((resolve) => window.setTimeout(resolve, nextMode === 'nodes' ? 260 : 100));
       if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
@@ -969,10 +974,10 @@ export default function App() {
     }
   }, []);
 
-  const handleStartBlankGraph = useCallback(() => {
+  const handleStartBlankGraph = useCallback((mode = 'terrain') => {
     if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
     graphCompileTimerRef.current = null; pendingGraphRef.current = null;
-    const next = createBlankGraph();
+    const next = createBlankGraph(mode);
     setTerrainGraph(next);
     engineRef.current?.setTerrainGraph(next, { structural: true });
   }, []);

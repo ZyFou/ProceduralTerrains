@@ -2035,7 +2035,7 @@ export class Engine {
     }
   }
 
-  setTerrainGraph(graph, { structural = true, silent = false } = {}) {
+  setTerrainGraph(graph, { structural = true, silent = false, atomic = false } = {}) {
     const nextGraph = migrateGraphDocument(graph, this.noiseStack);
     const compiled = compileTerrainGraph(nextGraph);
     this.terrainGraph = nextGraph;
@@ -2053,15 +2053,16 @@ export class Engine {
 
     if (!compiled.ok) {
       if (!silent) this.cb.onToast?.(this._graphDiagnostics[0]?.message || 'Terrain graph is invalid');
-      return { ok: false, diagnostics: this._graphDiagnostics };
+      return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
 
     this._syncCpuHeightProgram();
     const needsCompile = structural || previousSig !== compiled.program.sig;
+    let ready = Promise.resolve({ swapped: false, error: null });
     if (this.worldMode === 'studio' && this.generationSource === 'graph') {
       if (needsCompile) {
         this.cb.onGraphState?.({ valid: true, compiling: true, diagnostics: [], slotCount: compiled.program.slotCount });
-        this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph' }).then((result) => {
+        ready = this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph', atomic }).then((result) => {
           if (result?.error && this._graphProgram === compiled.program) {
             this._graphProgram = previousProgram;
             this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. The last valid terrain is still active.' }];
@@ -2071,6 +2072,7 @@ export class Engine {
           } else if (result?.swapped && this._graphProgram === compiled.program) {
             this.cb.onGraphState?.({ valid: true, compiling: false, diagnostics: [], slotCount: compiled.program.slotCount });
           }
+          return result;
         });
       }
       else {
@@ -2083,7 +2085,7 @@ export class Engine {
         this._needsRender = true;
       }
     }
-    return { ok: true, program: compiled.program };
+    return { ok: true, program: compiled.program, ready };
   }
 
   setGenerationSource(source, { silent = false } = {}) {
@@ -2130,73 +2132,95 @@ export class Engine {
    * place once the identical programs are cached (no freeze, no mesh swap).
    * Same warm-then-swap pattern as _setOctavesAsync.
    */
-  async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), { label = 'Compiling noise stack' } = {}) {
+  async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), { label = 'Compiling noise stack', atomic = false } = {}) {
     const token = ++this._octToken;
+    if (atomic) this._compiling++;
     this.cb.onStatus(`${label}…`, true);
     const oct = Math.round(this.params.octaves);
     const sg = program || this._stackGLSL;
 
-    const warm = [
-      createTerrainMaterial(this.uniforms, oct, sg),
-      createWaterMaterial(this.uniforms, oct, sg),
-    ];
-    if (this.worldMode === 'infinite') {
-      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, sg));
-      warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
-    }
-
-    const emitProgress = (payload) => {
-      if (token === this._octToken && !this._disposed) {
-        this.cb.onCompileProgress?.(payload);
-      }
-    };
-    emitProgress({
-      id: 'noise-stack',
-      label,
-      done: 0,
-      total: warm.length * 2,
-    });
-
-    let compileError = null;
+    let warm = [];
     try {
-      // stagger: one program per yielded task so editing the noise stack never freezes.
-      await this._compileMaterialVariants(warm, {
-        stagger: true,
-        onProgress: (done, total) => emitProgress({
-          id: 'noise-stack',
-          label,
-          done,
-          total,
-        }),
-      });
-    } catch (e) {
-      console.warn('Noise stack shader compile failed', e);
-      compileError = e;
-    }
-    let swapped = false;
-    if (!compileError && token === this._octToken && !this._disposed) {
-      // update live materials in place (programs already cached from `warm`)
-      rebuildTerrainShaderSource(this.terrainMaterial, sg);
-      rebuildWaterShaderSource(this.waterMaterial, sg);
-      if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
-      if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
-        rebuildWaterShaderSource(this._infiniteWaterMat, sg);
+      warm = [
+        createTerrainMaterial(this.uniforms, oct, sg),
+        createWaterMaterial(this.uniforms, oct, sg),
+      ];
+      if (this.worldMode === 'infinite') {
+        warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, sg));
+        warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
       }
-      this.waterSystem?.onStackRebuilt(sg, oct);
-      if (this.heightSampler) this.heightSampler.invalidate();
-      if (this.propSurfaceField) this.propSurfaceField.invalidate();
-      this._applyUniforms();
-      if (!this._compiling) this.cb.onStatus('Ready', false);
-      this._minimapDirtyAt = performance.now();
-      this.minimap.requestRedraw();
-      this._needsRender = true;
-      swapped = true;
-    } else if (compileError && token === this._octToken && !this._disposed && !this._compiling) {
-      this.cb.onStatus('Ready', false);
+
+      const emitProgress = (payload) => {
+        if (token === this._octToken && !this._disposed) {
+          this.cb.onCompileProgress?.(payload);
+        }
+      };
+      emitProgress({
+        id: 'noise-stack',
+        label,
+        done: 0,
+        total: warm.length * 2,
+      });
+
+      let compileError = null;
+      try {
+        // stagger: one program per yielded task so editing the noise stack never freezes.
+        await this._compileMaterialVariants(warm, {
+          stagger: true,
+          onProgress: (done, total) => emitProgress({
+            id: 'noise-stack',
+            label,
+            done,
+            total,
+          }),
+        });
+      } catch (e) {
+        console.warn('Noise stack shader compile failed', e);
+        compileError = e;
+      }
+      let swapped = false;
+      if (!compileError && token === this._octToken && !this._disposed) {
+        // update live materials in place (programs already cached from `warm`).
+        // Project loads can change OCTAVES and the generated height source in the
+        // same transaction. The earlier octave warmup is intentionally cancelled
+        // by this newer token, so carry the matching define across here too.
+        for (const mat of [this.terrainMaterial, this.waterMaterial, this._infiniteTerrainMat, this._infiniteWaterMat]) {
+          if (!mat) continue;
+          mat.defines ||= {};
+          if (mat.defines.OCTAVES !== oct) mat.defines.OCTAVES = oct;
+        }
+        rebuildTerrainShaderSource(this.terrainMaterial, sg);
+        rebuildWaterShaderSource(this.waterMaterial, sg);
+        if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
+        if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
+          rebuildWaterShaderSource(this._infiniteWaterMat, sg);
+        }
+        this.waterSystem?.onStackRebuilt(sg, oct);
+        if (this.heightSampler) this.heightSampler.invalidate();
+        if (this.propSurfaceField) this.propSurfaceField.invalidate();
+        this._applyUniforms();
+        if (!this._compiling || (atomic && this._compiling === 1)) this.cb.onStatus('Ready', false);
+        this._minimapDirtyAt = performance.now();
+        this.minimap.requestRedraw();
+        this._needsRender = true;
+        swapped = true;
+      } else if (compileError && token === this._octToken && !this._disposed && !this._compiling) {
+        this.cb.onStatus('Ready', false);
+      }
+      emitProgress(null);
+      return { swapped, error: compileError };
+    } finally {
+      if (warm.length) this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
+      if (atomic) {
+        this._compiling = Math.max(0, this._compiling - 1);
+        // A newer atomic transition keeps the render gate closed. Only the last
+        // completed load may expose the scene again.
+        if (!this._compiling && !this._disposed) {
+          this.cb.onStatus('Ready', false);
+          this._needsRender = true;
+        }
+      }
     }
-    emitProgress(null);
-    this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
-    return { swapped, error: compileError };
   }
 
   _applyStudioAssemblyLayout(maxHeight = this._maxHeight()) {
@@ -5085,7 +5109,7 @@ export class Engine {
     const src = json?.params && typeof json.params === 'object' ? json.params : json;
     if (!src || typeof src !== 'object' || !('seed' in src)) {
       this.cb.onToast('Not a valid terrain seed file');
-      return;
+      return Promise.resolve({ swapped: false, error: new Error('Invalid terrain seed') });
     }
     if (!silent) this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
     const next = { ...DEFAULT_PARAMS };
@@ -5142,15 +5166,20 @@ export class Engine {
     this.cb.onGraphView?.({ ...this.graphView });
     this.applyAll({ force: true });
     this._syncCpuHeightProgram();
-    if (this.worldMode === 'planet') this._rebuildPlanet();
-    else this._rebuildStackMaterialsAsync(this._activeHeightProgram());
+    const ready = this.worldMode === 'planet'
+      ? Promise.resolve(this._rebuildPlanet())
+      : this._rebuildStackMaterialsAsync(this._activeHeightProgram(), { label: 'Loading terrain', atomic: true });
+    const loadedSeed = this.params.seed;
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._notifyTiles();
     if (json?.paint) this.paintMode?.load(json.paint);
     this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
     this.terrainAnalysis?.load(json?.creatorTools?.analysis);
-    if (!silent) this.cb.onToast(`Loaded seed ${this.params.seed}`);
+    return ready.then((result) => {
+      if (!silent) this.cb.onToast(`Loaded seed ${loadedSeed}`);
+      return result;
+    });
   }
 
   // ------------------------------------------------------- undo / redo state

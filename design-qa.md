@@ -1,41 +1,56 @@
-# Nodes Template Catalog Design QA
+# Procedural → Nodes Height Transition and Picker QA
 
 ## Evidence
 
-- Native design source: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/template-catalog-procedural-source.png`.
-- Final Nodes catalog: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/template-catalog-nodes-final-1280x720.png`.
-- Authored template workspace: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/.design-qa/node-template-alpine-1280x720.png`.
-- Viewport: 1280×720.
-- State: Templates page, Nodes tab selected, Blank graph preview active; Alpine ridges was also created and inspected in the Nodes workspace.
-- Comparison method: the existing Procedural catalog and the new Nodes catalog were reviewed together as the product-native visual reference and implementation.
+- Source visual truth: `/var/folders/p4/2wybsmsn2xn2_0msnyqy_wlr0000gn/T/TemporaryItems/NSIRD_screencaptureui_kwom6s/Capture d’écran 2026-07-17 à 13.37.00.png`.
+- Local implementation: `http://127.0.0.1:6061/`.
+- Full browser-rendered implementation: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-workspace-1280x1200.png`.
+- Focused implementation region: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-picker-focus.png`.
+- Same-input source/implementation comparison: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-picker-comparison.png`.
+- Viewport: 1280×1200 for the visual picker comparison; 1280×800 for the Procedural → Nodes load sequence.
+- State: a saved Mountain Range Procedural project was loaded first, followed immediately by a saved Alpine Ridges Nodes project. The Terrain Graph was expanded with its palette visible and the Terrain recipe group open.
+
+## Full-view Comparison Evidence
+
+The full implementation capture shows the loaded Alpine heightfield on the same frame as the active Terrain Graph. The terrain is visibly elevated on the first post-load frame, the saved graph is present, the status is Ready, and the right inspector remains stable. No flat-ground or floating-water intermediate frame was exposed during the browser-tested saved-project transition.
+
+## Focused Comparison Evidence
+
+The side-by-side comparison places the reported picker state and the revised implementation in one image. The implementation preserves the existing dark compact editor language while adding a persistent search control, total/result counts, click-to-add affordances, and a measured 10px gap between the 184px palette and the graph canvas. A focused region was required because the search field and palette-to-canvas gap are too small to judge reliably in the full editor capture.
 
 ## Findings
 
 No actionable P0, P1, or P2 issues remain.
 
-- Hierarchy: the Nodes catalog preserves the existing template page composition, search placement, card density, live-preview split, and primary creation action.
-- Workflow separation: Procedural and Nodes are explicit template tabs. Selecting either changes the template catalog and the project type used by Create.
-- Project-type handoff: landing previews are cancelled synchronously before a project is opened or created, so a stale preview can no longer overwrite the user's Procedural or Nodes selection during the exit animation.
-- Template coverage: Blank graph, Alpine ridges, Layered highlands, Wind dunes, Crater basin, and River valleys provide distinct analytical starting points while keeping Blank graph as the default.
-- Graph quality: every authored template has one permanent Terrain Output, valid typed connections, reachable nodes only, and stays within the 12-slot analytical limit.
-- Color and styling: the catalog uses the product's native black/graphite surfaces, blue selection accents, typography, borders, spacing, and Lucide icon language.
-- Preview behavior: Blank graph renders the intended neutral slab. Alpine ridges produces a normalized realtime terrain and its graph remains visible beside the quick-node palette.
-- Accessibility: template-type controls use tab semantics, search is labelled, template cards expose their names/descriptions/workflow, and the create action reflects the selected template.
+- Fonts and typography: the picker continues to use the product’s compact UI and mono hierarchy, with readable category labels, node labels, counts, and shortcut hints. Search placeholder text is visually subordinate without becoming illegible.
+- Spacing and layout rhythm: the picker has a 10px outer inset and a separate 10px right-side canvas gap. Search, sections, rows, and footer follow the existing 5–10px density scale; no content collides with the graph.
+- Colors and tokens: existing graphite surfaces, subtle borders, muted text, category dots, and blue active accents are reused. Focus uses the established active-border token.
+- Image quality and asset fidelity: no raster assets were introduced into the product UI. Existing Lucide icons remain crisp and consistent at the compact scale.
+- Copy and content: “Find a node…”, live result counts, and “all nodes” describe the picker behavior directly. Category names and node descriptions remain unchanged.
+- Icons and affordances: Search, clear, collapse, and plus icons align with their controls. A single click on a palette row now adds the node; drag-to-place remains available.
+- Accessibility: the filter has an explicit accessible name, clear control, visible focus state, semantic textbox, and keyboard-compatible buttons. The existing Shift+A global search remains documented.
+- Viewport resilience: the picker width uses dock variables and narrows at the existing 821–1179px desktop breakpoint; the palette-to-canvas gap remains explicit at both widths.
+- State synchronization: terrain and water height shaders now stay behind one atomic render gate, synchronize their compile-time octave define, and commit together. Superseded project compiles cannot overwrite the latest Nodes terrain.
+- AI-shortcut review: no placeholder art, custom SVG, CSS illustration, decorative blob, or generic card treatment was added.
 
 ## Primary Interactions Tested
 
-- Started from a Procedural landing preview, created Nodes, and confirmed the resulting workspace remained Nodes.
-- Started from a Nodes landing preview, created Procedural, and confirmed the resulting workspace remained Procedural.
-- Switched between Procedural and Nodes template catalogs and confirmed the selected catalog controls live preview and creation.
-- Created the Blank graph template and confirmed it contains only Terrain Output and the flat slab.
-- Created Alpine ridges and confirmed Ridged → Domain Warp → Terrace → Terrain Output renders in realtime.
-- Verified the six Nodes templates can be searched, selected, previewed, and created.
+- Created a non-flat Mountain Range Procedural project and confirmed the terrain height rendered.
+- Created an Alpine Ridges Nodes project immediately afterward and confirmed the non-flat graph height rendered on entry.
+- Loaded the saved Mountain Range Procedural project, then loaded the saved Alpine Ridges Nodes project; the first visible Nodes frame was elevated and Ready.
+- Filtered the picker with `mount`; the palette reduced to three relevant results and exposed a clear control.
+- Clicked Mountain once in the picker; one disconnected Mountain node appeared in the graph and its settings opened in the inspector.
+- Confirmed the picker’s left inset, right canvas gap, category scroll, and graph organization frame at 1280×1200.
+- Checked browser warnings and errors after the full transition and interaction sequence; none were reported.
+
+## Comparison History
+
+- Pass 1: no P0/P1/P2 visual differences were found. The source’s cramped, edge-touching picker state is resolved by the visible search field and explicit palette-to-canvas gap. No visual fixes were required after the same-input comparison.
 
 ## Runtime Verification
 
-- Automated tests: 116 passed across 10 test files.
-- Production build: passed; React Flow remains a separate lazy-loaded `NodeWorkspace` chunk.
-- Browser console: clean on a fresh final verification tab.
-- Regression fixed during QA: authored graph nodes initially overlapped the quick palette; the flow frame now reserves the palette width and the post-fix Alpine workspace was rechecked.
+- Automated tests: 133 passed across 11 test files, including a rapid out-of-order height-transition regression.
+- Production build: passed. The existing Vite large-chunk advisory remains unchanged.
+- Browser console: no errors or warnings.
 
 final result: passed

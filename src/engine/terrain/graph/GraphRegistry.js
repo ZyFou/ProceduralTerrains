@@ -26,9 +26,9 @@ function sourceDefinition(type) {
   ];
   return {
     id: type,
-    label: noise.label,
+    label: type === 'crater' ? 'Crater Field' : noise.label,
     description: noise.desc,
-    category: 'Sources',
+    category: 'Noise',
     executionKind: 'analytical',
     inputs: [], outputs: [output()],
     inspector,
@@ -40,6 +40,119 @@ function sourceDefinition(type) {
     color: type === 'ridged' || type === 'crater' ? 'amber' : 'green',
   };
 }
+
+function deterministicNoiseDefinition() {
+  const inspector = [
+    number('strength', 'Amplitude', 0, 2, 0.01, 0.8, { section: 'Output' }),
+    number('seed', 'Seed', 0, 999999, 1, 1337, { section: 'Variation' }),
+    number('scale', 'Scale', 0.1, 20, 0.05, 1, { section: 'Fractal' }),
+    number('octaves', 'Octaves', 1, 8, 1, 6, { structural: true, section: 'Fractal' }),
+    number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Fractal' }),
+    number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2, { section: 'Fractal' }),
+    number('erosion', 'Erosion', 0, 1, 0.01, 0.08, { section: 'Character' }),
+    number('warp', 'Self Warp', 0, 1.5, 0.01, 0.12, { section: 'Character' }),
+  ];
+  return {
+    id: 'deterministicNoise', label: 'Deterministic Noise', category: 'Base', color: 'green',
+    description: 'A seeded fractal source that produces the same terrain for the same seed on every build.',
+    executionKind: 'analytical', inputs: [], outputs: [output()], inspector,
+    defaults: Object.fromEntries(inspector.map((field) => [field.key, field.default])),
+    structuralParams: ['octaves'], uniformSlots: () => 1,
+    glslCompiler: execute('source'), cpuEvaluator: execute('source'),
+    noiseType: 'fbm', seedParam: 'seed',
+  };
+}
+
+const terrainNode = ({ id, label, description, color = 'green', inspector }) => ({
+  id, label, description, category: 'Landforms', color,
+  executionKind: 'analytical', inputs: [], outputs: [output()], inspector,
+  defaults: Object.fromEntries(inspector.map((field) => [field.key, field.default])),
+  structuralParams: inspector.filter((field) => field.structural).map((field) => field.key),
+  uniformSlots: () => 1, glslCompiler: execute(id), cpuEvaluator: execute(id),
+  terrainOnly: true, workspaceModes: ['terrain'], landform: true,
+});
+
+const LANDFORM_DEFINITIONS = [
+  terrainNode({
+    id: 'mountain', label: 'Mountain',
+    description: 'Creates a single seeded mountain with a controllable silhouette and fractal rock detail.',
+    inspector: [
+      number('height', 'Height', 0, 2.5, 0.01, 1.15, { section: 'Form' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.75, { section: 'Form' }),
+      number('radius', 'Radius', 0.2, 3, 0.01, 1.25, { section: 'Form' }),
+      number('sharpness', 'Peak Sharpness', 0.5, 5, 0.01, 1.65, { section: 'Form' }),
+      number('roughness', 'Roughness', 0, 1, 0.01, 0.55, { section: 'Surface' }),
+      number('octaves', 'Detail Octaves', 1, 8, 1, 5, { structural: true, section: 'Surface' }),
+      number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Surface' }),
+      number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2, { section: 'Surface' }),
+      number('seed', 'Seed', 0, 999999, 1, 1201, { section: 'Variation' }),
+    ],
+  }),
+  terrainNode({
+    id: 'mountainRange', label: 'Mountain Range',
+    description: 'Builds a connected mountain chain with direction, span, ridge width, and seeded variation.',
+    inspector: [
+      number('height', 'Height', 0, 2.5, 0.01, 1.2, { section: 'Form' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.65, { section: 'Form' }),
+      number('direction', 'Direction', 0, 6.283, 0.01, 0.7, { section: 'Form' }),
+      number('width', 'Range Width', 0.1, 2, 0.01, 0.42, { section: 'Form' }),
+      number('length', 'Range Length', 0.4, 5, 0.01, 2.4, { section: 'Form' }),
+      number('sharpness', 'Ridge Sharpness', 0.5, 4, 0.01, 1.8, { section: 'Surface' }),
+      number('roughness', 'Breakup', 0, 1.5, 0.01, 0.65, { section: 'Surface' }),
+      number('octaves', 'Detail Octaves', 1, 8, 1, 6, { structural: true, section: 'Surface' }),
+      number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Surface' }),
+      number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2.1, { section: 'Surface' }),
+      number('seed', 'Seed', 0, 999999, 1, 2201, { section: 'Variation' }),
+    ],
+  }),
+  terrainNode({
+    id: 'ridge', label: 'Ridge', color: 'amber',
+    description: 'Creates a long directional ridge with adjustable width, crest sharpness, and natural breakup.',
+    inspector: [
+      number('height', 'Height', 0, 2.5, 0.01, 0.95, { section: 'Form' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.8, { section: 'Form' }),
+      number('direction', 'Direction', 0, 6.283, 0.01, 1.15, { section: 'Form' }),
+      number('width', 'Width', 0.05, 1.5, 0.01, 0.28, { section: 'Form' }),
+      number('sharpness', 'Crest Sharpness', 0.5, 6, 0.01, 2.2, { section: 'Form' }),
+      number('breakup', 'Crest Breakup', 0, 4, 0.01, 1.3, { section: 'Surface' }),
+      number('roughness', 'Roughness', 0, 1, 0.01, 0.45, { section: 'Surface' }),
+      number('octaves', 'Detail Octaves', 1, 8, 1, 5, { structural: true, section: 'Surface' }),
+      number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.48, { section: 'Surface' }),
+      number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2.05, { section: 'Surface' }),
+      number('seed', 'Seed', 0, 999999, 1, 3301, { section: 'Variation' }),
+    ],
+  }),
+  terrainNode({
+    id: 'island', label: 'Island', color: 'cyan',
+    description: 'Generates a finite island with a seeded interior, plateau control, and a softened coastline.',
+    inspector: [
+      number('height', 'Height', 0, 2.5, 0.01, 1.05, { section: 'Form' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.7, { section: 'Form' }),
+      number('radius', 'Island Radius', 0.2, 4, 0.01, 1.35, { section: 'Form' }),
+      number('coast', 'Coast Falloff', 0.02, 0.8, 0.01, 0.28, { section: 'Form' }),
+      number('plateau', 'Plateau', 0, 1, 0.01, 0.32, { section: 'Surface' }),
+      number('roughness', 'Interior Roughness', 0, 1, 0.01, 0.72, { section: 'Surface' }),
+      number('octaves', 'Detail Octaves', 1, 8, 1, 6, { structural: true, section: 'Surface' }),
+      number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Surface' }),
+      number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2, { section: 'Surface' }),
+      number('seed', 'Seed', 0, 999999, 1, 4401, { section: 'Variation' }),
+    ],
+  }),
+  terrainNode({
+    id: 'singleCrater', label: 'Crater', color: 'amber',
+    description: 'Cuts one impact bowl with a raised rim and seeded surface damage for combining into a base terrain.',
+    inspector: [
+      number('depth', 'Depth', 0, 2, 0.01, 0.75, { section: 'Impact' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.85, { section: 'Impact' }),
+      number('radius', 'Radius', 0.2, 2, 0.01, 0.9, { section: 'Impact' }),
+      number('rimHeight', 'Rim Height', 0, 1, 0.01, 0.42, { section: 'Rim' }),
+      number('rimWidth', 'Rim Width', 0.03, 0.6, 0.01, 0.18, { section: 'Rim' }),
+      number('roughness', 'Damage', 0, 1, 0.01, 0.2, { section: 'Surface' }),
+      number('octaves', 'Detail Octaves', 1, 8, 1, 4, { structural: true, section: 'Surface' }),
+      number('seed', 'Seed', 0, 999999, 1, 5501, { section: 'Variation' }),
+    ],
+  }),
+];
 
 const BLEND_OPTIONS = [
   ...Object.entries(BLEND_LABELS).map(([value, label]) => ({ value, label })),
@@ -67,7 +180,9 @@ const definitions = [
     structuralParams: [], uniformSlots: () => 0,
     glslCompiler: execute('classicTerrain'), cpuEvaluator: execute('classicTerrain'), hiddenFromPalette: true,
   },
+  deterministicNoiseDefinition(),
   ...SOURCE_TYPES.map(sourceDefinition),
+  ...LANDFORM_DEFINITIONS,
   {
     id: 'domainWarp', label: 'Domain Warp', category: 'Transform', color: 'cyan',
     description: 'Distorts the source coordinates before evaluating the connected terrain.',
@@ -145,8 +260,9 @@ const definitions = [
 const registry = new Map(definitions.map((definition) => [definition.id, Object.freeze(definition)]));
 
 export function getGraphNodeDefinition(type) { return registry.get(type) || null; }
-export function listGraphNodeDefinitions({ includeHidden = false } = {}) {
-  return definitions.filter((definition) => includeHidden || !definition.hiddenFromPalette);
+export function listGraphNodeDefinitions({ includeHidden = false, mode = null } = {}) {
+  return definitions.filter((definition) => (includeHidden || !definition.hiddenFromPalette)
+    && (!mode || !definition.workspaceModes || definition.workspaceModes.includes(mode)));
 }
 export function nodeDefaults(type) {
   const definition = getGraphNodeDefinition(type);
