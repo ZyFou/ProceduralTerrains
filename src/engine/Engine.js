@@ -265,7 +265,7 @@ export class Engine {
     this._bakedStudioLayout = '';    // tile layout the studio texture was baked at
     this._paintWasEnabled = false;   // detect paint→idle transition to refresh the bake
     this.planetFaceGrid = 8;
-    this._compiledKeys = new Set();   // mode:octave shader sets already compiled
+    this._compiledKeys = new Set();   // mode-specific shader sets (currently Planet) already compiled
 
     // Explore controllers: walk or plane. playerMode remains a walk-only
     // compatibility flag for existing UI/status paths.
@@ -2151,7 +2151,6 @@ export class Engine {
         createWaterMaterial(this.uniforms, oct, sg),
       ];
       if (this.worldMode === 'infinite') {
-        warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, sg));
         warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
       }
 
@@ -2441,6 +2440,7 @@ export class Engine {
     this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
     const u = this.uniforms;
+    u.uInfiniteMode.value = this.worldMode === 'infinite' ? 1.0 : 0.0;
     this._syncImportedMapUniforms();
     const size = this.boardSize;
 
@@ -3155,7 +3155,6 @@ export class Engine {
     ];
     if (!this._waterDeferred) warm.push(createWaterMaterial(this.uniforms, oct, studioProgram));
     if (this.worldMode === 'infinite') {
-      warm.push(createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL));
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
     const planetMode = this.worldMode === 'planet';
@@ -3981,6 +3980,7 @@ export class Engine {
     else if (prev === 'planet') this._disposePlanet();
 
     this.worldMode = mode;
+    this.uniforms.uInfiniteMode.value = mode === 'infinite' ? 1.0 : 0.0;
     this.uniforms.uTileDebugView.value = mode === 'studio' ? (this.tileDebug.view === 'noise' ? 1 : this.tileDebug.view === 'height' ? 2 : this.tileDebug.view === 'biome' ? 3 : 0) : 0;
     this._terrainGen++;   // uFrequency / falloff change with the mode
     // The new mode's materials need their own underwater RT-variant programs;
@@ -4013,15 +4013,11 @@ export class Engine {
     const p = this.params;
     const tileFreq = (p.noiseScale * 0.1) / this.boardSize;
 
-    // Create infinite materials (sharing the same uniform objects). First
-    // entry this session boots on the MINIMAL fragment (fast to translate) —
-    // _warmupInfiniteShaders upgrades it to the full fragment in the
-    // background once the mode is interactive. Re-entries reuse the cached
-    // full program directly.
+    // Keep a distinct material object for disposal, but use source/defines that
+    // are byte-identical to Tile terrain. Tile's compiled program remains owned
+    // by terrainMaterial, so Three.js can reuse it immediately for these chunks.
     const oct = Math.round(p.octaves);
-    this._infiniteTerrainMat = this._compiledKeys.has(`infinite:${oct}`)
-      ? createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL)
-      : createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL, { infinite: true });
+    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this._infiniteTerrainMat.wireframe = p.wireframe;
     this._infiniteWaterMat = this.waterSystem.createInfiniteMaterial();
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
@@ -4088,8 +4084,8 @@ export class Engine {
 
     this.waterSystem.sync(p, 'infinite');
 
-    // Compile the INFINITE_MODE shader variants in the background before the
-    // first infinite frame renders (avoids a multi-second freeze on entry).
+    // Terrain already reuses Tile's compiled program. Only genuinely
+    // mode-specific world materials need background preparation.
     this._warmupInfiniteShaders(oct);
 
     this.cb.onStatus('Infinite World', false);
@@ -4100,24 +4096,12 @@ export class Engine {
   async _warmupInfiniteShaders(oct) {
     this._compiling++;
     this.cb.onStatus('Compiling world shaders…', true);
-    // warm clones (not the live materials) so mode exits mid-compile are safe.
-    // Canvas-variant only — the underwater render-target variants are deferred
-    // and warmed lazily on first approach to water (see _warmUnderwaterShaders),
-    // halving the compile burst that otherwise stalls other tabs on mode switch.
-    // On first entry the terrain clone uses the MINIMAL fragment: its ANGLE
-    // translation is a fraction of the full one, so the mode becomes
-    // interactive quickly; the full fragment is upgraded in the background.
-    const minimal = this._infiniteTerrainMat?.userData?.minimalFragment === true;
-    const warm = [
-      minimal
-        ? createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL, { infinite: true })
-        : createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL),
-      createInfiniteWaterMaterial(this.uniforms, oct),
-    ];
+    // Warm only genuinely mode-specific materials. Terrain is omitted because
+    // its source and defines are byte-identical to Tile's already-cached program.
+    const warm = [createInfiniteWaterMaterial(this.uniforms, oct)];
     try {
-      // stagger: one program per yielded task caps each stall at one translation
       await this._compileMaterialVariants(warm, { canvasOnly: true, stagger: true });
-      // sky dome material (already in the scene) — canvas variant only
+      // Sky dome material (already in the scene) — canvas variant only.
       await this._withStudioCloudDetached(() => this._compileSceneStaggered());
     } catch (e) {
       console.warn('Infinite shader warmup failed', e);
@@ -4127,40 +4111,7 @@ export class Engine {
     if (!this._disposed && !this._compiling) {
       this.cb.onStatus(this.worldMode === 'infinite' ? 'Infinite World' : 'Ready', false);
     }
-    if (minimal && !this._disposed) this._upgradeInfiniteTerrain(oct);
   }
-
-  /**
-   * Background full-fragment upgrade for a minimal infinite terrain material
-   * (same warm-then-swap-source pattern as _upgradeMinimalTerrain).
-   */
-  async _upgradeInfiniteTerrain(oct) {
-    const mat = this._infiniteTerrainMat;
-    if (!mat?.userData?.minimalFragment) return;
-    const t0 = performance.now();
-    const warm = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
-    this._bgWorkStart('infinite-full', 'Loading full terrain colors…');
-    try {
-      await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
-      const ready = await this._pollProgramReady(warm);
-      if (ready) this._compiledKeys.add(`infinite:${oct}`);
-      if (!this._disposed && this._infiniteTerrainMat === mat &&
-          mat.userData.minimalFragment && mat.defines.OCTAVES === oct &&
-          ready) {
-        rebuildTerrainShaderSource(mat, this._stackGLSL);
-        this._needsRender = true;
-        console.info(`[mode] full infinite terrain swapped in ${(performance.now() - t0).toFixed(0)}ms`);
-      } else if (!this._disposed) {
-        console.warn(`[mode] infinite terrain upgrade skipped (ready=${ready}, live=${this._infiniteTerrainMat === mat})`);
-      }
-    } catch (e) {
-      console.warn('Infinite terrain material upgrade failed', e);
-    } finally {
-      this._bgWorkEnd('infinite-full');
-    }
-    this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
-  }
-
   /** Dispose the infinite-world systems (does not restore studio). */
   _disposeInfinite() {
     if (this.infiniteWorld) {

@@ -53,7 +53,7 @@ void main() {
 
   float skirt = aSkirt;
   float wall = 0.0;   // outer-perimeter skirt -> plinth wall
-  #ifndef INFINITE_MODE
+  if (uInfiniteMode < 0.5) {
     if (uUseTiles > 0.5) {
       if (uTileShape > 0.5) {
         if (aWall > 0.5) {
@@ -97,7 +97,7 @@ void main() {
                          step(uBoardHalf - 1.0, bz) * sign(wp.z));
       wp.xz += outDir * (wall * uWallThickness);
     }
-  #endif
+  }
 
   // interior skirt drops by uSkirtDepth; the perimeter wall drops all the way to
   // the plinth base so the terrain's own edge masks the under-the-map view at
@@ -325,12 +325,10 @@ vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, fl
 void main() {
   vec2 xz = vWorldPos.xz;
 
-#ifndef INFINITE_MODE
   // Circular assemblies still use square chunk meshes. Remove every chunk
   // fragment outside the disk so the original board cannot show through at zero
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
-  if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
-#endif
+  if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
   BiomeWeights bw = biomeWeightsAt(cl);
@@ -340,8 +338,7 @@ void main() {
   bw.canyon = clamp(max(bw.canyon, max(paintedBiome.g, splineMask.r * (1.0 - splineMask.b))), 0.0, 1.0);
   bw.wetland = clamp(max(bw.wetland, max(paintedBiome.b, splineMask.r * splineMask.b)), 0.0, 1.0);
   bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
-#ifndef INFINITE_MODE
-  if (uImportBiomeMode > 1.5) {
+  if (uInfiniteMode < 0.5 && uImportBiomeMode > 1.5) {
     float b = importedMapValue(uImportBiomeTex, tileUvAt(xz));
     BiomeWeights importedBw;
     importedBw.desert = 1.0 - smoothstep(0.18, 0.32, b);
@@ -357,13 +354,11 @@ void main() {
       bw = importedBw;
     }
   }
-#endif
 
   float eps = uEps;
   float hC, hX, hZ;
   vec3 nGeo;
-#ifndef INFINITE_MODE
-  if (uUseTerrainHeightTex > 0.5) {
+  if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
     // Baked path: one fetch covers height + geometric normal, two more cover
     // the neighbour heights used by the concavity AO term — versus three full
     // ~46-octave evaluations. Branch is on a uniform, so it stays warp-coherent.
@@ -375,7 +370,6 @@ void main() {
     hX = texture2D(uTerrainHeightTex, uv + vec2(du, 0.0)).a * uHeightScale;
     hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, du)).a * uHeightScale;
   } else
-#endif
   {
     hC = heightAt(xz);
     hX = heightAt(xz + vec2(eps, 0.0));
@@ -387,12 +381,10 @@ void main() {
     float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
     if (uTileDebugView < 1.5) {
       float n = stackHeight2D(xz, cl);
-#ifndef INFINITE_MODE
-      if (uImportNoiseMode > 1.5) {
+      if (uInfiniteMode < 0.5 && uImportNoiseMode > 1.5) {
         float importedNoise = importedMapValue(uImportNoiseTex, tileUvAt(xz)) * uAmplitude;
         n = (uImportNoiseMode > 2.5) ? mix(n, importedNoise, uImportNoiseBlend) : importedNoise;
       }
-#endif
       gl_FragColor = vec4(vec3(clamp(n, 0.0, 1.0)), 1.0);
     } else if (uTileDebugView < 2.5) {
       gl_FragColor = vec4(vec3(h01), 1.0);
@@ -486,10 +478,9 @@ void main() {
   td.albedo = surf.albedo;
   n = surf.normal;
 
-#ifndef INFINITE_MODE
   // Geo-aligned OpenTopoMap (or file) imagery — same UV region as the real-world
   // height import. Applied after surface materials so the map reads as true albedo.
-  if (uImportImageryMode > 1.5) {
+  if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
     vec2 iuv = importHeightUvAt(xz);
     if (iuv.x >= 0.0 && iuv.x <= 1.0 && iuv.y >= 0.0 && iuv.y <= 1.0) {
       vec3 mapCol = texture2D(uImportImageryTex, clamp(iuv, 0.0, 1.0)).rgb;
@@ -498,7 +489,6 @@ void main() {
         : mapCol;
     }
   }
-#endif
 
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
@@ -548,9 +538,7 @@ void main() {
     float line = 1.0 - min(min(gp.x, gp.y), 1.0);
     float gridFade = smoothstep(420.0, 60.0, length(cameraPosition - vWorldPos) / 8.0);
     float gridMul = 1.0;
-#ifndef INFINITE_MODE
-    if (uUseTiles > 0.5) gridMul = 1.0 - tileInteriorSeam(xz);
-#endif
+    if (uInfiniteMode < 0.5 && uUseTiles > 0.5) gridMul = 1.0 - tileInteriorSeam(xz);
     // Grid lines recolour over folded terrain so the chunk grid also shows
     // which chunks have merged, ramped by fold level (green = small fold →
     // magenta = whole board); default blue over live detailed chunks.
@@ -572,9 +560,7 @@ void main() {
   // Skirts darken to read as a recessed crack filler — except in circle mode,
   // where they exist purely to plug LOD T-junctions and must stay terrain-toned.
   float skirtDarken = vSkirt * 0.55;
-#ifndef INFINITE_MODE
-  if (uTileShape > 0.5) skirtDarken = 0.0;
-#endif
+  if (uInfiniteMode < 0.5 && uTileShape > 0.5) skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -589,9 +575,8 @@ void main() {
 // fog only. It skips the palette/colour, surface-texture, terrain-detail and
 // caustic blocks — the dominant cost of the full fragment's synchronous
 // GLSL→HLSL translation on Windows/ANGLE (the multi-second tab freeze). Used
-// for the first paint and for infinite-mode entry while the full fragment
-// compiles in the background; the live material's source is then swapped in
-// place (rebuildTerrainShaderSource) for an instant program-cache hit.
+// for the first Tile paint; the live material's source is then swapped in place
+// (rebuildTerrainShaderSource) for an instant program-cache hit.
 const buildMinimalFragment = () => /* glsl */ `
 precision highp float;
 
@@ -611,19 +596,15 @@ varying float vWallMesh;
 void main() {
   vec2 xz = vWorldPos.xz;
 
-#ifndef INFINITE_MODE
-  if (uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
-#endif
+  if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
   float hC;
   vec3 nGeo;
-#ifndef INFINITE_MODE
-  if (uUseTerrainHeightTex > 0.5) {
+  if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
     vec4 hT = texture2D(uTerrainHeightTex, bakedUvAt(xz));
     hC = hT.a * uHeightScale;
     nGeo = normalize(hT.rgb * 2.0 - 1.0);
   } else
-#endif
   {
     hC = vWorldPos.y;
     nGeo = vec3(0.0, 1.0, 0.0);
@@ -715,6 +696,7 @@ export function createTerrainUniforms() {
     uWarp:           { value: 0.9 },
     uFalloff:        { value: 0.5 },
     uEdgeFalloffMode:{ value: 0.0 },
+    uInfiniteMode:   { value: 0.0 },
     uBoardHalf:      { value: 1024 },
     uChunkSize:      { value: 128 },
     // Tile mode (multi-cell studio assembly). Defaults reproduce a single
@@ -805,8 +787,9 @@ export function createTerrainUniforms() {
 
     // Studio-mode baked height/normal texture (shared by the studio terrain +
     // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
-    // 2D texture instead of re-evaluating the height field per pixel. Declared
-    // only by the non-infinite materials (TERRAIN_HEIGHT_TEX_GLSL).
+    // 2D texture instead of re-evaluating the height field per pixel. The shared
+    // Tile/Infinite program always declares it; uInfiniteMode keeps unbounded
+    // terrain on the procedural path.
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
@@ -921,14 +904,9 @@ export function createTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT
 }
 
 export function createInfiniteTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
-  const h = buildHeightGLSL(stackGLSL.body2d);
-  return new THREE.ShaderMaterial({
-    uniforms,
-    defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
-    vertexShader: buildVertex(h),
-    fragmentShader: buildFragment(h),
-    side: THREE.DoubleSide,
-  });
+  // A distinct material object keeps mode ownership/disposal simple, while the
+  // identical source + defines let Three.js reuse Tile's compiled GPU program.
+  return createTerrainMaterial(uniforms, octaves, stackGLSL);
 }
 
 /**
@@ -938,11 +916,11 @@ export function createInfiniteTerrainMaterial(uniforms, octaves = 7, stackGLSL =
  * `userData.minimalFragment` marks it for the in-place source upgrade
  * (rebuildTerrainShaderSource) once the full program is warmed.
  */
-export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL, { infinite = false } = {}) {
+export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL, _options = {}) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   const mat = new THREE.ShaderMaterial({
     uniforms,
-    defines: infinite ? { OCTAVES: octaves, INFINITE_MODE: 1 } : { OCTAVES: octaves },
+    defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
     fragmentShader: buildMinimalFragment(h),
     side: THREE.DoubleSide,

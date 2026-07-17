@@ -23,6 +23,7 @@ uniform float uRidge;          // ridged-mountain intensity
 uniform float uWarp;           // domain warp strength
 uniform float uFalloff;        // edge falloff width (0..1)
 uniform float uEdgeFalloffMode; // 0 island, 1 mountains
+uniform float uInfiniteMode;   // 0 = bounded Tile terrain, 1 = streamed Infinite terrain
 uniform float uBoardHalf;      // half board size in world units
 uniform float uChunkSize;      // internal chunk size in world units
 uniform vec3  uSunDir;         // normalized, pointing FROM surface TO sun
@@ -226,18 +227,17 @@ float assemblyFalloff(vec2 xz) {
 
 // Baked studio height/normal texture sampling. Studio terrain + water fragment
 // shaders include this so they can replace the per-pixel ~46-octave height
-// field with a single texture2D fetch when the engine's bake is active. Gated
-// to non-infinite materials (the infinite world is unbounded — no fixed bake).
+// field with a single texture2D fetch when the engine's bake is active. Infinite
+// terrain includes the same declarations so both modes share one GPU program;
+// uInfiniteMode keeps the unbounded world on the procedural path at runtime.
 // Studio bake covers uBakeOrigin … uBakeOrigin+uBakeSpan in world XZ.
 export const TERRAIN_HEIGHT_TEX_GLSL = /* glsl */ `
-#ifndef INFINITE_MODE
 uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
 vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
   return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
 }
-#endif
 `;
 
 export const NOISE_GLSL = /* glsl */ `
@@ -425,47 +425,43 @@ float smoothedStackHeight2D(vec2 xz, Climate c) {
 float shapeHeight(vec2 xz, Climate c) {
   float proceduralH = smoothedStackHeight2D(xz, c);
   float h = proceduralH;
-#ifndef INFINITE_MODE
-  if (uImportNoiseMode > 1.5) {
+  if (uInfiniteMode < 0.5 && uImportNoiseMode > 1.5) {
     float importedNoise = importedMapValue(uImportNoiseTex, tileUvAt(xz)) * uAmplitude;
     h = (uImportNoiseMode > 2.5) ? mix(proceduralH, importedNoise, uImportNoiseBlend) : importedNoise;
   }
-#endif
-#ifndef INFINITE_MODE
-  // rim == 1 means the terrain is unaffected at this point (full height).
-  // uFalloff == 0 -> rim is 1 everywhere -> no island attenuation, no edge noise.
-  float rim = 1.0;
-  if (uUseTiles > 0.5) {
-    // multi-cell assembly: affect only the outer rim (seamless interiors)
-    rim = assemblyFalloff(xz);
-  } else if (uFalloff > 0.0) {
-    // island/continent falloff toward board edges (square+radial blend). The
-    // fade lives entirely inside the boundary: rim hits 0 exactly at the edge.
-    vec2 e = abs(xz) / uBoardHalf;
-    float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
-    float t = clamp((1.0 - edge) / uFalloff, 0.0, 1.0);
-    rim = rimFalloff(t);
+  if (uInfiniteMode < 0.5) {
+    // rim == 1 means the terrain is unaffected at this point (full height).
+    // uFalloff == 0 -> rim is 1 everywhere -> no island attenuation, no edge noise.
+    float rim = 1.0;
+    if (uUseTiles > 0.5) {
+      // multi-cell assembly: affect only the outer rim (seamless interiors)
+      rim = assemblyFalloff(xz);
+    } else if (uFalloff > 0.0) {
+      // island/continent falloff toward board edges (square+radial blend). The
+      // fade lives entirely inside the boundary: rim hits 0 exactly at the edge.
+      vec2 e = abs(xz) / uBoardHalf;
+      float edge = mix(max(e.x, e.y), length(e) * 0.7071, 0.5);
+      float t = clamp((1.0 - edge) / uFalloff, 0.0, 1.0);
+      rim = rimFalloff(t);
+    }
+    if (uEdgeFalloffMode < 0.5) {
+      h *= rim;
+    } else {
+      // Mountain edges preserve the existing terrain and add a noisy ridged
+      // perimeter. uFalloff controls BOTH the band width (via rim) and the noise
+      // amplitude, so a small value (0.05) is a subtle rim, not full-height peaks.
+      float edgeMask = 1.0 - rim;
+      vec2 edgeP = xz * uFrequency + uSeedOffset + vec2(173.7, 419.2);
+      float edgeMountains = pow(ridgedFBM(edgeP * 2.35), 1.25);
+      float edgeBreakup = vnoise(edgeP * 5.1 + vec2(61.4, 27.8));
+      h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude * clamp(uFalloff, 0.0, 1.0);
+    }
   }
-  if (uEdgeFalloffMode < 0.5) {
-    h *= rim;
-  } else {
-    // Mountain edges preserve the existing terrain and add a noisy ridged
-    // perimeter. uFalloff controls BOTH the band width (via rim) and the noise
-    // amplitude, so a small value (0.05) is a subtle rim, not full-height peaks.
-    float edgeMask = 1.0 - rim;
-    vec2 edgeP = xz * uFrequency + uSeedOffset + vec2(173.7, 419.2);
-    float edgeMountains = pow(ridgedFBM(edgeP * 2.35), 1.25);
-    float edgeBreakup = vnoise(edgeP * 5.1 + vec2(61.4, 27.8));
-    h += (edgeMountains * 0.55 + edgeBreakup * 0.12) * edgeMask * uAmplitude * clamp(uFalloff, 0.0, 1.0);
-  }
-#endif
   float finalH = finalizeStackHeight(h) * uHeightScale;
-#ifndef INFINITE_MODE
-  if (uImportHeightMode > 1.5) {
+  if (uInfiniteMode < 0.5 && uImportHeightMode > 1.5) {
     float importedH = importedMapValue(uImportHeightTex, importHeightUvAt(xz)) * uHeightScale * uImportHeightStrength + uImportHeightOffset;
     finalH = (uImportHeightMode > 2.5) ? mix(finalH, importedH, uImportHeightBlend) : importedH;
   }
-#endif
   return finalH;
 }
 

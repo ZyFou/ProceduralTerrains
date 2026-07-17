@@ -201,9 +201,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     <article className={`lp-card${menuFor === project.id ? ' menu-open' : ''}`} key={project.id}>
       <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!bootReady || exiting}>
         <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
+        <span className={`lp-template-kind-badge ${project.terrain.editorMode}`}>
+          {project.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}
+        </span>
         <span className="lp-card-info">
           <strong>{project.metadata.name}</strong>
-          <small><Clock size={11} aria-hidden /> {relTime(project.metadata.modified)} <span className={`lp-project-kind ${project.terrain.editorMode}`}>{project.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}</span></small>
+          <small><Clock size={11} aria-hidden /> {relTime(project.metadata.modified)}</small>
         </span>
       </button>
       <button
@@ -283,7 +286,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                 <h2>Recent projects</h2>
                 {projects.length > 0 && <button type="button" className="lp-link" onClick={() => setView('projects')}>View all projects <ArrowRight size={12} aria-hidden /></button>}
               </div>
-              {projects.length ? <div className="lp-card-grid">{projects.slice(0, 4).map(renderProjectCard)}</div> : emptyProjects}
+              {projects.length ? <div className="lp-card-grid">{projects.slice(0, 6).map(renderProjectCard)}</div> : emptyProjects}
             </section>
 
           </>}
@@ -305,7 +308,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                 </div>
                 {projects.length === 0 ? emptyProjects
                   : filtered.length === 0 ? <p className="lp-no-results">No project matches &ldquo;{query.trim()}&rdquo;.</p>
-                  : <div className="lp-card-grid">{filtered.map(renderProjectCard)}</div>}
+                  : <div className="lp-card-grid">{filtered.slice(0, 6).map(renderProjectCard)}</div>}
               </section>
             );
           })()}
