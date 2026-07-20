@@ -2671,15 +2671,39 @@ export class Engine {
 
   _applyPixelRatio() {
     // base = legacy absolute override if set, otherwise device pixel ratio;
-    // then scaled by the performance render scale and the auto-perf scale.
+    // Render Scale and auto-performance now size the offscreen scene buffer;
+    // the visible canvas stays at this native base ratio for reconstruction.
     // On a low-tier GPU, cap the ceiling lower so a 2× HiDPI panel doesn't make
     // a weak GPU render 4× the pixels.
     const legacy = this.params?.pixelRatio || 0;
     const ceiling = this.gpuTier === 'low' ? 1.25 : 2;
     const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, ceiling);
-    const scale = (this.perf?.renderScale ?? 1) * this._autoScale;
-    this.renderer.setPixelRatio(Math.min(ceiling, Math.max(0.3, base * scale)));
+    this._basePixelRatio = Math.min(ceiling, Math.max(0.3, base));
+    this._pixelRatioCeiling = ceiling;
+    this.renderer.setPixelRatio(this._basePixelRatio);
     this._needsRender = true;   // resolution changed → force a redraw
+  }
+
+  _effectiveRenderScale() {
+    const requested = (this.perf?.renderScale ?? 1) * this._autoScale;
+    const base = this._basePixelRatio || this.renderer?.getPixelRatio?.() || 1;
+    const ceiling = this._pixelRatioCeiling || 2;
+    return Math.max(0.1, Math.min(requested, ceiling / Math.max(base, 0.01)));
+  }
+
+  _prepareCameraPipeline() {
+    return this.visualPost.prepare(this.renderer, {
+      params: this.params,
+      perf: this.perf,
+      worldMode: this.worldMode,
+      renderScale: this._effectiveRenderScale(),
+      time: this.uniforms.uTime.value,
+      sunScreen: this._underwaterSunScreen(),
+    });
+  }
+
+  _cameraSceneSize(plan) {
+    return { x: plan.sceneWidth, y: plan.sceneHeight };
   }
 
   // -------------------------------------------------- async shader compiling
@@ -3217,12 +3241,11 @@ export class Engine {
 
     if (this.studioCloud) {
       this.studioCloud.update(0.016, this.camera.position, this.uniforms.uSunDir.value);
-      this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
     }
 
-    this.underwater.render(this.renderer, this.scene, this.camera);
-    this._lastTris = this.renderer.info.render.triangles;
-    this._lastDraws = this.renderer.info.render.calls;
+    const renderStats = this._renderCameraCapture();
+    this._lastTris = renderStats?.triangles ?? 0;
+    this._lastDraws = renderStats?.drawCalls ?? 0;
     this._lastRenderAt = performance.now();
     this._camPos.copy(this.camera.position);
     this._camQuat.copy(this.camera.quaternion);
@@ -4784,6 +4807,7 @@ export class Engine {
     const keepsPreset = key === 'autoPerf'
       || key === 'underwaterEffect'
       || key === 'onDemandStudio'
+      || key === 'resolutionDenoiseMode'
       || key === 'rendererBackend'
       || key === 'gpuPreference'
       || key === 'useWorker';
@@ -5574,18 +5598,41 @@ export class Engine {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
-  exportScreenshot() {
-    // planet renders straight to the canvas (no underwater pass)
-    if (this.worldMode === 'planet') {
-      this.renderer.render(this.scene, this.camera);
-    } else if (this.visualPost?.enabled(this.params, this.worldMode)) {
-      this.visualPost.ensureTarget(this.renderer);
-      this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
-      this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
-      this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
-    } else {
-      this.underwater.render(this.renderer, this.scene, this.camera);
+  _renderCameraCapture() {
+    const plan = this._prepareCameraPipeline();
+    const sceneSize = this._cameraSceneSize(plan);
+    const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
+
+    if (this.worldMode === 'studio' && this.studioCloud) {
+      this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      this.studioCloud.renderLowRes(this.renderer, this.camera, sceneSize);
+    } else if (this.worldMode === 'planet') {
+      this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      this.planetCloudLayer?.renderLowRes(this.renderer, this.camera, sceneSize);
     }
+
+    if (this.worldMode === 'planet') {
+      this.renderer.setRenderTarget(target);
+      this.renderer.render(this.scene, this.camera);
+    } else {
+      this.underwater.render(this.renderer, this.scene, this.camera, target);
+      if (target) this.renderer.setRenderTarget(target);
+    }
+    const stats = {
+      triangles: this.renderer.info.render.triangles,
+      drawCalls: this.renderer.info.render.calls,
+    };
+
+    if (this.worldMode === 'studio') this.studioCloud?.compositeLowRes(this.renderer);
+    else if (this.worldMode === 'planet') this.planetCloudLayer?.compositeLowRes(this.renderer);
+    if (target) this.renderer.setRenderTarget(null);
+    this.visualPost.finish(this.renderer);
+    return stats;
+  }
+
+  exportScreenshot() {
+    this._renderCameraCapture();
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
       this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
@@ -5596,13 +5643,7 @@ export class Engine {
   capturePreviewThumbnail(width = 480, height = 270) {
     // Render through the exact same path used by screenshot export, then scale
     // the actual WebGL canvas into a compact data URL for template previews.
-    if (this.worldMode === 'planet') this.renderer.render(this.scene, this.camera);
-    else if (this.visualPost?.enabled(this.params, this.worldMode)) {
-      this.visualPost.ensureTarget(this.renderer);
-      this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
-      this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
-      this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
-    } else this.underwater.render(this.renderer, this.scene, this.camera);
+    this._renderCameraCapture();
     const thumbnail = document.createElement('canvas');
     thumbnail.width = width; thumbnail.height = height;
     thumbnail.getContext('2d')?.drawImage(this.renderer.domElement, 0, 0, width, height);
@@ -5987,6 +6028,7 @@ export class Engine {
       (this.params.cloudsEnabled && !!this.studioCloud) ||
       (this.water.visible && this.params.waterAnim) ||
       (this.visualPost?.enabled(this.params, this.worldMode) && (this.params.visualsSunRaysStrength ?? 0) > 0.001) ||
+      !!this.params.visualsCrtEnabled ||
       this.underwater.active ||
       this._debug.freeCamNoClip ||
       this.exploreMode !== 'none' ||
@@ -6035,12 +6077,16 @@ export class Engine {
         );
       }
 
+      const cameraPlan = this._prepareCameraPipeline();
+      const cameraSceneSize = this._cameraSceneSize(cameraPlan);
+      const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+
       if (this.studioCloud) {
-        this.studioCloud.renderDepthPrepass(this.renderer, this.camera);
+        this.studioCloud.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
         // low-res cloud mode: march the clouds into an offscreen half/quarter-res
         // target now. The main scene render below skips them (the mesh lives on a
         // dedicated camera layer) and compositeLowRes blends them back afterwards.
-        this.studioCloud.renderLowRes(this.renderer, this.camera);
+        this.studioCloud.renderLowRes(this.renderer, this.camera, cameraSceneSize);
       }
 
       // refresh the baked height/normal texture if the field changed (no-op on a
@@ -6051,27 +6097,18 @@ export class Engine {
       this._maybeWarmUnderwater();
       this.profiler.begin('render');
       this.profiler.gpu?.frameBegin();
-      const visualPostActive = this.visualPost?.enabled(this.params, this.worldMode);
-      if (visualPostActive) {
-        this.visualPost.ensureTarget(this.renderer);
-        this.visualPost.update(this.params, this.uniforms.uTime.value, this._underwaterSunScreen());
-        this.underwater.render(this.renderer, this.scene, this.camera, this.visualPost.inputTarget);
-      } else {
-        this.underwater.render(this.renderer, this.scene, this.camera);
-      }
+      this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
       // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
       if (this.studioCloud) {
-        if (visualPostActive) this.renderer.setRenderTarget(this.visualPost.inputTarget);
+        if (cameraTarget) this.renderer.setRenderTarget(cameraTarget);
         this.studioCloud.compositeLowRes(this.renderer);
-        if (visualPostActive) this.renderer.setRenderTarget(null);
+        if (cameraTarget) this.renderer.setRenderTarget(null);
       }
-      if (visualPostActive) {
-        this.visualPost.render(this.renderer, this.visualPost.inputTarget.texture);
-      }
+      this.visualPost.finish(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
 
@@ -6137,11 +6174,14 @@ export class Engine {
     this._maybeWarmUnderwater();
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
-    this.underwater.render(this.renderer, this.scene, this.camera);
-    this.profiler.gpu?.frameEnd();
-    this.profiler.end('render');
+    const cameraPlan = this._prepareCameraPipeline();
+    const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
+    this.visualPost.finish(this.renderer);
+    this.profiler.gpu?.frameEnd();
+    this.profiler.end('render');
 
     // Feed the triangle budget controller
     if (this.infiniteWorld) this.infiniteWorld.notifyTriangles(triangles);
@@ -6207,27 +6247,34 @@ export class Engine {
     // steady frame); the planet terrain + water shaders sample it per pixel.
     this._ensurePlanetHeightTex();
 
+    const cameraPlan = this._prepareCameraPipeline();
+    const cameraSceneSize = this._cameraSceneSize(cameraPlan);
+    const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+
     // depth prepass so the cloud march is occluded by the terrain relief
     // (otherwise clouds show through the surface up close)
     if (this.planetCloudChunks) {
-      this.planetCloudChunks.renderDepthPrepass(this.renderer, this.camera);
+      this.planetCloudChunks.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
     }
     if (this.planetCloudLayer) {
-      this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera);
+      this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
       // low-res cloud mode: march clouds into the offscreen target; the main
       // render skips them (offscreen layer) and we composite them back below.
-      this.planetCloudLayer.renderLowRes(this.renderer, this.camera);
+      this.planetCloudLayer.renderLowRes(this.renderer, this.camera, cameraSceneSize);
     }
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
+    this.renderer.setRenderTarget(cameraTarget);
     this.renderer.render(this.scene, this.camera);
     // capture scene tri/draw counts BEFORE the low-res cloud composite (its
     // fullscreen quad would otherwise reset renderer.info to ~2 triangles).
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
     if (this.planetCloudLayer) this.planetCloudLayer.compositeLowRes(this.renderer);
+    if (cameraTarget) this.renderer.setRenderTarget(null);
+    this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
@@ -6306,7 +6353,9 @@ export class Engine {
       shadowsEnabled: !!(this.renderer && this.renderer.shadowMap && this.renderer.shadowMap.enabled),
       postProcessing: {
         underwater: !!this.underwater?.active,
-        visuals: !!this.visualPost?.enabled(this.params, this.worldMode),
+        visuals: !!this.visualPost?.lookEnabled(this.params, this.worldMode),
+        cameraShaders: !!this.visualPost?.cameraEffectsEnabled(this.params),
+        cameraStack: this.visualPost?.diagnostics?.() ?? null,
       },
 
       terrain: {},

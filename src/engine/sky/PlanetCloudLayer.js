@@ -325,12 +325,12 @@ export class PlanetCloudLayer {
   /** Render the opaque scene depth (clouds hidden) so the cloud march can clamp
    *  to the terrain — fixes clouds showing through the surface up close. Mirrors
    *  CloudSlabLayer.renderDepthPrepass. Call once per frame before the main render. */
-  renderDepthPrepass(renderer, camera) {
+  renderDepthPrepass(renderer, camera, baseSize = null) {
     if (!this.active) {
       this.material.uniforms.uUseDepth.value = 0.0;
       return false;
     }
-    this._ensureDepthTarget(renderer);
+    this._ensureDepthTarget(renderer, baseSize);
 
     const wasVisible = this.mesh.visible;
     const prevTarget = renderer.getRenderTarget();
@@ -365,9 +365,9 @@ export class PlanetCloudLayer {
 
   /** March the clouds into the low-res target (after renderDepthPrepass, before
    *  the main scene render). */
-  renderLowRes(renderer, camera) {
+  renderLowRes(renderer, camera, baseSize = null) {
     if (!this.usesLowRes) return false;
-    this._lowResPass.renderCloud(renderer, this.scene, camera, this.mesh);
+    this._lowResPass.renderCloud(renderer, this.scene, camera, this.mesh, baseSize);
     return true;
   }
 
@@ -377,8 +377,8 @@ export class PlanetCloudLayer {
     this._lowResPass.composite(renderer, this._depthTexture);
   }
 
-  _ensureDepthTarget(renderer) {
-    const size = renderer.getDrawingBufferSize(this._depthSize);
+  _ensureDepthTarget(renderer, baseSize = null) {
+    const size = baseSize || renderer.getDrawingBufferSize(this._depthSize);
     const w = Math.max(1, Math.round(size.x));
     const h = Math.max(1, Math.round(size.y));
     if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;

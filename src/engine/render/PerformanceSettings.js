@@ -163,6 +163,7 @@ export function createPerfSettings(presetKey = 'high') {
     gpuPreference: 'default',
     useWorker: false,
     autoPerf: true,
+    resolutionDenoiseMode: 'clean',
     underwaterEffect: true,
     // Terrain merge layer (Tile mode): quadtree that folds far chunk blocks
     // into fewer flat-grid meshes. Preset-independent — fold distance scales
@@ -287,6 +288,7 @@ export function sanitizePerfSettings(settings) {
   s.terrainMicroDetail = clamp(Number.isFinite(+s.terrainMicroDetail) ? +s.terrainMicroDetail : 0.6, PERF_LIMITS.terrainMicroDetail);
   s.terrainMacroVariation = clamp(Number.isFinite(+s.terrainMacroVariation) ? +s.terrainMacroVariation : 0.5, PERF_LIMITS.terrainMacroVariation);
   s.autoPerf = !!s.autoPerf;
+  s.resolutionDenoiseMode = s.resolutionDenoiseMode === 'pixelated' ? 'pixelated' : 'clean';
   // terrain merge layer (Tile mode quadtree)
   s.terrainMerge = s.terrainMerge !== false;
   s.terrainMergeQuads = Math.round(clamp(+s.terrainMergeQuads || 8, PERF_LIMITS.terrainMergeQuads));

@@ -484,7 +484,7 @@ function LightingPanel({ ctx }) {
 
 function VisualsPanel({ ctx }) {
   return (
-    <SidePanel title="Visuals" description="Tile post effects, HDR sky and terrain surface polish." onClose={ctx.onClose}>
+    <SidePanel title="Visuals" description="Post effects, global camera shaders, HDR sky and surface polish." onClose={ctx.onClose}>
       <VisualsPanelInner ctx={ctx} />
     </SidePanel>
   );

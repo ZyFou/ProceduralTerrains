@@ -39,11 +39,23 @@ const SHORE_SLIDERS = [
   slider('visualsShallowWaterSoftness', 'Shallow Water Softness', 0, 1, 0.02, { digits: 2 }),
 ];
 
+const CAMERA_SLIDERS = {
+  pixelResolution: slider('visualsPixelResolution', 'Virtual Resolution', 120, 720, 8, { unit: 'p' }),
+  ditheringStrength: slider('visualsDitheringStrength', 'Dithering Strength', 0, 1, 0.02, { digits: 2 }),
+  ditheringLevels: slider('visualsDitheringLevels', 'Color Levels', 2, 32, 1),
+  ditheringScale: slider('visualsDitheringScale', 'Pattern Scale', 1, 6, 1, { unit: ' px' }),
+  crtStrength: slider('visualsCrtStrength', 'CRT Strength', 0, 1, 0.02, { digits: 2 }),
+  crtLensBend: slider('visualsCrtLensBend', 'Lens Bend', 0, 1, 0.02, { digits: 2 }),
+  crtLineWidth: slider('visualsCrtLineWidth', 'Scanline Width', 1, 6, 0.25, { digits: 2, unit: ' px' }),
+  chromaticStrength: slider('visualsChromaticAberrationStrength', 'Chromatic Offset', 0, 8, 0.1, { digits: 1, unit: ' px' }),
+};
+
 const VISUALS_TABS = [
   { id: 'post', label: 'Post FX' },
   { id: 'sky', label: 'HDR Sky' },
   { id: 'terrain', label: 'Terrain Surface' },
   { id: 'shoreline', label: 'Shoreline' },
+  { id: 'camera', label: 'Camera Shaders' },
 ];
 
 function val(params, key) {
@@ -115,6 +127,87 @@ export default function VisualsPanel({ ctx }) {
 
       {tab === 'shoreline' && (
         <SliderList items={SHORE_SLIDERS} params={params} onParam={onParam} />
+      )}
+
+      {tab === 'camera' && (
+        <>
+          <ToggleRow
+            label="Pixelated"
+            value={!!val(params, 'visualsPixelatedEnabled')}
+            onChange={(v) => onParam('visualsPixelatedEnabled', v)}
+            settingId="visuals.visualsPixelatedEnabled"
+            info="Renders the camera through a low-resolution target with hard nearest-neighbor pixels."
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.pixelResolution}
+            value={val(params, 'visualsPixelResolution')}
+            onChange={(v) => onParam('visualsPixelResolution', Math.round(v))}
+            settingId="visuals.visualsPixelResolution"
+          />
+          <ToggleRow
+            label="Dithering"
+            value={!!val(params, 'visualsDitheringEnabled')}
+            onChange={(v) => onParam('visualsDitheringEnabled', v)}
+            settingId="visuals.visualsDitheringEnabled"
+            info="Applies visible ordered 4×4 dithering with adjustable color depth and pattern size."
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.ditheringStrength}
+            value={val(params, 'visualsDitheringStrength')}
+            onChange={(v) => onParam('visualsDitheringStrength', v)}
+            settingId="visuals.visualsDitheringStrength"
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.ditheringLevels}
+            value={val(params, 'visualsDitheringLevels')}
+            onChange={(v) => onParam('visualsDitheringLevels', Math.round(v))}
+            settingId="visuals.visualsDitheringLevels"
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.ditheringScale}
+            value={val(params, 'visualsDitheringScale')}
+            onChange={(v) => onParam('visualsDitheringScale', Math.round(v))}
+            settingId="visuals.visualsDitheringScale"
+          />
+          <ToggleRow
+            label="CRT"
+            value={!!val(params, 'visualsCrtEnabled')}
+            onChange={(v) => onParam('visualsCrtEnabled', v)}
+            settingId="visuals.visualsCrtEnabled"
+            info="Adds adjustable scanlines, RGB mask, lens curvature, analog noise, and edge falloff."
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.crtStrength}
+            value={val(params, 'visualsCrtStrength')}
+            onChange={(v) => onParam('visualsCrtStrength', v)}
+            settingId="visuals.visualsCrtStrength"
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.crtLensBend}
+            value={val(params, 'visualsCrtLensBend')}
+            onChange={(v) => onParam('visualsCrtLensBend', v)}
+            settingId="visuals.visualsCrtLensBend"
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.crtLineWidth}
+            value={val(params, 'visualsCrtLineWidth')}
+            onChange={(v) => onParam('visualsCrtLineWidth', v)}
+            settingId="visuals.visualsCrtLineWidth"
+          />
+          <ToggleRow
+            label="Chromatic Aberration"
+            value={!!val(params, 'visualsChromaticAberrationEnabled')}
+            onChange={(v) => onParam('visualsChromaticAberrationEnabled', v)}
+            settingId="visuals.visualsChromaticAberrationEnabled"
+            info="Separates red and blue channels toward the lens edges and combines with every other camera shader."
+          />
+          <SliderCtl
+            def={CAMERA_SLIDERS.chromaticStrength}
+            value={val(params, 'visualsChromaticAberrationStrength')}
+            onChange={(v) => onParam('visualsChromaticAberrationStrength', v)}
+            settingId="visuals.visualsChromaticAberrationStrength"
+          />
+        </>
       )}
 
       <PanelResetButton label="Reset Visual Settings" onClick={() => ctx.onResetPanel?.('visuals')} settingId="visuals.reset" />

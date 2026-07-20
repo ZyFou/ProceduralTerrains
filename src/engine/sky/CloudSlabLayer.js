@@ -436,10 +436,10 @@ export class CloudSlabLayer {
     }
   }
 
-  renderDepthPrepass(renderer, camera) {
+  renderDepthPrepass(renderer, camera, baseSize = null) {
     if (!this.active) return false;
 
-    this._ensureDepthTarget(renderer);
+    this._ensureDepthTarget(renderer, baseSize);
 
     const wasVisible = this.mesh.visible;
     const prevTarget = renderer.getRenderTarget();
@@ -475,9 +475,9 @@ export class CloudSlabLayer {
 
   /** Render the clouds into the low-res target (call after renderDepthPrepass,
    *  before the main scene render). Returns true if it ran. */
-  renderLowRes(renderer, camera) {
+  renderLowRes(renderer, camera, baseSize = null) {
     if (!this.usesLowRes) return false;
-    this._lowResPass.renderCloud(renderer, this.scene, camera, this.mesh);
+    this._lowResPass.renderCloud(renderer, this.scene, camera, this.mesh, baseSize);
     return true;
   }
 
@@ -488,8 +488,8 @@ export class CloudSlabLayer {
     this._lowResPass.composite(renderer, this._depthTexture);
   }
 
-  _ensureDepthTarget(renderer) {
-    const size = renderer.getDrawingBufferSize(this._depthSize);
+  _ensureDepthTarget(renderer, baseSize = null) {
+    const size = baseSize || renderer.getDrawingBufferSize(this._depthSize);
     const w = Math.max(1, Math.round(size.x));
     const h = Math.max(1, Math.round(size.y));
     if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;

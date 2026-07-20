@@ -1,7 +1,6 @@
 // ============================================================================
-// Tile-mode visual enhancement settings.
-// These are artistic controls, not performance budgets. They live in params so
-// saved projects keep their look and older saves inherit these defaults.
+// Visual enhancement settings. The original look controls remain Tile-only;
+// camera shaders are global and serialize with projects in every world mode.
 // ============================================================================
 
 export const VISUAL_DEFAULT_PARAMS = {
@@ -13,6 +12,19 @@ export const VISUAL_DEFAULT_PARAMS = {
   visualsBloomStrength: 0.18,
   visualsBloomThreshold: 0.72,
   visualsSunRaysStrength: 0.22,
+
+  visualsPixelatedEnabled: false,
+  visualsPixelResolution: 240,
+  visualsDitheringEnabled: false,
+  visualsDitheringStrength: 0.65,
+  visualsDitheringLevels: 8,
+  visualsDitheringScale: 2,
+  visualsCrtEnabled: false,
+  visualsCrtStrength: 0.5,
+  visualsCrtLensBend: 0.35,
+  visualsCrtLineWidth: 2,
+  visualsChromaticAberrationEnabled: false,
+  visualsChromaticAberrationStrength: 1.5,
 
   visualsSkyIntensity: 1.08,
   visualsSunGlow: 1.0,

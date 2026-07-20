@@ -423,9 +423,9 @@ export class PlanetCloudChunks {
   }
 
   // ---- terrain depth occlusion (shared; identical to PlanetCloudLayer)
-  renderDepthPrepass(renderer, camera) {
+  renderDepthPrepass(renderer, camera, baseSize = null) {
     if (!this.active) { if (this.shared) this.shared.uUseDepth.value = 0.0; return false; }
-    this._ensureDepthTarget(renderer);
+    this._ensureDepthTarget(renderer, baseSize);
 
     const wasVisible = this.group.visible;
     const prevTarget = renderer.getRenderTarget();
@@ -452,8 +452,8 @@ export class PlanetCloudChunks {
     return true;
   }
 
-  _ensureDepthTarget(renderer) {
-    const size = renderer.getDrawingBufferSize(this._depthSize);
+  _ensureDepthTarget(renderer, baseSize = null) {
+    const size = baseSize || renderer.getDrawingBufferSize(this._depthSize);
     const w = Math.max(1, Math.round(size.x));
     const h = Math.max(1, Math.round(size.y));
     if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;

@@ -115,8 +115,8 @@ export class CloudLowResPass {
     mesh.layers.set(lowRes ? CLOUD_LOWRES_LAYER : 0);
   }
 
-  _ensureRT(renderer) {
-    const ds = renderer.getDrawingBufferSize(this._size);
+  _ensureRT(renderer, baseSize = null) {
+    const ds = baseSize || renderer.getDrawingBufferSize(this._size);
     const w = Math.max(1, Math.round(ds.x * this.scale));
     const h = Math.max(1, Math.round(ds.y * this.scale));
     if (this.rt && this.rt.width === w && this.rt.height === h) return;
@@ -140,8 +140,8 @@ export class CloudLowResPass {
    * full-res depth still lines up). renderDepthPrepass resets it to full res
    * every frame, so we only need to set it here.
    */
-  renderCloud(renderer, scene, camera, mesh) {
-    this._ensureRT(renderer);
+  renderCloud(renderer, scene, camera, mesh, baseSize = null) {
+    this._ensureRT(renderer, baseSize);
 
     const depthRes = mesh?.material?.uniforms?.uDepthResolution;
     if (depthRes) depthRes.value.set(this.rt.width, this.rt.height);

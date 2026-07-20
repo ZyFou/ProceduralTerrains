@@ -70,6 +70,11 @@ const GPU_PREFERENCE_OPTIONS = [
   { value: 'low-power', label: 'Low Power' },
 ];
 
+const RESOLUTION_DENOISE_OPTIONS = [
+  { value: 'clean', label: 'Clean Denoise' },
+  { value: 'pixelated', label: 'Pixelated Denoise' },
+];
+
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'lod', label: 'LOD' },
@@ -411,6 +416,18 @@ function renderSettings({
       <SettingGroup tab="overview" label="Render Scale" keywords="resolution pixel dpr scale" {...groupProps}>
         <PerfSlider perf={perf} id="renderScale" onPerfSetting={onPerfSetting} settingId="performance.renderScale" />
       </SettingGroup>
+
+      <SettingGroup tab="overview" label="Resolution Reconstruction" keywords="resolution upscale denoise clean pixelated nearest ps1" {...groupProps}>
+        <SelectRow
+          label="Resolution Reconstruction"
+          value={perf.resolutionDenoiseMode || 'clean'}
+          options={RESOLUTION_DENOISE_OPTIONS}
+          onChange={(v) => onPerfSetting('resolutionDenoiseMode', v)}
+          settingId="performance.resolutionDenoiseMode"
+        />
+      </SettingGroup>
+
+      <SettingNote tab="overview" text="Clean Denoise reconstructs reduced resolution while preserving edges. Pixelated Denoise keeps hard source pixels for a retro look." {...groupProps} />
 
       <SettingNote tab="overview" text={`Worst-case visible triangles: ~${(estTris / 1e6).toFixed(2)}M`} {...groupProps} />
 

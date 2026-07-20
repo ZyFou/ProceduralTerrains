@@ -995,6 +995,18 @@ export default function App() {
       case 'visuals.normalStrength': return num(params.normalStrength, 2);
       case 'visuals.aoStrength': return num(params.aoStrength, 2);
       case 'visuals.aoRidge': return num(params.aoRidge ?? 0, 2);
+      case 'visuals.visualsPixelatedEnabled': return yesNo(!!params.visualsPixelatedEnabled);
+      case 'visuals.visualsPixelResolution': return `${Math.round(params.visualsPixelResolution ?? 240)}p`;
+      case 'visuals.visualsDitheringEnabled': return yesNo(!!params.visualsDitheringEnabled);
+      case 'visuals.visualsDitheringStrength': return num(params.visualsDitheringStrength ?? 0.65, 2);
+      case 'visuals.visualsDitheringLevels': return String(Math.round(params.visualsDitheringLevels ?? 8));
+      case 'visuals.visualsDitheringScale': return num(params.visualsDitheringScale ?? 2, 0, ' px');
+      case 'visuals.visualsCrtEnabled': return yesNo(!!params.visualsCrtEnabled);
+      case 'visuals.visualsCrtStrength': return num(params.visualsCrtStrength ?? 0.5, 2);
+      case 'visuals.visualsCrtLensBend': return num(params.visualsCrtLensBend ?? 0.35, 2);
+      case 'visuals.visualsCrtLineWidth': return num(params.visualsCrtLineWidth ?? 2, 2, ' px');
+      case 'visuals.visualsChromaticAberrationEnabled': return yesNo(!!params.visualsChromaticAberrationEnabled);
+      case 'visuals.visualsChromaticAberrationStrength': return num(params.visualsChromaticAberrationStrength ?? 1.5, 1, ' px');
       case 'terrain.heightMap':
       case 'terrain.noiseMap':
       case 'terrain.biomeMap':
@@ -1035,6 +1047,7 @@ export default function App() {
       case 'performance.autoPerf': return yesNo(perf?.autoPerf);
       case 'performance.onDemandStudio': return yesNo(perf?.onDemandStudio);
       case 'performance.renderScale': return num(perf?.renderScale, 2, 'x');
+      case 'performance.resolutionDenoiseMode': return perf?.resolutionDenoiseMode === 'pixelated' ? 'Pixelated Denoise' : 'Clean Denoise';
       case 'performance.resolutionScale': return num(perf?.resolutionScale, 2, 'x');
       case 'performance.lodDistanceScale': return num(perf?.lodDistanceScale, 2, 'x');
       case 'performance.viewRadius': return `${perf?.viewRadius ?? '—'} chunks`;

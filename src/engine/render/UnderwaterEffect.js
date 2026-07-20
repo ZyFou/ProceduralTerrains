@@ -288,9 +288,10 @@ export class UnderwaterEffect {
       return;
     }
 
-    this._ensureTarget(renderer);
-
-    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const size = outputTarget
+      ? new THREE.Vector2(outputTarget.width, outputTarget.height)
+      : renderer.getDrawingBufferSize(new THREE.Vector2());
+    this._ensureTarget(renderer, size.x, size.y);
     const u = this._material.uniforms;
     u.uNear.value = camera.near;
     u.uFar.value = camera.far;
@@ -307,10 +308,12 @@ export class UnderwaterEffect {
     if (outputTarget) renderer.setRenderTarget(null);
   }
 
-  _ensureTarget(renderer) {
-    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const w = Math.max(1, size.x);
-    const h = Math.max(1, size.y);
+  _ensureTarget(renderer, width, height) {
+    const size = (width && height)
+      ? new THREE.Vector2(width, height)
+      : renderer.getDrawingBufferSize(new THREE.Vector2());
+    const w = Math.max(1, Math.round(size.x));
+    const h = Math.max(1, Math.round(size.y));
     if (this._rt && this._rt.width === w && this._rt.height === h) return;
 
     if (this._rt) this._rt.dispose();
