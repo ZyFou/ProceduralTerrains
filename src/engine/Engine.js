@@ -2814,14 +2814,20 @@ export class Engine {
    * @param {boolean} [visibleOnly] skip materials whose meshes are hidden (deferred
    *   water, disk wall, tile ghost, disabled sky) — they compile lazily when shown.
    */
-  async _compileSceneStaggered(renderTarget = null, { visibleOnly = false, skipMinimalTerrain = false } = {}) {
+  async _compileSceneStaggered(renderTarget = null, {
+    visibleOnly = false,
+    skipMinimalTerrain = false,
+    skipWaterMaterial = false,
+  } = {}) {
     const materials = new Set();
     this.scene.traverse((obj) => {
       if (!obj.material) return;
       if (visibleOnly && !this._isRenderable(obj)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach((m) => {
-        if (!m || (skipMinimalTerrain && m.userData?.minimalFragment)) return;
+        if (!m
+            || (skipMinimalTerrain && m.userData?.minimalFragment)
+            || (skipWaterMaterial && m === this.waterMaterial)) return;
         materials.add(m);
       });
     });
@@ -2882,10 +2888,10 @@ export class Engine {
     yieldTask().then(() => yieldTask().then(run));
   }
 
-  /** Compile the full textured terrain plus only the visible supporting scene programs. */
+  /** Compile and instantiate the textured terrain and water before releasing boot. */
   async _warmupInitialShaders() {
     this._compiling++;
-    this.cb.onStatus('Compiling textured terrain…', true);
+    this.cb.onStatus('Compiling terrain & water…', true);
     const _tCompile0 = performance.now();
     let fullTerrainResult = null;
     let bakeMs = 0;
@@ -2897,6 +2903,13 @@ export class Engine {
       // waits for the textured material, compiling both would be pure duplicate
       // work with the same generated height vertex source.
       const fullTerrainJob = this._upgradeMinimalTerrain();
+      // Kick off water immediately after terrain translation. Both programs can
+      // link on the driver's worker threads while the height map is baked.
+      // _warmDeferredWater also instantiates WaterSystem before this boot job
+      // resolves, so there is no post-loading water swap.
+      const waterJob = this.params.waterEnabled !== false
+        ? this._warmDeferredWater()
+        : Promise.resolve();
 
       const bakeStartedAt = performance.now();
       try {
@@ -2923,25 +2936,33 @@ export class Engine {
       // visibleOnly: the first burst only translates the on-screen set (the
       // hidden water / disk wall / ghost / disabled sky compile lazily later).
       await this._withBootDeferredObjectsDetached(
-        () => this._compileSceneStaggered(null, { visibleOnly: true, skipMinimalTerrain: true })
+        () => this._compileSceneStaggered(null, {
+          visibleOnly: true,
+          skipMinimalTerrain: true,
+          // Water owns a dedicated concurrent warmup above. If its link and
+          // init finish during the height bake, do not enqueue it a second time.
+          skipWaterMaterial: true,
+        })
       );
-      fullTerrainResult = await fullTerrainJob;
+      const [terrainOutcome, waterOutcome] = await Promise.allSettled([fullTerrainJob, waterJob]);
+      if (terrainOutcome.status === 'fulfilled') fullTerrainResult = terrainOutcome.value;
+      else console.warn('Boot terrain warmup failed', terrainOutcome.reason);
+      if (waterOutcome.status === 'rejected') {
+        console.warn('Boot water initialization failed', waterOutcome.reason);
+      }
 
       // If the full program failed or timed out, warm the minimal fallback now
       // so the first frame still cannot trigger a surprise synchronous compile.
       if (!fullTerrainResult?.swapped && this.terrainMaterial?.userData?.minimalFragment) {
         await this._compileMaterialVariants([this.terrainMaterial], { canvasOnly: true });
       }
-      // NOTE: the deferred (hidden) water was skipped by visibleOnly, so
-      // _waterMaterialWarmed stays false — _warmDeferredWater compiles it
-      // after the first paint instead of inside the boot burst.
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
     }
     try {
       if (!this._disposed && this._compiling === 1) {
         const _paintMs = this._renderInitialStudioFrame();
-        console.info(`[boot] first textured frame ${(_paintMs ?? 0).toFixed(0)}ms after optimized warmup ${(performance.now() - _tCompile0).toFixed(0)}ms + height bake ${bakeMs.toFixed(0)}ms (terrain ready=${fullTerrainResult?.ready === true}); elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
+        console.info(`[boot] first textured frame ${(_paintMs ?? 0).toFixed(0)}ms after optimized warmup ${(performance.now() - _tCompile0).toFixed(0)}ms + height bake ${bakeMs.toFixed(0)}ms (terrain ready=${fullTerrainResult?.ready === true}, water ready=${!this._waterDeferred}); elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
 
         this._bootPending = false;
         this.cb.onStatus('Ready', false);
@@ -2949,8 +2970,6 @@ export class Engine {
         // (info toasts are suppressed while a blocking overlay is up).
         if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
         this.cb.onBootComplete?.();
-        // Water remains deferred until after the landing page exits. Its shader
-        // does not contribute to the textured terrain visible on the homepage.
         this._scheduleErosionGPUWarmImport();
       }
     } finally {
@@ -3099,7 +3118,7 @@ export class Engine {
 
       const jobs = [];
       if (this.terrainMaterial?.userData?.minimalFragment) jobs.push(this._upgradeMinimalTerrain());
-      if (this.params.waterEnabled !== false) jobs.push(this._warmDeferredWater());
+      if (this.params.waterEnabled !== false && this._waterDeferred) jobs.push(this._warmDeferredWater());
       Promise.allSettled(jobs).then(() => {
         if (!this._disposed) this._needsRender = true;
       });
