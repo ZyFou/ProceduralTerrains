@@ -43,16 +43,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
-  const [templatePreviewsReady, setTemplatePreviewsReady] = useState(false);
   const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
-  const [previewProgress, setPreviewProgress] = useState(() => ({ completed: 0, total: PROJECT_TEMPLATES.length }));
   const [menuFor, setMenuFor] = useState(null);
   const [query, setQuery] = useState('');
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
   const fileRef = useRef(null);
-  const templateSelectionRef = useRef(null);
-  templateSelectionRef.current = { view, templateId: selectedTemplateId, editorMode: templateKind };
 
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
@@ -69,18 +65,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       const { templateId, image } = event.detail ?? {};
       if (templateId && image) setTemplateThumbs((current) => ({ ...current, [templateId]: image }));
     };
-    const onPreviewProgress = (event) => setPreviewProgress(event.detail ?? { completed: 0, total: PROJECT_TEMPLATES.length });
-    const onPreviewComplete = () => setTemplatePreviewsReady(true);
     window.addEventListener('terrain-template:thumbnail', onThumbnail);
-    window.addEventListener('terrain-template:progress', onPreviewProgress);
-    window.addEventListener('terrain-template:preload-complete', onPreviewComplete);
-    const preloadTimer = window.setTimeout(() => {
-      const selection = templateSelectionRef.current;
-      window.dispatchEvent(new CustomEvent('terrain-template:preload', {
-        detail: selection?.view === 'templates' ? selection : undefined,
-      }));
-    }, 100);
-    return () => { window.removeEventListener('terrain-template:thumbnail', onThumbnail); window.removeEventListener('terrain-template:progress', onPreviewProgress); window.removeEventListener('terrain-template:preload-complete', onPreviewComplete); window.clearTimeout(preloadTimer); };
+    return () => window.removeEventListener('terrain-template:thumbnail', onThumbnail);
   }, [bootReady]);
   useEffect(() => {
     if (!menuFor) return undefined;
@@ -92,10 +78,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   useEffect(() => { setQuery(''); }, [view]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
-  useEffect(() => {
-    if (!bootReady || !templatePreviewsReady || view === 'templates' || !selectedProject) return;
-    window.dispatchEvent(new CustomEvent('terrain-project:preview', { detail: { project: selectedProject } }));
-  }, [bootReady, selectedProject, templatePreviewsReady, view]);
 
   const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -118,13 +100,18 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     setSelectedTemplateId(id);
     setSelectedProjectId(null);
     setView('templates');
-    dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
+    if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
+    else dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
   };
   const openTemplates = (editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
     const catalog = nextKind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
     const currentExists = catalog.some((item) => item.id === selectedTemplateId);
-    selectTemplate(currentExists ? selectedTemplateId : catalog[0].id, nextKind);
+    setTemplateKind(nextKind);
+    setSelectedTemplateId(currentExists ? selectedTemplateId : catalog[0].id);
+    setSelectedProjectId(null);
+    setView('templates');
+    if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
   };
   const importProjectFile = (file, { openAfter } = {}) => {
     if (!file) return;
@@ -320,7 +307,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             return (
             <section className="lp-section lp-view">
               <div className="lp-section-head lp-template-section-head">
-                <div><h2>Terrain templates</h2><p>Choose one authoring workflow. The selected terrain previews live behind this page.</p></div>
+                <div><h2>Terrain templates</h2><p>Choose one authoring workflow. Procedural selections preview live; Nodes opens straight into the editor.</p></div>
                 <div className="lp-template-kind-switch" role="tablist" aria-label="Template type">
                   <button type="button" role="tab" aria-selected={templateKind === 'procedural'} className={templateKind === 'procedural' ? 'active' : ''} onClick={() => openTemplates('procedural')}><SlidersHorizontal size={13} /> Procedural</button>
                   <button type="button" role="tab" aria-selected={templateKind === 'nodes'} className={templateKind === 'nodes' ? 'active' : ''} onClick={() => openTemplates('nodes')}><Boxes size={13} /> Nodes</button>
@@ -345,7 +332,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                   </article>
                 ))}
               </div>
-              <p className="lp-template-hint">Selecting a template previews it live in the background.</p>
+              <p className="lp-template-hint">{templateKind === 'nodes' ? 'Node templates load instantly; open the 2D preview when you need it.' : 'Selecting a template previews it live in the background.'}</p>
               <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
             </section>
             );
@@ -365,7 +352,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </main>
       </div>
 
-      {(!bootReady || previewProgress.completed < previewProgress.total) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>{bootReady ? 'Rendering terrain previews' : 'Starting terrain editor'}</strong><small>{bootReady ? `${previewProgress.completed} of ${previewProgress.total} real previews ready` : 'Preparing your random terrain workspace…'}</small></div>}
+      {!bootReady && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>

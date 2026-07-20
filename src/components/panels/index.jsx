@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Cog, Dices, Eye, RefreshCw } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
-import { PANEL_ICONS } from '../icons/panelIcons.jsx';
+import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
+export { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
 import ControlSection from '../ui/ControlSection.jsx';
@@ -31,57 +32,6 @@ import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 import SplinesPanel from './SplinesPanel.jsx';
 import { AnalysisContent } from './AnalysisPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
-
-// ---- toolbar / panel metadata (single source for icons + labels) ----
-export const PANEL_META = {
-  terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
-  noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },
-  world: { label: 'World', title: 'World', desc: 'Layout, tiles, chunking and grid.', icon: PANEL_ICONS.world },
-  planet: {
-    label: 'Planet',
-    title: 'Planet',
-    desc: 'Spherical world style and summary.',
-    studioLabel: 'Colors',
-    studioTitle: 'Colors',
-    studioDesc: 'Biome palette and terrain material colors.',
-    icon: PANEL_ICONS.planet,
-    modes: ['planet', 'studio', 'infinite'],
-  },
-  biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
-  water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
-  props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
-  clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
-  visuals: { label: 'Visuals', title: 'Visuals', desc: 'Tile post effects, HDR sky and terrain surface polish.', icon: PANEL_ICONS.visuals, modes: ['studio'] },
-  skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },
-  lighting: { label: 'Lighting', title: 'Lighting', desc: 'Sun, atmosphere and fog.', icon: PANEL_ICONS.lighting },
-  export: { label: 'Export', title: 'Export', desc: 'Export meshes and textures.', icon: PANEL_ICONS.export },
-  performance: { label: 'Performance', title: 'Performance', desc: 'GPU, water, fog and cloud budgets.', icon: PANEL_ICONS.performance },
-  debug: { label: 'Debug', title: 'Debug', desc: 'Live stats and diagnostics.', icon: PANEL_ICONS.debug },
-  splines: { label: 'Splines', title: 'Splines', desc: 'Editable roads and rivers.', icon: PANEL_ICONS.splines, modes: ['studio'] },
-  history: { label: 'History', title: 'History', desc: 'Creator checkpoints and actions.', icon: PANEL_ICONS.history },
-};
-
-// Order used by the left toolbar.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
-
-export function panelAvailable(id, worldMode) {
-  const meta = PANEL_META[id];
-  if (!meta) return false;
-  return !meta.modes || meta.modes.includes(worldMode);
-}
-
-export function getPanelDisplay(id, worldMode) {
-  const meta = PANEL_META[id];
-  if (!meta) return { label: id, title: id, desc: '' };
-  if (worldMode !== 'planet' && meta.studioLabel) {
-    return {
-      label: meta.studioLabel,
-      title: meta.studioTitle ?? meta.studioLabel,
-      desc: meta.studioDesc ?? meta.desc,
-    };
-  }
-  return { label: meta.label, title: meta.title, desc: meta.desc };
-}
 
 // ---------------------------------------------------------------- helpers
 function SeedRow({ seed, onParam, onRandomizeSeed }) {

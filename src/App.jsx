@@ -9,11 +9,10 @@ import { normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
-import { panelAvailable, PANEL_ORDER, getPanelDisplay } from './components/panels/index.jsx';
+import { panelAvailable, PANEL_ORDER, getPanelDisplay } from './components/panels/panelMeta.js';
 import { searchSettings } from './components/panels/settingsSearch.js';
 import TopBar from './components/TopBar.jsx';
 import LeftToolbar from './components/ui/LeftToolbar.jsx';
-import SideDrawer from './components/ui/SideDrawer.jsx';
 import {
   loadToolsRailLayout,
   saveToolsRailLayout,
@@ -48,7 +47,9 @@ import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
-const NodeWorkspace = lazy(() => import('./components/nodes/NodeWorkspace.jsx'));
+const SideDrawer = lazy(() => import('./components/ui/SideDrawer.jsx'));
+const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
+const NodeWorkspace = lazy(loadNodeWorkspace);
 
 const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
 const yesNo = (value) => (value ? 'On' : 'Off');
@@ -137,6 +138,7 @@ export default function App() {
   const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0 });
   const [nodesPreviewVisible, setNodesPreviewVisible] = useState(false);
   const graphCompileTimerRef = useRef(null);
+  const graphUniformFrameRef = useRef(null);
   const pendingGraphRef = useRef(null);
 
   // ---- toasts ----
@@ -457,6 +459,7 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
     const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
     landingPreviewActiveRef.current = false;
     landingPreviewSessionRef.current += 1;
@@ -505,24 +508,13 @@ export default function App() {
       if (!project?.terrain || !eng) return;
       stopLandingPreviews();
       const normalized = normalizeProject(project);
+      if (normalized.terrain.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
       if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
       }
       await eng.loadSeedJSON(normalized.terrain);
       setCurrentProject(normalized);
       showToast(`Opened ${normalized.metadata?.name ?? 'terrain project'}`, 'success');
-    };
-    const onPreviewProject = async (event) => {
-      const project = event.detail?.project;
-      const eng = engineRef.current;
-      const session = landingPreviewSessionRef.current;
-      if (!landingPreviewActiveRef.current || !project?.terrain || !eng) return;
-      const normalized = normalizeProject(project);
-      if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
-        await runModeSwitchRef.current('studio', { silent: true });
-      }
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current) return;
-      await eng.loadSeedJSON(normalized.terrain, { silent: true });
     };
     const previewSeed = (templateId, editorMode = 'procedural') => {
       const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
@@ -564,66 +556,21 @@ export default function App() {
       return templatePreviewQueueRef.current;
     };
     const onPreviewTemplate = (event) => {
-      // A template click can beat Landing's delayed preload after returning
-      // from an open project. Resume now instead of leaving Blank Nodes' flat
-      // graph shader on the live terrain.
       if (!landingRef.current?.visible || landingRef.current?.exiting) return;
+      if (event.detail?.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
       landingPreviewActiveRef.current = true;
-      // Every explicit selection owns a fresh session. This also invalidates a
-      // recent-project preview that may still be awaiting a world-mode switch.
-      const session = ++landingPreviewSessionRef.current;
-      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' })
-        .then(() => {
-          if (landingPreviewActiveRef.current && session === landingPreviewSessionRef.current) {
-            window.dispatchEvent(new Event('terrain-template:preload-complete'));
-          }
-        });
-    };
-    const onPreloadTemplatePreviews = (event) => {
-      landingPreviewActiveRef.current = true;
-      const session = ++landingPreviewSessionRef.current;
-      const restoreMode = event.detail?.editorMode === 'nodes' ? 'nodes' : 'procedural';
-      const restoreTemplateId = event.detail?.view === 'templates'
-        ? (event.detail?.templateId ?? (restoreMode === 'nodes' ? 'nodes-blank' : 'blank'))
-        : 'blank';
-      let completed = 0;
-      PROJECT_TEMPLATES.forEach((template) => {
-        let cached = null;
-        try { cached = sessionStorage.getItem(projectTemplatePreviewCacheKey(template.id)); } catch { /* cache is optional */ }
-        if (cached) {
-          completed += 1;
-          window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, image: cached } }));
-          window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
-          return;
-        }
-        templatePreviewQueueRef.current = templatePreviewQueueRef.current.then(async () => {
-          await captureTemplateThumbnail(template.id, { silent: true, editorMode: 'procedural', session });
-          if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current) return;
-          completed += 1;
-          window.dispatchEvent(new CustomEvent('terrain-template:progress', { detail: { completed, total: PROJECT_TEMPLATES.length } }));
-        }).catch(() => {});
-      });
-      // End the bake on the user's current selection. This is essential when
-      // the gallery was opened from a flat Blank Nodes project: a delayed
-      // preload must not overwrite the requested procedural terrain.
-      queueTemplatePreview(restoreTemplateId, { silent: true, editorMode: restoreMode });
-      templatePreviewQueueRef.current = templatePreviewQueueRef.current
-        .then(() => {
-          if (landingPreviewActiveRef.current && session === landingPreviewSessionRef.current) window.dispatchEvent(new Event('terrain-template:preload-complete'));
-        })
-        .catch(() => {});
+      // Every explicit selection owns a fresh session so an older queued
+      // procedural preview can never overwrite it.
+      landingPreviewSessionRef.current += 1;
+      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
     };
     window.addEventListener('terrain-project:new', onNewProject);
     window.addEventListener('terrain-project:open', onOpenProject);
-    window.addEventListener('terrain-project:preview', onPreviewProject);
     window.addEventListener('terrain-template:preview', onPreviewTemplate);
-    window.addEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     return () => {
       window.removeEventListener('terrain-project:new', onNewProject);
       window.removeEventListener('terrain-project:open', onOpenProject);
-      window.removeEventListener('terrain-project:preview', onPreviewProject);
       window.removeEventListener('terrain-template:preview', onPreviewTemplate);
-      window.removeEventListener('terrain-template:preload', onPreloadTemplatePreviews);
     };
   }, [createProjectFromTemplate, setCurrentProject, showToast]);
 
@@ -984,6 +931,8 @@ export default function App() {
     setTerrainGraph(next);
     pendingGraphRef.current = next;
     if (meta.structural) {
+      if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
+      graphUniformFrameRef.current = null;
       if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
       graphCompileTimerRef.current = setTimeout(() => {
         graphCompileTimerRef.current = null;
@@ -991,18 +940,32 @@ export default function App() {
         pendingGraphRef.current = null;
         if (pending) engineRef.current?.setTerrainGraph(pending, { structural: true });
       }, 200);
-    } else if (!graphCompileTimerRef.current) {
-      pendingGraphRef.current = null;
-      engineRef.current?.setTerrainGraph(next, { structural: false });
+    } else if (!graphCompileTimerRef.current && !graphUniformFrameRef.current) {
+      // Range inputs can emit faster than the display refresh rate. Repack the
+      // latest uniform values once per frame instead of evaluating every
+      // intermediate pointer event.
+      graphUniformFrameRef.current = requestAnimationFrame(() => {
+        graphUniformFrameRef.current = null;
+        const pending = pendingGraphRef.current;
+        pendingGraphRef.current = null;
+        if (pending) engineRef.current?.setTerrainGraph(pending, { structural: false });
+      });
     }
   }, []);
 
   const handleStartBlankGraph = useCallback((mode = 'terrain') => {
     if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
+    graphUniformFrameRef.current = null;
     graphCompileTimerRef.current = null; pendingGraphRef.current = null;
     const next = createBlankGraph(mode);
     setTerrainGraph(next);
     engineRef.current?.setTerrainGraph(next, { structural: true });
+  }, []);
+
+  useEffect(() => () => {
+    if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
   }, []);
 
   const handleGraphView = useCallback((next) => {
@@ -1669,16 +1632,18 @@ export default function App() {
           {showBlockingOverlay && <LoadingOverlay task={block} />}
         </div>
 
-        {showToolPanels && (
-          <SideDrawer
-            activePanel={effectivePanel}
-            ctx={ctx}
-            onClose={() => setActivePanel(null)}
-            layout={drawerLayout}
-            onLayoutChange={handleDrawerLayout}
-            shellRef={appShellRef}
-            toolsRailEdge={toolsRailAttr}
-          />
+        {showToolPanels && drawerOpen && (
+          <Suspense fallback={null}>
+            <SideDrawer
+              activePanel={effectivePanel}
+              ctx={ctx}
+              onClose={() => setActivePanel(null)}
+              layout={drawerLayout}
+              onLayoutChange={handleDrawerLayout}
+              shellRef={appShellRef}
+              toolsRailEdge={toolsRailAttr}
+            />
+          </Suspense>
         )}
       </div>
 

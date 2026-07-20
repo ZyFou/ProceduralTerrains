@@ -940,3 +940,14 @@ export function rebuildTerrainShaderSource(mat, stackGLSL) {
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.needsUpdate = true;
 }
+
+// Node authoring keeps the inexpensive palette-based fragment while swapping
+// only the generated height source. This preserves a correct live 3D preview
+// without paying for the full surface/detail fragment after every graph edit.
+export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
+  const h = buildHeightGLSL(stackGLSL.body2d);
+  mat.vertexShader = buildVertex(h);
+  mat.fragmentShader = buildMinimalFragment();
+  mat.userData.minimalFragment = true;
+  mat.needsUpdate = true;
+}

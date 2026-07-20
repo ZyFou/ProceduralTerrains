@@ -42,6 +42,38 @@ function heightTransitionHarness() {
 }
 
 describe('atomic terrain height transitions', () => {
+  it('compiles only the visible canvas terrain variant when node-project water is disabled', async () => {
+    const program = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'nodes';
+    engine.params.waterEnabled = false;
+    engine._compileMaterialVariants = vi.fn(async () => {});
+
+    await engine._rebuildStackMaterialsAsync(program);
+
+    expect(engine._compileMaterialVariants).toHaveBeenCalledTimes(1);
+    const [materials, options] = engine._compileMaterialVariants.mock.calls[0];
+    expect(materials).toHaveLength(1);
+    expect(materials[0].userData.minimalFragment).toBe(true);
+    expect(options).toMatchObject({ canvasOnly: true, stagger: true });
+    expect(engine._underwaterWarmed).toBe(false);
+    expect(engine.terrainMaterial.userData.minimalFragment).toBe(true);
+  });
+
+  it('skips WebGL compilation when a uniform-only update keeps the live shader signature', async () => {
+    const program = compileTerrainGraph(createNodeTemplateGraph('nodes-dunes')).program;
+    const engine = heightTransitionHarness();
+    engine._liveHeightSig = program.sig;
+    engine.terrainMaterial.defines.OCTAVES = 6;
+    engine._compileMaterialVariants = vi.fn(async () => {});
+
+    const result = await engine._rebuildStackMaterialsAsync(program);
+
+    expect(result.cached).toBe(true);
+    expect(engine._compileMaterialVariants).not.toHaveBeenCalled();
+    expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps rendering gated until the latest rapid project load commits terrain and water together', async () => {
     const proceduralProgram = compileTerrainGraph(createNodeTemplateGraph('nodes-dunes')).program;
     const nodesProgram = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;

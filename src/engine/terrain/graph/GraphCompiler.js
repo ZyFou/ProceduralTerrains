@@ -9,6 +9,22 @@ import { findOutputNode, inputEdge, reachableNodeIds, topologicalSort, validateG
 export const GRAPH_FUNCTIONS_MARKER = '/*__TERRAIN_GRAPH_FUNCTIONS__*/';
 export const GRAPH_BODY_MARKER = '/*__TERRAIN_GRAPH_BODY__*/';
 
+// Continuous inspector edits only change packed uniforms. Cache the generated
+// GLSL by structural signature so dragging a slider does not rebuild the same
+// large shader string on every pointer event. Keep the cache small because old
+// structural variants are also retained by the WebGL program cache.
+const SHADER_SOURCE_CACHE_LIMIT = 32;
+const shaderSourceCache = new Map();
+
+function cacheShaderSource(sig, source) {
+  if (shaderSourceCache.has(sig)) shaderSourceCache.delete(sig);
+  shaderSourceCache.set(sig, source);
+  if (shaderSourceCache.size > SHADER_SOURCE_CACHE_LIMIT) {
+    shaderSourceCache.delete(shaderSourceCache.keys().next().value);
+  }
+  return source;
+}
+
 const vec4 = () => [0, 0, 0, 0];
 const safe = (id) => `graph_${String(id).replace(/[^a-zA-Z0-9_]/g, '_')}`;
 const num = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -371,13 +387,20 @@ export function compileTerrainGraph(graph) {
     const node = nodes.get(id); const count = getGraphNodeDefinition(node.type)?.uniformSlots?.(node) || 0;
     if (count) { slotById.set(id, slot); slot += count; }
   }
-  const functions = ordered.filter((id) => reachable.has(id)).map((id) => nodeFunction(graph, nodes.get(id), slotById.get(id))).join('\n\n');
   const output = findOutputNode(graph);
   const sig = structuralSignature(graph, ordered, slotById);
+  let shaderSource = shaderSourceCache.get(sig);
+  if (!shaderSource) {
+    const functions = ordered.filter((id) => reachable.has(id)).map((id) => nodeFunction(graph, nodes.get(id), slotById.get(id))).join('\n\n');
+    shaderSource = cacheShaderSource(sig, {
+      body2d: `${GRAPH_FUNCTIONS_MARKER}\n${functions}\n${GRAPH_BODY_MARKER}\n  h = ${safe(output.id)}(xz, c);`,
+      body3d: '',
+    });
+  }
   const program = {
     kind: 'graph', sig,
-    body2d: `${GRAPH_FUNCTIONS_MARKER}\n${functions}\n${GRAPH_BODY_MARKER}\n  h = ${safe(output.id)}(xz, c);`,
-    body3d: '',
+    body2d: shaderSource.body2d,
+    body3d: shaderSource.body3d,
     packUniforms: () => packUniforms(graph, ordered, slotById),
     evaluate2D: cpuEvaluator(graph),
     graph: structuredClone(graph), diagnostics: [], slotCount: slot,
