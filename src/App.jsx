@@ -33,7 +33,7 @@ import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
-import ToastContainer, { classifyToast } from './components/ui/Toast.jsx';
+import { classifyToast } from './components/ui/Toast.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
@@ -142,12 +142,27 @@ export default function App() {
   const pendingGraphRef = useRef(null);
 
   // ---- toasts ----
-  const [toasts, setToasts] = useState([]);
+  const [recentNotifications, setRecentNotifications] = useState([]);
+  const [notificationsIgnored, setNotificationsIgnored] = useState(() => {
+    try { return localStorage.getItem('terrain-studio.ignore-notifications') === 'true'; }
+    catch { return false; }
+  });
+  const notificationsIgnoredRef = useRef(notificationsIgnored);
+  notificationsIgnoredRef.current = notificationsIgnored;
   const toastId = useRef(0);
   const pushToast = useCallback((msg, type = 'info') => {
+    if (notificationsIgnoredRef.current) return;
     const id = ++toastId.current;
-    setToasts((prev) => [...prev, { id, msg, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2800);
+    const notification = { id, msg, type, timestamp: Date.now() };
+    setRecentNotifications((prev) => [notification, ...prev].slice(0, 12));
+  }, []);
+  const clearNotifications = useCallback(() => setRecentNotifications([]), []);
+  const toggleNotificationLogging = useCallback(() => {
+    setNotificationsIgnored((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('terrain-studio.ignore-notifications', String(next)); } catch { /* ignore storage failures */ }
+      return next;
+    });
   }, []);
   const pushToastRef = useRef(pushToast);
   pushToastRef.current = pushToast;
@@ -1477,6 +1492,10 @@ export default function App() {
         onOpenSettingsSearch={openSettingsSearch}
         settingsSearchOpen={settingsSearchOpen}
         onOpenUiSettings={() => setUiSettingsOpen(true)}
+        recentNotifications={recentNotifications}
+        notificationsIgnored={notificationsIgnored}
+        onClearNotifications={clearNotifications}
+        onToggleNotificationLogging={toggleNotificationLogging}
       />
 
       <div
@@ -1693,8 +1712,6 @@ export default function App() {
         perfOpen={perfOverlay.settings.open}
         onPerfToggle={perfOverlay.toggleOpen}
       />
-
-      <ToastContainer toasts={toasts} />
 
       {perfOverlay.settings.open && (
         <Suspense fallback={null}>

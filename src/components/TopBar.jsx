@@ -19,6 +19,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
+import NotificationCenter from './ui/Toast.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
   <svg viewBox={viewBox}>
@@ -43,6 +44,10 @@ export default function TopBar({
   onUndo, onRedo, canUndo, canRedo,
   onOpenHistory, onOpenProjects,
   onOpenUiSettings,
+  recentNotifications = [],
+  notificationsIgnored = false,
+  onClearNotifications,
+  onToggleNotificationLogging,
 }) {
   const fileRef = useRef(null);
   const fileMenuRef = useRef(null);
@@ -269,6 +274,12 @@ export default function TopBar({
       </div>
 
       <div className="tb-group tb-right">
+        <NotificationCenter
+          recent={recentNotifications}
+          notificationsIgnored={notificationsIgnored}
+          onClear={onClearNotifications}
+          onToggleIgnore={onToggleNotificationLogging}
+        />
         <button
           className={`tb-btn primary${activePanel === 'export' ? ' active' : ''}`}
           onClick={() => onOpenPanel('export')}
