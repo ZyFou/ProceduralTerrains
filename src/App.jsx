@@ -157,7 +157,7 @@ export default function App() {
   const [projectMode, setProjectMode] = useState('procedural');
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
-  const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0 });
+  const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0, colorSlotCount: 0 });
   const [nodesPreviewVisible, setNodesPreviewVisible] = useState(false);
   const [nodePaletteDock, setNodePaletteDock] = useState({ detached: true, side: 'left', width: 208 });
   const graphCompileTimerRef = useRef(null);

@@ -19,6 +19,11 @@ import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
+const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
+vec3 applyTerrainGraphColor(vec3 fallback, vec2 xz, float h01, float slope, float detail, float moisture) {
+  return fallback;
+}
+`;
 
 // Quad shaders for baking
 const BAKE_VERTEX = /* glsl */ `
@@ -29,7 +34,7 @@ const BAKE_VERTEX = /* glsl */ `
   }
 `;
 
-const buildBakeFragment = (heightGLSL) => /* glsl */ `
+const buildBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
   precision highp float;
 
   ${COMMON_UNIFORMS_GLSL}
@@ -38,6 +43,7 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
   ${heightGLSL}
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+  ${graphColorGLSL}
 
   uniform float uAO;
   uniform float uNormalStrength;
@@ -99,6 +105,7 @@ const buildBakeFragment = (heightGLSL) => /* glsl */ `
     float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
     TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
+    tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
 
     if (uBakeMode == 2) {
       if (uBakeLighting) {
@@ -231,7 +238,7 @@ export class TerrainExporter {
       defines: { OCTAVES: oct },
       uniforms: bakeUniforms,
       vertexShader: BAKE_VERTEX,
-      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d))
+      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody)
     });
     quadMesh.material = bakeMat;
 

@@ -1,58 +1,46 @@
-# Procedural → Nodes Height Transition and Picker QA
+# Design QA — realistic terrain color nodes
 
-## Evidence
+## Visual truth
 
-- Source visual truth: `/var/folders/p4/2wybsmsn2xn2_0msnyqy_wlr0000gn/T/TemporaryItems/NSIRD_screencaptureui_kwom6s/Capture d’écran 2026-07-17 à 13.37.00.png`.
-- Local implementation: `http://127.0.0.1:6061/`.
-- Full browser-rendered implementation: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-workspace-1280x1200.png`.
-- Focused implementation region: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-picker-focus.png`.
-- Same-input source/implementation comparison: `/Users/gaetan/.codex/visualizations/2026/07/17/019f6f9a-eb04-7290-a989-503cee696601/terrain-height-picker-qa/nodes-picker-comparison.png`.
-- Viewport: 1280×1200 for the visual picker comparison; 1280×800 for the Procedural → Nodes load sequence.
-- State: a saved Mountain Range Procedural project was loaded first, followed immediately by a saved Alpine Ridges Nodes project. The Terrain Graph was expanded with its palette visible and the Terrain recipe group open.
+- Primary target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-6792f1d9-39c6-478e-a047-557ee1e1647b.png`
+- Gradient/control detail: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-651d1e5b-63d6-4c29-9ac9-961a322ef4a0.png`
+- Current-state reference: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-b8ed5df0-0334-45e6-add5-b8979a78343e.png`
 
-## Full-view Comparison Evidence
+The target is a muted, satellite-like terrain treatment: layered stone and soil colors, greener/moister valleys, restrained saturation, and materially different steep rock faces. The current-state reference is largely white, height-only, and terrace-dominant.
 
-The full implementation capture shows the loaded Alpine heightfield on the same frame as the active Terrain Graph. The terrain is visibly elevated on the first post-load frame, the saved graph is present, the status is Ready, and the right inspector remains stable. No flat-ground or floating-water intermediate frame was exposed during the browser-tested saved-project transition.
+## Render attempt
 
-## Focused Comparison Evidence
+- Local URL: `http://127.0.0.1:4173/`
+- Viewport: 1280 × 720
+- Tested state: default landing/boot state
+- Implementation screenshot: unavailable
+- Browser console: no application errors were reported by the in-app Browser
 
-The side-by-side comparison places the reported picker state and the revised implementation in one image. The implementation preserves the existing dark compact editor language while adding a persistent search control, total/result counts, click-to-add affordances, and a measured 10px gap between the 184px palette and the graph canvas. A focused region was required because the search field and palette-to-canvas gap are too small to judge reliably in the full editor capture.
+The Vite production preview responded with HTTP 200. In both the in-app Browser and the Chrome fallback, the existing boot overlay remained on “Starting terrain editor / Preparing random terrain workspace…”, leaving **Open App** disabled. Chrome later stopped responding to inspection commands. Both automated browser sessions were closed cleanly.
+
+## Comparison
+
+### Full-view pass
+
+Blocked. The editor, terrain viewport, and node graph never became available in the browser automation environment, so no honest full-view source-versus-implementation comparison could be made.
+
+### Focused-detail pass
+
+- Source gradient strip, realistic palette, terrain shading, and typed graph intent were inspected directly.
+- Implementation source was verified for typed Height/Color ports, gradient previews, realistic palette presets, surface-color shader integration, and separated template lanes.
+- Rendered focused-detail comparison remains blocked by the same boot gate.
+
+### Primary interaction pass
+
+Blocked before editor entry. No node creation, connection, preset selection, template loading, or terrain-orbit interaction could be exercised through browser automation.
 
 ## Findings
 
-No actionable P0, P1, or P2 issues remain.
+- **P1 — Visual QA environment blocker:** the pre-existing terrain-engine boot gate prevents automated access to the editor. Re-run visual comparison in a normal GPU/WebGL-enabled app session.
+- No P0 source-code, build, or test blocker was found.
 
-- Fonts and typography: the picker continues to use the product’s compact UI and mono hierarchy, with readable category labels, node labels, counts, and shortcut hints. Search placeholder text is visually subordinate without becoming illegible.
-- Spacing and layout rhythm: the picker has a 10px outer inset and a separate 10px right-side canvas gap. Search, sections, rows, and footer follow the existing 5–10px density scale; no content collides with the graph.
-- Colors and tokens: existing graphite surfaces, subtle borders, muted text, category dots, and blue active accents are reused. Focus uses the established active-border token.
-- Image quality and asset fidelity: no raster assets were introduced into the product UI. Existing Lucide icons remain crisp and consistent at the compact scale.
-- Copy and content: “Find a node…”, live result counts, and “all nodes” describe the picker behavior directly. Category names and node descriptions remain unchanged.
-- Icons and affordances: Search, clear, collapse, and plus icons align with their controls. A single click on a palette row now adds the node; drag-to-place remains available.
-- Accessibility: the filter has an explicit accessible name, clear control, visible focus state, semantic textbox, and keyboard-compatible buttons. The existing Shift+A global search remains documented.
-- Viewport resilience: the picker width uses dock variables and narrows at the existing 821–1179px desktop breakpoint; the palette-to-canvas gap remains explicit at both widths.
-- State synchronization: terrain and water height shaders now stay behind one atomic render gate, synchronize their compile-time octave define, and commit together. Superseded project compiles cannot overwrite the latest Nodes terrain.
-- AI-shortcut review: no placeholder art, custom SVG, CSS illustration, decorative blob, or generic card treatment was added.
+## Comparison history
 
-## Primary Interactions Tested
+- Baseline implementation pass only; no valid rendered implementation frame was available for iterative comparison.
 
-- Created a non-flat Mountain Range Procedural project and confirmed the terrain height rendered.
-- Created an Alpine Ridges Nodes project immediately afterward and confirmed the non-flat graph height rendered on entry.
-- Loaded the saved Mountain Range Procedural project, then loaded the saved Alpine Ridges Nodes project; the first visible Nodes frame was elevated and Ready.
-- Switched the home template preview from Blank Graph Nodes to the Procedural Mountain Range; the background changed from a flat slab to elevated mountains before project creation, and the created editor terrain remained elevated.
-- Reloaded with a saved Blank Nodes project as the newest recent project, confirmed its home preview was flat, then opened Templates and selected Procedural Mountain Range inside the delayed-preload race window; the gallery preview and created project both rendered full elevation.
-- Filtered the picker with `mount`; the palette reduced to three relevant results and exposed a clear control.
-- Clicked Mountain once in the picker; one disconnected Mountain node appeared in the graph and its settings opened in the inspector.
-- Confirmed the picker’s left inset, right canvas gap, category scroll, and graph organization frame at 1280×1200.
-- Checked browser warnings and errors after the full transition and interaction sequence; none were reported.
-
-## Comparison History
-
-- Pass 1: no P0/P1/P2 visual differences were found. The source’s cramped, edge-touching picker state is resolved by the visible search field and explicit palette-to-canvas gap. No visual fixes were required after the same-input comparison.
-
-## Runtime Verification
-
-- Automated tests: 136 passed across 12 test files, including both direction-specific height-transition regressions, the rapid out-of-order load case, and versioned procedural-template preview caching.
-- Production build: passed. The existing Vite large-chunk advisory remains unchanged.
-- Browser console: no errors or warnings.
-
-final result: passed
+final result: blocked

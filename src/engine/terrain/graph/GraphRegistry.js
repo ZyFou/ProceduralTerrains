@@ -1,15 +1,21 @@
 import { BLEND_LABELS } from '../noise/blendModes.js';
 import { activeLayers } from '../noise/NoiseStack.js';
 import { getNoiseType } from '../noise/noiseTypes.js';
+import { TERRAIN_GRADIENT_OPTIONS } from './TerrainGradientPresets.js';
 
 export const ANALYTIC_HEIGHT = 'analytic-height';
+export const ANALYTIC_COLOR = 'analytic-color';
 export const GRAPH_CAPACITY = 12;
+export const GRAPH_COLOR_CAPACITY = 8;
 
-const input = (id, label, required = true) => ({ id, label, type: ANALYTIC_HEIGHT, required });
-const output = (id = 'height', label = 'Height') => ({ id, label, type: ANALYTIC_HEIGHT });
+const input = (id, label, required = true, type = ANALYTIC_HEIGHT) => ({ id, label, type, required });
+const output = (id = 'height', label = 'Height', type = ANALYTIC_HEIGHT) => ({ id, label, type });
+const colorInput = (id = 'color', label = 'Color', required = true) => input(id, label, required, ANALYTIC_COLOR);
+const colorOutput = (id = 'color', label = 'Color') => output(id, label, ANALYTIC_COLOR);
 const number = (key, label, min, max, step, value, extra = {}) => ({
   key, label, type: 'number', min, max, step, default: value, ...extra,
 });
+const color = (key, label, value, extra = {}) => ({ key, label, type: 'color', default: value, ...extra });
 const select = (key, label, options, value, extra = {}) => ({
   key, label, type: 'enum', options, default: value, structural: true, ...extra,
 });
@@ -243,9 +249,110 @@ const definitions = [
     glslCompiler: execute('terrace'), cpuEvaluator: execute('terrace'),
   },
   {
+    id: 'geologyDetail', label: 'Geology Detail', category: 'Surface', color: 'amber',
+    description: 'Adds multi-scale rock structure, broken strata, and restrained ridge detail without flattening the base landform.',
+    executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
+    inspector: [
+      number('strength', 'Detail Strength', 0, 0.45, 0.005, 0.1, { section: 'Rock Structure' }),
+      number('scale', 'Detail Scale', 0.25, 12, 0.05, 3.2, { section: 'Rock Structure' }),
+      number('roughness', 'Ridge Breakup', 0, 1, 0.01, 0.58, { section: 'Rock Structure' }),
+      number('strata', 'Strata', 0, 1, 0.01, 0.24, { section: 'Stratification' }),
+      number('strataScale', 'Layer Frequency', 1, 32, 0.25, 11, { section: 'Stratification' }),
+      number('octaves', 'Detail Octaves', 2, 7, 1, 5, { structural: true, section: 'Fractal' }),
+      number('persistence', 'Persistence', 0.2, 0.8, 0.01, 0.48, { section: 'Fractal' }),
+      number('lacunarity', 'Lacunarity', 1.5, 3.2, 0.01, 2.15, { section: 'Fractal' }),
+      number('seed', 'Seed', 0, 999999, 1, 7103, { section: 'Variation' }),
+    ],
+    defaults: { strength: 0.1, scale: 3.2, roughness: 0.58, strata: 0.24, strataScale: 11, octaves: 5, persistence: 0.48, lacunarity: 2.15, seed: 7103 },
+    structuralParams: ['octaves'], uniformSlots: () => 1,
+    glslCompiler: execute('geologyDetail'), cpuEvaluator: execute('geologyDetail'),
+  },
+  {
+    id: 'naturalErosion', label: 'Natural Erosion', category: 'Simulate', color: 'cyan',
+    description: 'Softens unstable crests, deposits material in shallow basins, and carves fine drainage channels using an analytical neighborhood pass.',
+    executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
+    inspector: [
+      number('strength', 'Weathering', 0, 1, 0.01, 0.38, { section: 'Erosion' }),
+      number('radius', 'Talus Radius', 2, 180, 1, 34, { section: 'Erosion', digits: 0 }),
+      number('talus', 'Talus Preservation', 0, 1, 0.01, 0.62, { section: 'Erosion' }),
+      number('channels', 'Channel Carving', 0, 1, 0.01, 0.28, { section: 'Drainage' }),
+      number('channelScale', 'Channel Scale', 0.25, 8, 0.05, 1.4, { section: 'Drainage' }),
+      number('deposition', 'Deposition', 0, 1, 0.01, 0.22, { section: 'Drainage' }),
+      number('seed', 'Seed', 0, 999999, 1, 8209, { section: 'Variation' }),
+    ],
+    defaults: { strength: 0.38, radius: 34, talus: 0.62, channels: 0.28, channelScale: 1.4, deposition: 0.22, seed: 8209 },
+    structuralParams: [], uniformSlots: () => 1,
+    glslCompiler: execute('naturalErosion'), cpuEvaluator: execute('naturalErosion'),
+  },
+  {
+    id: 'terrainGradient', label: 'Terrain Gradient', category: 'Colorize', color: 'rose',
+    description: 'Maps rendered elevation through a curated satellite-style gradient with large-scale mineral and vegetation variation.',
+    executionKind: 'analytical', inputs: [], outputs: [colorOutput()], preview: 'gradient',
+    inspector: [
+      select('preset', 'Terrain Family', TERRAIN_GRADIENT_OPTIONS, 'alpine', { section: 'Gradient' }),
+      number('lowPoint', 'Lowland End', 0.05, 0.5, 0.01, 0.28, { section: 'Elevation Bands' }),
+      number('highPoint', 'Highland Start', 0.3, 0.82, 0.01, 0.62, { section: 'Elevation Bands' }),
+      number('summitPoint', 'Summit / Snow', 0.58, 1, 0.01, 0.86, { section: 'Elevation Bands' }),
+      number('variation', 'Natural Variation', 0, 0.5, 0.01, 0.16, { section: 'Surface Detail' }),
+      number('macroScale', 'Patch Scale', 0.05, 2, 0.01, 0.42, { section: 'Surface Detail' }),
+    ],
+    defaults: { preset: 'alpine', lowPoint: 0.28, highPoint: 0.62, summitPoint: 0.86, variation: 0.16, macroScale: 0.42 },
+    structuralParams: [], uniformSlots: () => 0, colorUniformSlots: () => 1,
+    glslCompiler: execute('terrainGradient'), cpuEvaluator: execute('terrainGradient'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
+    id: 'slopeTint', label: 'Slope Rock', category: 'Colorize', color: 'rose',
+    description: 'Exposes believable rock on steep faces while keeping flatter ledges and valleys tied to the incoming terrain color.',
+    executionKind: 'analytical', inputs: [colorInput('base', 'Base Color')], outputs: [colorOutput()], preview: 'color',
+    inspector: [
+      color('rockColor', 'Rock Color', '#6f6b63', { section: 'Rock' }),
+      number('slopeStart', 'Exposure Start', 0.04, 0.8, 0.01, 0.2, { section: 'Rock' }),
+      number('slopeEnd', 'Full Exposure', 0.08, 1, 0.01, 0.56, { section: 'Rock' }),
+      number('strength', 'Rock Amount', 0, 1, 0.01, 0.72, { section: 'Rock' }),
+      number('variation', 'Mineral Variation', 0, 0.5, 0.01, 0.12, { section: 'Surface Detail' }),
+      number('scale', 'Mineral Scale', 0.05, 4, 0.01, 0.78, { section: 'Surface Detail' }),
+    ],
+    defaults: { rockColor: '#6f6b63', slopeStart: 0.2, slopeEnd: 0.56, strength: 0.72, variation: 0.12, scale: 0.78 },
+    structuralParams: [], uniformSlots: () => 0, colorUniformSlots: () => 1,
+    glslCompiler: execute('slopeTint'), cpuEvaluator: execute('slopeTint'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
+    id: 'moistureTint', label: 'Moisture Tint', category: 'Colorize', color: 'rose',
+    description: 'Uses the terrain climate field to introduce dry soil and damp vegetation variation at geographic scale.',
+    executionKind: 'analytical', inputs: [colorInput('base', 'Base Color')], outputs: [colorOutput()], preview: 'color',
+    inspector: [
+      color('dryColor', 'Dry Tint', '#8c7458', { section: 'Climate' }),
+      color('wetColor', 'Wet Tint', '#314a39', { section: 'Climate' }),
+      number('amount', 'Climate Amount', 0, 1, 0.01, 0.3, { section: 'Climate' }),
+      number('balance', 'Wet / Dry Balance', 0.1, 0.9, 0.01, 0.5, { section: 'Climate' }),
+      number('softness', 'Transition', 0.02, 0.5, 0.01, 0.18, { section: 'Climate' }),
+    ],
+    defaults: { dryColor: '#8c7458', wetColor: '#314a39', amount: 0.3, balance: 0.5, softness: 0.18 },
+    structuralParams: [], uniformSlots: () => 0, colorUniformSlots: () => 1,
+    glslCompiler: execute('moistureTint'), cpuEvaluator: execute('moistureTint'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
+    id: 'colorGrade', label: 'Color Grade', category: 'Colorize', color: 'rose',
+    description: 'Finishes the terrain albedo with restrained saturation, contrast, exposure, and warm/cool balance.',
+    executionKind: 'analytical', inputs: [colorInput('base', 'Base Color')], outputs: [colorOutput()], preview: 'color',
+    inspector: [
+      number('saturation', 'Saturation', 0, 2, 0.01, 0.92, { section: 'Grade' }),
+      number('contrast', 'Contrast', 0.5, 1.8, 0.01, 1.04, { section: 'Grade' }),
+      number('exposure', 'Exposure', 0.5, 1.5, 0.01, 0.96, { section: 'Grade' }),
+      number('warmth', 'Warmth', -1, 1, 0.01, 0.02, { section: 'Grade' }),
+    ],
+    defaults: { saturation: 0.92, contrast: 1.04, exposure: 0.96, warmth: 0.02 },
+    structuralParams: [], uniformSlots: () => 0, colorUniformSlots: () => 1,
+    glslCompiler: execute('colorGrade'), cpuEvaluator: execute('colorGrade'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
     id: 'terrainOutput', label: 'Terrain Output', category: 'Output', color: 'output',
-    description: 'Connect the graph height here. Unconnected stays flat.',
-    executionKind: 'analytical', inputs: [input('height', 'Height', false)], outputs: [],
+    description: 'Connect height and optional surface color here. Unconnected height stays flat; unconnected color uses the project palette.',
+    executionKind: 'analytical', inputs: [input('height', 'Height', false), colorInput('color', 'Color', false)], outputs: [],
     inspector: [
       { key: 'normalize', label: 'Normalize Output', type: 'boolean', default: false },
       number('outMin', 'Output Min', -4, 4, 0.01, 0),

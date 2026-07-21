@@ -6,15 +6,16 @@ import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  Plus, Search, Trash2, Ungroup, X,
+  Palette, Plus, Search, Trash2, Ungroup, X,
 } from 'lucide-react';
 import {
-  TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
+  TERRAIN_OUTPUT_ID, addGraphNode, canConnectGraphNodes, connectGraphNodes, createBlankGraph,
   duplicateGraphSelection, groupGraphNodes, moveGraphGroup, moveGraphNodes,
   removeGraphEdges, removeGraphGroups, removeGraphNodes, setGraphMode,
   updateGraphGroup, updateGraphNode, updateGraphNodeParams,
 } from '../../engine/terrain/graph/GraphDocument.js';
-import { getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
+import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
+import { terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v1';
@@ -93,31 +94,34 @@ function NodePalette({
 function TerrainNode({ data, selected }) {
   const { node, invalid, connectionSource, onStartConnection, onCompleteConnection } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
+  const NodeIcon = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? Palette : Boxes;
   return (
     <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}`}>
       <div className="terrain-flow-node__header">
-        <span className="terrain-flow-node__icon"><Boxes size={12} aria-hidden /></span>
+        <span className="terrain-flow-node__icon"><NodeIcon size={12} aria-hidden /></span>
         <span className="terrain-flow-node__title">{node.label}</span>
         {definition.permanent ? <span className="terrain-flow-node__output">OUT</span> : null}
       </div>
       <div className="terrain-flow-node__ports">
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
-            <div className="terrain-flow-port input" key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={connectionSource ? 'connection-target' : ''} onClick={(event) => { event.stopPropagation(); onCompleteConnection?.({ nodeId: node.id, handleId: port.id }); }} title={connectionSource ? `Connect ${connectionSource.label} to ${port.label}` : `Click an output first, then click ${port.label}`} />
+            <div className={`terrain-flow-port input${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={`${port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'}${connectionSource ? (connectionSource.type === port.type ? ' connection-target' : ' connection-incompatible') : ''}`} onClick={(event) => { event.stopPropagation(); if (!connectionSource || connectionSource.type === port.type) onCompleteConnection?.({ nodeId: node.id, handleId: port.id }); }} title={connectionSource ? (connectionSource.type === port.type ? `Connect ${connectionSource.label} to ${port.label}` : `${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`) : `Click an output first, then click ${port.label}`} />
               <span>{port.label}</span>
             </div>
           ))}
         </div>
         <div className="terrain-flow-node__port-column outputs">
           {definition.outputs.map((port, index) => (
-            <div className="terrain-flow-port output" key={port.id}>
+            <div className={`terrain-flow-port output${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
               <span>{port.label}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={connectionSource?.nodeId === node.id && connectionSource?.handleId === port.id ? 'source-selected' : ''} onClick={(event) => { event.stopPropagation(); onStartConnection?.({ nodeId: node.id, handleId: port.id, label: `${node.label} ${port.label}` }); }} title="Drag from here, or click then click an input" />
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={`${port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'}${connectionSource?.nodeId === node.id && connectionSource?.handleId === port.id ? ' source-selected' : ''}`} onClick={(event) => { event.stopPropagation(); onStartConnection?.({ nodeId: node.id, handleId: port.id, type: port.type, label: `${node.label} ${port.label}` }); }} title={`Drag ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} from here, or click then click a matching input`} />
             </div>
           ))}
         </div>
       </div>
+      {definition.preview === 'gradient' ? <div className="terrain-flow-node__gradient" style={{ background: terrainGradientCss(node.params?.preset) }} aria-label={`${node.params?.preset || 'alpine'} terrain gradient`} /> : null}
+      {definition.preview === 'color' && node.params?.rockColor ? <div className="terrain-flow-node__color-chip"><span style={{ background: node.params.rockColor }} /><small>Rock tint</small></div> : null}
       <div className="terrain-flow-node__summary">
         {node.type === 'currentTerrain'
           ? `${node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0} classic layers`
@@ -164,6 +168,17 @@ function InspectorField({ field, value, onChange }) {
         }}>
           {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
+      </label>
+    );
+  }
+  if (field.type === 'color') {
+    return (
+      <label className="node-inspector-field node-inspector-color-field">
+        <span><span>{field.label}</span><output>{String(value || field.default).toUpperCase()}</output></span>
+        <span className="node-inspector-color-row">
+          <span className="node-inspector-color-swatch" style={{ background: value || field.default }} />
+          <input type="color" value={value || field.default} onChange={(event) => onChange(event.target.value, false)} />
+        </span>
       </label>
     );
   }
@@ -259,7 +274,7 @@ function NodeInspector({
       )}
       <footer className={`node-graph-health${graphState?.valid === false ? ' invalid' : ''}`}>
         {graphState?.valid === false ? <CircleAlert size={13} /> : <CheckCircle2 size={13} />}
-        <span>{graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 node slots`}</span>
+        <span>{graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 height · ${graphState?.colorSlotCount || 0} / 8 color`}</span>
       </footer>
     </aside>
   );
@@ -375,7 +390,7 @@ export default function NodeWorkspace({
   ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, connectionSource, nodeMeasurements, collapsedNodes, toggleGroup, startClickConnection, completeClickConnection]);
   const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
     ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false,
-    className: `terrain-flow-edge edge-${getGraphNodeDefinition(localGraph.nodes.find((node) => node.id === edge.source)?.type)?.color || 'blue'}`,
+    className: `terrain-flow-edge ${edge.type === ANALYTIC_COLOR ? 'edge-color' : 'edge-height'}`,
   })), [localGraph.edges, localGraph.nodes, selectedEdges, collapsedNodes]);
 
   const addNodeAt = useCallback((type, position) => {
@@ -627,6 +642,8 @@ export default function NodeWorkspace({
           nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={setInstance}
           defaultViewport={graphView || { x: 0, y: 0, zoom: 1 }} minZoom={0.18} maxZoom={2.2}
           snapToGrid snapGrid={[12, 12]} connectionRadius={30} selectionOnDrag panOnDrag={[1, 2]}
+          isValidConnection={(connection) => canConnectGraphNodes(graphRef.current, connection)}
+          connectionLineStyle={{ stroke: connectionSource?.type === ANALYTIC_COLOR ? 'var(--node-rose)' : 'var(--node-cyan)', strokeWidth: 2 }}
           elevateNodesOnSelect={false}
           deleteKeyCode={null} multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
           onMoveEnd={(_, viewport) => onGraphViewChange?.(viewport)}

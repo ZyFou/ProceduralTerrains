@@ -1753,7 +1753,7 @@ export class Engine {
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
-    this.cb.onGraphState?.({ valid: !this.terrainGraph || compiled?.ok === true, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this.cb.onGraphState?.({ valid: !this.terrainGraph || compiled?.ok === true, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
     this.cb.onGraphView?.({ ...this.graphView });
 
     this.tileAssemblyShape = 'square';
@@ -1978,6 +1978,15 @@ export class Engine {
       u.uLayerMaskB.value[i].set(p.maskB[i][0], p.maskB[i][1], p.maskB[i][2], p.maskB[i][3]);
       if (u.uLayerMaskC) u.uLayerMaskC.value[i].set(p.maskC[i][0], p.maskC[i][1], p.maskC[i][2], p.maskC[i][3]);
     }
+    if (p.colorA && u.uGraphColorA) {
+      for (let i = 0; i < p.colorA.length; i++) {
+        u.uGraphColorA.value[i].set(...p.colorA[i]);
+        u.uGraphColorB.value[i].set(...p.colorB[i]);
+        u.uGraphColorC.value[i].set(...p.colorC[i]);
+        u.uGraphColorD.value[i].set(...p.colorD[i]);
+        u.uGraphColorParams.value[i].set(...p.colorParams[i]);
+      }
+    }
   }
 
   /**
@@ -2053,6 +2062,7 @@ export class Engine {
       compiling: false,
       diagnostics: structuredClone(this._graphDiagnostics),
       slotCount: compiled.program?.slotCount ?? this._graphProgram?.slotCount ?? 0,
+      colorSlotCount: compiled.program?.colorSlotCount ?? this._graphProgram?.colorSlotCount ?? 0,
     });
 
     if (!compiled.ok) {
@@ -2068,16 +2078,16 @@ export class Engine {
     let ready = Promise.resolve({ swapped: false, error: null });
     if (this.worldMode === 'studio' && this.generationSource === 'graph') {
       if (needsCompile) {
-        this.cb.onGraphState?.({ valid: true, compiling: true, diagnostics: [], slotCount: compiled.program.slotCount });
+        this.cb.onGraphState?.({ valid: true, compiling: true, diagnostics: [], slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount });
         ready = this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph', atomic }).then((result) => {
           if (result?.error && this._graphProgram === compiled.program) {
             this._graphProgram = previousProgram;
             this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. The last valid terrain is still active.' }];
             this._syncCpuHeightProgram();
-            this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: previousProgram?.slotCount || 0 });
+            this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: previousProgram?.slotCount || 0, colorSlotCount: previousProgram?.colorSlotCount || 0 });
             if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
           } else if (result?.swapped && this._graphProgram === compiled.program) {
-            this.cb.onGraphState?.({ valid: true, compiling: false, diagnostics: [], slotCount: compiled.program.slotCount });
+            this.cb.onGraphState?.({ valid: true, compiling: false, diagnostics: [], slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount });
           }
           return result;
         });
@@ -2106,7 +2116,7 @@ export class Engine {
     this.generationSource = next;
     this.cb.onGenerationSource?.(next);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
-    this.cb.onGraphState?.({ valid: !!this._graphProgram && this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this.cb.onGraphState?.({ valid: !!this._graphProgram && this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
     this._syncCpuHeightProgram();
     if (this.worldMode === 'studio') {
       this._applyUniforms();
@@ -2117,7 +2127,7 @@ export class Engine {
         this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. Classic terrain remains active.' }];
         this._syncCpuHeightProgram();
         this._applyUniforms();
-        this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: 0 });
+        this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: 0, colorSlotCount: 0 });
         if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
       });
     }
@@ -5243,7 +5253,7 @@ export class Engine {
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
-    this.cb.onGraphState?.({ valid: !!this._graphProgram || this.generationSource === 'classic', compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this.cb.onGraphState?.({ valid: !!this._graphProgram || this.generationSource === 'classic', compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
     this.cb.onGraphView?.({ ...this.graphView });
     this.applyAll({ force: true });
     this._syncCpuHeightProgram();
@@ -5382,7 +5392,7 @@ export class Engine {
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
-    this.cb.onGraphState?.({ valid: this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0 });
+    this.cb.onGraphState?.({ valid: this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
     this._syncCpuHeightProgram();
     if (this.worldMode === 'studio') this._rebuildStackMaterialsAsync(this._activeHeightProgram());
 

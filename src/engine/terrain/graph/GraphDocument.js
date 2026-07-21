@@ -1,7 +1,9 @@
 import { cloneStack, defaultLegacyStack, migrateStack } from '../noise/NoiseStack.js';
-import { ANALYTIC_HEIGHT, GRAPH_CAPACITY, getGraphNodeDefinition, nodeDefaults } from './GraphRegistry.js';
+import {
+  ANALYTIC_HEIGHT, GRAPH_CAPACITY, GRAPH_COLOR_CAPACITY, getGraphNodeDefinition, nodeDefaults,
+} from './GraphRegistry.js';
 
-export const GRAPH_DOCUMENT_VERSION = 2;
+export const GRAPH_DOCUMENT_VERSION = 3;
 export const TERRAIN_OUTPUT_ID = 'terrain-output';
 export const DEFAULT_GRAPH_VIEW = Object.freeze({ x: 0, y: 0, zoom: 1 });
 export const GRAPH_MODES = Object.freeze(['noise', 'terrain']);
@@ -83,11 +85,25 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
   const idSet = new Set(normalizedNodes.map((node) => node.id));
   const edges = raw.edges
     .filter((edge) => edge && idSet.has(edge.source) && (idSet.has(edge.target) || edge.target === oldOutputId))
-    .map((edge) => ({
-      id: edge.id || uid('edge'), source: edge.source, sourceHandle: edge.sourceHandle || 'height',
-      target: edge.target === oldOutputId ? TERRAIN_OUTPUT_ID : edge.target,
-      targetHandle: edge.targetHandle || 'height', type: edge.type || ANALYTIC_HEIGHT,
-    }));
+    .map((edge) => {
+      const target = edge.target === oldOutputId ? TERRAIN_OUTPUT_ID : edge.target;
+      const sourceNode = normalizedNodes.find((node) => node.id === edge.source);
+      const targetNode = normalizedNodes.find((node) => node.id === target);
+      const sourceDef = getGraphNodeDefinition(sourceNode?.type);
+      const targetDef = getGraphNodeDefinition(targetNode?.type);
+      const requestedType = edge.type || null;
+      const sourcePort = sourceDef?.outputs.find((port) => port.id === edge.sourceHandle)
+        || sourceDef?.outputs.find((port) => !requestedType || port.type === requestedType)
+        || sourceDef?.outputs[0];
+      const targetPort = targetDef?.inputs.find((port) => port.id === edge.targetHandle)
+        || targetDef?.inputs.find((port) => port.type === (sourcePort?.type || requestedType))
+        || targetDef?.inputs[0];
+      return {
+        id: edge.id || uid('edge'), source: edge.source, sourceHandle: sourcePort?.id || edge.sourceHandle || 'height',
+        target, targetHandle: targetPort?.id || edge.targetHandle || 'height',
+        type: sourcePort?.type || targetPort?.type || requestedType || ANALYTIC_HEIGHT,
+      };
+    });
   const claimedNodes = new Set();
   const groupIds = new Set();
   const groups = (Array.isArray(raw.groups) ? raw.groups : [])
@@ -171,6 +187,14 @@ export function graphCapacity(graph) {
   }, 0);
 }
 
+export function graphColorCapacity(graph) {
+  const reachable = reachableNodeIds(graph);
+  return graph.nodes.reduce((sum, node) => {
+    if (!reachable.has(node.id)) return sum;
+    return sum + (getGraphNodeDefinition(node.type)?.colorUniformSlots?.(node) || 0);
+  }, 0);
+}
+
 export function validateGraph(graph, { requireInputs = true, enforceCapacity = true } = {}) {
   const diagnostics = [];
   const nodes = new Map();
@@ -210,6 +234,8 @@ export function validateGraph(graph, { requireInputs = true, enforceCapacity = t
   if (enforceCapacity) {
     const capacity = graphCapacity(graph);
     if (capacity > GRAPH_CAPACITY) diagnostics.push({ code: 'capacity', message: `This graph needs ${capacity} parameter slots; the realtime limit is ${GRAPH_CAPACITY}.` });
+    const colorCapacity = graphColorCapacity(graph);
+    if (colorCapacity > GRAPH_COLOR_CAPACITY) diagnostics.push({ code: 'color-capacity', message: `This graph needs ${colorCapacity} color slots; the realtime limit is ${GRAPH_COLOR_CAPACITY}.` });
   }
   return { ok: diagnostics.length === 0, diagnostics };
 }
@@ -297,11 +323,62 @@ export function removeGraphNodes(graph, nodeIds) {
   return { ...graph, nodes: graph.nodes.filter((node) => !ids.has(node.id)), edges: graph.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)), groups };
 }
 
-export function connectGraphNodes(graph, connection) {
-  const candidate = {
-    id: connection.id || uid('edge'), source: connection.source, sourceHandle: connection.sourceHandle || 'height',
-    target: connection.target, targetHandle: connection.targetHandle || 'height', type: connection.type || ANALYTIC_HEIGHT,
+export function resolveGraphConnection(graph, connection) {
+  const sourceNode = graph.nodes.find((node) => node.id === connection?.source);
+  const targetNode = graph.nodes.find((node) => node.id === connection?.target);
+  if (!sourceNode || !targetNode) throw new GraphValidationError('dangling-edge', 'Choose an existing source and target node.');
+  if (sourceNode.id === targetNode.id) throw new GraphValidationError('self-link', 'A node cannot connect to itself.');
+
+  const sourceDef = getGraphNodeDefinition(sourceNode.type);
+  const targetDef = getGraphNodeDefinition(targetNode.type);
+  const requestedSource = connection.sourceHandle
+    ? sourceDef?.outputs.find((port) => port.id === connection.sourceHandle)
+    : null;
+  const requestedTarget = connection.targetHandle
+    ? targetDef?.inputs.find((port) => port.id === connection.targetHandle)
+    : null;
+  if (connection.sourceHandle && !requestedSource) {
+    throw new GraphValidationError('incompatible-port', `${sourceNode.label || sourceNode.type} has no “${connection.sourceHandle}” output.`);
+  }
+  if (connection.targetHandle && !requestedTarget) {
+    throw new GraphValidationError('incompatible-port', `${targetNode.label || targetNode.type} has no “${connection.targetHandle}” input.`);
+  }
+
+  const sourceCandidates = requestedSource ? [requestedSource] : (sourceDef?.outputs || []);
+  const targetCandidates = requestedTarget ? [requestedTarget] : (targetDef?.inputs || []);
+  let pair = null;
+  for (const sourcePort of sourceCandidates) {
+    const targetPort = targetCandidates.find((port) => port.type === sourcePort.type
+      && (!connection.type || connection.type === port.type));
+    if (targetPort) { pair = { sourcePort, targetPort }; break; }
+  }
+  if (!pair) {
+    const sourceLabel = requestedSource?.label || 'this output';
+    const targetLabel = requestedTarget?.label || 'this input';
+    throw new GraphValidationError('incompatible-port', `${sourceLabel} cannot connect to ${targetLabel}. Height and Color cables cannot be mixed.`);
+  }
+
+  return {
+    id: connection.id || uid('edge'), source: sourceNode.id, sourceHandle: pair.sourcePort.id,
+    target: targetNode.id, targetHandle: pair.targetPort.id, type: pair.sourcePort.type,
   };
+}
+
+export function canConnectGraphNodes(graph, connection) {
+  try {
+    const candidate = resolveGraphConnection(graph, connection);
+    const next = {
+      ...graph,
+      edges: [...graph.edges.filter((edge) => !(edge.target === candidate.target && edge.targetHandle === candidate.targetHandle)), candidate],
+    };
+    return validateGraph(next, { requireInputs: false, enforceCapacity: false }).ok;
+  } catch {
+    return false;
+  }
+}
+
+export function connectGraphNodes(graph, connection) {
+  const candidate = resolveGraphConnection(graph, connection);
   const next = {
     ...graph,
     edges: [...graph.edges.filter((edge) => !(edge.target === candidate.target && edge.targetHandle === candidate.targetHandle)), candidate],

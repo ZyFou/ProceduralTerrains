@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import {
-  TERRAIN_OUTPUT_ID, graphCapacity, reachableNodeIds, validateGraph,
+  TERRAIN_OUTPUT_ID, graphCapacity, graphColorCapacity, inputEdge, reachableNodeIds, validateGraph,
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
@@ -23,6 +23,11 @@ describe('Nodes project templates', () => {
     expect(graph.nodes.filter((node) => node.id === TERRAIN_OUTPUT_ID)).toHaveLength(1);
     expect(reachableNodeIds(graph).size).toBe(graph.nodes.length);
     expect(graphCapacity(graph)).toBeLessThanOrEqual(12);
+    expect(graphColorCapacity(graph)).toBeLessThanOrEqual(8);
+    if (templateId !== 'nodes-blank') {
+      expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')?.type).toBe('analytic-color');
+      expect(compiled.program.colorBody).toContain('applyTerrainGraphColor');
+    }
   });
 
   it('returns fresh documents and safely falls back to Blank graph', () => {

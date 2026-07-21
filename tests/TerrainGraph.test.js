@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { makeLayer, makeStack } from '../src/engine/terrain/noise/NoiseStack.js';
 import {
   GraphValidationError, TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
-  createGraphFromStack, downstreamNodeIds, duplicateGraphSelection, graphCapacity, groupGraphNodes, inputEdge,
+  createGraphFromStack, downstreamNodeIds, duplicateGraphSelection, graphCapacity, graphColorCapacity, groupGraphNodes, inputEdge,
   migrateGraphDocument, moveGraphGroup, moveGraphNodes, reachableNodeIds, removeGraphGroups, removeGraphNodes,
   setGraphMode, topologicalSort, updateGraphGroup, updateGraphNodeParams, validateGraph,
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
-import { getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
+import { ANALYTIC_COLOR, ANALYTIC_HEIGHT, getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
 import { SEED_DOMAIN_RADIUS, seedDomainOffset } from '../src/engine/terrain/noise/seedDomain.js';
 
 const uniforms = {
@@ -32,7 +32,8 @@ function graphForRegistryNode(type) {
     return { graph, node };
   }
   for (const [index, port] of definition.inputs.entries()) {
-    graph = addGraphNode(graph, 'constant', { x: 0, y: index * 100 }, { params: { value: 0.2 + index * 0.3, strength: 1 } });
+    const sourceType = port.type === ANALYTIC_COLOR ? 'terrainGradient' : 'constant';
+    graph = addGraphNode(graph, sourceType, { x: 0, y: index * 100 }, { params: { value: 0.2 + index * 0.3, strength: 1 } });
     graph = connectGraphNodes(graph, { source: graph.nodes.at(-1).id, target: node.id, targetHandle: port.id });
   }
   graph = connectGraphNodes(graph, { source: node.id, target: TERRAIN_OUTPUT_ID });
@@ -42,7 +43,7 @@ function graphForRegistryNode(type) {
 describe('terrain graph document', () => {
   it('starts in Terrain Graph mode and can switch sub-modes without changing the recipe', () => {
     const graph = createBlankGraph();
-    expect(graph).toMatchObject({ version: 2, mode: 'terrain', groups: [] });
+    expect(graph).toMatchObject({ version: 3, mode: 'terrain', groups: [] });
     const noise = setGraphMode(graph, 'noise');
     expect(noise.mode).toBe('noise');
     expect(noise.nodes).toEqual(graph.nodes);
@@ -96,6 +97,21 @@ describe('terrain graph document', () => {
     expect(() => connectGraphNodes(graph, { source: b.id, target: a.id, targetHandle: 'source' })).toThrow(GraphValidationError);
     expect(() => connectGraphNodes(graph, { source: a.id, target: a.id, targetHandle: 'source' })).toThrow(GraphValidationError);
     expect(() => connectGraphNodes(graph, { source: a.id, sourceHandle: 'missing', target: TERRAIN_OUTPUT_ID })).toThrow(GraphValidationError);
+  });
+
+  it('infers typed color handles, replaces color independently, and rejects height-to-color links', () => {
+    let graph = createBlankGraph();
+    graph = addGraphNode(graph, 'terrainGradient', { x: 0, y: 160 }); const gradient = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'slopeTint', { x: 200, y: 160 }); const slope = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'fbm', { x: 0, y: 0 }); const height = graph.nodes.at(-1);
+    graph = connectGraphNodes(graph, { source: gradient.id, target: slope.id });
+    graph = connectGraphNodes(graph, { source: slope.id, target: TERRAIN_OUTPUT_ID });
+    graph = connectGraphNodes(graph, { source: height.id, target: TERRAIN_OUTPUT_ID });
+    expect(inputEdge(graph, slope.id, 'base')).toMatchObject({ sourceHandle: 'color', type: ANALYTIC_COLOR });
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')).toMatchObject({ source: slope.id, type: ANALYTIC_COLOR });
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'height')).toMatchObject({ source: height.id, type: ANALYTIC_HEIGHT });
+    expect(graphColorCapacity(graph)).toBe(2);
+    expect(() => connectGraphNodes(graph, { source: height.id, target: slope.id, targetHandle: 'base' })).toThrow(GraphValidationError);
   });
 
   it('sorts dependencies, ignores disconnected experiments, and propagates dirtiness downstream', () => {
@@ -183,7 +199,7 @@ describe('analytical terrain graph compiler', () => {
       expect(definition.executionKind).toBe('analytical');
       expect(definition.glslCompiler).toBeTypeOf('function');
       expect(definition.cpuEvaluator).toBeTypeOf('function');
-      expect([...definition.inputs, ...definition.outputs].every((port) => port.type === 'analytic-height')).toBe(true);
+      expect([...definition.inputs, ...definition.outputs].every((port) => [ANALYTIC_HEIGHT, ANALYTIC_COLOR].includes(port.type))).toBe(true);
       expect(JSON.parse(JSON.stringify(definition.defaults))).toEqual(definition.defaults);
     }
   });
@@ -194,6 +210,34 @@ describe('analytical terrain graph compiler', () => {
     for (const type of ['deterministicNoise', 'mountain', 'mountainRange', 'ridge', 'island', 'singleCrater']) expect(terrainIds.has(type)).toBe(true);
     for (const type of ['mountain', 'mountainRange', 'ridge', 'island', 'singleCrater']) expect(noiseIds.has(type)).toBe(false);
     expect(noiseIds.has('deterministicNoise')).toBe(true);
+    for (const type of ['terrainGradient', 'slopeTint', 'moistureTint', 'colorGrade']) {
+      expect(terrainIds.has(type)).toBe(true);
+      expect(noiseIds.has(type)).toBe(false);
+    }
+  });
+
+  it('compiles a realistic height and color graph into separate shader streams', () => {
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'mountainRange', { x: 0, y: 0 }); const range = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'naturalErosion', { x: 200, y: 0 }); const erosion = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'geologyDetail', { x: 400, y: 0 }); const geology = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'terrainGradient', { x: 0, y: 180 }, { params: { preset: 'alpine' } }); const gradient = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'slopeTint', { x: 200, y: 180 }); const slope = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'colorGrade', { x: 400, y: 180 }); const grade = graph.nodes.at(-1);
+    graph = connectGraphNodes(graph, { source: range.id, target: erosion.id });
+    graph = connectGraphNodes(graph, { source: erosion.id, target: geology.id });
+    graph = connectGraphNodes(graph, { source: geology.id, target: TERRAIN_OUTPUT_ID });
+    graph = connectGraphNodes(graph, { source: gradient.id, target: slope.id });
+    graph = connectGraphNodes(graph, { source: slope.id, target: grade.id });
+    graph = connectGraphNodes(graph, { source: grade.id, target: TERRAIN_OUTPUT_ID });
+    const result = compileTerrainGraph(graph);
+    expect(result.ok).toBe(true);
+    expect(result.program.slotCount).toBe(3);
+    expect(result.program.colorSlotCount).toBe(3);
+    expect(result.program.colorBody).toContain('applyTerrainGraphColor');
+    expect(result.program.colorBody).toContain('uGraphColorA');
+    expect(result.program.packUniforms().colorA).toHaveLength(8);
+    expect(Number.isFinite(result.program.evaluate2D(12.5, -7.25, ctx))).toBe(true);
   });
 
   it('rebuilds deterministic noise identically for the same seed and differently for another seed', () => {

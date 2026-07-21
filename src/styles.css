@@ -3921,6 +3921,7 @@ input[type="color"].palette-color-input {
   --node-blue: #62a5ff;
   --node-violet: #aa82e8;
   --node-amber: #e5a93f;
+  --node-rose: #e879a9;
   --node-output: #f3d35b;
 }
 .nodes-workspace-loading {
@@ -4071,7 +4072,9 @@ input[type="color"].palette-color-input {
 .node-graph-dock .react-flow__controls-button:hover { background: var(--bg-control); color: var(--accent); }
 .node-graph-dock .react-flow__controls-button svg { fill: currentColor; }
 .node-graph-dock .react-flow__selection { background: rgba(83, 172, 255, .08); border: 1px solid rgba(83, 172, 255, .45); }
-.terrain-flow-edge .react-flow__edge-path { stroke: var(--node-blue); stroke-width: 1.55; }
+.terrain-flow-edge .react-flow__edge-path { stroke: var(--node-cyan); stroke-width: 1.55; }
+.terrain-flow-edge.edge-color .react-flow__edge-path { stroke: var(--node-rose); stroke-width: 1.8; }
+.terrain-flow-edge.edge-height .react-flow__edge-path { stroke: var(--node-cyan); }
 .terrain-flow-edge.edge-green .react-flow__edge-path { stroke: var(--node-green); }
 .terrain-flow-edge.edge-cyan .react-flow__edge-path { stroke: var(--node-cyan); }
 .terrain-flow-edge.edge-violet .react-flow__edge-path { stroke: var(--node-violet); }
@@ -4125,6 +4128,7 @@ input[type="color"].palette-color-input {
 .terrain-flow-node.tone-cyan { border-color: color-mix(in srgb, var(--node-cyan) 70%, #27303b); }
 .terrain-flow-node.tone-violet { border-color: color-mix(in srgb, var(--node-violet) 70%, #27303b); }
 .terrain-flow-node.tone-amber { border-color: color-mix(in srgb, var(--node-amber) 75%, #27303b); }
+.terrain-flow-node.tone-rose { border-color: color-mix(in srgb, var(--node-rose) 72%, #27303b); }
 .terrain-flow-node.tone-output { border-color: color-mix(in srgb, var(--node-output) 80%, #27303b); }
 .terrain-flow-node.selected { box-shadow: 0 0 0 1px var(--text-bright), 0 8px 24px rgba(0,0,0,.42); }
 .terrain-flow-node.invalid { border-style: dashed; box-shadow: 0 0 0 1px rgba(255, 91, 91, .32); }
@@ -4143,6 +4147,7 @@ input[type="color"].palette-color-input {
 .tone-cyan .terrain-flow-node__icon { color: var(--node-cyan); }
 .tone-violet .terrain-flow-node__icon { color: var(--node-violet); }
 .tone-amber .terrain-flow-node__icon { color: var(--node-amber); }
+.tone-rose .terrain-flow-node__icon { color: var(--node-rose); }
 .tone-output .terrain-flow-node__icon { color: var(--node-output); }
 .terrain-flow-node__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
 .terrain-flow-node__output { color: var(--node-output); font: 700 7px/1 var(--mono); letter-spacing: .1em; }
@@ -4157,10 +4162,12 @@ input[type="color"].palette-color-input {
   background: var(--node-cyan);
   box-shadow: 0 0 0 2px #171b21;
 }
+.terrain-flow-node .react-flow__handle.handle-color { background: var(--node-rose); }
+.terrain-flow-node .react-flow__handle.handle-height { background: var(--node-cyan); }
+.terrain-flow-node .react-flow__handle.connection-incompatible { opacity: .2; filter: grayscale(1); transform: translate(-50%, -50%) scale(.82); }
 .terrain-flow-node .react-flow__handle.source-selected,
 .terrain-flow-node .react-flow__handle.connection-target {
-  background: var(--node-green);
-  box-shadow: 0 0 0 3px #171b21, 0 0 10px color-mix(in srgb, var(--node-green) 72%, transparent);
+  box-shadow: 0 0 0 3px #171b21, 0 0 10px currentColor;
 }
 .terrain-flow-node .react-flow__handle.source-selected { transform: translate(50%, -50%) scale(1.5); }
 .terrain-flow-node .react-flow__handle.connection-target { transform: translate(-50%, -50%) scale(1.5); }
@@ -4175,6 +4182,10 @@ input[type="color"].palette-color-input {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+.terrain-flow-node__gradient { height: 14px; margin: 5px 8px 1px; border: 1px solid rgba(255,255,255,.12); border-radius: 3px; box-shadow: inset 0 1px rgba(255,255,255,.05); }
+.terrain-flow-node__color-chip { height: 20px; display: flex; align-items: center; gap: 6px; margin: 4px 8px 0; color: var(--text-dim); }
+.terrain-flow-node__color-chip > span { width: 22px; height: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 2px; }
+.terrain-flow-node__color-chip small { font: 8px var(--mono); }
 
 .node-quick-palette {
   position: absolute;
@@ -4244,7 +4255,7 @@ input[type="color"].palette-color-input {
 .node-palette-scroll button svg { flex: 0 0 auto; color: var(--text-dim); }
 .node-palette-scroll button:hover svg { color: var(--accent); }
 .node-palette-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--node-blue); box-shadow: 0 0 7px currentColor; }
-.node-palette-dot.tone-green { background: var(--node-green); }.node-palette-dot.tone-cyan { background: var(--node-cyan); }.node-palette-dot.tone-violet { background: var(--node-violet); }.node-palette-dot.tone-amber { background: var(--node-amber); }
+.node-palette-dot.tone-green { background: var(--node-green); }.node-palette-dot.tone-cyan { background: var(--node-cyan); }.node-palette-dot.tone-violet { background: var(--node-violet); }.node-palette-dot.tone-amber { background: var(--node-amber); }.node-palette-dot.tone-rose { background: var(--node-rose); }
 .node-palette-empty { min-height: 92px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; color: var(--text-dim); font-size: 9px; text-align: center; }
 .node-quick-palette footer { height: 31px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; border-top: 1px solid var(--border-subtle); color: var(--text-dim); font-size: 9px; }
 .node-palette-footer-spacer { flex: 1; }
@@ -4271,7 +4282,7 @@ input[type="color"].palette-color-input {
 .node-search-results > button { width: 100%; display: grid; grid-template-columns: 26px 96px 1fr; align-items: center; gap: 7px; padding: 7px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); text-align: left; }
 .node-search-results > button.active { background: var(--accent-bg); color: var(--text-bright); }
 .node-search-icon { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--node-blue); background: var(--bg-control); }
-.node-search-icon.tone-green { color: var(--node-green); }.node-search-icon.tone-cyan { color: var(--node-cyan); }.node-search-icon.tone-violet { color: var(--node-violet); }.node-search-icon.tone-amber { color: var(--node-amber); }
+.node-search-icon.tone-green { color: var(--node-green); }.node-search-icon.tone-cyan { color: var(--node-cyan); }.node-search-icon.tone-violet { color: var(--node-violet); }.node-search-icon.tone-amber { color: var(--node-amber); }.node-search-icon.tone-rose { color: var(--node-rose); }
 .node-search-results strong { display: block; font-size: 9px; }.node-search-results small { display: block; margin-top: 2px; color: var(--text-dim); font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
 .node-search-results > button > span:last-child { color: var(--text-dim); font-size: 8px; line-height: 1.3; }
 
@@ -4303,6 +4314,9 @@ input[type="color"].palette-color-input {
 .node-inspector-number-row input[type="number"]:focus { border-color: var(--border-active); }
 .node-inspector-number-row { display: grid; grid-template-columns: minmax(0, 1fr) 66px; gap: 8px; align-items: center; }
 .node-inspector-number-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.node-inspector-color-row { height: 31px; display: grid !important; grid-template-columns: 1fr 46px; gap: 7px; margin: 0 !important; }
+.node-inspector-color-swatch { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); box-shadow: inset 0 1px rgba(255,255,255,.08); }
+.node-inspector-color-row input[type="color"] { width: 46px; height: 31px; padding: 3px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-control); cursor: var(--cursor-pointer); }
 .node-inspector-toggle { min-height: 38px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-control); color: var(--text-muted); font-size: 9px; }
 .node-inspector-toggle input { accent-color: var(--accent); }
 .node-inspector-snapshot { display: flex; flex-direction: column; gap: 4px; margin-bottom: 13px; padding: 10px; border: 1px solid rgba(103,200,122,.24); border-radius: var(--radius-sm); background: rgba(103,200,122,.06); }

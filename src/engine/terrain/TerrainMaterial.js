@@ -114,7 +114,13 @@ void main() {
 }
 `;
 
-const buildFragment = (heightGLSL) => /* glsl */ `
+const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
+vec3 applyTerrainGraphColor(vec3 fallback, vec2 xz, float h01, float slope, float detail, float moisture) {
+  return fallback;
+}
+`;
+
+const buildFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
@@ -124,6 +130,7 @@ ${heightGLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+${graphColorGLSL}
 ${SURFACE_TEXTURE_UNIFORMS_GLSL}
 ${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 ${TERRAIN_DETAIL_GLSL}
@@ -444,6 +451,7 @@ void main() {
   float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
   TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
+  tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
   TerrainDetailResult td = applyTerrainDetailLayer(tc, cl, bw, vWorldPos, nGeo, hC, hRel, h01, slope, jitter);
   n = applyTerrainDetailNormal2D(n, nGeo, vWorldPos, td.fade, td.rockMask, td.shoreMask);
 
@@ -577,12 +585,13 @@ void main() {
 // GLSL→HLSL translation on Windows/ANGLE (the multi-second tab freeze). Used
 // for the first Tile paint; the live material's source is then swapped in place
 // (rebuildTerrainShaderSource) for an instant program-cache hit.
-const buildMinimalFragment = () => /* glsl */ `
+const buildMinimalFragment = (graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
+${graphColorGLSL}
 
 uniform float uColorMode;
 uniform float uEps;
@@ -647,6 +656,8 @@ void main() {
   albedo = mix(uColSand, albedo, smoothstep(0.0, 6.0, hRel));
   float luma = dot(albedo, vec3(0.299, 0.587, 0.114));
   albedo = max((mix(vec3(luma), albedo, uPaletteSaturation) - 0.5) * uPaletteContrast + 0.5, vec3(0.0)) * uPaletteTint;
+  float graphDetail = fract(sin(dot(floor(xz * 0.02), vec2(12.9898, 78.233))) * 43758.5453);
+  albedo = applyTerrainGraphColor(albedo, xz, h01, slope, graphDetail, 0.5);
 
   vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
   float diff = max(dot(n, uSunDir), 0.0);
@@ -812,6 +823,13 @@ export function createTerrainUniforms() {
     uLayerMaskA:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
     uLayerMaskB:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
     uLayerMaskC:     { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Vector4()) },
+    // Terrain graph color stream. Kept separate from height slots so rich
+    // color grading never reduces the realtime landform budget.
+    uGraphColorA:    { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+    uGraphColorB:    { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+    uGraphColorC:    { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+    uGraphColorD:    { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+    uGraphColorParams: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
     uNoiseDebug:     { value: 0.0 },
     uTileDebugView:  { value: 0.0 },
     uTerrainDetailQuality: { value: 3.0 },
@@ -898,7 +916,7 @@ export function createTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
-    fragmentShader: buildFragment(h),
+    fragmentShader: buildFragment(h, stackGLSL.colorBody),
     side: THREE.DoubleSide,
   });
 }
@@ -922,7 +940,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
-    fragmentShader: buildMinimalFragment(h),
+    fragmentShader: buildMinimalFragment(stackGLSL.colorBody),
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = true;
@@ -936,7 +954,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 export function rebuildTerrainShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
-  mat.fragmentShader = buildFragment(h);
+  mat.fragmentShader = buildFragment(h, stackGLSL.colorBody);
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.needsUpdate = true;
 }
@@ -947,7 +965,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL) {
 export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
-  mat.fragmentShader = buildMinimalFragment();
+  mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody);
   mat.userData.minimalFragment = true;
   mat.needsUpdate = true;
 }
