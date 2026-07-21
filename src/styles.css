@@ -4157,6 +4157,13 @@ input[type="color"].palette-color-input {
   background: var(--node-cyan);
   box-shadow: 0 0 0 2px #171b21;
 }
+.terrain-flow-node .react-flow__handle.source-selected,
+.terrain-flow-node .react-flow__handle.connection-target {
+  background: var(--node-green);
+  box-shadow: 0 0 0 3px #171b21, 0 0 10px color-mix(in srgb, var(--node-green) 72%, transparent);
+}
+.terrain-flow-node .react-flow__handle.source-selected { transform: translate(50%, -50%) scale(1.5); }
+.terrain-flow-node .react-flow__handle.connection-target { transform: translate(-50%, -50%) scale(1.5); }
 .terrain-flow-node__summary {
   min-height: 24px;
   padding: 4px 8px 7px;

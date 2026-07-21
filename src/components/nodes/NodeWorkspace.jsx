@@ -91,7 +91,7 @@ function NodePalette({
 }
 
 function TerrainNode({ data, selected }) {
-  const { node, invalid } = data;
+  const { node, invalid, connectionSource, onStartConnection, onCompleteConnection } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
   return (
     <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}`}>
@@ -104,7 +104,7 @@ function TerrainNode({ data, selected }) {
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
             <div className="terrain-flow-port input" key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} />
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={connectionSource ? 'connection-target' : ''} onClick={(event) => { event.stopPropagation(); onCompleteConnection?.({ nodeId: node.id, handleId: port.id }); }} title={connectionSource ? `Connect ${connectionSource.label} to ${port.label}` : `Click an output first, then click ${port.label}`} />
               <span>{port.label}</span>
             </div>
           ))}
@@ -113,7 +113,7 @@ function TerrainNode({ data, selected }) {
           {definition.outputs.map((port, index) => (
             <div className="terrain-flow-port output" key={port.id}>
               <span>{port.label}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} />
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={connectionSource?.nodeId === node.id && connectionSource?.handleId === port.id ? 'source-selected' : ''} onClick={(event) => { event.stopPropagation(); onStartConnection?.({ nodeId: node.id, handleId: port.id, label: `${node.label} ${port.label}` }); }} title="Drag from here, or click then click an input" />
             </div>
           ))}
         </div>
@@ -282,6 +282,7 @@ export default function NodeWorkspace({
   const [paletteQuery, setPaletteQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [instance, setInstance] = useState(null);
+  const [connectionSource, setConnectionSource] = useState(null);
   const [draggingDock, setDraggingDock] = useState(null);
   const [snapHint, setSnapHint] = useState(null);
   const rootRef = useRef(null);
@@ -331,7 +332,27 @@ export default function NodeWorkspace({
     return definitions.filter((definition) => !query || `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query));
   }, [definitions, searchQuery]);
 
+  const completeClickConnection = useCallback((target) => {
+    if (!connectionSource) return;
+    try {
+      commit(connectGraphNodes(graphRef.current, {
+        source: connectionSource.nodeId, sourceHandle: connectionSource.handleId,
+        target: target.nodeId, targetHandle: target.handleId,
+      }), { structural: true, history: true });
+      setConnectionSource(null);
+    } catch (error) {
+      graphState?.onDiagnostic?.(error.message);
+    }
+  }, [connectionSource, commit, graphState]);
+
+  const startClickConnection = useCallback((source) => {
+    setConnectionSource((current) => current?.nodeId === source.nodeId && current?.handleId === source.handleId ? null : source);
+  }, []);
+
   const invalidNodes = useMemo(() => new Set((graphState?.diagnostics || []).map((diagnostic) => diagnostic.nodeId).filter(Boolean)), [graphState]);
+  useEffect(() => {
+    if (connectionSource && !localGraph.nodes.some((node) => node.id === connectionSource.nodeId)) setConnectionSource(null);
+  }, [connectionSource, localGraph.nodes]);
   const collapsedNodes = useMemo(() => new Set((localGraph.groups || [])
     .filter((group) => group.collapsed).flatMap((group) => group.nodeIds)), [localGraph.groups]);
   const flowNodes = useMemo(() => [
@@ -345,10 +366,13 @@ export default function NodeWorkspace({
     ...localGraph.nodes.filter((node) => !collapsedNodes.has(node.id)).map((node) => ({
       id: node.id, type: 'terrainNode', position: node.position,
       measured: nodeMeasurements[node.id], zIndex: 2,
-      data: { node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id) },
+      data: {
+        node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id),
+        connectionSource, onStartConnection: startClickConnection, onCompleteConnection: completeClickConnection,
+      },
       selected: selectedNodes.has(node.id), deletable: node.type !== 'terrainOutput',
     })),
-  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, nodeMeasurements, collapsedNodes, toggleGroup]);
+  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, connectionSource, nodeMeasurements, collapsedNodes, toggleGroup, startClickConnection, completeClickConnection]);
   const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
     ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false,
     className: `terrain-flow-edge edge-${getGraphNodeDefinition(localGraph.nodes.find((node) => node.id === edge.source)?.type)?.color || 'blue'}`,
@@ -663,7 +687,7 @@ export default function NodeWorkspace({
             if (removed.length) commit(removeGraphEdges(graphRef.current, removed), { structural: true, history: true });
           }}
           onConnect={(connection) => {
-            try { commit(connectGraphNodes(graphRef.current, connection), { structural: true, history: true }); }
+            try { commit(connectGraphNodes(graphRef.current, connection), { structural: true, history: true }); setConnectionSource(null); }
             catch (error) { graphState?.onDiagnostic?.(error.message); }
           }}
           colorMode="dark" proOptions={{ hideAttribution: true }}
