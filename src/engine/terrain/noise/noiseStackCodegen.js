@@ -16,6 +16,7 @@ import { activeLayers, structuralSignature, MAX_LAYERS } from './NoiseStack.js';
 import { getNoiseType } from './noiseTypes.js';
 import { blendGlslStmt, blendJs } from './blendModes.js';
 import { evalMaskGlsl, evalMaskJs } from './masks.js';
+import { seedDomainOffset } from './seedDomain.js';
 
 // GLSL declarations shared by every material (folded into COMMON_UNIFORMS_GLSL).
 export const NOISE_STACK_UNIFORMS_GLSL = /* glsl */ `
@@ -172,7 +173,7 @@ export function packStackUniforms(stack, { solo = null } = {}) {
     const soloActive = solo && solo !== layer.id;
     strength[slot] = (layer.strength ?? 1) * (layer.opacity ?? 1) * (soloActive ? 0 : 1);
     scale[slot] = def.scaleKey ? (layer.params[def.scaleKey] ?? 1) : 1;
-    seed[slot] = (layer.seedOffset || 0) * 31.7;
+    seed[slot] = seedDomainOffset(layer.seedOffset);
     const pa = paramsA[slot]; const pb = paramsB[slot];
     (def.paKeys || []).forEach((k, j) => { if (k) pa[j] = layer.params[k] ?? 0; });
     (def.pbKeys || []).forEach((k, j) => { if (k) pb[j] = layer.params[k] ?? 0; });
@@ -204,7 +205,7 @@ function slopeFromSamples(h, hDX, hDZ, u) {
 
 function evalLayer2DAt(layer, def, state, ctx) {
   if (layer.type === 'legacy') return def.eval2d(state.x, state.z, layer, ctx);
-  const seedV = (layer.seedOffset || 0) * 31.7;
+  const seedV = seedDomainOffset(layer.seedOffset);
   const sc = def.scaleKey ? (layer.params[def.scaleKey] ?? 1) : 1;
   const P0 = state.px * sc + seedV;
   const P1 = state.pz * sc + seedV * 1.7 + 3.1;
@@ -268,7 +269,7 @@ export function evalStack2D(stack, x, z, ctx) {
       else if (def.modHeightJs) { h = def.modHeightJs(h, layer, eff, 1); }
       continue;
     }
-    const seedV = (layer.seedOffset || 0) * 31.7;
+    const seedV = seedDomainOffset(layer.seedOffset);
     const sc = def.scaleKey ? (layer.params[def.scaleKey] ?? 1) : 1;
     const P0 = state.px * sc + seedV;
     const P1 = state.pz * sc + seedV * 1.7 + 3.1;
@@ -295,7 +296,7 @@ export function evalStack3D(stack, dx, dy, dz, ctx) {
       else if (def.modHeightJs) { h = def.modHeightJs(h, layer, eff, 1); }
       continue;
     }
-    const seedV = (layer.seedOffset || 0) * 31.7;
+    const seedV = seedDomainOffset(layer.seedOffset);
     const sc = def.scaleKey ? (layer.params[def.scaleKey] ?? 1) : 1;
     let val;
     if (layer.type === 'legacy') val = def.eval3d(dx, dy, dz, layer, ctx);

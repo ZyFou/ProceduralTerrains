@@ -3,6 +3,7 @@ import { activeLayers, migrateStack } from '../noise/NoiseStack.js';
 import { evalStack2D, generateStackGLSL, packStackUniforms } from '../noise/noiseStackCodegen.js';
 import { fbm2, vnoise2 } from '../noise/cpuNoise.js';
 import { getNoiseType } from '../noise/noiseTypes.js';
+import { seedDomainOffset } from '../noise/seedDomain.js';
 import { getGraphNodeDefinition } from './GraphRegistry.js';
 import { findOutputNode, inputEdge, reachableNodeIds, topologicalSort, validateGraph } from './GraphDocument.js';
 
@@ -241,7 +242,7 @@ function packUniforms(graph, ordered, slotById) {
       for (const key of ['strength', 'scale', 'seed', 'paramsA', 'paramsB', 'maskA', 'maskB', 'maskC']) packed[key][slot] = structuredClone(one[key][0]);
     } else if (definition?.landform) {
       packed.scale[slot] = num(node.params.scale, 1);
-      packed.seed[slot] = num(node.params.seed) * 31.7;
+      packed.seed[slot] = seedDomainOffset(node.params.seed);
       if (node.type === 'mountain') {
         packed.strength[slot] = num(node.params.height, 1.15);
         packed.paramsA[slot] = [num(node.params.radius, 1.25), num(node.params.sharpness, 1.65), num(node.params.roughness, 0.55), 0];
@@ -263,7 +264,7 @@ function packUniforms(graph, ordered, slotById) {
         packed.paramsA[slot] = [num(node.params.radius, 0.9), num(node.params.rimHeight, 0.42), num(node.params.rimWidth, 0.18), num(node.params.roughness, 0.2)];
       }
     } else if (node.type === 'domainWarp') {
-      packed.strength[slot] = num(node.params.strength, 0.7); packed.scale[slot] = num(node.params.scale, 1); packed.seed[slot] = num(node.params.seedOffset) * 31.7;
+      packed.strength[slot] = num(node.params.strength, 0.7); packed.scale[slot] = num(node.params.scale, 1); packed.seed[slot] = seedDomainOffset(node.params.seedOffset);
     } else if (node.type === 'combine') packed.paramsA[slot][0] = num(node.params.mix, 0.5);
     else if (node.type === 'math') packed.paramsA[slot] = [num(node.params.value, 1), num(node.params.min), num(node.params.max, 1), 0];
     else if (node.type === 'remap') packed.paramsA[slot] = [num(node.params.inMin), num(node.params.inMax, 1), num(node.params.outMin), num(node.params.outMax, 1)];
@@ -288,7 +289,7 @@ function cpuEvaluator(graph) {
       return {
         px: x * u.uFrequency.value * scale,
         pz: z * u.uFrequency.value * scale,
-        seed: num(node.params.seed) * 31.7,
+        seed: seedDomainOffset(node.params.seed),
       };
     };
     const fractal = (px, pz, octaves = node.params.octaves, persistence = node.params.persistence, lacunarity = node.params.lacunarity) => fbm2(px, pz, octaves, num(persistence, 0.5), num(lacunarity, 2));
@@ -302,7 +303,7 @@ function cpuEvaluator(graph) {
       source: () => {
         const def = getNoiseType(definition.noiseType), layer = sourceLayer(node);
         const sx = u.uSeedOffset.value.x, sz = u.uSeedOffset.value.y, freq = u.uFrequency.value;
-        const seed = num(node.params[definition.seedParam || 'seedOffset']) * 31.7, scale = def.scaleKey ? num(node.params[def.scaleKey], 1) : 1;
+        const seed = seedDomainOffset(node.params[definition.seedParam || 'seedOffset']), scale = def.scaleKey ? num(node.params[def.scaleKey], 1) : 1;
         return (def.eval2d?.((x * freq + sx) * scale + seed, (z * freq + sz) * scale + seed * 1.7 + 3.1, layer, ctx) || 0) * num(node.params.strength, 1);
       },
       mountain: () => {
@@ -354,7 +355,7 @@ function cpuEvaluator(graph) {
         return num(node.params.depth, 0.75) * (bowl + rim + breakup);
       },
       domainWarp: () => {
-        const def = getNoiseType('domainWarp'), u = ctx.uniforms, seed = num(node.params.seedOffset) * 31.7;
+        const def = getNoiseType('domainWarp'), u = ctx.uniforms, seed = seedDomainOffset(node.params.seedOffset);
         const state = { px: x * u.uFrequency.value + u.uSeedOffset.value.x + seed, pz: z * u.uFrequency.value + u.uSeedOffset.value.y + seed * 1.7 + 3.1 };
         def.modJs2(state, { params: node.params }, num(node.params.strength, 0.7));
         return get('source', (state.px - u.uSeedOffset.value.x - seed) / u.uFrequency.value, (state.pz - u.uSeedOffset.value.y - seed * 1.7 - 3.1) / u.uFrequency.value);

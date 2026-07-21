@@ -39,6 +39,7 @@ export default function TopBar({
   projectMode = 'procedural',
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onToggleHelp, onResetView,
+  nodeToolsVisible = true, onToggleNodeTools,
   paintMode, onTogglePaintMode, onOpenPanel, activePanel,
   loading, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
@@ -225,6 +226,20 @@ export default function TopBar({
                 ? <><Eye size={14} strokeWidth={1.75} aria-hidden /> Show UI</>
                 : <><EyeOff size={14} strokeWidth={1.75} aria-hidden /> Hide UI</>}
             </button>
+            {projectMode === 'nodes' ? <>
+              <div className="tb-menu-divider" role="separator" />
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={nodeToolsVisible}
+                className={nodeToolsVisible ? 'active' : ''}
+                title="Show water, colors, clouds, lighting, export, and other standard tools"
+                onClick={() => runMenuAction(setViewMenuOpen, onToggleNodeTools)}
+              >
+                {nodeToolsVisible ? <Eye size={14} strokeWidth={1.75} aria-hidden /> : <EyeOff size={14} strokeWidth={1.75} aria-hidden />}
+                Other tools
+              </button>
+            </> : null}
           </div>
         </div>
 

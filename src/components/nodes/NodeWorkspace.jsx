@@ -18,7 +18,12 @@ import { getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/t
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v1';
-const DEFAULT_LAYOUT = { graphEdge: 'bottom', graphRatio: 0.38, inspectorSide: 'right', inspectorWidth: 320, paletteCollapsed: false, previewVisible: false };
+const DEFAULT_LAYOUT = {
+  graphEdge: 'bottom', graphRatio: 0.38,
+  inspectorSide: 'right', inspectorWidth: 320,
+  paletteCollapsed: false, paletteDetached: true, paletteSide: 'left', paletteWidth: 208,
+  previewVisible: false,
+};
 const GRAPH_EDGES = ['bottom', 'left', 'top', 'right'];
 
 function loadLayout() {
@@ -27,6 +32,49 @@ function loadLayout() {
 }
 function saveLayout(layout) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* preferences are best effort */ } }
 function editingTarget(target) { return target?.matches?.('input, textarea, select, [contenteditable="true"]'); }
+
+function NodePalette({
+  detached = false, side = 'left', style, graphMode, definitions, paletteGroups,
+  paletteQuery, onPaletteQuery, resultCount, onAdd, onCollapse, onDetach, onAttach, onMoveSide,
+}) {
+  return (
+    <aside className={`node-quick-palette${detached ? ` detached detached-${side}` : ''}`} style={style} aria-label={`${graphMode === 'terrain' ? 'Terrain' : 'Noise'} nodes`}>
+      <header>
+        <span>{graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes'}</span>
+        <small>{definitions.length}</small>
+        {detached ? (
+          <>
+            <button type="button" onClick={onMoveSide} title={`Move node list to the ${side === 'left' ? 'right' : 'left'} side`}>
+              {side === 'left' ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            </button>
+            <button type="button" onClick={onAttach} title="Attach node list inside the graph"><Boxes size={13} /></button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onDetach} title="Detach node list to the sidebar"><Maximize2 size={13} /></button>
+            <button type="button" onClick={onCollapse} title="Collapse node list"><ChevronLeft size={14} /></button>
+          </>
+        )}
+      </header>
+      <label className="node-palette-filter">
+        <Search size={12} aria-hidden />
+        <input value={paletteQuery} onChange={(event) => onPaletteQuery(event.target.value)} placeholder="Find a node…" aria-label={`Find ${graphMode} nodes`} />
+        {paletteQuery ? <button type="button" onClick={() => onPaletteQuery('')} title="Clear node filter"><X size={11} /></button> : null}
+      </label>
+      <div className="node-palette-scroll">
+        {[...paletteGroups].map(([category, items]) => (
+          <section key={category}><h4>{category}</h4>{items.map((definition) => (
+            <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
+              <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
+            </button>
+          ))}</section>
+        ))}
+        {!resultCount ? <div className="node-palette-empty"><Search size={16} /><span>No nodes match “{paletteQuery}”</span></div> : null}
+      </div>
+      <footer><span>{resultCount} shown</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>all nodes</span></footer>
+    </aside>
+  );
+}
 
 function TerrainNode({ data, selected }) {
   const { node, invalid } = data;
@@ -234,7 +282,7 @@ export default function NodeWorkspace({
     if (!instance) return undefined;
     const frame = requestAnimationFrame(() => instance.fitView({ padding: 0.2, maxZoom: 1, duration: 220 }));
     return () => cancelAnimationFrame(frame);
-  }, [instance, layout.graphEdge, layout.inspectorSide]);
+  }, [instance, layout.graphEdge, layout.inspectorSide, layout.paletteDetached, layout.paletteSide]);
 
   const commit = useCallback((next, meta = {}) => {
     graphRef.current = next; setLocalGraph(next); onGraphChange?.(next, meta);
@@ -445,9 +493,25 @@ export default function NodeWorkspace({
   const selectedGroup = (localGraph.groups || []).find((group) => selectedGroups.has(group.id)) || null;
   const selectedNode = selectedGroup ? null : localGraph.nodes.find((node) => selectedNodes.has(node.id)) || null;
   const inspectorOffset = inspectorReplaced ? 0 : layout.inspectorWidth;
+  const paletteOffset = layout.paletteDetached ? layout.paletteWidth : 0;
+  const sideOffset = (side) => (layout.paletteDetached && layout.paletteSide === side ? paletteOffset : 0)
+    + (!inspectorReplaced && layout.inspectorSide === side ? inspectorOffset : 0);
   const dockStyle = layout.graphEdge === 'bottom' || layout.graphEdge === 'top'
-    ? { [layout.graphEdge]: 0, left: layout.inspectorSide === 'left' ? inspectorOffset : 0, right: layout.inspectorSide === 'right' ? inspectorOffset : 0, height: `${layout.graphRatio * 100}%` }
-    : { [layout.graphEdge]: layout.inspectorSide === layout.graphEdge ? inspectorOffset : 0, top: 0, bottom: 0, width: `${layout.graphRatio * 100}%` };
+    ? { [layout.graphEdge]: 0, left: sideOffset('left'), right: sideOffset('right'), height: `${layout.graphRatio * 100}%` }
+    : { [layout.graphEdge]: sideOffset(layout.graphEdge), top: 0, bottom: 0, width: `${layout.graphRatio * 100}%` };
+
+  const palette = (
+    <NodePalette
+      detached={layout.paletteDetached} side={layout.paletteSide}
+      graphMode={graphMode} definitions={definitions} paletteGroups={paletteGroups}
+      paletteQuery={paletteQuery} onPaletteQuery={setPaletteQuery} resultCount={paletteResultCount}
+      onAdd={addNodeFromPalette}
+      onCollapse={() => updateLayout({ paletteCollapsed: true })}
+      onDetach={() => updateLayout({ paletteDetached: true, paletteCollapsed: false })}
+      onAttach={() => updateLayout({ paletteDetached: false, paletteCollapsed: false })}
+      onMoveSide={() => updateLayout({ paletteSide: layout.paletteSide === 'left' ? 'right' : 'left' })}
+    />
+  );
 
   return (
     <section ref={rootRef} className={`nodes-workspace graph-edge-${layout.graphEdge} inspector-${layout.inspectorSide}${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Terrain Nodes workspace">
@@ -456,7 +520,8 @@ export default function NodeWorkspace({
           {(draggingDock === 'graph' ? GRAPH_EDGES : ['left', 'right']).map((edge) => <div key={edge} className={`panel-snap-zone panel-snap-zone--${edge}${snapHint === edge ? ' active' : ''}`} />)}
         </div>
       ) : null}
-      {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: inspectorOffset + 14 }}>{preview}</div> : null}
+      {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: sideOffset(layout.inspectorSide) + 14 }}>{preview}</div> : null}
+      {layout.paletteDetached ? React.cloneElement(palette, { style: { [layout.paletteSide]: 0, width: layout.paletteWidth } }) : null}
       <div ref={graphDockRef} className="node-graph-dock" style={dockStyle} onPointerMove={(event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={(event) => {
         event.preventDefault(); const type = event.dataTransfer.getData('application/x-terrain-node'); if (!type || !instance) return;
         addNodeAt(type, instance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
@@ -481,27 +546,8 @@ export default function NodeWorkspace({
           </div>
         </header>
 
-        {!layout.paletteCollapsed ? (
-          <aside className="node-quick-palette">
-            <header><span>{graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes'}</span><small>{definitions.length}</small><button type="button" onClick={() => updateLayout({ paletteCollapsed: true })} title="Collapse palette"><ChevronLeft size={14} /></button></header>
-            <label className="node-palette-filter">
-              <Search size={12} aria-hidden />
-              <input value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder="Find a node…" aria-label={`Find ${graphMode} nodes`} />
-              {paletteQuery ? <button type="button" onClick={() => setPaletteQuery('')} title="Clear node filter"><X size={11} /></button> : null}
-            </label>
-            <div className="node-palette-scroll">
-              {[...paletteGroups].map(([category, items]) => (
-                <section key={category}><h4>{category}</h4>{items.map((definition) => (
-                  <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => addNodeFromPalette(definition.id)}>
-                    <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
-                  </button>
-                ))}</section>
-              ))}
-              {!paletteResultCount ? <div className="node-palette-empty"><Search size={16} /><span>No nodes match “{paletteQuery}”</span></div> : null}
-            </div>
-            <footer><span>{paletteResultCount} shown</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>all nodes</span></footer>
-          </aside>
-        ) : <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title="Show quick nodes"><ChevronRight size={15} /></button>}
+        {!layout.paletteDetached && !layout.paletteCollapsed ? palette : null}
+        {!layout.paletteDetached && layout.paletteCollapsed ? <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title="Show quick nodes"><ChevronRight size={15} /></button> : null}
 
         <div className="node-flow-frame">
         <ReactFlow
@@ -600,7 +646,7 @@ export default function NodeWorkspace({
       </div>
 
       {!inspectorReplaced ? (
-        <div className="node-inspector-dock" style={{ [layout.inspectorSide]: 0, width: layout.inspectorWidth }}>
+        <div className="node-inspector-dock" style={{ [layout.inspectorSide]: layout.paletteDetached && layout.paletteSide === layout.inspectorSide ? paletteOffset : 0, width: layout.inspectorWidth }}>
           <div className="node-inspector-resizer" onPointerDown={beginInspectorResize} />
           <NodeInspector
             node={selectedNode} group={selectedGroup} graphState={graphState}

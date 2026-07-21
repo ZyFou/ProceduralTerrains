@@ -8,6 +8,7 @@ import {
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
+import { SEED_DOMAIN_RADIUS, seedDomainOffset } from '../src/engine/terrain/noise/seedDomain.js';
 
 const uniforms = {
   uFrequency: { value: 0.01 }, uSeedOffset: { value: { x: 2, y: 3 } }, uAmplitude: { value: 1 },
@@ -204,6 +205,18 @@ describe('analytical terrain graph compiler', () => {
     };
     expect(make(7842)).toBe(make(7842));
     expect(make(7843)).not.toBeCloseTo(make(7842), 8);
+  });
+
+  it('hashes large node seeds into a bounded GPU-safe noise domain', () => {
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'deterministicNoise', { x: 0, y: 0 }, { params: { seed: 999999 } });
+    graph = connectGraphNodes(graph, { source: graph.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID });
+    const packedSeed = compileTerrainGraph(graph).program.packUniforms().seed[0];
+
+    expect(packedSeed).toBe(seedDomainOffset(999999));
+    expect(Math.abs(packedSeed)).toBeLessThanOrEqual(SEED_DOMAIN_RADIUS);
+    expect(seedDomainOffset(5291)).not.toBe(seedDomainOffset(5292));
+    expect(seedDomainOffset(0)).toBe(0);
   });
 
   it.each(listGraphNodeDefinitions().map((definition) => [definition.id]))('compiles, packs, and evaluates the %s registry node', (type) => {

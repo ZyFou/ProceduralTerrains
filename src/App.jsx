@@ -938,7 +938,8 @@ export default function App() {
   const touchExplore = isInfinite || exploring;
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
-  const showToolPanels = !previewMode && !paintMode && !planetExploring;
+  const nodeToolsVisible = projectMode !== 'nodes' || uiPrefs.nodeToolsVisible !== false;
+  const showToolPanels = !previewMode && !paintMode && !planetExploring && nodeToolsVisible;
   const searchEnabled = showToolPanels && projectMode === 'procedural';
   const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
 
@@ -1477,6 +1478,12 @@ export default function App() {
         onLoadJSON={loadProjectJSON}
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
+        nodeToolsVisible={uiPrefs.nodeToolsVisible !== false}
+        onToggleNodeTools={() => {
+          const visible = uiPrefs.nodeToolsVisible === false;
+          handleUiPrefs({ ...uiPrefs, nodeToolsVisible: visible });
+          if (!visible) setActivePanel(null);
+        }}
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onResetView={() => engine().resetView()}
         paintMode={paintMode}

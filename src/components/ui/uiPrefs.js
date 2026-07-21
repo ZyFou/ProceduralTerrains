@@ -7,6 +7,7 @@ const STORAGE_KEY = 'pt-ui-prefs';
  * @property {boolean} toolbarLabels  Show labels under left-toolbar icons
  * @property {ModeDisplay} modeDisplay
  * @property {boolean} cameraControls Show bottom camera toolbar
+ * @property {boolean} nodeToolsVisible Show the standard water, color, sky, and utility tools in node mode
  */
 
 /** @type {UiPrefs} */
@@ -14,6 +15,7 @@ export const DEFAULT_UI_PREFS = {
   toolbarLabels: true,
   modeDisplay: 'both',
   cameraControls: true,
+  nodeToolsVisible: true,
 };
 
 export function loadUiPrefs() {
@@ -40,5 +42,6 @@ export function normalizeUiPrefs(input) {
     toolbarLabels: input?.toolbarLabels !== false,
     modeDisplay,
     cameraControls: input?.cameraControls !== false,
+    nodeToolsVisible: input?.nodeToolsVisible !== false,
   };
 }

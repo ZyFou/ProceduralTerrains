@@ -3938,7 +3938,8 @@ input[type="color"].palette-color-input {
 }
 .node-graph-dock,
 .node-inspector-dock,
-.nodes-map-preview { pointer-events: auto; }
+.nodes-map-preview,
+.node-quick-palette.detached { pointer-events: auto; }
 .node-graph-dock {
   --node-palette-inset: 10px;
   --node-palette-width: 184px;
@@ -4191,9 +4192,22 @@ input[type="color"].palette-color-input {
   backdrop-filter: blur(8px);
   overflow: hidden;
 }
+.node-quick-palette.detached {
+  top: 0;
+  bottom: 0;
+  z-index: 12;
+  border-radius: 0;
+  background: var(--bg-panel);
+  box-shadow: 12px 0 30px rgba(0,0,0,.22);
+  backdrop-filter: none;
+}
+.node-quick-palette.detached-left { left: 0; right: auto; border-width: 0 1px 0 0; }
+.node-quick-palette.detached-right { right: 0; left: auto; border-width: 0 0 0 1px; box-shadow: -12px 0 30px rgba(0,0,0,.22); }
 .node-quick-palette > header { height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .node-quick-palette > header small { color: var(--text-dim); font: 8px var(--mono); letter-spacing: 0; }
 .node-quick-palette > header button { margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-dim); }
+.node-quick-palette > header button + button { margin-left: 0; }
+.node-quick-palette > header button:hover { color: var(--accent); background: var(--accent-bg); border-radius: 3px; }
 .node-palette-filter { height: 31px; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin: 7px 7px 2px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-control); color: var(--text-dim); }
 .node-palette-filter:focus-within { border-color: var(--border-active); color: var(--accent); }
 .node-palette-filter input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text-main); font: 9px var(--font); }
