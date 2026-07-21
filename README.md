@@ -93,7 +93,7 @@ Quick actions (Export panel):
 - **Heightmap** — orthographic grayscale bake from the same shader
 
 Full export (ZIP with optional contents):
-- Terrain mesh as **GLB/GLTF** or **OBJ** (configurable resolution, skirts, base slab)
+- Terrain mesh as **GLB/GLTF** or **OBJ** (configurable resolution, skirts, base slab). Multi-tile square boards can export as one combined mesh or as per-tile packages in the ZIP.
 - Baked **color**, **normal** and **heightmap** textures
 - **Biome splat** map, **collision** mesh, water surface mesh
 - Water masks (depth, shoreline, foam) and preset JSON for re-import

@@ -848,8 +848,8 @@ function ExportPanel({ ctx }) {
             onChange={(v) => set('exportTileMode', v)}
           />
           <div className="settings-hint">
-            Merged = one continuous landscape. Separate = each tile as its own
-            named object with its own walls.
+            Merged = one combined terrain mesh. Separate = one ZIP with an
+            importable model and enabled maps for every tile.
           </div>
         </ControlSection>
       )}

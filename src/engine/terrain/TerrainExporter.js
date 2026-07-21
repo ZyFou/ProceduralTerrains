@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { zipSync } from 'fflate';
+import {
+  createTileExportManifest,
+  tileExportFolder,
+  tilePackageAssetPath,
+  tilePackageHeightmapPath,
+} from './TerrainExportLayout.js';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
@@ -268,10 +275,44 @@ export class TerrainExporter {
       rt.dispose();
       return c;
     };
+    const bakeHeightAsset = (ox, oz, sx, sz) => {
+      const visualRT = new THREE.WebGLRenderTarget(texRes, texRes);
+      setRegion(ox, oz, sx, sz);
+      bakeUniforms.uBakeMode.value = 0;
+      renderer.setRenderTarget(visualRT);
+      renderer.render(quadScene, quadCam);
+      const visualPixels = new Uint8Array(texRes * texRes * 4);
+      renderer.readRenderTargetPixels(visualRT, 0, 0, texRes, texRes, visualPixels);
+      renderer.setRenderTarget(null);
+      visualRT.dispose();
+
+      const canvas = document.createElement('canvas');
+      canvas.width = texRes;
+      canvas.height = texRes;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(texRes, texRes);
+      const raw16 = new Uint8Array(texRes * texRes * 2);
+      const rawView = new DataView(raw16.buffer);
+      for (let y = 0; y < texRes; y++) {
+        const srcRow = (texRes - 1 - y) * texRes * 4;
+        const dstRow = y * texRes * 4;
+        for (let x = 0; x < texRes; x++) {
+          const sIdx = srcRow + x * 4;
+          const dIdx = dstRow + x * 4;
+          const height01 = (visualPixels[sIdx] * 65536 + visualPixels[sIdx + 1] * 256 + visualPixels[sIdx + 2]) / 16777215;
+          const val = Math.round(height01 * 255);
+          img.data[dIdx] = val; img.data[dIdx + 1] = val; img.data[dIdx + 2] = val; img.data[dIdx + 3] = 255;
+          rawView.setUint16((y * texRes + x) * 2, Math.round(height01 * 65535), true);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      return { canvas, raw16 };
+    };
 
     const skirtDepth = Math.max(24, heightScale * 0.08);
     const baseHeight = -skirtDepth;
     const multi = tiles.length > 1;
+    const separateTileExport = multi && tileShape === 'square' && tileMode === 'separate';
 
     // --- 2. Construct 3D Mesh (one terrain block per occupied cell) ---
     const exportGroup = new THREE.Group();
@@ -413,39 +454,9 @@ export class TerrainExporter {
     let heightRaw16 = null;
     if (exportHeightmap) {
       onToast('Baking grayscale heightmap...');
-      const visualRT = new THREE.WebGLRenderTarget(texRes, texRes);
-      setRegion(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
-      bakeUniforms.uBakeMode.value = 0;
-      renderer.setRenderTarget(visualRT);
-      renderer.render(quadScene, quadCam);
-      const visualPixels = new Uint8Array(texRes * texRes * 4);
-      renderer.readRenderTargetPixels(visualRT, 0, 0, texRes, texRes, visualPixels);
-      renderer.setRenderTarget(null);
-      visualRT.dispose();
-
-      heightCanvas = document.createElement('canvas');
-      heightCanvas.width = texRes;
-      heightCanvas.height = texRes;
-      const ctx = heightCanvas.getContext('2d');
-      const img = ctx.createImageData(texRes, texRes);
-      // Game-engine presets use this little-endian, unsigned 16-bit stream.
-      // Keep it alongside the preview PNG so one bake services both outputs.
-      heightRaw16 = new Uint8Array(texRes * texRes * 2);
-      const rawView = new DataView(heightRaw16.buffer);
-      for (let y = 0; y < texRes; y++) {
-        const srcRow = (texRes - 1 - y) * texRes * 4;
-        const dstRow = y * texRes * 4;
-        for (let x = 0; x < texRes; x++) {
-          const sIdx = srcRow + x * 4;
-          const dIdx = dstRow + x * 4;
-          const r = visualPixels[sIdx], g = visualPixels[sIdx + 1], b = visualPixels[sIdx + 2];
-          const height01 = (r * 65536 + g * 256 + b) / 16777215;
-          const val = Math.round(height01 * 255);
-          img.data[dIdx] = val; img.data[dIdx + 1] = val; img.data[dIdx + 2] = val; img.data[dIdx + 3] = 255;
-          rawView.setUint16((y * texRes + x) * 2, Math.round(height01 * 65535), true);
-        }
-      }
-      ctx.putImageData(img, 0, 0);
+      const asset = bakeHeightAsset(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
+      heightCanvas = asset.canvas;
+      heightRaw16 = asset.raw16;
     }
 
     // E. Union-wide splat / biome map
@@ -462,8 +473,89 @@ export class TerrainExporter {
     if (bakeColor) colorCanvas = bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
     if (bakeNormal) normalCanvas = bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
 
+    // A multi-tile whole-terrain export has exactly one surface object. Re-map
+    // every cell to the union texture before merging so boundary vertices share
+    // both position and UVs, then recompute normals after welding.
+    if (includeMesh && multi && !separateTileExport) {
+      const surfaceMeshes = [];
+      exportGroup.traverse((obj) => {
+        if (obj.isMesh && /^Terrain_Tile_/.test(obj.name)) surfaceMeshes.push(obj);
+      });
+      if (surfaceMeshes.length) {
+        const mergedParts = surfaceMeshes.map((mesh) => {
+          const geo = mesh.geometry.clone();
+          const pos = geo.getAttribute('position');
+          const uv = geo.getAttribute('uv');
+          for (let i = 0; i < pos.count; i++) {
+            uv.setXY(i,
+              (pos.getX(i) - (unionCenter.x - unionSpanX * 0.5)) / unionSpanX,
+              (pos.getZ(i) - (unionCenter.z - unionSpanZ * 0.5)) / unionSpanZ,
+            );
+          }
+          geo.deleteAttribute('normal');
+          return geo;
+        });
+        const joinedGeo = mergeGeometries(mergedParts);
+        const combinedGeo = mergeVertices(joinedGeo);
+        joinedGeo.dispose();
+        combinedGeo.computeVertexNormals();
+        mergedParts.forEach((geo) => geo.dispose());
+
+        let mergedColor = null, mergedNormal = null;
+        if (colorCanvas) {
+          mergedColor = new THREE.CanvasTexture(colorCanvas);
+          mergedColor.colorSpace = THREE.SRGBColorSpace;
+        }
+        if (normalCanvas) mergedNormal = new THREE.CanvasTexture(normalCanvas);
+        const mergedMaterial = new THREE.MeshStandardMaterial({
+          name: 'Terrain_Material', map: mergedColor, normalMap: mergedNormal,
+          roughness: 0.85, metalness: 0.05,
+        });
+        surfaceMeshes.forEach((mesh) => {
+          exportGroup.remove(mesh);
+          mesh.geometry.dispose();
+          if (mesh.material.map) mesh.material.map.dispose();
+          if (mesh.material.normalMap) mesh.material.normalMap.dispose();
+          mesh.material.dispose();
+        });
+        const terrainMesh = new THREE.Mesh(combinedGeo, mergedMaterial);
+        terrainMesh.name = 'Terrain_Surface';
+        exportGroup.add(terrainMesh);
+
+        // Keep the whole terrain in one mesh node even when skirts/base slabs
+        // are enabled. Material groups retain the terrain texture on top and
+        // the slab material on the side/bottom faces.
+        const slabMeshes = [];
+        exportGroup.traverse((obj) => {
+          if (obj.isMesh && (/^Tile_Base_/.test(obj.name) || obj.name === 'Circular_Base_Skirt')) slabMeshes.push(obj);
+        });
+        if (slabMeshes.length) {
+          const parts = [terrainMesh.geometry.clone(), ...slabMeshes.map((mesh) => {
+            const geo = mesh.geometry.clone();
+            if (!geo.getAttribute('uv')) {
+              const position = geo.getAttribute('position');
+              geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(position.count * 2), 2));
+            }
+            return geo;
+          })];
+          const terrainAndSlabs = mergeGeometries(parts, true);
+          parts.forEach((geo) => geo.dispose());
+          const materials = [terrainMesh.material, ...slabMeshes.map((mesh) => mesh.material)];
+          exportGroup.remove(terrainMesh);
+          terrainMesh.geometry.dispose();
+          slabMeshes.forEach((mesh) => {
+            exportGroup.remove(mesh);
+            mesh.geometry.dispose();
+          });
+          const wholeTerrain = new THREE.Mesh(terrainAndSlabs, materials);
+          wholeTerrain.name = 'Terrain_Surface';
+          exportGroup.add(wholeTerrain);
+        }
+      }
+    }
+
     // F. Add Water Mesh spanning the whole assembly
-    if (exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
+    if (!separateTileExport && exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
       onToast('Adding water plane...');
       const waterGeo = tileShape === 'circle' ? new THREE.CircleGeometry(diskRadiusWorld, 96) : new THREE.PlaneGeometry(unionSpanX, unionSpanZ);
       waterGeo.rotateX(-Math.PI / 2);
@@ -478,68 +570,81 @@ export class TerrainExporter {
     }
 
     // --- 3. Collision Mesh ---
-    let collisionModel = null;
-    if (exportCollision) {
-      onToast('Generating collision geometry...');
-      // Compute lower-res heightmap for collision
-      const colHSize = collisionRes + 1;
-      const colRT = new THREE.WebGLRenderTarget(colHSize, colHSize, {
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter
-      });
-      setRegion(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
-      bakeUniforms.uBakeMode.value = 0;
-      renderer.setRenderTarget(colRT);
-      renderer.render(quadScene, quadCam);
-
-      const colPixels = new Uint8Array(colHSize * colHSize * 4);
-      renderer.readRenderTargetPixels(colRT, 0, 0, colHSize, colHSize, colPixels);
-      renderer.setRenderTarget(null);
-      colRT.dispose();
-
-      function getColHeightAt(i, j) {
-        const idx = (j * colHSize + i) * 4;
-        const r = colPixels[idx];
-        const g = colPixels[idx + 1];
-        const b = colPixels[idx + 2];
-        const h01 = (r * 65536 + g * 256 + b) / 16777215;
-        return h01 * heightScale;
-      }
-
-      const colPositions = [];
-      const colIndices = [];
-
+    const buildCollisionModel = (ox, oz, sx, sz, name = 'Collision_Mesh') => {
+      const { at } = bakeHeightGrid(ox, oz, sx, sz, collisionRes, collisionRes);
+      const positions = [], indices = [];
       for (let j = 0; j <= collisionRes; j++) {
-        const z = unionCenter.z + (j / collisionRes - 0.5) * unionSpanZ;
+        const z = oz + (j / collisionRes - 0.5) * sz;
         for (let i = 0; i <= collisionRes; i++) {
-          const x = unionCenter.x + (i / collisionRes - 0.5) * unionSpanX;
-          const y = getColHeightAt(i, j);
-          colPositions.push(x, y, z);
+          const x = ox + (i / collisionRes - 0.5) * sx;
+          positions.push(x, at(i, j), z);
         }
       }
-
       for (let j = 0; j < collisionRes; j++) {
         for (let i = 0; i < collisionRes; i++) {
           const p0 = j * (collisionRes + 1) + i;
-          const p1 = j * (collisionRes + 1) + (i + 1);
+          const p1 = p0 + 1;
           const p2 = (j + 1) * (collisionRes + 1) + i;
-          const p3 = (j + 1) * (collisionRes + 1) + (i + 1);
-
-          colIndices.push(p0, p2, p1);
-          colIndices.push(p1, p2, p3);
+          const p3 = p2 + 1;
+          indices.push(p0, p2, p1, p1, p2, p3);
         }
       }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      const model = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ name: 'Collision_Material', wireframe: true, visible: false }));
+      model.name = name;
+      return model;
+    };
+    let collisionModel = null;
+    if (exportCollision && !separateTileExport) {
+      onToast('Generating collision geometry...');
+      collisionModel = buildCollisionModel(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
+    }
 
-      const colGeo = new THREE.BufferGeometry();
-      colGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(colPositions), 3));
-      colGeo.setIndex(colIndices);
-      colGeo.computeVertexNormals();
+    // Separate mode serializes a self-contained model for every occupied cell.
+    // The original export group remains the owner of terrain resources; clones
+    // are only used while their individual GLB/OBJ payloads are generated.
+    const tilePackages = [];
+    if (separateTileExport) {
+      onToast('Preparing individual tile packages...');
+      for (const cell of tiles) {
+        const ctr = cellCenter(cell.cx, cell.cz);
+        const group = new THREE.Group();
+        group.name = `Terrain_Tile_${cell.cx}_${cell.cz}`;
+        const surface = exportGroup.getObjectByName(`Terrain_Tile_${cell.cx}_${cell.cz}`);
+        const base = exportGroup.getObjectByName(`Tile_Base_${cell.cx}_${cell.cz}`);
+        if (surface) group.add(surface.clone());
+        if (base) group.add(base.clone());
 
-      const colMaterial = new THREE.MeshBasicMaterial({ name: 'Collision_Material', wireframe: true, visible: false });
-      collisionModel = new THREE.Mesh(colGeo, colMaterial);
-      collisionModel.name = 'Collision_Mesh';
+        let water = null;
+        if (exportWater && !options.excludeWaterFromExport && seaLevel > 0.5) {
+          const waterGeo = new THREE.PlaneGeometry(cellSize, cellSize);
+          waterGeo.rotateX(-Math.PI / 2);
+          water = new THREE.Mesh(waterGeo, new THREE.MeshStandardMaterial({
+            name: 'Water_Material', color: 0x0f5e73, roughness: 0.1, metalness: 0.8,
+            transparent: true, opacity: 0.6,
+          }));
+          water.name = 'Water';
+          water.position.set(ctr.x, seaLevel, ctr.z);
+          group.add(water);
+        }
+
+        const height = exportHeightmap ? bakeHeightAsset(ctr.x, ctr.z, cellSize, cellSize) : null;
+        tilePackages.push({
+          cell,
+          group,
+          water,
+          colorCanvas: bakeColor ? bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          normalCanvas: bakeNormal ? bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          heightCanvas: height?.canvas ?? null,
+          heightRaw16: height?.raw16 ?? null,
+          splatCanvas: exportHeightmap && options.exportSplat
+            ? bakeRegionCanvas(3, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          collisionModel: exportCollision ? buildCollisionModel(ctr.x, ctr.z, cellSize, cellSize, `Collision_Tile_${cell.cx}_${cell.cz}`) : null,
+        });
+      }
     }
 
     // Cleanup bake resources (kept alive until here so the collision pass could
@@ -585,53 +690,72 @@ export class TerrainExporter {
     // GLTF / GLB Export
     let exportedModel = null;
     let exportedCollision = null;
-
-    if (includeMesh) {
-      onToast(`Packaging primary ${format.toUpperCase()}...`);
-      exportedModel = await new Promise((resolve) => {
-        if (format === 'glb') {
-          const exporter = new GLTFExporter();
-          exporter.parse(
-            exportGroup,
-            (result) => resolve(new Uint8Array(result)),
-            (err) => { console.error(err); resolve(null); },
-            { binary: true, animations: [] }
-          );
-        } else {
-          const exporter = new OBJExporter();
-          const objText = exporter.parse(exportGroup);
-          resolve(new TextEncoder().encode(objText));
-        }
-      });
-    }
-
-    // Collision GLTF Export
-    if (exportCollision && collisionModel) {
-      onToast('Packaging collision mesh...');
-      exportedCollision = await new Promise((resolve) => {
-        const exporter = new GLTFExporter();
-        exporter.parse(
-          collisionModel,
+    const serializeModel = (model) => new Promise((resolve) => {
+      if (format === 'glb') {
+        new GLTFExporter().parse(
+          model,
           (result) => resolve(new Uint8Array(result)),
           (err) => { console.error(err); resolve(null); },
-          { binary: true, animations: [] }
+          { binary: true, animations: [] },
         );
-      });
+      } else {
+        resolve(new TextEncoder().encode(new OBJExporter().parse(model)));
+      }
+    });
+    const serializeCollision = (model) => new Promise((resolve) => {
+      new GLTFExporter().parse(
+        model,
+        (result) => resolve(new Uint8Array(result)),
+        (err) => { console.error(err); resolve(null); },
+        { binary: true, animations: [] },
+      );
+    });
+
+    if (includeMesh && separateTileExport) {
+      for (const tile of tilePackages) {
+        onToast(`Packaging tile ${tile.cell.cx}, ${tile.cell.cz}...`);
+        tile.model = await serializeModel(tile.group);
+      }
+    } else if (includeMesh) {
+      onToast(`Packaging primary ${format.toUpperCase()}...`);
+      exportedModel = await serializeModel(exportGroup);
+    }
+
+    if (separateTileExport && exportCollision) {
+      for (const tile of tilePackages) {
+        if (tile.collisionModel) tile.collision = await serializeCollision(tile.collisionModel);
+      }
+    } else if (exportCollision && collisionModel) {
+      onToast('Packaging collision mesh...');
+      exportedCollision = await serializeCollision(collisionModel);
     }
 
     // Cleanup exported geometry
     exportGroup.traverse((obj) => {
       if (obj.isMesh) {
         obj.geometry.dispose();
-        if (obj.material.map) obj.material.map.dispose();
-        if (obj.material.normalMap) obj.material.normalMap.dispose();
-        obj.material.dispose();
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        materials.forEach((material) => {
+          if (material.map) material.map.dispose();
+          if (material.normalMap) material.normalMap.dispose();
+          material.dispose();
+        });
       }
     });
 
     if (collisionModel) {
       collisionModel.geometry.dispose();
       collisionModel.material.dispose();
+    }
+    for (const tile of tilePackages) {
+      if (tile.water) {
+        tile.water.geometry.dispose();
+        tile.water.material.dispose();
+      }
+      if (tile.collisionModel) {
+        tile.collisionModel.geometry.dispose();
+        tile.collisionModel.material.dispose();
+      }
     }
 
     // Download helpers
@@ -652,6 +776,40 @@ export class TerrainExporter {
 
     if (exportedCollision) {
       zipFiles[pathFor('collision.glb')] = exportedCollision;
+    }
+
+    if (separateTileExport) {
+      const manifest = createTileExportManifest(tiles, format, {
+        includeMesh,
+        packageRoot: options.packageRoot,
+        packagePaths: options.packagePaths,
+        heightmapRawPath: options.heightmapRawPath,
+        exportCollision,
+        exportWater: exportWater && !options.excludeWaterFromExport && seaLevel > 0.5,
+        bakeColor,
+        bakeNormal,
+        exportHeightmap,
+        exportSplat: options.exportSplat,
+      });
+      zipFiles[pathFor('tiles.json')] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      for (const tile of tilePackages) {
+        if (tile.model) zipFiles[pathFor(tilePackageAssetPath(tile.cell, `terrain.${modelExt}`, options))] = tile.model;
+        if (tile.collision) zipFiles[pathFor(tilePackageAssetPath(tile.cell, 'collision.glb', options))] = tile.collision;
+        if (tile.colorCanvas) zipFiles[pathFor(tilePackageAssetPath(tile.cell, 'textures/terrain_color.png', options))] = await canvasToUint8Array(tile.colorCanvas);
+        if (tile.normalCanvas) zipFiles[pathFor(tilePackageAssetPath(tile.cell, 'textures/terrain_normal.png', options))] = await canvasToUint8Array(tile.normalCanvas);
+        if (tile.heightCanvas) {
+          const heightPath = tilePackageHeightmapPath(tile.cell, options);
+          zipFiles[pathFor(heightPath)] = options.heightmapRawPath && tile.heightRaw16
+            ? tile.heightRaw16 : await canvasToUint8Array(tile.heightCanvas);
+        }
+        if (tile.splatCanvas) zipFiles[pathFor(tilePackageAssetPath(tile.cell, 'textures/terrain_splat.png', options))] = await canvasToUint8Array(tile.splatCanvas);
+        if (exportPreset) {
+          zipFiles[pathFor(`${tileExportFolder(tile.cell)}/terrain_preset.json`)] = new TextEncoder().encode(JSON.stringify({
+            app: 'terrain-studio', version: 1, exportedAt: new Date().toISOString(),
+            params: engineParams, tile: tile.cell,
+          }, null, 2));
+        }
+      }
     }
 
     // Water masks (and any other caller-supplied files) ride along in the same zip.
