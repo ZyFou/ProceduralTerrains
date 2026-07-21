@@ -238,7 +238,7 @@ export class TerrainExporter {
       defines: { OCTAVES: oct },
       uniforms: bakeUniforms,
       vertexShader: BAKE_VERTEX,
-      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody)
+      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL)
     });
     quadMesh.material = bakeMat;
 

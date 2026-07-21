@@ -23,6 +23,12 @@ const execute = (kind) => (context) => context[kind]();
 
 const SOURCE_TYPES = ['fbm', 'ridged', 'billow', 'value', 'white', 'constant', 'voronoi', 'crater', 'dune', 'flow'];
 
+const MOUNTAIN_FORMATION_OPTIONS = [
+  { value: 'alpine', label: 'Alpine' },
+  { value: 'strata', label: 'Strata' },
+  { value: 'weathered', label: 'Weathered' },
+];
+
 function sourceDefinition(type) {
   const noise = getNoiseType(type);
   const inspector = [
@@ -81,12 +87,18 @@ const terrainNode = ({ id, label, description, color = 'green', inspector }) => 
 const LANDFORM_DEFINITIONS = [
   terrainNode({
     id: 'mountain', label: 'Mountain',
-    description: 'Creates a single seeded mountain with a controllable silhouette and fractal rock detail.',
+    description: 'Builds an asymmetric multi-peak massif with branching ridges, drainage valleys, foothills, and formation-aware rock structure.',
     inspector: [
+      select('formation', 'Formation', MOUNTAIN_FORMATION_OPTIONS, 'alpine', { section: 'Form' }),
       number('height', 'Height', 0, 2.5, 0.01, 1.15, { section: 'Form' }),
       number('scale', 'Scale', 0.1, 4, 0.01, 0.75, { section: 'Form' }),
       number('radius', 'Radius', 0.2, 3, 0.01, 1.25, { section: 'Form' }),
+      number('peakSpread', 'Peak Spread', 0.15, 1.25, 0.01, 0.78, { section: 'Form' }),
       number('sharpness', 'Peak Sharpness', 0.5, 5, 0.01, 1.65, { section: 'Form' }),
+      number('asymmetry', 'Asymmetry', 0, 1, 0.01, 0.72, { section: 'Structure' }),
+      number('ridgeStrength', 'Branching Ridges', 0, 1.5, 0.01, 0.98, { section: 'Structure' }),
+      number('valleyDepth', 'Valley Depth', 0, 1.5, 0.01, 0.72, { section: 'Structure' }),
+      number('foothills', 'Foothills', 0, 1, 0.01, 0.32, { section: 'Structure' }),
       number('roughness', 'Roughness', 0, 1, 0.01, 0.55, { section: 'Surface' }),
       number('octaves', 'Detail Octaves', 1, 8, 1, 5, { structural: true, section: 'Surface' }),
       number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Surface' }),
@@ -266,6 +278,25 @@ const definitions = [
     defaults: { strength: 0.1, scale: 3.2, roughness: 0.58, strata: 0.24, strataScale: 11, octaves: 5, persistence: 0.48, lacunarity: 2.15, seed: 7103 },
     structuralParams: ['octaves'], uniformSlots: () => 1,
     glslCompiler: execute('geologyDetail'), cpuEvaluator: execute('geologyDetail'),
+  },
+  {
+    id: 'thermalErosion', label: 'Thermal Erosion', category: 'Simulate', color: 'amber',
+    description: 'Relaxes slopes above the talus threshold, moves loose material downslope, and builds broken scree deposits while preserving the massif.',
+    executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
+    inspector: [
+      number('strength', 'Relaxation', 0, 1, 0.01, 0.58, { section: 'Thermal' }),
+      number('radius', 'Feature Radius', 2, 160, 1, 30, { section: 'Thermal', digits: 0 }),
+      number('talus', 'Talus Threshold', 0.005, 0.3, 0.005, 0.07, { section: 'Thermal', digits: 3 }),
+      number('iterations', 'Thermal Passes', 1, 16, 1, 7, { section: 'Thermal', digits: 0 }),
+      number('deposition', 'Deposition', 0, 1, 0.01, 0.72, { section: 'Sediment' }),
+      number('scree', 'Scree Breakup', 0, 1, 0.01, 0.2, { section: 'Sediment' }),
+      number('screeScale', 'Scree Scale', 0.5, 12, 0.05, 4.8, { section: 'Sediment' }),
+      number('seed', 'Seed', 0, 999999, 1, 9103, { section: 'Variation' }),
+    ],
+    defaults: { strength: 0.58, radius: 30, talus: 0.07, iterations: 7, deposition: 0.72, scree: 0.2, screeScale: 4.8, seed: 9103 },
+    structuralParams: [], uniformSlots: () => 1,
+    glslCompiler: execute('thermalErosion'), cpuEvaluator: execute('thermalErosion'),
+    terrainOnly: true, workspaceModes: ['terrain'],
   },
   {
     id: 'naturalErosion', label: 'Natural Erosion', category: 'Simulate', color: 'cyan',

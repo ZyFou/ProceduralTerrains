@@ -214,6 +214,46 @@ describe('analytical terrain graph compiler', () => {
       expect(terrainIds.has(type)).toBe(true);
       expect(noiseIds.has(type)).toBe(false);
     }
+    expect(terrainIds.has('thermalErosion')).toBe(true);
+    expect(noiseIds.has('thermalErosion')).toBe(false);
+  });
+
+  it('builds an asymmetric massif and redistributes steep material with Thermal Erosion', () => {
+    let mountainGraph = createBlankGraph('terrain');
+    mountainGraph = addGraphNode(mountainGraph, 'mountain', { x: 0, y: 0 });
+    const mountain = mountainGraph.nodes.at(-1);
+    mountainGraph = connectGraphNodes(mountainGraph, { source: mountain.id, target: TERRAIN_OUTPUT_ID });
+    const mountainProgram = compileTerrainGraph(mountainGraph).program;
+    const mountainAt = mountainProgram.evaluate2D;
+
+    const ring = Array.from({ length: 16 }, (_, index) => {
+      const angle = index * Math.PI / 8;
+      return mountainAt(Math.cos(angle) * 90, Math.sin(angle) * 90, ctx);
+    });
+    expect(Math.max(...ring) - Math.min(...ring)).toBeGreaterThan(0.12);
+    expect(mountainAt(260, 260, ctx)).toBe(0);
+    expect(mountainProgram.body2d).toContain('peak2');
+    expect(mountainProgram.body2d).toContain('branchPhase');
+
+    let thermalGraph = addGraphNode(mountainGraph, 'thermalErosion', { x: 220, y: 0 });
+    const thermal = thermalGraph.nodes.at(-1);
+    thermalGraph = connectGraphNodes(thermalGraph, { source: mountain.id, target: thermal.id });
+    thermalGraph = connectGraphNodes(thermalGraph, { source: thermal.id, target: TERRAIN_OUTPUT_ID });
+    const thermalProgram = compileTerrainGraph(thermalGraph).program;
+    const thermalAt = thermalProgram.evaluate2D;
+    const baseSamples = [], thermalSamples = [];
+    for (let z = -180; z <= 180; z += 15) {
+      for (let x = -180; x <= 180; x += 15) {
+        baseSamples.push(mountainAt(x, z, ctx));
+        thermalSamples.push(thermalAt(x, z, ctx));
+      }
+    }
+    const meanChange = baseSamples.reduce((sum, value, index) => sum + Math.abs(value - thermalSamples[index]), 0) / baseSamples.length;
+    expect(meanChange).toBeGreaterThan(0.005);
+    expect(Math.max(...thermalSamples)).toBeLessThan(Math.max(...baseSamples));
+    expect(Math.min(...thermalSamples)).toBeGreaterThanOrEqual(0);
+    expect(thermalProgram.body2d).toContain('passGain');
+    expect(thermalProgram.packUniforms().paramsA[1]).toEqual([0.07, 7, 0.72, 0.2]);
   });
 
   it('compiles a realistic height and color graph into separate shader streams', () => {

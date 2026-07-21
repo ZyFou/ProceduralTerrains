@@ -916,7 +916,7 @@ export function createTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
-    fragmentShader: buildFragment(h, stackGLSL.colorBody),
+    fragmentShader: buildFragment(h, stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL),
     side: THREE.DoubleSide,
   });
 }
@@ -940,7 +940,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
-    fragmentShader: buildMinimalFragment(stackGLSL.colorBody),
+    fragmentShader: buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL),
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = true;
@@ -954,7 +954,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 export function rebuildTerrainShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
-  mat.fragmentShader = buildFragment(h, stackGLSL.colorBody);
+  mat.fragmentShader = buildFragment(h, stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.needsUpdate = true;
 }
@@ -965,7 +965,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL) {
 export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
-  mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody);
+  mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = true;
   mat.needsUpdate = true;
 }

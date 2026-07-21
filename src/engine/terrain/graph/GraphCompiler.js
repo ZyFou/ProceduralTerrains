@@ -114,14 +114,53 @@ function nodeFunction(graph, node, slot) {
     source: () => sourceFunction(node, slot),
     mountain: () => {
       const oct = Math.max(1, Math.min(8, Math.round(num(node.params.octaves, 5))));
+      const macroOct = Math.max(2, Math.min(4, oct));
+      const detailOct = Math.max(2, oct - 2);
+      const formation = node.params.formation || 'alpine';
+      const formationTuning = {
+        alpine: { ridge: 1, valley: 1, detail: 1, strata: 0 },
+        strata: { ridge: 0.82, valley: 0.86, detail: 0.78, strata: 0.045 },
+        weathered: { ridge: 0.58, valley: 0.68, detail: 0.52, strata: 0.018 },
+      }[formation] || { ridge: 1, valley: 1, detail: 1, strata: 0 };
       return `float ${fn}(vec2 xz, Climate c) {
   float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
-  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}], pc=uLayerMaskA[${slot}];
   vec2 p=xz*uFrequency*scale;
-  ${glslFbm('detail', 'p*2.6+vec2(seed,seed*1.7+3.1)', oct, 'pb.x', 'pb.y')}
-  float ridge=1.0-abs(detail*2.0-1.0);
-  float silhouette=pow(max(1.0-length(p)/max(pa.x,0.001),0.0),max(pa.y,0.01));
-  return height*silhouette*mix(1.0,ridge,clamp(pa.z,0.0,1.0));
+  float radius=max(pa.x,0.001), turn=seed*0.0137+0.73;
+  vec2 dir=vec2(cos(turn),sin(turn)), side=vec2(-dir.y,dir.x);
+  vec2 q=vec2(dot(p,dir),dot(p,side));
+  float warpA=(vnoise(q*0.58+vec2(seed,seed*0.37))-0.5)*2.0;
+  float warpB=(vnoise(q*0.47+vec2(seed*0.19+17.3,-seed*0.41+8.7))-0.5)*2.0;
+  q+=vec2(warpA*radius*0.34,warpB*radius*0.27)*clamp(pa.w,0.0,1.0);
+  float radial=length(vec2(q.x/(radius*1.04),q.y/(radius*0.92)));
+  float envelope=pow(max(1.0-smoothstep(0.72,1.18,radial),0.0),max(pa.y*0.56,0.28));
+  float spread=clamp(pc.y,0.15,1.25);
+  vec2 d0=vec2((q.x+radius*0.10*spread)/(radius*0.68),(q.y-radius*0.04*spread)/(radius*0.58));
+  vec2 d1=vec2((q.x-radius*0.43*spread)/(radius*0.48),(q.y+radius*0.23*spread)/(radius*0.39));
+  vec2 d2=vec2((q.x+radius*0.36*spread)/(radius*0.42),(q.y-radius*0.34*spread)/(radius*0.35));
+  float peak0=exp(-pow(length(d0),1.62));
+  float peak1=0.78*exp(-pow(length(d1),1.72));
+  float peak2=0.64*exp(-pow(length(d2),1.78));
+  ${glslFbm('macro', 'q*0.78+vec2(seed*0.73,seed*1.11+19.7)', macroOct, '0.55', '2.03')}
+  float massif=pow(max(peak0,max(peak1,peak2)),0.88)*mix(0.78,1.22,macro);
+  ${glslFbm('structure', 'q*1.38+vec2(seed,seed*1.7+3.1)', oct, 'pb.x', 'pb.y')}
+  float fractured=pow(max(1.0-abs(structure*2.0-1.0),0.0),0.82);
+  float theta=atan(q.y,q.x);
+  float branchWarp=(vnoise(q*0.92+vec2(seed*1.23,-seed*0.31))-0.5)*3.2;
+  float branchPhase=theta*4.0+radial*3.35+branchWarp;
+  float branches=pow(max(1.0-abs(sin(branchPhase)),0.0),2.7);
+  float channels=pow(max(1.0-abs(sin(branchPhase+1.5707963)),0.0),5.0);
+  float body=envelope*(0.07+0.93*massif);
+  body*=0.62+fractured*pb.z*0.68*${glsl(formationTuning.ridge)};
+  body+=branches*pb.z*${glsl(formationTuning.ridge)}*envelope*(0.055+0.16*massif)*smoothstep(0.08,0.92,radial);
+  body-=channels*pb.w*${glsl(formationTuning.valley)}*body*smoothstep(0.15,0.98,radial)*0.32;
+  float foothillGate=smoothstep(0.38,0.96,radial)*(1.0-smoothstep(0.98,1.18,radial));
+  body+=envelope*foothillGate*pc.x*(0.05+macro*0.09);
+  ${glslFbm('detail', 'q*5.2+vec2(seed*1.91+7.1,seed*0.61+31.7)', detailOct, 'pb.x', 'pb.y')}
+  float surfaceGate=envelope*smoothstep(0.04,0.82,max(body,0.0));
+  body+=(detail-0.5)*pa.z*${glsl(formationTuning.detail)}*(0.04+0.13*fractured)*surfaceGate;
+  body+=sin((body*13.0+(structure-0.5)*0.7)*6.2831853)*pa.z*${glsl(formationTuning.strata)}*surfaceGate;
+  return height*max(body,0.0);
 }`;
     },
     mountainRange: () => {
@@ -230,6 +269,33 @@ function nodeFunction(graph, node, slot) {
   structure+=strata*0.18*pa.y;
   float elevationGate=smoothstep(0.04,0.38,abs(h));
   return h+structure*strength*elevationGate;
+}`;
+    },
+    thermalErosion: () => {
+      return `float ${fn}(vec2 xz, Climate c) {
+  float strength=uLayerStrength[${slot}], radius=max(uLayerScale[${slot}],1.0), seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  float h=${source}(xz,c);
+  float turn=seed*0.017+0.31;
+  vec2 axis=vec2(cos(turn),sin(turn))*radius, side=vec2(-axis.y,axis.x);
+  float h0=${source}(xz-axis,c), h1=${source}(xz+axis,c);
+  float h2=${source}(xz-side,c), h3=${source}(xz+side,c);
+  float avg=(h0+h1+h2+h3)*0.25;
+  float talus=max(pa.x,0.0001);
+  float drop0=max(h-h0-talus,0.0), drop1=max(h-h1-talus,0.0);
+  float drop2=max(h-h2-talus,0.0), drop3=max(h-h3-talus,0.0);
+  float rise0=max(h0-h-talus,0.0), rise1=max(h1-h-talus,0.0);
+  float rise2=max(h2-h-talus,0.0), rise3=max(h3-h-talus,0.0);
+  float outgoing=max(max(drop0,drop1),max(drop2,drop3));
+  float incoming=(rise0+rise1+rise2+rise3)*0.25;
+  float relief=max(max(abs(h-h0),abs(h-h1)),max(abs(h-h2),abs(h-h3)));
+  float activity=smoothstep(talus*0.65,talus*2.8,relief);
+  float passGain=1.0-exp(-max(pa.y,1.0)*0.22);
+  float creep=(avg-h)*activity*0.18;
+  float relaxed=h-outgoing*0.34*strength*passGain+incoming*pa.z*0.24*strength*passGain+creep*strength*passGain;
+  vec2 sp=xz*uFrequency*max(pb.x,0.1)+vec2(seed,seed*1.7+3.1);
+  float scree=(vnoise(sp)-0.5)*pa.w*0.045*strength*activity;
+  return max(relaxed+scree,min(h,0.0));
 }`;
     },
     naturalErosion: () => {
@@ -389,8 +455,9 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
       packed.seed[slot] = seedDomainOffset(node.params.seed);
       if (node.type === 'mountain') {
         packed.strength[slot] = num(node.params.height, 1.15);
-        packed.paramsA[slot] = [num(node.params.radius, 1.25), num(node.params.sharpness, 1.65), num(node.params.roughness, 0.55), 0];
-        packed.paramsB[slot] = [num(node.params.persistence, 0.5), num(node.params.lacunarity, 2), 0, 0];
+        packed.paramsA[slot] = [num(node.params.radius, 1.25), num(node.params.sharpness, 1.45), num(node.params.roughness, 0.55), num(node.params.asymmetry, 0.72)];
+        packed.paramsB[slot] = [num(node.params.persistence, 0.5), num(node.params.lacunarity, 2), num(node.params.ridgeStrength, 0.88), num(node.params.valleyDepth, 0.62)];
+        packed.maskA[slot] = [num(node.params.foothills, 0.48), num(node.params.peakSpread, 0.62), 0, 0];
       } else if (node.type === 'mountainRange') {
         packed.strength[slot] = num(node.params.height, 1.2);
         packed.paramsA[slot] = [num(node.params.direction, 0.7), num(node.params.width, 0.42), num(node.params.length, 2.4), num(node.params.sharpness, 1.8)];
@@ -419,6 +486,12 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
       packed.seed[slot] = seedDomainOffset(node.params.seed);
       packed.paramsA[slot] = [num(node.params.roughness, 0.58), num(node.params.strata, 0.24), num(node.params.strataScale, 11), num(node.params.persistence, 0.48)];
       packed.paramsB[slot] = [num(node.params.lacunarity, 2.15), 0, 0, 0];
+    } else if (node.type === 'thermalErosion') {
+      packed.strength[slot] = num(node.params.strength, 0.58);
+      packed.scale[slot] = num(node.params.radius, 30);
+      packed.seed[slot] = seedDomainOffset(node.params.seed);
+      packed.paramsA[slot] = [num(node.params.talus, 0.07), num(node.params.iterations, 7), num(node.params.deposition, 0.72), num(node.params.scree, 0.2)];
+      packed.paramsB[slot] = [num(node.params.screeScale, 4.8), 0, 0, 0];
     } else if (node.type === 'naturalErosion') {
       packed.strength[slot] = num(node.params.strength, 0.38);
       packed.scale[slot] = num(node.params.channelScale, 1.4);
@@ -465,10 +538,51 @@ function cpuEvaluator(graph) {
       mountain: () => {
         const { px, pz, seed } = point();
         const radius = Math.max(num(node.params.radius, 1.25), 0.001);
-        const silhouette = Math.pow(Math.max(1 - Math.hypot(px, pz) / radius, 0), Math.max(num(node.params.sharpness, 1.65), 0.01));
-        const detail = fractal(px * 2.6 + seed, pz * 2.6 + seed * 1.7 + 3.1);
-        const ridge = 1 - Math.abs(detail * 2 - 1);
-        return num(node.params.height, 1.15) * silhouette * (1 + (ridge - 1) * num(node.params.roughness, 0.55));
+        const sharpness = Math.max(num(node.params.sharpness, 1.65), 0.01);
+        const roughness = num(node.params.roughness, 0.55);
+        const asymmetry = Math.max(0, Math.min(1, num(node.params.asymmetry, 0.72)));
+        const ridgeStrength = num(node.params.ridgeStrength, 0.98);
+        const valleyDepth = num(node.params.valleyDepth, 0.72);
+        const foothills = num(node.params.foothills, 0.32);
+        const spread = Math.max(0.15, Math.min(1.25, num(node.params.peakSpread, 0.78)));
+        const formation = node.params.formation || 'alpine';
+        const tuning = {
+          alpine: { ridge: 1, valley: 1, detail: 1, strata: 0 },
+          strata: { ridge: 0.82, valley: 0.86, detail: 0.78, strata: 0.045 },
+          weathered: { ridge: 0.58, valley: 0.68, detail: 0.52, strata: 0.018 },
+        }[formation] || { ridge: 1, valley: 1, detail: 1, strata: 0 };
+        const turn = seed * 0.0137 + 0.73, dx = Math.cos(turn), dz = Math.sin(turn);
+        let qx = px * dx + pz * dz, qz = px * -dz + pz * dx;
+        const warpA = (vnoise2(qx * 0.58 + seed, qz * 0.58 + seed * 0.37) - 0.5) * 2;
+        const warpB = (vnoise2(qx * 0.47 + seed * 0.19 + 17.3, qz * 0.47 - seed * 0.41 + 8.7) - 0.5) * 2;
+        qx += warpA * radius * 0.34 * asymmetry;
+        qz += warpB * radius * 0.27 * asymmetry;
+        const radial = Math.hypot(qx / (radius * 1.04), qz / (radius * 0.92));
+        const envelope = Math.pow(Math.max(1 - smoothstep(0.72, 1.18, radial), 0), Math.max(sharpness * 0.56, 0.28));
+        const peak = (cx, cz, sx, sz, power) => Math.exp(-Math.pow(Math.hypot((qx - cx) / (radius * sx), (qz - cz) / (radius * sz)), power));
+        const peak0 = peak(-radius * 0.1 * spread, radius * 0.04 * spread, 0.68, 0.58, 1.62);
+        const peak1 = 0.78 * peak(radius * 0.43 * spread, -radius * 0.23 * spread, 0.48, 0.39, 1.72);
+        const peak2 = 0.64 * peak(-radius * 0.36 * spread, radius * 0.34 * spread, 0.42, 0.35, 1.78);
+        const macro = fractal(qx * 0.78 + seed * 0.73, qz * 0.78 + seed * 1.11 + 19.7, Math.max(2, Math.min(4, num(node.params.octaves, 5))), 0.55, 2.03);
+        const massif = Math.pow(Math.max(peak0, peak1, peak2), 0.88) * (0.78 + (1.22 - 0.78) * macro);
+        const structure = fractal(qx * 1.38 + seed, qz * 1.38 + seed * 1.7 + 3.1);
+        const fractured = Math.pow(Math.max(1 - Math.abs(structure * 2 - 1), 0), 0.82);
+        const theta = Math.atan2(qz, qx);
+        const branchWarp = (vnoise2(qx * 0.92 + seed * 1.23, qz * 0.92 - seed * 0.31) - 0.5) * 3.2;
+        const branchPhase = theta * 4 + radial * 3.35 + branchWarp;
+        const branches = Math.pow(Math.max(1 - Math.abs(Math.sin(branchPhase)), 0), 2.7);
+        const channels = Math.pow(Math.max(1 - Math.abs(Math.sin(branchPhase + Math.PI / 2)), 0), 5);
+        let body = envelope * (0.07 + 0.93 * massif);
+        body *= 0.62 + fractured * ridgeStrength * 0.68 * tuning.ridge;
+        body += branches * ridgeStrength * tuning.ridge * envelope * (0.055 + 0.16 * massif) * smoothstep(0.08, 0.92, radial);
+        body -= channels * valleyDepth * tuning.valley * body * smoothstep(0.15, 0.98, radial) * 0.32;
+        const foothillGate = smoothstep(0.38, 0.96, radial) * (1 - smoothstep(0.98, 1.18, radial));
+        body += envelope * foothillGate * foothills * (0.05 + macro * 0.09);
+        const detail = fractal(qx * 5.2 + seed * 1.91 + 7.1, qz * 5.2 + seed * 0.61 + 31.7, Math.max(2, num(node.params.octaves, 5) - 2));
+        const surfaceGate = envelope * smoothstep(0.04, 0.82, Math.max(body, 0));
+        body += (detail - 0.5) * roughness * tuning.detail * (0.04 + 0.13 * fractured) * surfaceGate;
+        body += Math.sin((body * 13 + (structure - 0.5) * 0.7) * Math.PI * 2) * roughness * tuning.strata * surfaceGate;
+        return num(node.params.height, 1.15) * Math.max(body, 0);
       },
       mountainRange: () => {
         const { px, pz, seed } = point(), direction = num(node.params.direction, 0.7);
@@ -531,6 +645,28 @@ function cpuEvaluator(graph) {
         const structure = (rock - 0.5) + ((ridge - 0.5) - (rock - 0.5)) * num(node.params.roughness, 0.58)
           + strata * 0.18 * num(node.params.strata, 0.24);
         return h + structure * num(node.params.strength, 0.1) * smoothstep(0.04, 0.38, Math.abs(h));
+      },
+      thermalErosion: () => {
+        const h = get('source');
+        const radius = Math.max(num(node.params.radius, 30), 1), seed = seedDomainOffset(node.params.seed);
+        const turn = seed * 0.017 + 0.31, dx = Math.cos(turn) * radius, dz = Math.sin(turn) * radius;
+        const h0 = get('source', x - dx, z - dz), h1 = get('source', x + dx, z + dz);
+        const h2 = get('source', x + dz, z - dx), h3 = get('source', x - dz, z + dx);
+        const avg = (h0 + h1 + h2 + h3) * 0.25;
+        const talus = Math.max(num(node.params.talus, 0.07), 0.0001);
+        const drops = [h - h0, h - h1, h - h2, h - h3].map((value) => Math.max(value - talus, 0));
+        const rises = [h0 - h, h1 - h, h2 - h, h3 - h].map((value) => Math.max(value - talus, 0));
+        const outgoing = Math.max(...drops), incoming = rises.reduce((sum, value) => sum + value, 0) * 0.25;
+        const relief = Math.max(Math.abs(h - h0), Math.abs(h - h1), Math.abs(h - h2), Math.abs(h - h3));
+        const active = smoothstep(talus * 0.65, talus * 2.8, relief);
+        const strength = num(node.params.strength, 0.58), passGain = 1 - Math.exp(-Math.max(num(node.params.iterations, 7), 1) * 0.22);
+        const creep = (avg - h) * active * 0.18;
+        const relaxed = h - outgoing * 0.34 * strength * passGain
+          + incoming * num(node.params.deposition, 0.72) * 0.24 * strength * passGain
+          + creep * strength * passGain;
+        const scree = (vnoise2(x * u.uFrequency.value * num(node.params.screeScale, 4.8) + seed, z * u.uFrequency.value * num(node.params.screeScale, 4.8) + seed * 1.7 + 3.1) - 0.5)
+          * num(node.params.scree, 0.2) * 0.045 * strength * active;
+        return Math.max(relaxed + scree, Math.min(h, 0));
       },
       naturalErosion: () => {
         const e = Math.max(num(node.params.radius, 34), 1);

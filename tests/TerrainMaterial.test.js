@@ -5,6 +5,8 @@ import {
   createTerrainMaterial,
   createTerrainUniforms,
 } from '../src/engine/terrain/TerrainMaterial.js';
+import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
+import { createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
 
 const materials = [];
 
@@ -49,5 +51,16 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(boot.userData.minimalFragment).toBe(true);
     expect(boot.defines).toEqual({ OCTAVES: 6 });
     expect(boot.defines.INFINITE_MODE).toBeUndefined();
+  });
+
+  it('keeps a no-op terrain color function when a height-only graph has no color shader', () => {
+    const uniforms = createTerrainUniforms();
+    const heightOnlyGraph = compileTerrainGraph(createBlankGraph('terrain')).program;
+    const boot = createBootTerrainMaterial(uniforms, 6, heightOnlyGraph);
+    materials.push(boot);
+
+    expect(heightOnlyGraph.colorBody).toBe('');
+    expect(boot.fragmentShader).toContain('vec3 applyTerrainGraphColor');
+    expect(boot.fragmentShader).toContain('return fallback;');
   });
 });
