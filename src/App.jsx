@@ -58,6 +58,28 @@ const num = (value, digits = 2, suffix = '') => {
   return `${Number(value).toFixed(digits)}${suffix}`;
 };
 
+// The undo stack owns the complete project state, while Creator snapshots are
+// managed separately by the engine. Give its entries useful names without
+// maintaining another, competing set of restore states.
+const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
+  try {
+    const before = JSON.parse(beforeSnapshot);
+    const after = JSON.parse(afterSnapshot);
+    if (before.worldMode !== after.worldMode) return 'Changed world mode';
+    if (before.paintRev !== after.paintRev) return 'Painted terrain';
+    if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
+    if (JSON.stringify(before.tiles) !== JSON.stringify(after.tiles)
+      || before.tileAssemblyShape !== after.tileAssemblyShape
+      || before.diskRadiusCells !== after.diskRadiusCells) return 'Edited terrain tiles';
+    if (JSON.stringify(before.creatorTools) !== JSON.stringify(after.creatorTools)) return 'Edited creator tools';
+    if (JSON.stringify(before.terrainGraph) !== JSON.stringify(after.terrainGraph)) return 'Edited terrain graph';
+    if (before.timeOfDay !== after.timeOfDay) return 'Adjusted time of day';
+    if (JSON.stringify(before.perf) !== JSON.stringify(after.perf)) return 'Adjusted performance settings';
+    if (JSON.stringify(before.params) !== JSON.stringify(after.params)) return 'Adjusted terrain settings';
+  } catch { /* A generic label is still preferable to hiding a valid undo entry. */ }
+  return 'Updated terrain';
+};
+
 export default function App() {
   const canvasRef = useRef(null);
   const minimapBaseRef = useRef(null);
@@ -189,6 +211,11 @@ export default function App() {
   const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
   const worldModeRef = useRef('studio');
   const [histState, setHistState] = useState({ canUndo: false, canRedo: false });
+  // The History panel reflects this very same stack, not the smaller
+  // Creator-only journal maintained for named snapshots.
+  const nativeHistoryActionsRef = useRef([]);
+  const nativeHistoryCursorRef = useRef(-1);
+  const [nativeHistoryActions, setNativeHistoryActions] = useState([]);
   const HISTORY_LIMIT = 100;
 
   blockingActiveRef.current = !!blockingTask(loading.tasks);
@@ -313,6 +340,9 @@ export default function App() {
     engineRef.current = engine;
     // seed the undo history baseline from the freshly-built default project
     try { historyRef.current = { past: [], future: [], present: JSON.stringify(engine.serializeState()) }; } catch { /* ignore */ }
+    nativeHistoryActionsRef.current = [];
+    nativeHistoryCursorRef.current = -1;
+    setNativeHistoryActions([]);
     setGpu(engine.gpuName);
     if (landingRef.current?.visible && !landingRef.current?.exiting) {
       engine.setLandingShowcase(true);
@@ -790,10 +820,23 @@ export default function App() {
     const h = historyRef.current;
     if (h.present == null) { h.present = snap; return; }  // first run → baseline
     if (snap === h.present) return;                        // nothing actually changed
-    h.past.push(h.present);
+    const previous = h.present;
+    h.past.push(previous);
     if (h.past.length > HISTORY_LIMIT) h.past.shift();
     h.present = snap;
     h.future.length = 0;
+    const actions = nativeHistoryActionsRef.current.slice(0, nativeHistoryCursorRef.current + 1);
+    actions.push({
+      id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+      type: 'edit',
+      label: historyActionLabel(previous, snap),
+      timestamp: Date.now(),
+      snapshot: snap,
+    });
+    if (actions.length > HISTORY_LIMIT) actions.shift();
+    nativeHistoryActionsRef.current = actions;
+    nativeHistoryCursorRef.current = actions.length - 1;
+    setNativeHistoryActions(actions.map(({ snapshot, ...action }) => action));
     prunePaintBlobs();
     setHistState({ canUndo: h.past.length > 0, canRedo: false });
   }, [captureSnapshot, prunePaintBlobs]);
@@ -854,6 +897,22 @@ export default function App() {
     }
   }, [captureSnapshot]);
 
+  const restoreNativeHistoryAction = useCallback((id) => {
+    if (histSuppressRef.current || modeLockRef.current) return;
+    flushRecord();
+    const actions = nativeHistoryActionsRef.current;
+    const index = actions.findIndex((action) => action.id === id);
+    if (index < 0) return;
+    const h = historyRef.current;
+    h.past = actions.slice(0, index).map((action) => action.snapshot);
+    h.present = actions[index].snapshot;
+    // Redo pops from the end, so keep the next action at the end of the stack.
+    h.future = actions.slice(index + 1).reverse().map((action) => action.snapshot);
+    nativeHistoryCursorRef.current = index;
+    setHistState({ canUndo: h.past.length > 0, canRedo: h.future.length > 0 });
+    applySnapshot(h.present);
+  }, [applySnapshot, flushRecord]);
+
   const undo = useCallback(() => {
     if (histSuppressRef.current || modeLockRef.current) return;
     flushRecord();
@@ -861,6 +920,7 @@ export default function App() {
     if (!h.past.length) return;
     h.future.push(h.present);
     h.present = h.past.pop();
+    nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: h.past.length > 0, canRedo: true });
     applySnapshot(h.present);
   }, [flushRecord, applySnapshot]);
@@ -872,6 +932,7 @@ export default function App() {
     if (!h.future.length) return;
     h.past.push(h.present);
     h.present = h.future.pop();
+    nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: true, canRedo: h.future.length > 0 });
     applySnapshot(h.present);
   }, [flushRecord, applySnapshot]);
@@ -1432,7 +1493,8 @@ export default function App() {
     onRealWorldImageryStyle: (style) => engine().setRealWorldImageryStyle(style),
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
-    splineState, analysisState, creatorHistory,
+    splineState, analysisState,
+    creatorHistory: { ...creatorHistory, actions: nativeHistoryActions },
     onCreateSpline: (type) => engine().createSpline(type),
     onConfirmSplineCreation: () => engine().confirmSplineCreation(),
     onCancelSplineCreation: () => engine().cancelSplineCreation(),
@@ -1444,7 +1506,7 @@ export default function App() {
     onAnalysisSettings: (patch) => engine().setAnalysisSettings(patch),
     onCreateSnapshot: (name) => engine().createSnapshot(name),
     onRestoreSnapshot: (id) => engine().restoreSnapshot(id),
-    onRestoreHistoryAction: (id) => engine().restoreHistoryAction(id),
+    onRestoreHistoryAction: restoreNativeHistoryAction,
     onDeleteSnapshot: (id) => engine().deleteSnapshot(id),
     onRenameSnapshot: (id, name) => engine().renameSnapshot(id, name),
   };
