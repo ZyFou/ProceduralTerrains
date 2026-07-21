@@ -37,6 +37,12 @@ function NodePalette({
   detached = false, side = 'left', style, graphMode, definitions, paletteGroups,
   paletteQuery, onPaletteQuery, resultCount, onAdd, onCollapse, onModeChange, onHeaderPointerDown,
 }) {
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const toggleGroup = (category) => {
+    const groupKey = `${graphMode}:${category}`;
+    setCollapsedGroups((current) => ({ ...current, [groupKey]: !current[groupKey] }));
+  };
+
   return (
     <aside className={`node-quick-palette${detached ? ` detached detached-${side}` : ''}`} style={style} aria-label={`${graphMode === 'terrain' ? 'Terrain' : 'Noise'} nodes`}>
       <header className="node-palette-drag-header" onPointerDown={onHeaderPointerDown} title="Drag to attach the node list to the graph or dock it to either side">
@@ -55,13 +61,28 @@ function NodePalette({
         {paletteQuery ? <button type="button" onClick={() => onPaletteQuery('')} title="Clear node filter"><X size={11} /></button> : null}
       </label>
       <div className="node-palette-scroll">
-        {[...paletteGroups].map(([category, items]) => (
-          <section key={category}><h4>{category}</h4>{items.map((definition) => (
-            <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
-              <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
-            </button>
-          ))}</section>
-        ))}
+        {[...paletteGroups].map(([category, items]) => {
+          const collapsed = !!collapsedGroups[`${graphMode}:${category}`];
+          return (
+            <section className={`node-palette-group${collapsed ? ' collapsed' : ''}`} key={category}>
+              <button
+                type="button"
+                className="node-palette-group-toggle"
+                aria-expanded={!collapsed}
+                onClick={() => toggleGroup(category)}
+              >
+                <span className="node-palette-group-title">{category}</span>
+                <span className="node-palette-group-count">{items.length}</span>
+                <ChevronDown size={12} aria-hidden />
+              </button>
+              {!collapsed ? <div className="node-palette-group-body">{items.map((definition) => (
+                <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
+                  <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
+                </button>
+              ))}</div> : null}
+            </section>
+          );
+        })}
         {!resultCount ? <div className="node-palette-empty"><Search size={16} /><span>No nodes match “{paletteQuery}”</span></div> : null}
       </div>
       <footer><span>{resultCount} shown</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>all nodes</span></footer>
