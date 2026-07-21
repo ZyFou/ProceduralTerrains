@@ -3,7 +3,7 @@
 // Reads a merged snapshot from usePerfOverlay; purely presentational.
 // ============================================================================
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { computeWarnings } from './warnings.js';
 import { buildDiagnosticsText, buildDiagnosticsObject } from './diagnostics.js';
 import PerfSparkline from './PerfSparkline.jsx';

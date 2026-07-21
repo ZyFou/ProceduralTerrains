@@ -22,3 +22,5 @@ export function Logo({ size = 40, className = '' }) {
     </svg>
   );
 }
+import React from 'react';
+

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ControlSection from './ui/ControlSection.jsx';
 import { ToggleRow } from './controls.jsx';
 

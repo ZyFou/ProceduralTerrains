@@ -1,7 +1,7 @@
 // Performance settings content (search + sub-tabs + body), shared by the
 // Performance drawer panel. Extracted from the old SettingsModal so the same
 // controls live in one place.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ControlSection from '../ui/ControlSection.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {

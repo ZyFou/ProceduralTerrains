@@ -40,3 +40,5 @@ export default function PlanetPresetPanel({ planetPreset, onSelect, onRandomize 
     </div>
   );
 }
+import React from 'react';
+

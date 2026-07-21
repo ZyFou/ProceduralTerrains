@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export function fmt(def, v) {
   const digits = def.digits ?? 0;

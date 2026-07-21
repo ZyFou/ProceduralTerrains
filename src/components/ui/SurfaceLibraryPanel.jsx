@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageUp, RefreshCw, RotateCcw } from 'lucide-react';
 import { unzipSync } from 'fflate';
 import CollapsibleGroup from './CollapsibleGroup.jsx';

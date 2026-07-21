@@ -22,3 +22,5 @@ export function AnalysisContent({ ctx }) {
 export default function AnalysisPanel({ ctx }) {
   return <SidePanel title="Analysis" description="Inspect final terrain structure." onClose={ctx.onClose}><AnalysisContent ctx={ctx} /></SidePanel>;
 }
+import React from 'react';
+

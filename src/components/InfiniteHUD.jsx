@@ -4,7 +4,7 @@
 // time-of-day slider, and a return button.
 // ============================================================================
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Compass } from 'lucide-react';
 import { formatTimeOfDay } from '../engine/sky/TimeOfDay.js';
 import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySettings.js';

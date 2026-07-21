@@ -12,3 +12,5 @@ export default function NoisePresetPanel({ noisePreset, onSelect }) {
     </div>
   );
 }
+import React from 'react';
+

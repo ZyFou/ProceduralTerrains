@@ -37,3 +37,5 @@ export default function PaintToolbar({ activeTool, onSelect }) {
     </nav>
   );
 }
+import React from 'react';
+

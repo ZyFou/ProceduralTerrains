@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DrawerChromeContext, FlatPanelContext } from '../panels/PanelContext.js';
 import { renderPanel } from '../panels/index.jsx';
 import {

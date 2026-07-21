@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Info, X } from 'lucide-react';
 
 // Small notification center for the editor top bar.

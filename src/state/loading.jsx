@@ -7,7 +7,7 @@
 //
 // LoadingTask = { id, label, detail?, progress?, blocking }
 // ============================================================================
-import { createContext, useContext, useMemo, useRef, useState, useCallback } from 'react';
+import React, { createContext, useContext, useMemo, useRef, useState, useCallback } from 'react';
 
 const LoadingContext = createContext(null);
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Check, ChevronRight, Plus, Route, Waves } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';

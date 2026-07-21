@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from '../panels/panelMeta.js';
 import {
   isToolsRailDesktopLayout,

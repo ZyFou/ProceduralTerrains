@@ -177,3 +177,5 @@ export default function PlaneHUD({ stats }) {
     </div>
   );
 }
+import React from 'react';
+

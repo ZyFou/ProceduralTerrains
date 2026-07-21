@@ -16,3 +16,5 @@ export default function PanelResetButton({ label = 'Reset Settings', onClick, se
     </div>
   );
 }
+import React from 'react';
+

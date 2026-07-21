@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import SidePanel, { PanelTabs } from './panels/SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
 import {

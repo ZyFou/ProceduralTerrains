@@ -3,7 +3,13 @@ import react from '@vitejs/plugin-react';
 import surfaceMaterialsApi from './vite-plugins/surfaceMaterialsApi.js';
 
 export default defineConfig({
-  plugins: [react(), surfaceMaterialsApi()],
+  // Be explicit here: without the automatic runtime, JSX is compiled to
+  // React.createElement and every JSX module must import a `React` binding.
+  // The application uses the modern runtime throughout its components.
+  esbuild: {
+    jsx: 'automatic',
+  },
+  plugins: [react({ jsxRuntime: 'automatic' }), surfaceMaterialsApi()],
   server: {
     port: 6061,
     strictPort: false,  // allow port shifting if 6061 is in use

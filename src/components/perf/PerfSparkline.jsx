@@ -94,3 +94,5 @@ export default function PerfSparkline({
     </div>
   );
 }
+import React from 'react';
+

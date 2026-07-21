@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { COLOR_PALETTE_PRESETS } from '../engine/style/ColorPalettePresets.js';
 import { PLANET_GEN_TYPES } from '../engine/style/ColorPaletteGenerator.js';
 import { PALETTE_KEYS, colorToHex, parseColor } from '../engine/style/ColorPalette.js';

@@ -70,3 +70,5 @@ export default function PerformancePanel({ stats, gpu }) {
     </ControlSection>
   );
 }
+import React from 'react';
+

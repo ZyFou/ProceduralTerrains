@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PRESETS } from '../engine/presets.js';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
 

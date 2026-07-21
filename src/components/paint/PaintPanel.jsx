@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { SelectRow, SliderCtl } from '../controls.jsx';
 import SidePanel from '../panels/SidePanel.jsx';
 import PaintToolbar, { PAINT_TOOLS } from './PaintToolbar.jsx';

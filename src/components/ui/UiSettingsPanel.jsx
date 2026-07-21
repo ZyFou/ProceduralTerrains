@@ -78,3 +78,5 @@ export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
     </div>
   );
 }
+import React from 'react';
+

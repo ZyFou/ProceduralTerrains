@@ -57,3 +57,5 @@ export default function TileMapDebugSection({ tileDebug, onTileDebug }) {
     </CollapsibleGroup>
   );
 }
+import React from 'react';
+

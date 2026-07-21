@@ -26,3 +26,5 @@ export default function CompileProgressChip({ progress }) {
     </div>
   );
 }
+import React from 'react';
+

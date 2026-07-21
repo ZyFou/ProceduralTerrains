@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import App from './App.jsx';
 import Landing from './landing/Landing.jsx';
 import { LandingProvider } from './landing/landingContext.jsx';

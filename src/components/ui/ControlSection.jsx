@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Cog, Dices, Eye, RefreshCw } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';

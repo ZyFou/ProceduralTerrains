@@ -108,3 +108,5 @@ export default function StatusBar({
     </footer>
   );
 }
+import React from 'react';
+

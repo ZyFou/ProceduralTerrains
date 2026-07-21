@@ -63,3 +63,5 @@ export default function PlanetStylePanel({
     </aside>
   );
 }
+import React from 'react';
+

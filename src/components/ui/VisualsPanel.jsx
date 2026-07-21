@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PanelTabs } from '../panels/SidePanel.jsx';
 import PanelResetButton from './PanelResetButton.jsx';
 import { SliderCtl, ToggleRow, ColorInput } from '../controls.jsx';

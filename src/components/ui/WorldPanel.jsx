@@ -95,3 +95,5 @@ export default function WorldPanel({ params, worldMode, onParam }) {
     </ControlSection>
   );
 }
+import React from 'react';
+
