@@ -205,7 +205,7 @@ function NodeInspector({
 
 export default function NodeWorkspace({
   graph, graphView, graphState, onGraphChange, onGraphViewChange, onStartBlank,
-  inspectorReplaced = false, preview = null, onPreviewVisibilityChange,
+  inspectorReplaced = false, onRequestInspector, preview = null, onPreviewVisibilityChange,
 }) {
   const [localGraph, setLocalGraph] = useState(graph);
   const graphRef = useRef(graph);
@@ -294,8 +294,9 @@ export default function NodeWorkspace({
     commit(next, { structural: true, history: true });
     setSelectedNodes(new Set([added.id]));
     setSelectedGroups(new Set());
+    onRequestInspector?.();
     setSearchState(null); setSearchQuery(''); setSearchIndex(0);
-  }, [commit]);
+  }, [commit, onRequestInspector]);
 
   const addNodeFromPalette = useCallback((type) => {
     const rect = graphDockRef.current?.getBoundingClientRect();
@@ -511,6 +512,7 @@ export default function NodeWorkspace({
           elevateNodesOnSelect={false}
           deleteKeyCode={null} multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
           onMoveEnd={(_, viewport) => onGraphViewChange?.(viewport)}
+          onNodeClick={() => onRequestInspector?.()}
           onSelectionChange={({ nodes, edges }) => {
             setSelectedNodes(new Set(nodes.filter((node) => node.type === 'terrainNode').map((node) => node.id)));
             setSelectedGroups(new Set(nodes.filter((node) => node.type === 'terrainGroup').map((node) => node.id)));

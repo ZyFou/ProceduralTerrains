@@ -1644,6 +1644,7 @@ export default function App() {
                 onGraphViewChange={handleGraphView}
                 onStartBlank={handleStartBlankGraph}
                 inspectorReplaced={!!effectivePanel}
+                onRequestInspector={() => setActivePanel(null)}
                 onPreviewVisibilityChange={setNodesPreviewVisible}
                 preview={(
                   <MinimapOverlay

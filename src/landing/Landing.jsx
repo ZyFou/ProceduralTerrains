@@ -345,7 +345,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={16} /></a>
             </div>
             <div className="lp-footer-meta">
-              <span>© {new Date().getFullYear()} {APP_NAME}. All rights reserved.</span>
+              <span>© {new Date().getFullYear()} {APP_NAME}. Open source software.</span>
               <button type="button" className="lp-link" onClick={() => setCreditsOpen(true)}>Credits</button>
             </div>
           </footer>
