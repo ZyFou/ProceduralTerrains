@@ -6,7 +6,7 @@ import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  Play, Plus, Search, Trash2, Ungroup, X,
+  Plus, Search, Trash2, Ungroup, X,
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
@@ -35,27 +35,20 @@ function editingTarget(target) { return target?.matches?.('input, textarea, sele
 
 function NodePalette({
   detached = false, side = 'left', style, graphMode, definitions, paletteGroups,
-  paletteQuery, onPaletteQuery, resultCount, onAdd, onCollapse, onDetach, onAttach, onMoveSide,
+  paletteQuery, onPaletteQuery, resultCount, onAdd, onCollapse, onModeChange, onHeaderPointerDown,
 }) {
   return (
     <aside className={`node-quick-palette${detached ? ` detached detached-${side}` : ''}`} style={style} aria-label={`${graphMode === 'terrain' ? 'Terrain' : 'Noise'} nodes`}>
-      <header>
+      <header className="node-palette-drag-header" onPointerDown={onHeaderPointerDown} title="Drag to attach the node list to the graph or dock it to either side">
         <span>{graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes'}</span>
         <small>{definitions.length}</small>
-        {detached ? (
-          <>
-            <button type="button" onClick={onMoveSide} title={`Move node list to the ${side === 'left' ? 'right' : 'left'} side`}>
-              {side === 'left' ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-            </button>
-            <button type="button" onClick={onAttach} title="Attach node list inside the graph"><Boxes size={13} /></button>
-          </>
-        ) : (
-          <>
-            <button type="button" onClick={onDetach} title="Detach node list to the sidebar"><Maximize2 size={13} /></button>
-            <button type="button" onClick={onCollapse} title="Collapse node list"><ChevronLeft size={14} /></button>
-          </>
-        )}
+        <GripVertical className="node-palette-drag-cue" size={14} aria-hidden />
+        {!detached ? <button type="button" onClick={onCollapse} title="Collapse node list"><ChevronLeft size={14} /></button> : null}
       </header>
+      <div className="node-mode-switch node-palette-mode-switch" role="tablist" aria-label="Node editor sub-mode">
+        <button type="button" role="tab" aria-selected={graphMode === 'noise'} className={graphMode === 'noise' ? 'active' : ''} onClick={() => onModeChange('noise')}>Noise nodes</button>
+        <button type="button" role="tab" aria-selected={graphMode === 'terrain'} className={graphMode === 'terrain' ? 'active' : ''} onClick={() => onModeChange('terrain')}>Terrain nodes</button>
+      </div>
       <label className="node-palette-filter">
         <Search size={12} aria-hidden />
         <input value={paletteQuery} onChange={(event) => onPaletteQuery(event.target.value)} placeholder="Find a node…" aria-label={`Find ${graphMode} nodes`} />
@@ -245,7 +238,7 @@ function NodeInspector({
       )}
       <footer className={`node-graph-health${graphState?.valid === false ? ' invalid' : ''}`}>
         {graphState?.valid === false ? <CircleAlert size={13} /> : <CheckCircle2 size={13} />}
-        <span>{graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 realtime slots`}</span>
+        <span>{graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 node slots`}</span>
       </footer>
     </aside>
   );
@@ -254,6 +247,7 @@ function NodeInspector({
 export default function NodeWorkspace({
   graph, graphView, graphState, onGraphChange, onGraphViewChange, onStartBlank,
   inspectorReplaced = false, onRequestInspector, preview = null, onPreviewVisibilityChange,
+  toolsRailVisible = false, toolsRailEdge = 'left', onPaletteDockChange,
 }) {
   const [localGraph, setLocalGraph] = useState(graph);
   const graphRef = useRef(graph);
@@ -278,6 +272,9 @@ export default function NodeWorkspace({
   useEffect(() => { setLocalGraph(graph); graphRef.current = graph; }, [graph]);
   useEffect(() => { graphRef.current = localGraph; }, [localGraph]);
   useEffect(() => { saveLayout(layout); onPreviewVisibilityChange?.(layout.previewVisible); }, [layout, onPreviewVisibilityChange]);
+  useEffect(() => {
+    onPaletteDockChange?.({ detached: layout.paletteDetached, side: layout.paletteSide, width: layout.paletteWidth });
+  }, [layout.paletteDetached, layout.paletteSide, layout.paletteWidth, onPaletteDockChange]);
   useEffect(() => {
     if (!instance) return undefined;
     const frame = requestAnimationFrame(() => instance.fitView({ padding: 0.2, maxZoom: 1, duration: 220 }));
@@ -438,6 +435,16 @@ export default function NodeWorkspace({
   }, []);
 
   useEffect(() => {
+    const paletteTargetAt = (event) => {
+      const root = rootRef.current;
+      const graphDock = graphDockRef.current;
+      if (!root || !graphDock) return 'left';
+      const graphRect = graphDock.getBoundingClientRect();
+      const insideGraphBand = event.clientX >= graphRect.left - 36 && event.clientX <= graphRect.right + 36
+        && event.clientY >= graphRect.top - 36 && event.clientY <= graphRect.bottom + 36;
+      if (insideGraphBand) return 'attached';
+      return resolveNearestEdge(event.clientX, event.clientY, root.getBoundingClientRect(), ['left', 'right']);
+    };
     const move = (event) => {
       const drag = dockDragRef.current;
       const root = rootRef.current;
@@ -446,6 +453,10 @@ export default function NodeWorkspace({
         if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
         drag.armed = true;
         setDraggingDock(drag.kind);
+      }
+      if (drag.kind === 'palette') {
+        setSnapHint(paletteTargetAt(event));
+        return;
       }
       const edges = drag.kind === 'graph' ? GRAPH_EDGES : ['left', 'right'];
       setSnapHint(resolveNearestEdge(event.clientX, event.clientY, root.getBoundingClientRect(), edges));
@@ -457,6 +468,13 @@ export default function NodeWorkspace({
       setDraggingDock(null);
       setSnapHint(null);
       if (!drag?.armed || !root) return;
+      if (drag.kind === 'palette') {
+        const target = paletteTargetAt(event);
+        updateLayout(target === 'attached'
+          ? { paletteDetached: false, paletteCollapsed: false }
+          : { paletteDetached: true, paletteCollapsed: false, paletteSide: target });
+        return;
+      }
       const edges = drag.kind === 'graph' ? GRAPH_EDGES : ['left', 'right'];
       const edge = resolveNearestEdge(event.clientX ?? drag.startX, event.clientY ?? drag.startY, root.getBoundingClientRect(), edges);
       updateLayout(drag.kind === 'graph' ? { graphEdge: edge } : { inspectorSide: edge });
@@ -494,11 +512,27 @@ export default function NodeWorkspace({
   const selectedNode = selectedGroup ? null : localGraph.nodes.find((node) => selectedNodes.has(node.id)) || null;
   const inspectorOffset = inspectorReplaced ? 0 : layout.inspectorWidth;
   const paletteOffset = layout.paletteDetached ? layout.paletteWidth : 0;
+  const toolsSideOffset = (side) => toolsRailVisible && toolsRailEdge === side ? 64 : 0;
+  const toolsTopOffset = toolsRailVisible && toolsRailEdge === 'top' ? 58 : 0;
+  const toolsBottomOffset = toolsRailVisible && toolsRailEdge === 'bottom' ? 58 : 0;
   const sideOffset = (side) => (layout.paletteDetached && layout.paletteSide === side ? paletteOffset : 0)
-    + (!inspectorReplaced && layout.inspectorSide === side ? inspectorOffset : 0);
+    + (!inspectorReplaced && layout.inspectorSide === side ? inspectorOffset : 0)
+    + toolsSideOffset(side);
   const dockStyle = layout.graphEdge === 'bottom' || layout.graphEdge === 'top'
-    ? { [layout.graphEdge]: 0, left: sideOffset('left'), right: sideOffset('right'), height: `${layout.graphRatio * 100}%` }
-    : { [layout.graphEdge]: sideOffset(layout.graphEdge), top: 0, bottom: 0, width: `${layout.graphRatio * 100}%` };
+    ? {
+      [layout.graphEdge]: layout.graphEdge === 'top' ? toolsTopOffset : toolsBottomOffset,
+      left: sideOffset('left'), right: sideOffset('right'), height: `${layout.graphRatio * 100}%`,
+    }
+    : {
+      [layout.graphEdge]: sideOffset(layout.graphEdge), top: toolsTopOffset, bottom: toolsBottomOffset, width: `${layout.graphRatio * 100}%`,
+    };
+
+  const paletteStyle = layout.paletteDetached ? {
+    [layout.paletteSide]: 0,
+    width: layout.paletteWidth,
+    top: toolsTopOffset,
+    bottom: toolsBottomOffset,
+  } : undefined;
 
   const palette = (
     <NodePalette
@@ -507,9 +541,8 @@ export default function NodeWorkspace({
       paletteQuery={paletteQuery} onPaletteQuery={setPaletteQuery} resultCount={paletteResultCount}
       onAdd={addNodeFromPalette}
       onCollapse={() => updateLayout({ paletteCollapsed: true })}
-      onDetach={() => updateLayout({ paletteDetached: true, paletteCollapsed: false })}
-      onAttach={() => updateLayout({ paletteDetached: false, paletteCollapsed: false })}
-      onMoveSide={() => updateLayout({ paletteSide: layout.paletteSide === 'left' ? 'right' : 'left' })}
+      onModeChange={(mode) => commit(setGraphMode(graphRef.current, mode), { structural: false, history: true })}
+      onHeaderPointerDown={(event) => beginDockDrag('palette', event)}
     />
   );
 
@@ -518,10 +551,11 @@ export default function NodeWorkspace({
       {draggingDock ? (
         <div className={`panel-snap-layer node-panel-snap-layer${draggingDock === 'inspector' ? ' panel-snap-layer--drawer' : ''}`} aria-hidden>
           {(draggingDock === 'graph' ? GRAPH_EDGES : ['left', 'right']).map((edge) => <div key={edge} className={`panel-snap-zone panel-snap-zone--${edge}${snapHint === edge ? ' active' : ''}`} />)}
+          {draggingDock === 'palette' ? <div className={`panel-snap-zone node-palette-snap-zone--attached${snapHint === 'attached' ? ' active' : ''}`} style={dockStyle} /> : null}
         </div>
       ) : null}
       {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: sideOffset(layout.inspectorSide) + 14 }}>{preview}</div> : null}
-      {layout.paletteDetached ? React.cloneElement(palette, { style: { [layout.paletteSide]: 0, width: layout.paletteWidth } }) : null}
+      {layout.paletteDetached ? React.cloneElement(palette, { style: paletteStyle }) : null}
       <div ref={graphDockRef} className="node-graph-dock" style={dockStyle} onPointerMove={(event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={(event) => {
         event.preventDefault(); const type = event.dataTransfer.getData('application/x-terrain-node'); if (!type || !instance) return;
         addNodeAt(type, instance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
@@ -529,13 +563,6 @@ export default function NodeWorkspace({
         <div className="node-graph-resizer" onPointerDown={beginGraphResize}><GripVertical size={14} /></div>
         <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
           <div className="node-dock-heading"><span className="node-dock-kicker">Nodes</span><strong>{graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise'}</strong></div>
-          <div className="node-mode-switch" role="tablist" aria-label="Node editor sub-mode">
-            <button type="button" role="tab" aria-selected={graphMode === 'noise'} className={graphMode === 'noise' ? 'active' : ''} onClick={() => commit(setGraphMode(graphRef.current, 'noise'), { structural: false, history: true })}>Noise</button>
-            <button type="button" role="tab" aria-selected={graphMode === 'terrain'} className={graphMode === 'terrain' ? 'active' : ''} onClick={() => commit(setGraphMode(graphRef.current, 'terrain'), { structural: false, history: true })}>Terrain</button>
-          </div>
-          <div className="node-graph-status">
-            {graphState?.valid === false ? <><CircleAlert size={13} /><span>Last valid terrain</span></> : <><Play size={12} /><span>Realtime</span></>}
-          </div>
           <div className="node-toolbar-actions">
             <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
             <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title="Group selected nodes (G)"><FolderPlus size={13} /> Group</button>
@@ -646,7 +673,10 @@ export default function NodeWorkspace({
       </div>
 
       {!inspectorReplaced ? (
-        <div className="node-inspector-dock" style={{ [layout.inspectorSide]: layout.paletteDetached && layout.paletteSide === layout.inspectorSide ? paletteOffset : 0, width: layout.inspectorWidth }}>
+        <div className="node-inspector-dock" style={{
+          [layout.inspectorSide]: (layout.paletteDetached && layout.paletteSide === layout.inspectorSide ? paletteOffset : 0) + toolsSideOffset(layout.inspectorSide),
+          top: toolsTopOffset, bottom: toolsBottomOffset, width: layout.inspectorWidth,
+        }}>
           <div className="node-inspector-resizer" onPointerDown={beginInspectorResize} />
           <NodeInspector
             node={selectedNode} group={selectedGroup} graphState={graphState}

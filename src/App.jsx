@@ -137,6 +137,7 @@ export default function App() {
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
   const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0 });
   const [nodesPreviewVisible, setNodesPreviewVisible] = useState(false);
+  const [nodePaletteDock, setNodePaletteDock] = useState({ detached: true, side: 'left', width: 208 });
   const graphCompileTimerRef = useRef(null);
   const graphUniformFrameRef = useRef(null);
   const pendingGraphRef = useRef(null);
@@ -1511,6 +1512,8 @@ export default function App() {
         ref={appShellRef}
         data-tools-rail={toolsRailAttr}
         data-drawer-side={drawerSideAttr}
+        data-node-palette-side={nodesWorkspaceActive && nodePaletteDock.detached ? nodePaletteDock.side : 'attached'}
+        style={{ '--node-palette-shell-width': `${nodePaletteDock.width || 208}px` }}
       >
         {showToolPanels && (
           <LeftToolbar
@@ -1653,6 +1656,9 @@ export default function App() {
                 inspectorReplaced={!!effectivePanel}
                 onRequestInspector={() => setActivePanel(null)}
                 onPreviewVisibilityChange={setNodesPreviewVisible}
+                toolsRailVisible={showToolPanels}
+                toolsRailEdge={toolsRailAttr}
+                onPaletteDockChange={setNodePaletteDock}
                 preview={(
                   <MinimapOverlay
                     docked
