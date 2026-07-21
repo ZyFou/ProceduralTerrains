@@ -803,6 +803,12 @@ export class TerrainExporter {
             ? tile.heightRaw16 : await canvasToUint8Array(tile.heightCanvas);
         }
         if (tile.splatCanvas) zipFiles[pathFor(tilePackageAssetPath(tile.cell, 'textures/terrain_splat.png', options))] = await canvasToUint8Array(tile.splatCanvas);
+        const waterFiles = options.tileWaterMaskFiles?.[`${tile.cell.cx},${tile.cell.cz}`];
+        if (waterFiles) {
+          for (const [path, data] of Object.entries(waterFiles)) {
+            zipFiles[pathFor(`${tileExportFolder(tile.cell)}/${path}`)] = data;
+          }
+        }
         if (exportPreset) {
           zipFiles[pathFor(`${tileExportFolder(tile.cell)}/terrain_preset.json`)] = new TextEncoder().encode(JSON.stringify({
             app: 'terrain-studio', version: 1, exportedAt: new Date().toISOString(),

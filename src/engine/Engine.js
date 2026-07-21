@@ -5716,9 +5716,33 @@ export class Engine {
       let extraZipFiles = createProductionFiles(exportOptions, {
         seed: this.params.seed, boardSize: this.boardSize, heightScale: this.params.heightScale,
       });
+      let tileWaterMaskFiles = null;
       if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask
         || options.exportFoamMask || options.exportWaterMetadata) {
-        Object.assign(extraZipFiles, await this.waterSystem.exportMasks({ ...exportOptions, maskRes: exportOptions.maskRes ?? exportOptions.meshRes ?? '512' }));
+        const maskOptions = { ...exportOptions, maskRes: exportOptions.maskRes ?? exportOptions.meshRes ?? '512' };
+        const separateTiles = this.worldMode === 'studio'
+          && this.tileAssemblyShape === 'square'
+          && this.tiles.length > 1
+          && options.exportTileMode === 'separate';
+        if (separateTiles) {
+          tileWaterMaskFiles = {};
+          for (const tile of this.tiles) {
+            tileWaterMaskFiles[`${tile.cx},${tile.cz}`] = await this.waterSystem.exportMasks({
+              ...maskOptions,
+              maskSize: this.cellSize,
+              maskOrigin: this._cellWorldCenter(tile.cx, tile.cz),
+            });
+          }
+        } else {
+          const assemblySize = this.worldMode === 'studio'
+            ? Math.max(this._unionWidth(), this._unionDepth())
+            : this.boardSize;
+          Object.assign(extraZipFiles, await this.waterSystem.exportMasks({
+            ...maskOptions,
+            maskSize: assemblySize,
+            maskOrigin: this.worldMode === 'studio' ? this._unionCenter() : { x: 0, z: 0 },
+          }));
+        }
       }
       if (options.exportSplineMasks && this.splineManager?.baker) {
         Object.assign(extraZipFiles, await this._splineMaskZipFiles());
@@ -5731,7 +5755,7 @@ export class Engine {
         const { TerrainExporter } = await import('./terrain/TerrainExporter.js');
         await TerrainExporter.export(
           this.renderer, this.params, this.uniforms, this.boardSize,
-          { ...exportOptions, extraZipFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._activeHeightProgram()
+          { ...exportOptions, extraZipFiles, tileWaterMaskFiles, tiles: this.tiles.map((t) => ({ ...t })), tileAssemblyShape: this.tileAssemblyShape, diskRadiusCells: this.diskRadiusCells, cellSize: this.cellSize }, onMsg, this._activeHeightProgram()
         );
       }
       return true;

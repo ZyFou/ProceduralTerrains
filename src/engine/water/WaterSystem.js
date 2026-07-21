@@ -186,11 +186,13 @@ export class WaterSystem {
       if (eng.heightSampler?.cpu) return eng.heightSampler.cpu.heightAt(x, z);
       return eng._getMinimapSampler().heightAt(x, z);
     };
-    const size = eng.boardSize ?? eng.params.chunkSize * eng.params.chunkCount;
+    const size = Number(options.maskSize) || eng.boardSize || eng.params.chunkSize * eng.params.chunkCount;
+    const origin = options.maskOrigin ?? { x: 0, z: 0 };
     const files = await buildWaterMaskFiles({
       sampleHeight,
       seaLevel: eng.params.seaLevel,
       size,
+      origin,
       resolution: parseInt(options.maskRes ?? '512', 10),
       options: { ...options, waterMode: this._effectiveMode },
     });
