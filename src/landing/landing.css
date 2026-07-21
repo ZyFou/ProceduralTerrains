@@ -154,7 +154,7 @@ body:has(.landing-overlay) {
   flex-direction: column;
   gap: 24px;
   box-sizing: border-box;
-  width: min(640px, 48vw);
+  width: min(760px, 52vw);
   min-height: 100%;
   padding: 24px 24px 20px 52px;
 }
@@ -294,6 +294,12 @@ body:has(.landing-overlay) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+/* On wider home screens, use the expanded panel for a balanced four-card row.
+   Narrower layouts retain larger, easier-to-scan cards. */
+@media (min-width: 1360px) {
+  .lp-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .lp-card {
   position: relative;
