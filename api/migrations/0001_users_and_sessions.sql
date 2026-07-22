@@ -15,7 +15,7 @@ CREATE TABLE users (
   UNIQUE KEY uq_users_username (username),
   KEY idx_users_status (status),
   CONSTRAINT chk_users_status CHECK (status IN ('active', 'suspended', 'deleted'))
-) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE sessions (
   id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -31,4 +31,4 @@ CREATE TABLE sessions (
   KEY idx_sessions_user_id (user_id),
   KEY idx_sessions_expires_at (expires_at),
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

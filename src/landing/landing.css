@@ -81,6 +81,8 @@ body:has(.landing-overlay) {
   clip-path: polygon(0 0, 55% 0, 51% 100%, 0 100%);
   filter: drop-shadow(18px 0 48px rgba(0, 0, 0, 0.55));
   pointer-events: none;
+  transition: clip-path .52s cubic-bezier(.4, 0, .2, 1);
+  will-change: clip-path;
 }
 
 /* ---- Top navigation ---- */
@@ -172,6 +174,19 @@ body:has(.landing-overlay) {
   min-height: 100%;
   padding: 24px 24px 20px 52px;
 }
+.lp-content > * {
+  animation: lp-content-enter .46s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes lp-content-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Keep the account form visually contained: the panel's edge sits just beyond
+   the form instead of leaving a broad empty dark area on the right. */
+.lp--auth .lp-bg {
+  clip-path: polygon(0 0, 45% 0, 42% 100%, 0 100%);
+}
 
 /* ---- Hero ---- */
 .lp-version-pill {
@@ -241,6 +256,16 @@ body:has(.landing-overlay) {
 }
 .lp-secondary:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.32); background: rgba(255, 255, 255, 0.08); }
 .lp-secondary:disabled { opacity: 0.55; cursor: var(--cursor-default); }
+.lp-auth-logout {
+  border-color: rgba(239, 68, 68, .42);
+  background: rgba(239, 68, 68, .1);
+  color: #f18b8b;
+}
+.lp-auth-logout:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, .75);
+  background: rgba(239, 68, 68, .18);
+  color: #ffaaaa;
+}
 .lp-primary.sm, .lp-secondary.sm { height: 34px; padding: 0 13px; font-size: 12.5px; }
 .lp-link {
   display: inline-flex;
@@ -582,6 +607,7 @@ body:has(.landing-overlay) {
     filter: none;
     background: linear-gradient(180deg, rgba(4, 5, 8, 0.92) 0%, rgba(4, 5, 8, 0.82) 100%);
   }
+  .lp--auth .lp-bg { clip-path: none; }
   .lp-content {
     width: 100%;
     max-width: 660px;
@@ -631,6 +657,8 @@ body:has(.landing-overlay) {
 @media (prefers-reduced-motion: reduce) {
   .landing-overlay { transition: opacity 0.35s ease; }
   .landing-overlay.exiting { transform: none; filter: none; }
+  .lp-bg { transition: none; }
+  .lp-content > * { animation: none; }
   .lp-primary:hover:not(:disabled) { transform: none; }
   .landing-preview-spinner { animation: none; border-top-color: var(--text-dim); }
 }

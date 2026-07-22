@@ -5,7 +5,7 @@ Small, self-hostable Node.js/MySQL account service for Procedural Terrains. It c
 ## Requirements
 
 - Node.js 22 or newer (Node.js 24 LTS recommended)
-- MySQL 8.4
+- MySQL 8+ or MariaDB 10.6+
 - PM2 installed globally on the server
 - HTTPS for production cookie sessions
 
@@ -128,6 +128,8 @@ npm run migrate
 ```
 
 The runner uses a MySQL advisory lock, records a SHA-256 checksum in `schema_migrations`, and refuses to continue if an already-applied migration was edited. Add a new migration file instead of changing a deployed one.
+
+If the configured database does not exist and `DB_USER` has permission to create it, the migration runner creates it automatically. A restricted production user should normally receive an already-created database from the server administrator.
 
 ## Routes
 

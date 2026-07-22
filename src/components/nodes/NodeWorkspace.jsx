@@ -610,7 +610,7 @@ export default function NodeWorkspace({
   useEffect(() => {
     const onKey = (event) => {
       if (!rootRef.current || editingTarget(event.target)) return;
-      const key = event.key.toLowerCase();
+      const key = String(event.key ?? '').toLowerCase();
       if (event.shiftKey && key === 'a') { event.preventDefault(); openSearch(); return; }
       if (event.key === 'Escape') { setSearchState(null); return; }
       if (event.metaKey || event.ctrlKey) {

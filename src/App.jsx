@@ -945,13 +945,13 @@ export default function App() {
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       if (e.ctrlKey || e.metaKey) {
-      const k = e.key.toLowerCase();
+      const k = String(e.key ?? '').toLowerCase();
       if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
       else if (k === 's' && e.shiftKey) { e.preventDefault(); engineRef.current?.createSnapshot('Creator checkpoint'); }
       return;
       }
-      const k = e.key.toLowerCase();
+      const k = String(e.key ?? '').toLowerCase();
       if (k === 's') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
       else if (k === 'r' && e.shiftKey) engineRef.current?.createSpline('river');
       else if (k === 'r') engineRef.current?.createSpline('road');
@@ -1315,7 +1315,7 @@ export default function App() {
   useEffect(() => {
     if (!searchEnabled) return;
     const onKeyDown = (e) => {
-      const key = e.key.toLowerCase();
+      const key = String(e.key ?? '').toLowerCase();
       if ((e.metaKey || e.ctrlKey) && key === 'k') {
         e.preventDefault();
         openSettingsSearch();

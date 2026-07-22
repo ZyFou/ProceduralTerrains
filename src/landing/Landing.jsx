@@ -256,7 +256,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   return (
     <div
-      className={`landing landing-overlay lp${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -283,7 +283,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           <button type="button" className="lp-nav-credits" onClick={() => setCreditsOpen(true)} aria-label="Open credits and links" title="Credits and links"><CircleHelp size={17} /></button>
           {user ? <>
             <span className="lp-account-chip" title={user.email}><UserRound size={14} /><span>{user.username}</span></span>
-            <button type="button" className="lp-secondary sm lp-auth-logout" onClick={() => logout()}><LogOut size={13} /> <span>Sign out</span></button>
+            <button type="button" className="lp-secondary sm lp-auth-logout" onClick={() => logout()}><LogOut size={13} /> <span>Logout</span></button>
           </> : <>
             <button type="button" className="lp-secondary sm lp-auth-login" onClick={() => showView('login')} disabled={authStatus === 'loading'}><LogIn size={13} /> <span>Sign in</span></button>
             <button type="button" className="lp-primary sm lp-auth-register" onClick={() => showView('register')} disabled={authStatus === 'loading'}><UserPlus size={13} /> <span>Create account</span></button>
@@ -293,7 +293,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       </header>
 
       <div className="lp-scroll">
-        <main className="lp-content">
+        <main key={view} className="lp-content">
           {AUTH_VIEWS.has(view) && (
             <AuthPage
               key={view}
@@ -399,7 +399,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </main>
       </div>
 
-      {!bootReady && !AUTH_VIEWS.has(view) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
+      {!bootReady && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>
