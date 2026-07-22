@@ -460,10 +460,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
             </button>
           </div>
-          <footer>
-            <button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates('procedural'); }}><SlidersHorizontal size={13} /> Procedural templates</button>
-            <button type="button" className="lp-link" onClick={() => { setCreateOpen(false); openTemplates('nodes'); }}><Boxes size={13} /> Nodes templates</button>
-          </footer>
         </section>
       </div>}
       {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>Credits</span><h2 id="credits-title">Cursor theme</h2></div><p>The editor cursor set is based on the Windows 11 Light Theme cursor pack by <strong>{CURSOR_PACK_AUTHOR}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">View cursor pack</a><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} /> X / Twitter</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} /> Portfolio</a></div><button type="button" onClick={() => setCreditsOpen(false)}>Close</button></section></div>}
