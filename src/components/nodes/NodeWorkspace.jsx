@@ -160,11 +160,6 @@ function TerrainNode({ data, selected }) {
       </div>
       {definition.preview === 'gradient' ? <div className="terrain-flow-node__gradient" style={{ background: terrainGradientCss(node.params?.preset) }} aria-label={`${node.params?.preset || 'alpine'} terrain gradient`} /> : null}
       {definition.preview === 'color' && node.params?.rockColor ? <div className="terrain-flow-node__color-chip"><span style={{ background: node.params.rockColor }} /><small>Rock tint</small></div> : null}
-      <div className="terrain-flow-node__summary">
-        {node.type === 'currentTerrain'
-          ? `${node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0} classic layers`
-          : definition.description}
-      </div>
     </div>
   );
 }

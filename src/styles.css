@@ -4131,7 +4131,7 @@ input[type="color"].palette-color-input {
 
 .terrain-flow-node {
   width: 188px;
-  min-height: 82px;
+  min-height: 0;
   border: 1px solid color-mix(in srgb, var(--node-blue) 72%, #27303b);
   border-radius: 5px;
   background: #0d0d0d;
@@ -4196,18 +4196,7 @@ input[type="color"].palette-color-input {
 }
 .terrain-flow-node .react-flow__handle.source-selected { transform: translate(50%, -50%) scale(1.5); }
 .terrain-flow-node .react-flow__handle.connection-target { transform: translate(-50%, -50%) scale(1.5); }
-.terrain-flow-node__summary {
-  min-height: 24px;
-  padding: 4px 8px 7px;
-  color: var(--text-dim);
-  font-size: 10px;
-  line-height: 1.35;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.terrain-flow-node__gradient { height: 14px; margin: 5px 8px 1px; border: 1px solid rgba(255,255,255,.12); border-radius: 3px; box-shadow: inset 0 1px rgba(255,255,255,.05); }
+.terrain-flow-node__gradient { height: 14px; margin: 5px 8px 6px; border: 1px solid rgba(255,255,255,.12); border-radius: 3px; box-shadow: inset 0 1px rgba(255,255,255,.05); }
 .terrain-flow-node__color-chip { height: 20px; display: flex; align-items: center; gap: 6px; margin: 4px 8px 0; color: var(--text-dim); }
 .terrain-flow-node__color-chip > span { width: 22px; height: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 2px; }
 .terrain-flow-node__color-chip small { font: 8px var(--mono); }

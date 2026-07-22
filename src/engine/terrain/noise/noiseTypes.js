@@ -212,7 +212,7 @@ export const NOISE_TYPES = [
   {
     id: 'fbm', label: 'FBM / Fractal', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.4,
-    desc: 'Layered value noise — general terrain variation, rolling hills, natural detail.',
+    desc: 'Layered value noise for general terrain variation, rolling hills, and natural detail.',
     scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: ['erosion', 'warp'],
     params: [P_SCALE, P_OCT, P_PERS, P_LAC, P_EROSION, P_SELF_WARP],
     body2d: (l) => fbmLoop2(clampOct(l.params.octaves)),
@@ -240,7 +240,7 @@ export const NOISE_TYPES = [
   {
     id: 'billow', label: 'Billow', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.4,
-    desc: 'Soft rounded noise — hills, soft dunes, organic/cloud-like surfaces.',
+    desc: 'Soft rounded noise for hills, soft dunes, and organic or cloud-like surfaces.',
     scaleKey: 'scale', paKeys: ['persistence', 'lacunarity'], pbKeys: ['erosion', 'warp'],
     params: [P_SCALE, P_OCT, P_PERS, P_LAC, P_EROSION, P_SELF_WARP],
     body2d: (l) => billowLoop2(clampOct(l.params.octaves)),
@@ -253,7 +253,7 @@ export const NOISE_TYPES = [
   {
     id: 'value', label: 'Value', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.3,
-    desc: 'Simple blocky base noise — broad masks, biome zones, stylized variation.',
+    desc: 'Simple blocky base noise for broad masks, biome zones, and stylized variation.',
     scaleKey: 'scale', paKeys: [], pbKeys: [],
     params: [P_SCALE,
       { key: 'interp', label: 'Interpolation', type: 'enum', structural: true, default: 2,
@@ -268,7 +268,7 @@ export const NOISE_TYPES = [
   {
     id: 'white', label: 'White / Random', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.06,
-    desc: 'Fine random detail — micro variation, roughness, mask breakup.',
+    desc: 'Fine random detail for micro variation, roughness, and mask breakup.',
     scaleKey: 'scale', paKeys: ['smoothing'], pbKeys: [],
     params: [{ ...P_SCALE, default: 8.0 },
       { key: 'smoothing', label: 'Smoothing', min: 0, max: 1, step: 0.01, default: 0.0, digits: 2 }],
@@ -288,7 +288,7 @@ export const NOISE_TYPES = [
   {
     id: 'constant', label: 'Constant', category: 'height',
     defaultBlend: 'add', defaultStrength: 1.0,
-    desc: 'A flat constant value — raise/lower the whole terrain, flatten base, water tests.',
+    desc: 'A flat constant value to raise or lower the whole terrain, flatten the base, or test water.',
     scaleKey: null, paKeys: ['value'], pbKeys: [],
     params: [{ key: 'value', label: 'Value', min: -1, max: 1, step: 0.01, default: 0.1, digits: 2 }],
     body2d: () => `val = pa.x;`,
@@ -301,7 +301,7 @@ export const NOISE_TYPES = [
   {
     id: 'voronoi', label: 'Voronoi / Cellular', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.4,
-    desc: 'Cell-based noise — tectonic plates, cracked desert, ice, alien patterns.',
+    desc: 'Cell-based noise for tectonic plates, cracked deserts, ice, and alien patterns.',
     scaleKey: 'scale', paKeys: ['jitter'], pbKeys: [],
     params: [{ ...P_SCALE, default: 2.0 },
       { key: 'jitter', label: 'Jitter', min: 0, max: 1, step: 0.01, default: 1.0, digits: 2 },
@@ -319,7 +319,7 @@ export const NOISE_TYPES = [
   {
     id: 'crater', label: 'Crater', category: 'height',
     defaultBlend: 'add', defaultStrength: 0.5,
-    desc: 'Impact craters — moons, asteroids, dead planets, sci-fi terrain.',
+    desc: 'Impact craters for moons, asteroids, dead planets, and sci-fi terrain.',
     scaleKey: 'scale', paKeys: ['density', 'depth', 'rim', 'rimWidth'], pbKeys: [],
     params: [{ ...P_SCALE, default: 1.5 },
       { key: 'density', label: 'Density', min: 0, max: 1, step: 0.01, default: 0.55, digits: 2 },
@@ -353,7 +353,7 @@ export const NOISE_TYPES = [
   {
     id: 'flow', label: 'Flow / River', category: 'height',
     defaultBlend: 'subtract', defaultStrength: 0.5,
-    desc: 'Directional flow channels — river valleys, erosion streaks, lava flows.',
+    desc: 'Directional flow channels for river valleys, erosion streaks, and lava flows.',
     scaleKey: 'scale', paKeys: ['flowDir', 'width', 'meander', 'meanderScale'], pbKeys: [],
     params: [{ ...P_SCALE, default: 1.0 },
       { key: 'flowDir', label: 'Flow Direction', min: 0, max: 6.283, step: 0.01, default: 1.2, digits: 2 },
@@ -370,7 +370,7 @@ export const NOISE_TYPES = [
   {
     id: 'domainWarp', label: 'Domain Warp', category: 'modifier', badge: 'MOD',
     defaultBlend: 'add', defaultStrength: 1.0,
-    desc: 'Distorts the coordinates of the layers below — breaks artificial patterns, twists terrain.',
+    desc: 'Distorts the coordinates of the layers below to break artificial patterns and twist terrain.',
     modKind: 'domain',
     scaleKey: 'scale', paKeys: [], pbKeys: [],
     params: [{ key: 'scale', label: 'Warp Scale', min: 0.1, max: 8, step: 0.05, default: 1.0, digits: 2 }, P_WARP_OCT],
@@ -397,7 +397,7 @@ export const NOISE_TYPES = [
   {
     id: 'terrace', label: 'Terrace', category: 'modifier', badge: 'MOD',
     defaultBlend: 'replace', defaultStrength: 1.0,
-    desc: 'Quantizes the accumulated height into stepped terraces — plateaus, cliffs, strata.',
+    desc: 'Quantizes the accumulated height into stepped terraces, plateaus, cliffs, and strata.',
     modKind: 'height',
     scaleKey: null, paKeys: ['count', 'smoothness'], pbKeys: [],
     params: [
