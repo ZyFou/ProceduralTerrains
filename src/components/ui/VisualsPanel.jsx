@@ -159,13 +159,6 @@ export default function VisualsPanel({ ctx }) {
         <>
           {group('pixelated', 'Pixelated', 'pixel resolution virtual resolution', (
             <>
-          <ToggleRow
-            label="Pixelated"
-            value={!!val(params, 'visualsPixelatedEnabled')}
-            onChange={(v) => onParam('visualsPixelatedEnabled', v)}
-            settingId="visuals.visualsPixelatedEnabled"
-            info="Renders the camera through a low-resolution target with hard nearest-neighbor pixels."
-          />
           <SliderCtl
             def={CAMERA_SLIDERS.pixelResolution}
             value={val(params, 'visualsPixelResolution')}

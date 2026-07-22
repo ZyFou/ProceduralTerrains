@@ -1109,6 +1109,9 @@ body {
   display: none;
 }
 .visuals-section-disabled { opacity: 0.48; pointer-events: none; }
+.toggle-row[data-setting-id="visuals.visualsDitheringEnabled"],
+.toggle-row[data-setting-id="visuals.visualsCrtEnabled"],
+.toggle-row[data-setting-id="visuals.visualsChromaticAberrationEnabled"] { display: none; }
 .visuals-search-wrap {
   display: flex;
   align-items: center;
