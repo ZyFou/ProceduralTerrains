@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Engine } from '../src/engine/Engine.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
+import { TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
 import { defaultLegacyStack } from '../src/engine/terrain/noise/NoiseStack.js';
 import { generateStackGLSL } from '../src/engine/terrain/noise/noiseStackCodegen.js';
 import { createNodeTemplateGraph } from '../src/project/NodeProjectTemplates.js';
@@ -22,6 +23,7 @@ function heightTransitionHarness() {
     _compiling: 0,
     _disposed: false,
     _needsRender: false,
+    _liveHeightSourceSig: null,
     _matTrash: [],
     worldMode: 'studio',
     params: { octaves: 6 },
@@ -72,6 +74,27 @@ describe('atomic terrain height transitions', () => {
     expect(result.cached).toBe(true);
     expect(engine._compileMaterialVariants).not.toHaveBeenCalled();
     expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not rebuild water for a color-only graph shader change', async () => {
+    let heightGraph = createBlankGraph('terrain');
+    heightGraph = addGraphNode(heightGraph, 'mountainRange', { x: 0, y: 0 });
+    heightGraph = connectGraphNodes(heightGraph, { source: heightGraph.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID });
+    let colorGraph = addGraphNode(heightGraph, 'terrainGradient', { x: 0, y: 180 });
+    colorGraph = connectGraphNodes(colorGraph, { source: colorGraph.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID, targetHandle: 'color' });
+    const before = compileTerrainGraph(heightGraph).program;
+    const after = compileTerrainGraph(colorGraph).program;
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'nodes';
+    engine.params.waterEnabled = true;
+    engine._liveHeightSig = before.sig;
+    engine._liveHeightSourceSig = before.heightSig;
+    engine._compileMaterialVariants = vi.fn(async () => {});
+
+    await engine._rebuildStackMaterialsAsync(after);
+
+    expect(engine._compileMaterialVariants.mock.calls[0][0]).toHaveLength(1);
+    expect(engine.waterMaterial.fragmentShader).toBe('old water source');
   });
 
   it('keeps rendering gated until the latest rapid project load commits terrain and water together', async () => {

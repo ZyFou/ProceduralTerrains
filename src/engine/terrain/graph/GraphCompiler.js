@@ -529,6 +529,31 @@ function structuralSignature(graph, ordered, slotById, colorSlotById) {
   return `graph-v2|${parts.join('|')}`;
 }
 
+// Water and height-only materials do not consume the color stream. Keeping a
+// separate signature lets the engine avoid recompiling them when a color node
+// is added, removed, or rewired.
+function heightStructuralSignature(graph, ordered, slotById) {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const parts = [];
+  for (const id of ordered) {
+    const node = nodes.get(id); const definition = getGraphNodeDefinition(node.type);
+    const isHeightNode = node.type === 'terrainOutput'
+      || definition?.outputs?.some((port) => port.type === 'analytic-height');
+    if (!isHeightNode) continue;
+    const structuralParams = node.type === 'mountain'
+      ? [...new Set([...(definition.structuralParams || []), 'reduceDetails'])]
+      : (definition.structuralParams || []);
+    const params = structuralParams.map((key) => key === 'stack'
+      ? generateStackGLSL(migrateStack(node.params?.stack)).sig
+      : `${key}=${JSON.stringify(node.params?.[key])}`).join(',');
+    const links = (definition.inputs || [])
+      .filter((port) => port.type === 'analytic-height')
+      .map((port) => `${port.id}<-${inputEdge(graph, id, port.id)?.source || '?'}`).join(',');
+    parts.push(`${node.type}@${slotById.get(id) ?? '-'}[${params}](${links})`);
+  }
+  return `graph-height-v1|${parts.join('|')}`;
+}
+
 function packUniforms(graph, ordered, slotById, colorSlotById) {
   const packed = emptyPack();
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -900,6 +925,7 @@ export function compileTerrainGraph(graph) {
   }
   const output = findOutputNode(graph);
   const sig = structuralSignature(graph, ordered, slotById, colorSlotById);
+  const heightSig = heightStructuralSignature(graph, ordered, slotById);
   let shaderSource = shaderSourceCache.get(sig);
   if (!shaderSource) {
     const functions = ordered.filter((id) => {
@@ -914,7 +940,7 @@ export function compileTerrainGraph(graph) {
     });
   }
   const program = {
-    kind: 'graph', sig,
+    kind: 'graph', sig, heightSig,
     body2d: shaderSource.body2d,
     body3d: shaderSource.body3d,
     colorBody: shaderSource.colorBody,

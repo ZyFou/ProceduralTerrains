@@ -161,12 +161,17 @@ export class Engine {
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
     this._liveHeightSig = this._stackSig;
+    this._liveHeightSourceSig = this._stackSig;
     this.projectMode = 'procedural';
     this.generationSource = 'classic';
     this.terrainGraph = null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
     this._graphProgram = null;
     this._graphDiagnostics = [];
+    this._pendingGraphCompileSig = null;
+    this._pendingGraphCompileReady = null;
+    this._pendingGraphCompileNodeIds = new Set();
+    this._pendingGraphFallbackProgram = null;
     this._soloLayerId = null;       // solo-preview gate (uniform-only, no recompile)
     this.appliedChunkCount = 0;
     this.appliedChunkSize = 0;
@@ -2049,23 +2054,32 @@ export class Engine {
     }
   }
 
-  setTerrainGraph(graph, { structural = true, silent = false, atomic = false } = {}) {
+  setTerrainGraph(graph, {
+    structural = true, silent = false, atomic = false, affectedNodeIds = [],
+  } = {}) {
     const nextGraph = migrateGraphDocument(graph, this.noiseStack);
     const compiled = compileTerrainGraph(nextGraph);
+    const previousProgram = this._graphProgram;
     this.terrainGraph = nextGraph;
     this._graphDiagnostics = compiled.diagnostics || [];
-    const previousProgram = this._graphProgram;
     if (compiled.ok) this._graphProgram = compiled.program;
     this.cb.onTerrainGraph?.(structuredClone(this.terrainGraph));
-    this.cb.onGraphState?.({
-      valid: compiled.ok,
-      compiling: false,
-      diagnostics: structuredClone(this._graphDiagnostics),
-      slotCount: compiled.program?.slotCount ?? this._graphProgram?.slotCount ?? 0,
-      colorSlotCount: compiled.program?.colorSlotCount ?? this._graphProgram?.colorSlotCount ?? 0,
-    });
 
     if (!compiled.ok) {
+      if (this._pendingGraphCompileSig) {
+        this._octToken++;
+        this._pendingGraphCompileSig = null;
+        this._pendingGraphCompileReady = null;
+        this._pendingGraphCompileNodeIds.clear();
+        this._pendingGraphFallbackProgram = null;
+        this.cb.onCompileProgress?.(null);
+      }
+      this.cb.onGraphState?.({
+        valid: false, compiling: false, compilingNodeIds: [],
+        diagnostics: structuredClone(this._graphDiagnostics),
+        slotCount: this._graphProgram?.slotCount || 0,
+        colorSlotCount: this._graphProgram?.colorSlotCount || 0,
+      });
       if (!silent) this.cb.onToast?.(this._graphDiagnostics[0]?.message || 'Terrain graph is invalid');
       return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
@@ -2078,21 +2092,55 @@ export class Engine {
     let ready = Promise.resolve({ swapped: false, error: null });
     if (this.worldMode === 'studio' && this.generationSource === 'graph') {
       if (needsCompile) {
-        this.cb.onGraphState?.({ valid: true, compiling: true, diagnostics: [], slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount });
+        for (const nodeId of affectedNodeIds) this._pendingGraphCompileNodeIds.add(nodeId);
+        if (this._pendingGraphCompileSig === compiled.program.sig && this._pendingGraphCompileReady) {
+          this.cb.onGraphState?.({
+            valid: true, compiling: true, compilingNodeIds: [...this._pendingGraphCompileNodeIds], diagnostics: [],
+            slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
+          });
+          return { ok: true, program: compiled.program, ready: this._pendingGraphCompileReady, reused: true };
+        }
+
+        const fallbackProgram = this._pendingGraphFallbackProgram
+          || (previousProgram?.sig === this._liveHeightSig ? previousProgram : null);
+        const pendingNodeIds = new Set(this._pendingGraphCompileNodeIds);
+        this._pendingGraphCompileSig = compiled.program.sig;
+        this._pendingGraphFallbackProgram = fallbackProgram;
+        this._pendingGraphCompileNodeIds = pendingNodeIds;
+        this.cb.onGraphState?.({
+          valid: true, compiling: true, compilingNodeIds: [...this._pendingGraphCompileNodeIds], diagnostics: [],
+          slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
+        });
         ready = this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph', atomic }).then((result) => {
-          if (result?.error && this._graphProgram === compiled.program) {
-            this._graphProgram = previousProgram;
+          if (this._pendingGraphCompileSig !== compiled.program.sig) return result;
+          if (result?.error) {
+            this._graphProgram = this._pendingGraphFallbackProgram;
             this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. The last valid terrain is still active.' }];
             this._syncCpuHeightProgram();
-            this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: previousProgram?.slotCount || 0, colorSlotCount: previousProgram?.colorSlotCount || 0 });
+            this.cb.onGraphState?.({ valid: false, compiling: false, compilingNodeIds: [], diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
             if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
-          } else if (result?.swapped && this._graphProgram === compiled.program) {
-            this.cb.onGraphState?.({ valid: true, compiling: false, diagnostics: [], slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount });
+          } else if (result?.swapped) {
+            this.cb.onGraphState?.({ valid: true, compiling: false, compilingNodeIds: [], diagnostics: [], slotCount: this._graphProgram.slotCount, colorSlotCount: this._graphProgram.colorSlotCount });
+          } else {
+            this.cb.onGraphState?.({ valid: true, compiling: false, compilingNodeIds: [], diagnostics: [], slotCount: this._graphProgram.slotCount, colorSlotCount: this._graphProgram.colorSlotCount });
           }
+          this._pendingGraphCompileSig = null;
+          this._pendingGraphCompileReady = null;
+          this._pendingGraphCompileNodeIds.clear();
+          this._pendingGraphFallbackProgram = null;
           return result;
         });
+        this._pendingGraphCompileReady = ready;
       }
       else {
+        if (this._pendingGraphCompileSig) {
+          this._octToken++;
+          this._pendingGraphCompileSig = null;
+          this._pendingGraphCompileReady = null;
+          this._pendingGraphCompileNodeIds.clear();
+          this._pendingGraphFallbackProgram = null;
+          this.cb.onCompileProgress?.(null);
+        }
         this._applyUniforms();
         this._terrainGen++;
         this._bakedStudioGen = -1;
@@ -2100,7 +2148,16 @@ export class Engine {
         this.propSurfaceField?.invalidate?.();
         this.minimap.requestRedraw();
         this._needsRender = true;
+        this.cb.onGraphState?.({
+          valid: true, compiling: false, compilingNodeIds: [], diagnostics: [],
+          slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
+        });
       }
+    } else {
+      this.cb.onGraphState?.({
+        valid: true, compiling: false, compilingNodeIds: [], diagnostics: [],
+        slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
+      });
     }
     return { ok: true, program: compiled.program, ready };
   }
@@ -2157,6 +2214,8 @@ export class Engine {
   async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), { label = 'Compiling noise stack', atomic = false } = {}) {
     const oct = Math.round(this.params.octaves);
     const sg = program || this._stackGLSL;
+    const heightSourceSig = sg.heightSig || sg.sig;
+    const heightSourceChanged = this._liveHeightSourceSig !== heightSourceSig;
     const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
     // Presets commonly change only uniforms. Do not touch WebGL when the live
     // studio program already matches the requested structural variant.
@@ -2179,9 +2238,9 @@ export class Engine {
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
         : createTerrainMaterial(this.uniforms, oct, sg)];
       const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
-      if (waterActive && this.worldMode === 'studio') {
+      if (heightSourceChanged && waterActive && this.worldMode === 'studio') {
         warm.push(createWaterMaterial(this.uniforms, oct, sg));
-      } else if (waterActive && this.worldMode === 'infinite') {
+      } else if (heightSourceChanged && waterActive && this.worldMode === 'infinite') {
         warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
       }
 
@@ -2227,12 +2286,13 @@ export class Engine {
         }
         if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
         else rebuildTerrainShaderSource(this.terrainMaterial, sg);
-        rebuildWaterShaderSource(this.waterMaterial, sg);
+        if (heightSourceChanged) rebuildWaterShaderSource(this.waterMaterial, sg);
         if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
-        if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
+        if (heightSourceChanged && this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
           rebuildWaterShaderSource(this._infiniteWaterMat, sg);
         }
         this._liveHeightSig = sg.sig;
+        this._liveHeightSourceSig = heightSourceSig;
         // The editor warms only canvas programs. Re-arm the existing lazy
         // near-water path for the new render-target shader variants.
         this._underwaterWarmed = false;

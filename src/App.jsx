@@ -161,8 +161,10 @@ export default function App() {
   const [nodesPreviewVisible, setNodesPreviewVisible] = useState(false);
   const [nodePaletteDock, setNodePaletteDock] = useState({ detached: true, side: 'left', width: 208 });
   const graphCompileTimerRef = useRef(null);
+  const graphCompileIdleRef = useRef(null);
   const graphUniformFrameRef = useRef(null);
   const pendingGraphRef = useRef(null);
+  const pendingGraphCompileNodesRef = useRef(new Set());
 
   // ---- toasts ----
   const [recentNotifications, setRecentNotifications] = useState([]);
@@ -1012,13 +1014,36 @@ export default function App() {
       if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
       graphUniformFrameRef.current = null;
       if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+      if (graphCompileIdleRef.current) {
+        const { kind, id } = graphCompileIdleRef.current;
+        if (kind === 'idle') cancelIdleCallback(id); else cancelAnimationFrame(id);
+        graphCompileIdleRef.current = null;
+      }
+      for (const nodeId of meta.compileNodeIds || []) pendingGraphCompileNodesRef.current.add(nodeId);
+      setGraphState((current) => ({
+        ...current,
+        compiling: true,
+        compilingNodeIds: [...pendingGraphCompileNodesRef.current],
+      }));
       graphCompileTimerRef.current = setTimeout(() => {
         graphCompileTimerRef.current = null;
-        const pending = pendingGraphRef.current;
-        pendingGraphRef.current = null;
-        if (pending) engineRef.current?.setTerrainGraph(pending, { structural: true });
-      }, 200);
-    } else if (!graphCompileTimerRef.current && !graphUniformFrameRef.current) {
+        const dispatch = () => {
+          graphCompileIdleRef.current = null;
+          const pending = pendingGraphRef.current;
+          const affectedNodeIds = [...pendingGraphCompileNodesRef.current];
+          pendingGraphRef.current = null;
+          pendingGraphCompileNodesRef.current.clear();
+          if (pending) engineRef.current?.setTerrainGraph(pending, { structural: true, affectedNodeIds });
+        };
+        if (typeof requestIdleCallback === 'function') {
+          const id = requestIdleCallback(dispatch, { timeout: 650 });
+          graphCompileIdleRef.current = { kind: 'idle', id };
+        } else {
+          const id = requestAnimationFrame(dispatch);
+          graphCompileIdleRef.current = { kind: 'frame', id };
+        }
+      }, 280);
+    } else if (!graphCompileTimerRef.current && !graphCompileIdleRef.current && !graphUniformFrameRef.current) {
       // Range inputs can emit faster than the display refresh rate. Repack the
       // latest uniform values once per frame instead of evaluating every
       // intermediate pointer event.
@@ -1033,16 +1058,25 @@ export default function App() {
 
   const handleStartBlankGraph = useCallback((mode = 'terrain') => {
     if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    if (graphCompileIdleRef.current) {
+      const { kind, id } = graphCompileIdleRef.current;
+      if (kind === 'idle') cancelIdleCallback(id); else cancelAnimationFrame(id);
+    }
     if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
     graphUniformFrameRef.current = null;
-    graphCompileTimerRef.current = null; pendingGraphRef.current = null;
+    graphCompileTimerRef.current = null; graphCompileIdleRef.current = null; pendingGraphRef.current = null;
+    pendingGraphCompileNodesRef.current.clear();
     const next = createBlankGraph(mode);
     setTerrainGraph(next);
-    engineRef.current?.setTerrainGraph(next, { structural: true });
+    engineRef.current?.setTerrainGraph(next, { structural: true, affectedNodeIds: next.nodes.map((node) => node.id) });
   }, []);
 
   useEffect(() => () => {
     if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    if (graphCompileIdleRef.current) {
+      const { kind, id } = graphCompileIdleRef.current;
+      if (kind === 'idle') cancelIdleCallback(id); else cancelAnimationFrame(id);
+    }
     if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
   }, []);
 

@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Background, BackgroundVariant, ConnectionMode, Controls, Handle, Position, ReactFlow, useUpdateNodeInternals,
+  Background, BackgroundVariant, ConnectionMode, Controls, Handle, NodeResizer, Position, ReactFlow, useUpdateNodeInternals,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  Palette, Plus, RotateCcw, Search, Sparkles, Trash2, Ungroup, X,
+  LoaderCircle, Palette, Plus, RotateCcw, Search, Sparkles, Trash2, Ungroup, X,
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, canConnectGraphNodes, connectGraphNodes, createBlankGraph,
-  duplicateGraphSelection, groupGraphNodes, moveGraphGroup, moveGraphNodes,
+  downstreamNodeIds, duplicateGraphSelection, groupGraphNodes, moveGraphGroup, moveGraphNodes,
   removeGraphEdges, removeGraphGroups, removeGraphNodes, setGraphMode,
   updateGraphGroup, updateGraphNode, updateGraphNodeParams,
 } from '../../engine/terrain/graph/GraphDocument.js';
@@ -42,6 +42,29 @@ function loadLayout() {
 }
 function saveLayout(layout) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* preferences are best effort */ } }
 function editingTarget(target) { return target?.matches?.('input, textarea, select, [contenteditable="true"]'); }
+const GROUP_TONE_HEX = { slate: '#788392', green: '#58b889', cyan: '#35c8d0', amber: '#d8a34f', violet: '#9b7be8' };
+
+function graphCompileNodeIds(before, after) {
+  if (!before || !after) return (after?.nodes || []).map((node) => node.id);
+  const beforeNodes = new Map(before.nodes.map((node) => [node.id, node]));
+  const afterNodes = new Map(after.nodes.map((node) => [node.id, node]));
+  const seeds = new Set();
+  if (before.mode !== after.mode) after.nodes.forEach((node) => seeds.add(node.id));
+  for (const node of after.nodes) {
+    const previous = beforeNodes.get(node.id);
+    if (!previous || previous.type !== node.type || JSON.stringify(previous.params) !== JSON.stringify(node.params)) seeds.add(node.id);
+  }
+  const edgeKey = (edge) => `${edge.source}:${edge.sourceHandle}>${edge.target}:${edge.targetHandle}:${edge.type}`;
+  const beforeEdges = new Map(before.edges.map((edge) => [edgeKey(edge), edge]));
+  const afterEdges = new Map(after.edges.map((edge) => [edgeKey(edge), edge]));
+  for (const [key, edge] of afterEdges) if (!beforeEdges.has(key)) seeds.add(edge.target);
+  for (const [key, edge] of beforeEdges) if (!afterEdges.has(key) && afterNodes.has(edge.target)) seeds.add(edge.target);
+  for (const removed of before.nodes) {
+    if (afterNodes.has(removed.id)) continue;
+    before.edges.filter((edge) => edge.source === removed.id && afterNodes.has(edge.target)).forEach((edge) => seeds.add(edge.target));
+  }
+  return [...downstreamNodeIds(after, [...seeds])].filter((id) => afterNodes.has(id));
+}
 
 function NodePalette({
   detached = false, side = 'left', style, graphMode, definitions, paletteGroups,
@@ -101,7 +124,7 @@ function NodePalette({
 }
 
 function TerrainNode({ data, selected }) {
-  const { node, invalid } = data;
+  const { node, invalid, compiling } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
   const NodeIcon = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? Palette : Boxes;
   const updateNodeInternals = useUpdateNodeInternals();
@@ -110,10 +133,11 @@ function TerrainNode({ data, selected }) {
     return () => cancelAnimationFrame(frame);
   }, [definition.inputs.length, definition.outputs.length, node.id, updateNodeInternals]);
   return (
-    <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}`}>
+    <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}${compiling ? ' compiling' : ''}`}>
       <div className="terrain-flow-node__header">
         <span className="terrain-flow-node__icon"><NodeIcon size={12} aria-hidden /></span>
         <span className="terrain-flow-node__title">{node.label}</span>
+        {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={`${node.label} is compiling`} title="Compiling shader"><LoaderCircle size={12} aria-hidden /></span> : null}
         {definition.permanent ? <span className="terrain-flow-node__output">OUT</span> : null}
       </div>
       <div className="terrain-flow-node__ports">
@@ -147,8 +171,22 @@ function TerrainNode({ data, selected }) {
 
 function TerrainGroup({ data, selected }) {
   const { group } = data;
+  const customColor = /^#[0-9a-f]{6}$/i.test(group.color || '');
   return (
-    <div className={`terrain-flow-group tone-${group.color || 'slate'}${selected ? ' selected' : ''}${group.collapsed ? ' collapsed' : ''}`}>
+    <div
+      className={`terrain-flow-group tone-${customColor ? 'slate custom' : (group.color || 'slate')}${selected ? ' selected' : ''}${group.collapsed ? ' collapsed' : ''}`}
+      style={customColor ? { '--group-tone': group.color } : undefined}
+    >
+      <NodeResizer
+        isVisible={selected && !group.collapsed}
+        minWidth={220}
+        minHeight={100}
+        color="var(--group-tone)"
+        lineClassName="terrain-flow-group__resize-line"
+        handleClassName="terrain-flow-group__resize-handle"
+        onResize={(_, size) => data.onResize(group.id, size)}
+        onResizeEnd={(_, size) => data.onResizeEnd(group.id, size)}
+      />
       <div className="terrain-flow-group__header">
         <ChevronDown size={12} className={group.collapsed ? 'collapsed' : ''} aria-hidden />
         <strong>{group.label}</strong>
@@ -294,7 +332,15 @@ function NodeInspector({
               <span>Frame color</span>
               <select value={group.color || 'slate'} onChange={(event) => onGroupPatch({ color: event.target.value })}>
                 <option value="slate">Slate</option><option value="green">Green</option><option value="cyan">Cyan</option><option value="amber">Amber</option><option value="violet">Violet</option>
+                {/^(#[0-9a-f]{6})$/i.test(group.color || '') ? <option value={group.color}>Custom</option> : null}
               </select>
+            </label>
+            <label className="node-inspector-field node-group-color-field">
+              <span>Custom color</span>
+              <span className="node-inspector-color-row">
+                <span className="node-inspector-color-swatch" style={{ background: GROUP_TONE_HEX[group.color] || group.color }} />
+                <input type="color" value={GROUP_TONE_HEX[group.color] || group.color || GROUP_TONE_HEX.slate} onChange={(event) => onGroupPatch({ color: event.target.value })} />
+              </span>
             </label>
             <label className="node-inspector-toggle">
               <span>Collapsed</span>
@@ -416,7 +462,11 @@ export default function NodeWorkspace({
   }, [instance, layout.graphEdge, layout.inspectorSide, layout.paletteDetached, layout.paletteSide]);
 
   const commit = useCallback((next, meta = {}) => {
-    graphRef.current = next; setLocalGraph(next); onGraphChange?.(next, meta);
+    const previous = graphRef.current;
+    const nextMeta = meta.structural && !meta.compileNodeIds
+      ? { ...meta, compileNodeIds: graphCompileNodeIds(previous, next) }
+      : meta;
+    graphRef.current = next; setLocalGraph(next); onGraphChange?.(next, nextMeta);
   }, [onGraphChange]);
 
   const toggleGroup = useCallback((groupId) => {
@@ -445,12 +495,23 @@ export default function NodeWorkspace({
   }, [definitions, searchQuery]);
 
   const invalidNodes = useMemo(() => new Set((graphState?.diagnostics || []).map((diagnostic) => diagnostic.nodeId).filter(Boolean)), [graphState]);
+  const compilingNodes = useMemo(() => new Set(graphState?.compilingNodeIds || []), [graphState?.compilingNodeIds]);
   const collapsedNodes = useMemo(() => new Set((localGraph.groups || [])
     .filter((group) => group.collapsed).flatMap((group) => group.nodeIds)), [localGraph.groups]);
+  const resizeGroup = useCallback((groupId, size, finished = false) => {
+    const next = updateGraphGroup(graphRef.current, groupId, { width: size.width, height: size.height });
+    graphRef.current = next;
+    setLocalGraph(next);
+    if (finished) onGraphChange?.(next, { structural: false, history: true });
+  }, [onGraphChange]);
   const flowNodes = useMemo(() => [
     ...(localGraph.groups || []).map((group) => ({
       id: group.id, type: 'terrainGroup', position: group.position,
-      data: { group, onToggle: toggleGroup }, selected: selectedGroups.has(group.id), deletable: true,
+      data: {
+        group, onToggle: toggleGroup,
+        onResize: (groupId, size) => resizeGroup(groupId, size, false),
+        onResizeEnd: (groupId, size) => resizeGroup(groupId, size, true),
+      }, selected: selectedGroups.has(group.id), deletable: true,
       zIndex: group.collapsed ? 3 : 0,
       measured: { width: group.collapsed ? 240 : group.width, height: group.collapsed ? 42 : group.height },
       style: { width: group.collapsed ? 240 : group.width, height: group.collapsed ? 42 : group.height },
@@ -459,11 +520,11 @@ export default function NodeWorkspace({
       id: node.id, type: 'terrainNode', position: node.position,
       measured: nodeMeasurements[node.id], zIndex: 2,
       data: {
-        node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id),
+        node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id), compiling: compilingNodes.has(node.id),
       },
       selected: selectedNodes.has(node.id), deletable: node.type !== 'terrainOutput',
     })),
-  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, nodeMeasurements, collapsedNodes, toggleGroup]);
+  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, compilingNodes, nodeMeasurements, collapsedNodes, resizeGroup, toggleGroup]);
   const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
     ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false, zIndex: 1,
     className: `terrain-flow-edge ${edge.type === ANALYTIC_COLOR ? 'edge-color' : 'edge-height'}`,

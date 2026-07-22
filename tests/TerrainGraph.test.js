@@ -164,10 +164,11 @@ describe('terrain graph document', () => {
     expect(grouped.groupId).toBe('geology');
     expect(graph.groups[0]).toMatchObject({ label: 'Geology', nodeIds: [mountain.id, terrace.id], collapsed: false, color: 'amber' });
     graph = updateGraphGroup(graph, 'geology', { collapsed: true, label: 'Rock pass' });
+    graph = updateGraphGroup(graph, 'geology', { width: 640, height: 310, color: '#6f4aa8' });
     graph = moveGraphGroup(graph, 'geology', { x: 70, y: 100 });
     expect(graph.nodes.find((node) => node.id === mountain.id).position).toEqual({ x: 110, y: 160 });
     const migrated = migrateGraphDocument(JSON.parse(JSON.stringify(graph)));
-    expect(migrated.groups[0]).toMatchObject({ id: 'geology', label: 'Rock pass', collapsed: true, position: { x: 70, y: 100 } });
+    expect(migrated.groups[0]).toMatchObject({ id: 'geology', label: 'Rock pass', collapsed: true, position: { x: 70, y: 100 }, width: 640, height: 310, color: '#6f4aa8' });
     expect(removeGraphGroups(migrated, ['geology']).groups).toEqual([]);
   });
 
@@ -375,6 +376,18 @@ describe('analytical terrain graph compiler', () => {
     expect(result.program.colorBody).toContain('uGraphColorA');
     expect(result.program.packUniforms().colorA).toHaveLength(8);
     expect(Number.isFinite(result.program.evaluate2D(12.5, -7.25, ctx))).toBe(true);
+  });
+
+  it('keeps the height shader signature stable for color-only graph changes', () => {
+    let heightOnly = createBlankGraph('terrain');
+    heightOnly = addGraphNode(heightOnly, 'mountainRange', { x: 0, y: 0 });
+    heightOnly = connectGraphNodes(heightOnly, { source: heightOnly.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID });
+    let colored = addGraphNode(heightOnly, 'terrainGradient', { x: 0, y: 180 });
+    colored = connectGraphNodes(colored, { source: colored.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID, targetHandle: 'color' });
+    const before = compileTerrainGraph(heightOnly).program;
+    const after = compileTerrainGraph(colored).program;
+    expect(after.sig).not.toBe(before.sig);
+    expect(after.heightSig).toBe(before.heightSig);
   });
 
   it('rebuilds deterministic noise identically for the same seed and differently for another seed', () => {

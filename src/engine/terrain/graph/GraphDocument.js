@@ -11,6 +11,8 @@ export const GRAPH_MODES = Object.freeze(['noise', 'terrain']);
 const clone = (value) => structuredClone(value);
 const uid = (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 const graphMode = (mode, fallback = 'terrain') => GRAPH_MODES.includes(mode) ? mode : fallback;
+const GROUP_TONES = new Set(['slate', 'green', 'cyan', 'amber', 'violet']);
+const groupColor = (value) => GROUP_TONES.has(value) || /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : 'slate';
 
 export class GraphValidationError extends Error {
   constructor(code, message, details = {}) { super(message); this.name = 'GraphValidationError'; this.code = code; this.details = details; }
@@ -119,7 +121,7 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
         height: Math.max(100, Number(group.height) || 240),
         nodeIds,
         collapsed: group.collapsed === true,
-        color: ['slate', 'green', 'cyan', 'amber', 'violet'].includes(group.color) ? group.color : 'slate',
+        color: groupColor(group.color),
       };
     })
     .filter((group) => group.nodeIds.length > 0);
@@ -280,16 +282,20 @@ export function groupGraphNodes(graph, nodeIds, options = {}) {
     height: Math.max(100, Number(options.height) || 240),
     nodeIds: members,
     collapsed: options.collapsed === true,
-    color: ['slate', 'green', 'cyan', 'amber', 'violet'].includes(options.color) ? options.color : 'slate',
+    color: groupColor(options.color),
   };
   return { graph: { ...graph, groups: [...groups, group] }, groupId: id };
 }
 
 export function updateGraphGroup(graph, groupId, patch) {
+  const nextPatch = clone(patch);
+  if (Object.hasOwn(nextPatch, 'width')) nextPatch.width = Math.max(220, Number(nextPatch.width) || 220);
+  if (Object.hasOwn(nextPatch, 'height')) nextPatch.height = Math.max(100, Number(nextPatch.height) || 100);
+  if (Object.hasOwn(nextPatch, 'color')) nextPatch.color = groupColor(nextPatch.color);
   return {
     ...graph,
     groups: (graph.groups || []).map((group) => group.id === groupId
-      ? { ...group, ...clone(patch), id: group.id, nodeIds: [...group.nodeIds] }
+      ? { ...group, ...nextPatch, id: group.id, nodeIds: [...group.nodeIds] }
       : group),
   };
 }

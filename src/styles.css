@@ -4119,6 +4119,15 @@ input[type="color"].palette-color-input {
 .terrain-flow-group__header span { color: var(--text-dim); font: 7px var(--mono); }
 .terrain-flow-group__header button { height: 21px; padding: 0 6px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--text-dim); font-size: 7px; }
 .terrain-flow-group__header button:hover { border-color: var(--border-subtle); background: var(--bg-control); color: var(--text-main); }
+.terrain-flow-group__resize-line { border-color: color-mix(in srgb, var(--group-tone) 75%, white) !important; }
+.terrain-flow-group__resize-handle {
+  width: 8px !important;
+  height: 8px !important;
+  border: 1px solid rgba(255,255,255,.82) !important;
+  border-radius: 2px !important;
+  background: var(--group-tone) !important;
+  box-shadow: 0 0 0 2px #11151a, 0 2px 6px rgba(0,0,0,.4);
+}
 
 .terrain-flow-node {
   width: 188px;
@@ -4138,6 +4147,7 @@ input[type="color"].palette-color-input {
 .terrain-flow-node.tone-output { border-color: color-mix(in srgb, var(--node-output) 80%, #27303b); }
 .terrain-flow-node.selected { box-shadow: 0 0 0 1px var(--text-bright), 0 8px 24px rgba(0,0,0,.42); }
 .terrain-flow-node.invalid { border-style: dashed; box-shadow: 0 0 0 1px rgba(255, 91, 91, .32); }
+.terrain-flow-node.compiling { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 24%, transparent), 0 7px 20px rgba(0,0,0,.3); }
 .terrain-flow-node__header {
   height: 28px;
   display: flex;
@@ -4156,6 +4166,10 @@ input[type="color"].palette-color-input {
 .tone-rose .terrain-flow-node__icon { color: var(--node-rose); }
 .tone-output .terrain-flow-node__icon { color: var(--node-output); }
 .terrain-flow-node__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+.terrain-flow-node__compile { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: currentColor; opacity: .82; }
+.terrain-flow-node__compile svg { animation: terrain-node-compile-spin .72s linear infinite; }
+@keyframes terrain-node-compile-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .terrain-flow-node__compile svg { animation-duration: 1.8s; } }
 .terrain-flow-node__output { color: var(--node-output); font: 700 7px/1 var(--mono); letter-spacing: .1em; }
 .terrain-flow-node__ports { min-height: 25px; display: flex; justify-content: space-between; padding: 6px 9px 2px; }
 .terrain-flow-node__port-column { display: flex; flex-direction: column; gap: 4px; }
