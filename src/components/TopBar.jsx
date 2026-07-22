@@ -19,7 +19,9 @@ import {
   Undo2,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
+import { EDITOR_SHORTCUTS, matchesShortcut, SEARCH_SETTINGS_SHORTCUT, shortcutText } from '../keyboardShortcuts.js';
 import NotificationCenter from './ui/Toast.jsx';
+import ShortcutHint from './ui/ShortcutHint.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
   <svg viewBox={viewBox}>
@@ -37,6 +39,7 @@ const Caret = () => (
 
 export default function TopBar({
   projectMode = 'procedural',
+  shortcutsEnabled = true,
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onToggleHelp, onResetView,
   nodeToolsVisible = true, onToggleNodeTools,
@@ -57,6 +60,18 @@ export default function TopBar({
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [editMenuOpen, setEditMenuOpen] = useState(false);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const shortcutActionsRef = useRef({});
+
+  shortcutActionsRef.current = shortcutsEnabled ? {
+    newTerrain: onNew,
+    projects: onOpenProjects,
+    save: onSave,
+    load: () => fileRef.current?.click(),
+    download: onDownload,
+    settings: onOpenUiSettings,
+    randomSeed: projectMode === 'procedural' ? onRandomize : null,
+    paintMode: projectMode === 'procedural' ? onTogglePaintMode : null,
+  } : {};
 
   const anyMenuOpen = fileMenuOpen || editMenuOpen || viewMenuOpen;
 
@@ -86,6 +101,33 @@ export default function TopBar({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [anyMenuOpen]);
+
+  useEffect(() => {
+    const onShortcut = (event) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+
+      const entry = Object.entries(EDITOR_SHORTCUTS).find(([actionId, shortcut]) => (
+        shortcutActionsRef.current[actionId] && matchesShortcut(event, shortcut)
+      ));
+      if (!entry) return;
+
+      event.preventDefault();
+      setFileMenuOpen(false);
+      setEditMenuOpen(false);
+      setViewMenuOpen(false);
+      shortcutActionsRef.current[entry[0]]?.();
+    };
+
+    document.addEventListener('keydown', onShortcut, true);
+    return () => document.removeEventListener('keydown', onShortcut, true);
+  }, []);
+
+  useEffect(() => {
+    if (shortcutsEnabled) return;
+    setFileMenuOpen(false);
+    setEditMenuOpen(false);
+    setViewMenuOpen(false);
+  }, [shortcutsEnabled]);
 
   const runMenuAction = (closeFn, action) => {
     closeFn(false);
@@ -133,22 +175,27 @@ export default function TopBar({
             <span className="tb-text">File</span>
             <Caret />
           </button>
-          <div className={`tb-menu${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label="File">
+          <div className={`tb-menu tb-menu-with-shortcuts${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label="File">
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onNew)}>
-              <FileText size={14} strokeWidth={1.75} aria-hidden /> New
+              <FileText size={14} strokeWidth={1.75} aria-hidden /> New terrain
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.newTerrain} className="tb-menu-shortcut" />
             </button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenProjects)}>
               <FolderOpen size={14} strokeWidth={1.75} aria-hidden /> Projects
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.projects} className="tb-menu-shortcut" />
             </button>
             <div className="tb-menu-divider" role="separator" />
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onSave)}>
               <Save size={14} strokeWidth={1.75} aria-hidden /> Save
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.save} className="tb-menu-shortcut" />
             </button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, () => fileRef.current?.click())}>
               <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> Load
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.load} className="tb-menu-shortcut" />
             </button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onDownload)}>
               <Download size={14} strokeWidth={1.75} aria-hidden /> Download
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.download} className="tb-menu-shortcut" />
             </button>
           </div>
         </div>
@@ -165,7 +212,7 @@ export default function TopBar({
             <span className="tb-text">Edit</span>
             <Caret />
           </button>
-          <div className={`tb-menu${editMenuOpen ? ' open' : ''}`} role="menu" aria-label="Edit">
+          <div className={`tb-menu tb-menu-with-shortcuts${editMenuOpen ? ' open' : ''}`} role="menu" aria-label="Edit">
             <div className="tb-menu-section-label">Layout</div>
             <button type="button" role="menuitem" disabled title="Preset options will be added next">
               <LayoutTemplate size={14} strokeWidth={1.75} aria-hidden /> Default layout
@@ -180,18 +227,17 @@ export default function TopBar({
               onClick={() => runMenuAction(setEditMenuOpen, () => onOpenUiSettings?.())}
             >
               <Settings size={14} strokeWidth={1.75} aria-hidden /> Settings
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.settings} className="tb-menu-shortcut" />
             </button>
             {projectMode === 'procedural' ? <>
               <div className="tb-menu-divider" role="separator" />
               <button
                 type="button"
                 role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRandomize?.();
-                }}
+                onClick={() => runMenuAction(setEditMenuOpen, onRandomize)}
               >
-                <Dices size={14} strokeWidth={1.75} aria-hidden /> Randomize seed
+                <Dices size={14} strokeWidth={1.75} aria-hidden /> Random seed
+                <ShortcutHint shortcut={EDITOR_SHORTCUTS.randomSeed} className="tb-menu-shortcut" />
               </button>
               <button
                 type="button"
@@ -200,6 +246,7 @@ export default function TopBar({
                 onClick={() => runMenuAction(setEditMenuOpen, onTogglePaintMode)}
               >
                 <Pencil size={14} strokeWidth={1.75} aria-hidden /> {paintMode ? 'Exit paint' : 'Paint mode'}
+                <ShortcutHint shortcut={EDITOR_SHORTCUTS.paintMode} className="tb-menu-shortcut" />
               </button>
             </> : null}
           </div>
@@ -278,12 +325,12 @@ export default function TopBar({
             type="button"
             className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
             onClick={onOpenSettingsSearch}
-            title="Search settings (Ctrl+K)"
+            title={`Search settings (${shortcutText(SEARCH_SETTINGS_SHORTCUT)})`}
             aria-pressed={settingsSearchOpen}
           >
             <Search size={13} strokeWidth={1.75} aria-hidden />
             <span className="tb-text">Search settings</span>
-            <span className="tb-shortcut">Ctrl+K</span>
+            <ShortcutHint shortcut={SEARCH_SETTINGS_SHORTCUT} className="tb-shortcut" />
           </button>
         )}
       </div>

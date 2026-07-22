@@ -180,7 +180,9 @@ body {
   font-size: 10px;
   letter-spacing: 0.04em;
   flex-shrink: 0;
+  gap: 3px;
 }
+.shortcut-command-icon { width: 12px !important; height: 12px !important; }
 .tb-btn.primary {
   background: var(--accent);
   color: #fff;
@@ -360,6 +362,7 @@ body {
   box-shadow: var(--shadow-panel);
 }
 .tb-menu.open { display: flex; }
+.tb-menu-with-shortcuts { min-width: 238px; }
 .tb-menu button {
   display: flex;
   align-items: center;
@@ -374,6 +377,19 @@ body {
   border-radius: 4px;
   cursor: var(--cursor-pointer);
 }
+.tb-menu-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding-left: 14px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.tb-menu button:hover .tb-menu-shortcut { color: var(--accent); }
+.tb-menu-shortcut .shortcut-command-icon { color: currentColor; }
 .tb-menu button svg { width: 14px; height: 14px; color: var(--text-muted); flex: 0 0 auto; }
 .tb-menu button:hover { background: var(--accent-bg); color: var(--accent); }
 .tb-menu button:hover svg { color: var(--accent); }
@@ -2626,6 +2642,9 @@ input[type="color"].palette-color-input {
   color: var(--text-dim);
 }
 .settings-search-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-family: var(--mono);
   color: var(--accent);
   white-space: nowrap;

@@ -1567,6 +1567,7 @@ export default function App() {
       )}
       <TopBar
         projectMode={projectMode}
+        shortcutsEnabled={!landingMode}
         previewMode={previewMode}
         onNew={() => createProjectFromTemplate('blank', { editorMode: projectMode })}
         onRandomize={() => engine().randomizeSeed()}

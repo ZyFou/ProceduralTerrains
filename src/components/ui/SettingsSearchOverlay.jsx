@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { SEARCH_SETTINGS_SHORTCUT } from '../../keyboardShortcuts.js';
+import ShortcutHint from './ShortcutHint.jsx';
 
 function SearchIcon() {
   return (
@@ -88,7 +90,7 @@ export default function SettingsSearchOverlay({
         <div className="settings-search-results-panel">
           <div className="settings-search-hint-row">
             <span>{hint}</span>
-            <span className="settings-search-shortcut">Ctrl+K / Cmd+K</span>
+            <ShortcutHint shortcut={SEARCH_SETTINGS_SHORTCUT} className="settings-search-shortcut" />
           </div>
 
           {groupedResults.length > 0 ? (
