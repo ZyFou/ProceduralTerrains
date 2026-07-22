@@ -8,13 +8,16 @@ import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCach
 import { Logo } from './shared.jsx';
 import AuthPage from '../auth/AuthPage.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { avatarUrl } from '../auth/authApi.js';
+import ProfilePage from '../auth/ProfilePage.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const AUTH_VIEWS = new Set(['login', 'register']);
+const HASH_VIEWS = new Set(['login', 'register', 'profile']);
 
-function authViewFromHash() {
+function viewFromHash() {
   const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-  return AUTH_VIEWS.has(value) ? value : null;
+  return HASH_VIEWS.has(value) ? value : null;
 }
 
 function initialTemplateThumbs() {
@@ -44,7 +47,7 @@ const relTime = (value) => {
 export default function Landing({ exiting, bootReady, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
   const [projects, setProjects] = useState([]);
-  const [view, setView] = useState(() => authViewFromHash() ?? 'home');
+  const [view, setView] = useState(() => viewFromHash() ?? 'home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [templateKind, setTemplateKind] = useState('procedural');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -88,8 +91,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   useEffect(() => {
     const syncAuthView = () => {
-      const authView = authViewFromHash();
-      setView((current) => authView ?? (AUTH_VIEWS.has(current) ? 'home' : current));
+      const hashView = viewFromHash();
+      setView((current) => hashView ?? (HASH_VIEWS.has(current) ? 'home' : current));
     };
     window.addEventListener('hashchange', syncAuthView);
     return () => window.removeEventListener('hashchange', syncAuthView);
@@ -100,17 +103,20 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
   const showView = (nextView) => {
-    if (AUTH_VIEWS.has(nextView)) {
+    if (HASH_VIEWS.has(nextView)) {
       const nextHash = `#/${nextView}`;
       if (window.location.hash !== nextHash) window.location.hash = `/${nextView}`;
       else setView(nextView);
       return;
     }
-    if (authViewFromHash()) {
+    if (viewFromHash()) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     }
     setView(nextView);
   };
+  useEffect(() => {
+    if (view === 'profile' && authStatus !== 'loading' && !user) showView('login');
+  }, [view, authStatus, user]);
   const create = (templateId, editorMode = 'procedural') => {
     if (!bootReady || exiting) return;
     setCreateOpen(false);
@@ -256,7 +262,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   return (
     <div
-      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -282,8 +288,11 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         <div className="lp-nav-actions">
           <button type="button" className="lp-nav-credits" onClick={() => setCreditsOpen(true)} aria-label="Open credits and links" title="Credits and links"><CircleHelp size={17} /></button>
           {user ? <>
-            <span className="lp-account-chip" title={user.email}><UserRound size={14} /><span>{user.username}</span></span>
-            <button type="button" className="lp-secondary sm lp-auth-logout" onClick={() => logout()}><LogOut size={13} /> <span>Logout</span></button>
+            <button type="button" className={`lp-account-chip${view === 'profile' ? ' active' : ''}`} title="Open your profile" onClick={() => showView('profile')}>
+              {avatarUrl(user) ? <img src={avatarUrl(user)} alt="" /> : <UserRound size={14} />}
+              <span>{user.username}</span>
+            </button>
+            <button type="button" className="lp-secondary sm lp-auth-logout" onClick={async () => { await logout(); goHome(); }}><LogOut size={13} /> <span>Logout</span></button>
           </> : <>
             <button type="button" className="lp-secondary sm lp-auth-login" onClick={() => showView('login')} disabled={authStatus === 'loading'}><LogIn size={13} /> <span>Sign in</span></button>
             <button type="button" className="lp-primary sm lp-auth-register" onClick={() => showView('register')} disabled={authStatus === 'loading'}><UserPlus size={13} /> <span>Create account</span></button>
@@ -303,6 +312,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               onSuccess={goHome}
             />
           )}
+          {view === 'profile' && user && <ProfilePage onBack={goHome} />}
           {view === 'home' && <>
             <section className="lp-hero">
               <div className="lp-version-pill">v{APP_VERSION}</div>
@@ -399,7 +409,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </main>
       </div>
 
-      {!bootReady && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
+      {!bootReady && !HASH_VIEWS.has(view) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>

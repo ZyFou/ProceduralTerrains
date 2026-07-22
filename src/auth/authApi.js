@@ -5,6 +5,11 @@ const defaultBase = '/api/v1';
 const configuredBase = String(import.meta.env.VITE_API_URL ?? defaultBase).trim();
 export const API_BASE_URL = configuredBase.replace(/\/+$/, '') || '/api/v1';
 
+export function avatarUrl(user) {
+  if (!user?.id || !user.avatarUpdatedAt) return null;
+  return `${API_BASE_URL}/users/${encodeURIComponent(user.id)}/avatar?v=${encodeURIComponent(user.avatarUpdatedAt)}`;
+}
+
 export class AuthApiError extends Error {
   constructor(message, { code = 'REQUEST_FAILED', status = 0, fields = {} } = {}) {
     super(message);
@@ -49,4 +54,8 @@ export const authApi = {
   register: (input) => request('/auth/register', { method: 'POST', body: input }),
   login: (input) => request('/auth/login', { method: 'POST', body: input }),
   logout: () => request('/auth/logout', { method: 'POST' }),
+  updateProfile: (input) => request('/me', { method: 'PATCH', body: input }),
+  updateAvatar: (dataUrl) => request('/me/avatar', { method: 'PUT', body: { dataUrl } }),
+  removeAvatar: () => request('/me/avatar', { method: 'DELETE' }),
+  changePassword: (input) => request('/me/password', { method: 'PUT', body: input }),
 };

@@ -49,9 +49,29 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const updateProfile = useCallback(async (details) => {
+    const result = await authApi.updateProfile(details);
+    setUser(result.user);
+    return result.user;
+  }, []);
+
+  const updateAvatar = useCallback(async (dataUrl) => {
+    const result = await authApi.updateAvatar(dataUrl);
+    setUser(result.user);
+    return result.user;
+  }, []);
+
+  const removeAvatar = useCallback(async () => {
+    const result = await authApi.removeAvatar();
+    setUser(result.user);
+    return result.user;
+  }, []);
+
+  const changePassword = useCallback((details) => authApi.changePassword(details), []);
+
   const value = useMemo(
-    () => ({ user, status, login, register, logout, refresh }),
-    [user, status, login, register, logout, refresh],
+    () => ({ user, status, login, register, logout, refresh, updateProfile, updateAvatar, removeAvatar, changePassword }),
+    [user, status, login, register, logout, refresh, updateProfile, updateAvatar, removeAvatar, changePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

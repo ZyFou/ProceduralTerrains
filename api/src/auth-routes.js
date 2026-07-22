@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { db } from './db.js';
 import { hashPassword, validateLogin, validateRegistration, verifyPassword } from './auth-utils.js';
+import { parseAvatarDataUrl, validatePasswordChange, validateProfileUpdate } from './profile-utils.js';
 
 const SESSION_COOKIE_OPTIONS = {
   path: '/',
@@ -18,6 +19,8 @@ const publicUser = (row) => ({
   username: row.username,
   displayName: row.display_name ?? null,
   websiteUrl: row.website_url ?? null,
+  defaultProjectVisibility: row.default_project_visibility ?? 'private',
+  avatarUpdatedAt: row.avatar_updated_at ?? null,
   emailVerified: !!row.email_verified_at,
   createdAt: row.created_at,
 });
@@ -57,6 +60,7 @@ async function findSessionUser(request) {
   if (!token || token.length > 128) return null;
   const [rows] = await db.execute(
     `SELECT u.id, u.email, u.username, u.display_name, u.website_url,
+            u.default_project_visibility, u.avatar_updated_at,
             u.email_verified_at, u.created_at, s.id AS session_id
        FROM sessions s
        JOIN users u ON u.id = s.user_id
@@ -68,6 +72,15 @@ async function findSessionUser(request) {
     [tokenHash(token)],
   );
   return rows[0] ?? null;
+}
+
+async function requireSession(request, reply) {
+  const user = await findSessionUser(request);
+  if (user) return user;
+  if (request.cookies[config.session.cookieName]) clearSessionCookie(reply);
+  reply.header('Cache-Control', 'no-store');
+  reply.code(401).send({ error: { code: 'AUTH_REQUIRED', message: 'Sign in to manage your profile.' } });
+  return null;
 }
 
 function validationReply(reply, errors) {
@@ -114,7 +127,8 @@ export async function registerAuthRoutes(app) {
     }
 
     const [rows] = await db.execute(
-      `SELECT id, email, username, display_name, website_url, email_verified_at, created_at
+      `SELECT id, email, username, display_name, website_url, default_project_visibility,
+              avatar_updated_at, email_verified_at, created_at
          FROM users WHERE id = ? LIMIT 1`,
       [userId],
     );
@@ -131,7 +145,8 @@ export async function registerAuthRoutes(app) {
     const { identifier, password } = result.value;
     const [rows] = await db.execute(
       `SELECT id, email, username, password_hash, display_name, website_url,
-              email_verified_at, created_at, status, deleted_at
+              default_project_visibility, avatar_updated_at, email_verified_at,
+              created_at, status, deleted_at
          FROM users
         WHERE email = ? OR username = ?
         LIMIT 1`,
@@ -169,5 +184,133 @@ export async function registerAuthRoutes(app) {
     clearSessionCookie(reply);
     reply.header('Cache-Control', 'no-store');
     return reply.code(204).send();
+  });
+
+  app.get('/api/v1/me', async (request, reply) => {
+    const user = await requireSession(request, reply);
+    if (!user) return;
+    reply.header('Cache-Control', 'no-store');
+    return { user: publicUser(user) };
+  });
+
+  app.patch('/api/v1/me', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const user = await requireSession(request, reply);
+    if (!user) return;
+    const result = validateProfileUpdate(request.body);
+    if (!result.ok) return validationReply(reply, result.errors);
+
+    const columns = {
+      username: 'username',
+      displayName: 'display_name',
+      websiteUrl: 'website_url',
+      defaultProjectVisibility: 'default_project_visibility',
+    };
+    const entries = Object.entries(result.value);
+    try {
+      await db.execute(
+        `UPDATE users SET ${entries.map(([key]) => `${columns[key]} = ?`).join(', ')} WHERE id = ?`,
+        [...entries.map(([, value]) => value), user.id],
+      );
+    } catch (error) {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return reply.code(409).send({
+          error: {
+            code: 'USERNAME_TAKEN',
+            message: 'This username is already taken.',
+            fields: { username: 'Username already taken.' },
+          },
+        });
+      }
+      throw error;
+    }
+
+    const updated = await findSessionUser(request);
+    reply.header('Cache-Control', 'no-store');
+    return { user: publicUser(updated) };
+  });
+
+  app.put('/api/v1/me/avatar', {
+    bodyLimit: 1_500_000,
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const user = await requireSession(request, reply);
+    if (!user) return;
+    const result = parseAvatarDataUrl(request.body?.dataUrl);
+    if (!result.ok) return validationReply(reply, { avatar: result.error });
+    await db.execute(
+      `UPDATE users
+          SET avatar_mime_type = ?, avatar_data = ?, avatar_updated_at = UTC_TIMESTAMP(3)
+        WHERE id = ?`,
+      [result.value.mimeType, result.value.data, user.id],
+    );
+    const updated = await findSessionUser(request);
+    reply.header('Cache-Control', 'no-store');
+    return { user: publicUser(updated) };
+  });
+
+  app.delete('/api/v1/me/avatar', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const user = await requireSession(request, reply);
+    if (!user) return;
+    await db.execute(
+      `UPDATE users
+          SET avatar_mime_type = NULL, avatar_data = NULL, avatar_updated_at = NULL
+        WHERE id = ?`,
+      [user.id],
+    );
+    const updated = await findSessionUser(request);
+    reply.header('Cache-Control', 'no-store');
+    return { user: publicUser(updated) };
+  });
+
+  app.get('/api/v1/users/:userId/avatar', async (request, reply) => {
+    const [rows] = await db.execute(
+      `SELECT avatar_mime_type, avatar_data
+         FROM users
+        WHERE id = ? AND status = 'active' AND deleted_at IS NULL
+        LIMIT 1`,
+      [String(request.params.userId ?? '').slice(0, 36)],
+    );
+    const avatar = rows[0];
+    if (!avatar?.avatar_data || !avatar.avatar_mime_type) {
+      return reply.code(404).send({ error: { code: 'AVATAR_NOT_FOUND', message: 'Profile picture not found.' } });
+    }
+    reply.header('Content-Type', avatar.avatar_mime_type);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    return reply.send(avatar.avatar_data);
+  });
+
+  app.put('/api/v1/me/password', {
+    config: { rateLimit: { max: 5, timeWindow: '5 minutes' } },
+  }, async (request, reply) => {
+    const user = await requireSession(request, reply);
+    if (!user) return;
+    const result = validatePasswordChange(request.body);
+    if (!result.ok) return validationReply(reply, result.errors);
+
+    const [[account]] = await db.execute('SELECT password_hash FROM users WHERE id = ? LIMIT 1', [user.id]);
+    if (!account || !await verifyPassword(result.value.currentPassword, account.password_hash)) {
+      return validationReply(reply, { currentPassword: 'Current password is incorrect.' });
+    }
+
+    const passwordHash = await hashPassword(result.value.newPassword);
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id]);
+      await connection.execute('DELETE FROM sessions WHERE user_id = ? AND id <> ?', [user.id, user.session_id]);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    reply.header('Cache-Control', 'no-store');
+    return { ok: true };
   });
 }

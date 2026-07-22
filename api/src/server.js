@@ -17,6 +17,7 @@ const allowedOrigins = new Set(config.frontendOrigins);
 await app.register(cookie);
 await app.register(cors, {
   credentials: true,
+  methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   origin(origin, callback) {
     if (!origin || allowedOrigins.has(origin)) return callback(null, true);
     return callback(null, false);

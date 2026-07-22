@@ -1,6 +1,6 @@
 # Procedural Terrains API
 
-Small, self-hostable Node.js/MySQL account service for Procedural Terrains. It currently implements registration, login, session lookup, and logout. Terrain projects remain local-first; cloud project storage will be added separately.
+Small, self-hostable Node.js/MySQL account service for Procedural Terrains. It implements account sessions, profile settings, profile pictures, and password changes. Terrain projects remain local-first; cloud project storage will be added separately.
 
 ## Requirements
 
@@ -77,7 +77,7 @@ pm2 reload ecosystem.config.cjs --env production --update-env
 
 ## Frontend configuration
 
-`VITE_API_URL` is a frontend build-time variable. Local development defaults to `http://localhost:3001/api/v1`.
+`VITE_API_URL` is a frontend build-time variable. Local development defaults to the same-origin `/api/v1` path, which Vite proxies to port `3001`.
 
 ```env
 VITE_API_URL=https://api.example.com/api/v1
@@ -140,6 +140,12 @@ POST /api/v1/auth/register
 POST /api/v1/auth/login
 GET  /api/v1/auth/session
 POST /api/v1/auth/logout
+GET  /api/v1/me
+PATCH /api/v1/me
+PUT  /api/v1/me/avatar
+DELETE /api/v1/me/avatar
+PUT  /api/v1/me/password
+GET  /api/v1/users/:userId/avatar
 ```
 
 Register body:
@@ -154,6 +160,19 @@ Login accepts either email or username:
 { "identifier": "terrain_creator", "password": "your password" }
 ```
 
+Profile settings accept any subset of these fields:
+
+```json
+{
+  "username": "terrain_creator",
+  "displayName": "Terrain Creator",
+  "websiteUrl": "https://example.com",
+  "defaultProjectVisibility": "private"
+}
+```
+
+Visibility can be `private`, `unlisted`, or `public`. Profile pictures are sent as a PNG, JPEG, or WebP data URL in `{ "dataUrl": "..." }`, limited to 1 MB. MySQL stores only the decoded binary image.
+
 All browser requests must use credentials so the `HttpOnly` session cookie is sent. The included frontend client already does this.
 
 ## Security choices
@@ -164,3 +183,5 @@ All browser requests must use credentials so the `HttpOnly` session cookie is se
 - Browser origins are explicitly allowlisted through `FRONTEND_ORIGINS`.
 - Login errors do not reveal whether an account exists.
 - Registration and login are rate-limited per client IP.
+- Profile image signatures are checked server-side; SVG and mismatched content types are rejected.
+- Changing a password invalidates every other active session while preserving the current one.
