@@ -1,13 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Mail, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
 import { PROJECT_TEMPLATES, getProjectTemplate, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
 import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
 import { Logo } from './shared.jsx';
+import AuthPage from '../auth/AuthPage.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
+const AUTH_VIEWS = new Set(['login', 'register']);
+
+function authViewFromHash() {
+  const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+  return AUTH_VIEWS.has(value) ? value : null;
+}
 
 function initialTemplateThumbs() {
   const entries = [];
@@ -34,8 +42,9 @@ const relTime = (value) => {
 };
 
 export default function Landing({ exiting, bootReady, onLaunch }) {
+  const { user, status: authStatus, logout } = useAuth();
   const [projects, setProjects] = useState([]);
-  const [view, setView] = useState('home');
+  const [view, setView] = useState(() => authViewFromHash() ?? 'home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [templateKind, setTemplateKind] = useState('procedural');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -77,10 +86,31 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   useEffect(() => { setQuery(''); }, [view]);
 
+  useEffect(() => {
+    const syncAuthView = () => {
+      const authView = authViewFromHash();
+      setView((current) => authView ?? (AUTH_VIEWS.has(current) ? 'home' : current));
+    };
+    window.addEventListener('hashchange', syncAuthView);
+    return () => window.removeEventListener('hashchange', syncAuthView);
+  }, []);
+
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
 
   const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
+  const showView = (nextView) => {
+    if (AUTH_VIEWS.has(nextView)) {
+      const nextHash = `#/${nextView}`;
+      if (window.location.hash !== nextHash) window.location.hash = `/${nextView}`;
+      else setView(nextView);
+      return;
+    }
+    if (authViewFromHash()) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+    setView(nextView);
+  };
   const create = (templateId, editorMode = 'procedural') => {
     if (!bootReady || exiting) return;
     setCreateOpen(false);
@@ -93,13 +123,13 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     onLaunch();
   };
   const openApp = () => projects.length ? open(projects[0]) : setCreateOpen(true);
-  const goHome = () => { setView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
+  const goHome = () => { showView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
   const selectTemplate = (id, editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
     setTemplateKind(nextKind);
     setSelectedTemplateId(id);
     setSelectedProjectId(null);
-    setView('templates');
+    showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
     else dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
   };
@@ -110,7 +140,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     setTemplateKind(nextKind);
     setSelectedTemplateId(currentExists ? selectedTemplateId : catalog[0].id);
     setSelectedProjectId(null);
-    setView('templates');
+    showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
   };
   const importProjectFile = (file, { openAfter } = {}) => {
@@ -245,18 +275,34 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       <header className="lp-nav">
         <button type="button" className="lp-brand" onClick={goHome} title="Return to home"><Logo size={24} /><strong>{APP_NAME}</strong></button>
         <nav className="lp-nav-links" aria-label="Main navigation">
-          <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => setView('projects')}>Projects</button>
+          <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => showView('projects')}>Projects</button>
           <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => openTemplates()}>Templates</button>
           <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">Docs</a>
         </nav>
         <div className="lp-nav-actions">
           <button type="button" className="lp-nav-credits" onClick={() => setCreditsOpen(true)} aria-label="Open credits and links" title="Credits and links"><CircleHelp size={17} /></button>
+          {user ? <>
+            <span className="lp-account-chip" title={user.email}><UserRound size={14} /><span>{user.username}</span></span>
+            <button type="button" className="lp-secondary sm lp-auth-logout" onClick={() => logout()}><LogOut size={13} /> <span>Sign out</span></button>
+          </> : <>
+            <button type="button" className="lp-secondary sm lp-auth-login" onClick={() => showView('login')} disabled={authStatus === 'loading'}><LogIn size={13} /> <span>Sign in</span></button>
+            <button type="button" className="lp-primary sm lp-auth-register" onClick={() => showView('register')} disabled={authStatus === 'loading'}><UserPlus size={13} /> <span>Create account</span></button>
+          </>}
           <button type="button" className="lp-secondary sm" onClick={openApp} disabled={!bootReady || exiting}><SquareArrowOutUpRight size={14} /> Open App</button>
         </div>
       </header>
 
       <div className="lp-scroll">
         <main className="lp-content">
+          {AUTH_VIEWS.has(view) && (
+            <AuthPage
+              key={view}
+              mode={view}
+              onBack={goHome}
+              onSwitch={showView}
+              onSuccess={goHome}
+            />
+          )}
           {view === 'home' && <>
             <section className="lp-hero">
               <div className="lp-version-pill">v{APP_VERSION}</div>
@@ -271,7 +317,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <section className="lp-section">
               <div className="lp-section-head">
                 <h2>Recent projects</h2>
-                {projects.length > 0 && <button type="button" className="lp-link" onClick={() => setView('projects')}>View all projects <ArrowRight size={12} aria-hidden /></button>}
+                {projects.length > 0 && <button type="button" className="lp-link" onClick={() => showView('projects')}>View all projects <ArrowRight size={12} aria-hidden /></button>}
               </div>
               {projects.length ? <div className="lp-card-grid">{projects.slice(0, 8).map(renderProjectCard)}</div> : emptyProjects}
             </section>
@@ -353,7 +399,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </main>
       </div>
 
-      {!bootReady && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
+      {!bootReady && !AUTH_VIEWS.has(view) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>

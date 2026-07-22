@@ -24,6 +24,22 @@ If port 6061 is already in use, Vite picks the next free port.
 
 Production build: `npm run build` (output in `dist/`), preview it with `npm run preview`.
 
+## Optional accounts API
+
+Login and registration are backed by an independent, self-hostable Node.js/MySQL service in [`api/`](api/). The editor remains local-first and fully usable without an account.
+
+For local development, copy both environment examples and start the frontend and API in separate terminals:
+
+```sh
+cp .env.example .env
+cp api/.env.example api/.env
+npm --prefix api install
+npm run dev
+npm run dev:api
+```
+
+Run `npm run migrate:api` once MySQL is configured. Classic Linux, PM2, MySQL and Nginx deployment instructions are in [`api/README.md`](api/README.md).
+
 ## Architecture
 
 The WebGL **engine** is framework-agnostic (`src/engine/`); the editor **UI** is React

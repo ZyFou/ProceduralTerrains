@@ -14,6 +14,28 @@ export default defineConfig({
     port: 6061,
     strictPort: false,  // allow port shifting if 6061 is in use
     host: true,         // listen on all interfaces -> reachable on the network
+    // Keep browser requests same-origin during local development. The auth
+    // client uses /api/v1 in production too, so this also exercises the same
+    // deployment shape locally instead of relying on a second CORS path.
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
+  test: {
+    // The API owns its Node test runner. Keep Vitest focused on browser-side
+    // terrain/editor modules instead of collecting api/tests/*.test.js.
+    exclude: ['node_modules/**', 'dist/**', 'api/**'],
   },
   build: {
     // Split the rarely-changing heavy deps (three, react) into their own hashed
