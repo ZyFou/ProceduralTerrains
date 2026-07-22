@@ -214,11 +214,23 @@ describe('analytical terrain graph compiler', () => {
       expect(terrainIds.has(type)).toBe(true);
       expect(noiseIds.has(type)).toBe(false);
     }
-    expect(terrainIds.has('thermalErosion')).toBe(true);
-    expect(noiseIds.has('thermalErosion')).toBe(false);
+    for (const type of ['shaper', 'stratify', 'thermalErosion']) expect(terrainIds.has(type)).toBe(true);
+    for (const type of ['shaper', 'stratify', 'thermalErosion']) expect(noiseIds.has(type)).toBe(false);
   });
 
-  it('builds an asymmetric massif and redistributes steep material with Thermal Erosion', () => {
+  it('exposes compact geological Mountain presets and dedicated processing nodes', () => {
+    const mountain = getGraphNodeDefinition('mountain');
+    const fields = new Map(mountain.inspector.map((field) => [field.key, field]));
+    expect([...fields.keys()]).toEqual(['style', 'bulk', 'scale', 'height', 'reduceDetails', 'seed', 'x', 'y']);
+    expect(fields.get('style').options.map((option) => option.value)).toEqual(['basic', 'eroded', 'old', 'alpine', 'strata']);
+    expect(fields.get('bulk').options.map((option) => option.value)).toEqual(['low', 'medium', 'high']);
+    expect(nodeDefaults('mountain')).toMatchObject({ style: 'alpine', bulk: 'medium', reduceDetails: false, x: 0, y: 0 });
+    expect(getGraphNodeDefinition('domainWarp').label).toBe('Organic Warp');
+    expect(getGraphNodeDefinition('shaper').inputs[0]).toMatchObject({ id: 'source', type: ANALYTIC_HEIGHT });
+    expect(getGraphNodeDefinition('stratify').description).toContain('non-linear');
+  });
+
+  it('builds a cellular asymmetric massif and redistributes steep material with Thermal Erosion', () => {
     let mountainGraph = createBlankGraph('terrain');
     mountainGraph = addGraphNode(mountainGraph, 'mountain', { x: 0, y: 0 });
     const mountain = mountainGraph.nodes.at(-1);
@@ -233,7 +245,9 @@ describe('analytical terrain graph compiler', () => {
     expect(Math.max(...ring) - Math.min(...ring)).toBeGreaterThan(0.12);
     expect(mountainAt(260, 260, ctx)).toBe(0);
     expect(mountainProgram.body2d).toContain('peak2');
-    expect(mountainProgram.body2d).toContain('branchPhase');
+    expect(mountainProgram.body2d).toContain('cellF1');
+    expect(mountainProgram.body2d).toContain('drainageNetwork');
+    expect(mountainProgram.body2d).not.toContain('branchPhase');
 
     let thermalGraph = addGraphNode(mountainGraph, 'thermalErosion', { x: 220, y: 0 });
     const thermal = thermalGraph.nodes.at(-1);
@@ -253,7 +267,90 @@ describe('analytical terrain graph compiler', () => {
     expect(Math.max(...thermalSamples)).toBeLessThan(Math.max(...baseSamples));
     expect(Math.min(...thermalSamples)).toBeGreaterThanOrEqual(0);
     expect(thermalProgram.body2d).toContain('passGain');
-    expect(thermalProgram.packUniforms().paramsA[1]).toEqual([0.07, 7, 0.72, 0.2]);
+    expect(thermalProgram.body2d).toContain('directionalTalus');
+    expect(thermalProgram.body2d).toContain('screeDeposit');
+    expect(thermalProgram.body2d).toContain('sedimentRemoval');
+    expect(thermalProgram.packUniforms().paramsA[1]).toEqual([0.07, 12, 0.72, 0.18]);
+    expect(thermalProgram.packUniforms().paramsB[1][0]).toBe(0.16);
+  });
+
+  it('uses a structurally cached low-cost Mountain shader when Reduce Details is enabled', () => {
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'mountain', { x: 0, y: 0 }, { params: { style: 'alpine', bulk: 'high', reduceDetails: false } });
+    const mountain = graph.nodes.at(-1);
+    graph = connectGraphNodes(graph, { source: mountain.id, target: TERRAIN_OUTPUT_ID });
+    const detailed = compileTerrainGraph(graph).program;
+    const reduced = compileTerrainGraph(updateGraphNodeParams(graph, mountain.id, { reduceDetails: true })).program;
+
+    expect(reduced.sig).not.toBe(detailed.sig);
+    expect(detailed.body2d).toContain(`${String(mountain.id).replace(/[^a-zA-Z0-9_]/g, '_')}_cellular`);
+    expect(detailed.body2d).toContain('for(int i=0;i<5;i++)');
+    expect(reduced.body2d).toContain('reduced-details fast path');
+    expect(reduced.body2d).toContain('reducedCellA');
+    expect(reduced.body2d).not.toContain('_cellular');
+    expect(reduced.body2d).not.toContain('for(int i=0;i<5;i++)');
+    expect(reduced.body2d.length).toBeLessThan(detailed.body2d.length - 400);
+    expect(Number.isFinite(reduced.evaluate2D(32, -47, ctx))).toBe(true);
+  });
+
+  it('separates mass shaping and localized strata into nontrivial one-slot analytical stages', () => {
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'mountain', { x: 0, y: 0 }, { params: { style: 'eroded', bulk: 'high', seed: 4812 } });
+    const mountain = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'shaper', { x: 180, y: 0 }, { params: { shape: 0.52, strength: 0.9, featureScale: 36, detailPreservation: 0.86 } });
+    const shaper = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'stratify', { x: 360, y: 0 }, { params: { intensity: 0.58, spacing: 0.09, seed: 7711 } });
+    const stratify = graph.nodes.at(-1);
+    graph = connectGraphNodes(graph, { source: mountain.id, target: shaper.id });
+    graph = connectGraphNodes(graph, { source: shaper.id, target: stratify.id });
+    graph = connectGraphNodes(graph, { source: stratify.id, target: TERRAIN_OUTPUT_ID });
+
+    const shapedGraph = connectGraphNodes(graph, { source: shaper.id, target: TERRAIN_OUTPUT_ID });
+    const mountainGraph = connectGraphNodes(graph, { source: mountain.id, target: TERRAIN_OUTPUT_ID });
+    const mountainProgram = compileTerrainGraph(mountainGraph).program;
+    const shapedProgram = compileTerrainGraph(shapedGraph).program;
+    const layeredProgram = compileTerrainGraph(graph).program;
+    const samples = [];
+    for (let z = -120; z <= 120; z += 24) for (let x = -120; x <= 120; x += 24) samples.push([x, z]);
+    const meanDifference = (left, right) => samples.reduce((sum, [x, z]) => sum + Math.abs(left(x, z, ctx) - right(x, z, ctx)), 0) / samples.length;
+
+    expect(meanDifference(mountainProgram.evaluate2D, shapedProgram.evaluate2D)).toBeGreaterThan(0.003);
+    expect(meanDifference(shapedProgram.evaluate2D, layeredProgram.evaluate2D)).toBeGreaterThan(0.0002);
+    expect(layeredProgram.slotCount).toBe(3);
+    expect(layeredProgram.body2d).toContain('preservedDetail');
+    expect(layeredProgram.body2d).toContain('localZone');
+    expect(layeredProgram.packUniforms().paramsA[1]).toEqual([0.52, 0.86, 0, 0]);
+    expect(layeredProgram.packUniforms().scale[2]).toBe(0.09);
+  });
+
+  it('hard-bounds Thermal to one expensive upstream terrain sample', () => {
+    let graph = createBlankGraph('terrain');
+    const stages = [];
+    for (const type of ['mountain', 'shaper', 'domainWarp', 'stratify', 'thermalErosion', 'naturalErosion']) {
+      graph = addGraphNode(graph, type, { x: stages.length * 180, y: 0 });
+      const node = graph.nodes.at(-1);
+      if (stages.length) graph = connectGraphNodes(graph, { source: stages.at(-1).id, target: node.id });
+      stages.push(node);
+    }
+    graph = connectGraphNodes(graph, { source: stages.at(-1).id, target: TERRAIN_OUTPUT_ID });
+
+    const program = compileTerrainGraph(graph).program;
+    const [, , , substrate, thermal, natural] = stages;
+    const symbol = (id) => `graph_${String(id).replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const functionBody = (id) => program.body2d.match(new RegExp(`float ${symbol(id)}\\(vec2 xz, Climate c\\) \\{[\\s\\S]*?\\n\\}`))?.[0] || '';
+    const callsTo = (body, id) => (body.match(new RegExp(`${symbol(id)}\\(`, 'g')) || []).length;
+    const thermalBody = functionBody(thermal.id);
+    const naturalBody = functionBody(natural.id);
+
+    expect(callsTo(thermalBody, substrate.id)).toBe(1);
+    expect(callsTo(naturalBody, thermal.id)).toBe(1);
+    expect(callsTo(naturalBody, substrate.id)).toBe(0);
+    expect(callsTo(naturalBody, thermal.id) * callsTo(thermalBody, substrate.id) + callsTo(naturalBody, substrate.id)).toBe(1);
+    expect(thermalBody).toContain('directionalTalus');
+    expect(thermalBody).toContain('screeDeposit');
+    expect(naturalBody).toContain('tributary');
+    expect(naturalBody).toContain('deposit');
+    expect(Number.isFinite(program.evaluate2D(42.25, -19.5, ctx))).toBe(true);
   });
 
   it('compiles a realistic height and color graph into separate shader streams', () => {

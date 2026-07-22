@@ -38,4 +38,20 @@ describe('Nodes project templates', () => {
     expect(getNodeProjectTemplate('missing').id).toBe('nodes-blank');
     expect(createNodeTemplateGraph('missing').edges).toEqual([]);
   });
+
+  it('authors the Alpine template as a connected staged weathering pipeline', () => {
+    const graph = createNodeTemplateGraph('nodes-alpine');
+    const types = graph.nodes.map((node) => node.type);
+    expect(types).toEqual(expect.arrayContaining([
+      'mountain', 'shaper', 'domainWarp', 'stratify', 'thermalErosion', 'naturalErosion', 'terrainOutput',
+    ]));
+    const typeById = new Map(graph.nodes.map((node) => [node.id, node.type]));
+    const heightLinks = graph.edges
+      .filter((edge) => typeById.get(edge.source) !== 'terrainGradient' && edge.targetHandle !== 'color')
+      .map((edge) => [typeById.get(edge.source), typeById.get(edge.target)]);
+    expect(heightLinks).toEqual(expect.arrayContaining([
+      ['mountain', 'shaper'], ['shaper', 'domainWarp'], ['domainWarp', 'stratify'],
+      ['stratify', 'thermalErosion'], ['thermalErosion', 'naturalErosion'], ['geologyDetail', 'terrainOutput'],
+    ]));
+  });
 });

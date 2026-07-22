@@ -1,46 +1,70 @@
-# Design QA — realistic terrain color nodes
+# Design QA — Gaea-inspired terrain nodes
 
 ## Visual truth
 
-- Primary target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-6792f1d9-39c6-478e-a047-557ee1e1647b.png`
-- Gradient/control detail: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-651d1e5b-63d6-4c29-9ac9-961a322ef4a0.png`
-- Current-state reference: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-b8ed5df0-0334-45e6-add5-b8979a78343e.png`
+- Terrain target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-1f737080-abaf-405b-9cc9-937336740608.png`
+- Property-panel target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-e8a1b0af-9107-4b94-93e9-af3984059cee.png`
+- Earlier ThreeTerrain state: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-a1fa5a1e-3a5e-45bd-996c-bc91492f78ff.png`
+- Final implementation capture: `C:\Users\g.bondenet\Documents\ThreeTerrain\artifacts\node-terrain-final.png`
+- Combined reference/implementation board: `C:\Users\g.bondenet\Documents\ThreeTerrain\artifacts\node-terrain-comparison.png`
 
-The target is a muted, satellite-like terrain treatment: layered stone and soil colors, greener/moister valleys, restrained saturation, and materially different steep rock faces. The current-state reference is largely white, height-only, and terrace-dominant.
+The visual target is a coherent mountain massif with large-scale body, branching ridges, drainage, broken strata, thermal scree, and readable compact controls. It is a direction and quality bar, not a request to copy Gaea's proprietary implementation.
 
-## Render attempt
+## Live implementation check
 
-- Local URL: `http://127.0.0.1:4173/`
-- Viewport: 1280 × 720
-- Tested state: default landing/boot state
-- Implementation screenshot: unavailable
-- Browser console: no application errors were reported by the in-app Browser
-
-The Vite production preview responded with HTTP 200. In both the in-app Browser and the Chrome fallback, the existing boot overlay remained on “Starting terrain editor / Preparing random terrain workspace…”, leaving **Open App** disabled. Chrome later stopped responding to inspection commands. Both automated browser sessions were closed cleanly.
+- URL: `http://127.0.0.1:6061/`
+- Browser: Chrome with WebGL on NVIDIA Quadro P2200
+- Viewport: 2400 × 1068 CSS pixels, DPR 0.8
+- Template: Nodes → Alpine ridges
+- Compile result: Ready; live terrain visible and editor responsive
+- Browser console: no warnings or errors
+- Graph: 14 rendered graph items including two groups, 11 visible edges, seven height cables and four color cables
+- DOM response after compile: 111 ms for a complete accessible snapshot
 
 ## Comparison
 
-### Full-view pass
+### Terrain form
 
-Blocked. The editor, terrain viewport, and node graph never became available in the browser automation environment, so no honest full-view source-versus-implementation comparison could be made.
+The implementation now reads as a mountain rather than a single noisy cone or concentric terrace. It has an asymmetric multi-peak body, an elevated ridge spine, broad drainage cuts, foothill decay, localized strata, thermal slope relaxation, and restrained alpine color. The Gaea reference still has denser multi-scale erosion and sharper secondary ridges; that remains a future quality-tuning opportunity rather than a functional blocker.
 
-### Focused-detail pass
+### Graph and linking
 
-- Source gradient strip, realistic palette, terrain shading, and typed graph intent were inspected directly.
-- Implementation source was verified for typed Height/Color ports, gradient previews, realistic palette presets, surface-color shader integration, and separated template lanes.
-- Rendered focused-detail comparison remains blocked by the same boot gate.
+All expected template edges render. Height and color cables are visually distinct and remain visible across grouped template layouts. Native React Flow click/drag connection behavior was checked on a blank graph, and smart insertion produced Mountain → Shaper → Output without overlap.
 
-### Primary interaction pass
+### Properties panel
 
-Blocked before editor entry. No node creation, connection, preset selection, template loading, or terrain-orbit interaction could be exercised through browser automation.
+The panel now uses readable typography, a persistent settings search, reset action, semantic collapsible groups, segmented Style/Bulk controls, value fields, inline explanations, and a recommended-next-node action. Mountain and Thermal Erosion were both selected and inspected in the live template.
+
+### Functional states exercised
+
+- Opened the Nodes template catalog and created Alpine ridges.
+- Waited through shader compilation and confirmed the Ready state.
+- Selected Mountain and Thermal Erosion.
+- Verified searchbox and grouped settings are present and readable.
+- Verified 11 visible links and typed cable colors.
+- Opened the optional 2D/minimap preview.
+- Confirmed no console warnings or errors.
+
+## Accessibility and readability
+
+- Node ports expose descriptive accessible labels for accepted/output cable types.
+- Inspector search, reset, segmented controls, checkboxes, sliders, number inputs, and section toggles expose semantic roles.
+- Inspector type and control targets are materially larger than the earlier implementation.
+- Dark surfaces retain the original ThreeTerrain visual language while selected values, focus states, and typed cables have stronger contrast.
+
+## Performance regression
+
+The first staged Alpine build revealed a GPU driver lock caused by nested upstream terrain sampling. The final implementation evaluates Thermal's upstream height once, derives directional talus/scree procedurally, and gives `reduceDetails` a true reduced Mountain shader. The final Alpine height source is 9,313 characters, contains no 3×3 cellular loop, compiles successfully, and leaves the editor responsive.
 
 ## Findings
 
-- **P1 — Visual QA environment blocker:** the pre-existing terrain-engine boot gate prevents automated access to the editor. Re-run visual comparison in a normal GPU/WebGL-enabled app session.
-- No P0 source-code, build, or test blocker was found.
+- P2: The live Alpine preset is still coarser than the Gaea reference in secondary drainage density and micro-erosion. More tuning can improve visual parity, but the node architecture and controls now support that work.
+- No P0 or P1 issues found in the requested editor, linking, template, or shader-compile flows.
 
-## Comparison history
+## Verification
 
-- Baseline implementation pass only; no valid rendered implementation frame was available for iterative comparison.
+- `npm.cmd test`: 15 files, 175 tests passed.
+- `npm.cmd run build`: passed; only the existing Engine chunk-size warning remains.
+- `git diff --check`: clean.
 
-final result: blocked
+final result: pass

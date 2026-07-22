@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Background, BackgroundVariant, Controls, Handle, Position, ReactFlow,
+  Background, BackgroundVariant, ConnectionMode, Controls, Handle, Position, ReactFlow, useUpdateNodeInternals,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  Palette, Plus, Search, Trash2, Ungroup, X,
+  Palette, Plus, RotateCcw, Search, Sparkles, Trash2, Ungroup, X,
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, canConnectGraphNodes, connectGraphNodes, createBlankGraph,
@@ -18,14 +18,23 @@ import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from
 import { terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
-const LAYOUT_KEY = 'pt-nodes-workspace-layout-v1';
+const LAYOUT_KEY = 'pt-nodes-workspace-layout-v2';
 const DEFAULT_LAYOUT = {
   graphEdge: 'bottom', graphRatio: 0.38,
-  inspectorSide: 'right', inspectorWidth: 320,
+  inspectorSide: 'right', inspectorWidth: 372,
   paletteCollapsed: false, paletteDetached: true, paletteSide: 'left', paletteWidth: 208,
   previewVisible: false,
 };
 const GRAPH_EDGES = ['bottom', 'left', 'top', 'right'];
+const NEXT_NODE_SUGGESTIONS = {
+  mountain: { type: 'shaper', reason: 'Add durable mass before weathering.' },
+  mountainRange: { type: 'shaper', reason: 'Give the range a broader, erosion-ready body.' },
+  shaper: { type: 'domainWarp', reason: 'Introduce broad organic displacement.' },
+  domainWarp: { type: 'stratify', reason: 'Add broken geological layers.' },
+  stratify: { type: 'thermalErosion', reason: 'Relax exposed slopes and form scree.' },
+  geologyDetail: { type: 'thermalErosion', reason: 'Redistribute loose rock on steep faces.' },
+  thermalErosion: { type: 'naturalErosion', reason: 'Carve drainage after slope relaxation.' },
+};
 
 function loadLayout() {
   try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') }; }
@@ -92,9 +101,14 @@ function NodePalette({
 }
 
 function TerrainNode({ data, selected }) {
-  const { node, invalid, connectionSource, onStartConnection, onCompleteConnection } = data;
+  const { node, invalid } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
   const NodeIcon = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? Palette : Boxes;
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => updateNodeInternals(node.id));
+    return () => cancelAnimationFrame(frame);
+  }, [definition.inputs.length, definition.outputs.length, node.id, updateNodeInternals]);
   return (
     <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}`}>
       <div className="terrain-flow-node__header">
@@ -106,7 +120,7 @@ function TerrainNode({ data, selected }) {
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
             <div className={`terrain-flow-port input${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={`${port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'}${connectionSource ? (connectionSource.type === port.type ? ' connection-target' : ' connection-incompatible') : ''}`} onClick={(event) => { event.stopPropagation(); if (!connectionSource || connectionSource.type === port.type) onCompleteConnection?.({ nodeId: node.id, handleId: port.id }); }} title={connectionSource ? (connectionSource.type === port.type ? `Connect ${connectionSource.label} to ${port.label}` : `${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`) : `Click an output first, then click ${port.label}`} />
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} title={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} />
               <span>{port.label}</span>
             </div>
           ))}
@@ -115,7 +129,7 @@ function TerrainNode({ data, selected }) {
           {definition.outputs.map((port, index) => (
             <div className={`terrain-flow-port output${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
               <span>{port.label}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={`${port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'}${connectionSource?.nodeId === node.id && connectionSource?.handleId === port.id ? ' source-selected' : ''}`} onClick={(event) => { event.stopPropagation(); onStartConnection?.({ nodeId: node.id, handleId: port.id, type: port.type, label: `${node.label} ${port.label}` }); }} title={`Drag ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} from here, or click then click a matching input`} />
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} title={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} />
             </div>
           ))}
         </div>
@@ -150,15 +164,41 @@ function TerrainGroup({ data, selected }) {
 const nodeTypes = { terrainNode: TerrainNode, terrainGroup: TerrainGroup };
 
 function InspectorField({ field, value, onChange }) {
+  const help = field.help ? <small className="node-inspector-field-help">{field.help}</small> : null;
   if (field.type === 'boolean') {
     return (
-      <label className="node-inspector-toggle">
-        <span>{field.label}</span>
-        <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked, !!field.structural)} />
-      </label>
+      <div className="node-inspector-field-wrap">
+        <label className="node-inspector-toggle">
+          <span>{field.label}</span>
+          <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked, !!field.structural)} />
+        </label>
+        {help}
+      </div>
     );
   }
   if (field.type === 'enum') {
+    if (field.control === 'segmented') {
+      return (
+        <div className="node-inspector-field node-inspector-segmented-field">
+          <span>{field.label}</span>
+          <div className="node-inspector-segmented" role="radiogroup" aria-label={field.label}>
+            {(field.options || []).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={String(option.value) === String(value)}
+                className={String(option.value) === String(value) ? 'active' : ''}
+                onClick={() => onChange(option.value, true)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {help}
+        </div>
+      );
+    }
     return (
       <label className="node-inspector-field">
         <span>{field.label}</span>
@@ -168,6 +208,7 @@ function InspectorField({ field, value, onChange }) {
         }}>
           {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
+        {help}
       </label>
     );
   }
@@ -179,33 +220,56 @@ function InspectorField({ field, value, onChange }) {
           <span className="node-inspector-color-swatch" style={{ background: value || field.default }} />
           <input type="color" value={value || field.default} onChange={(event) => onChange(event.target.value, false)} />
         </span>
+        {help}
       </label>
     );
   }
   const numeric = Number.isFinite(Number(value)) ? Number(value) : field.default;
   return (
-    <label className="node-inspector-field">
-      <span><span>{field.label}</span><output>{Number(numeric).toFixed(field.digits ?? (field.step >= 1 ? 0 : 2))}</output></span>
+    <div className="node-inspector-field">
+      <span><span>{field.label}</span><output>{Number(numeric).toFixed(field.digits ?? (field.step >= 1 ? 0 : 2))}{field.unit ? ` ${field.unit}` : ''}</output></span>
       <div className="node-inspector-number-row">
-        <input type="range" min={field.min} max={field.max} step={field.step} value={numeric} onChange={(event) => onChange(Number(event.target.value), !!field.structural)} />
+        <input
+          type="range" min={field.min} max={field.max} step={field.step} value={numeric}
+          onChange={(event) => onChange(Number(event.target.value), !!field.structural)}
+          onDoubleClick={() => onChange(field.default, !!field.structural)}
+          aria-label={field.label}
+          title="Double-click to reset"
+        />
         <input type="number" min={field.min} max={field.max} step={field.step} value={numeric} onChange={(event) => onChange(Number(event.target.value), !!field.structural)} />
+        {field.control === 'seed' || field.key === 'seed' ? (
+          <button type="button" className="node-inspector-randomize" onClick={() => onChange(Math.floor(Math.random() * 1000000), true)} title="Generate another deterministic seed"><Sparkles size={13} /><span>New seed</span></button>
+        ) : null}
       </div>
-    </label>
+      {help}
+    </div>
   );
 }
 
 function NodeInspector({
-  node, group, graphState, onRename, onParam, onDelete, onGroupPatch, onUngroup, onHeaderPointerDown,
+  node, group, graphState, onRename, onParam, onDelete, onReset, onInsertAfter,
+  onGroupPatch, onUngroup, onHeaderPointerDown,
 }) {
+  const [propertyQuery, setPropertyQuery] = useState('');
+  const [openSections, setOpenSections] = useState({});
   const definition = node ? (getGraphNodeDefinition(node.type) || {
     label: `Unknown: ${node.type}`, description: 'This node type is unavailable in this version.', inspector: [], permanent: false,
   }) : null;
+  useEffect(() => { setPropertyQuery(''); }, [node?.id, group?.id]);
   const inspectorSections = definition?.inspector?.reduce((sections, field) => {
-    const label = field.section || 'Parameters';
+    const label = field.tier === 'essential' ? 'Essentials' : field.section || 'Parameters';
     const entry = sections.find((section) => section.label === label);
     if (entry) entry.fields.push(field); else sections.push({ label, fields: [field] });
     return sections;
   }, []) || [];
+  const normalizedPropertyQuery = propertyQuery.trim().toLowerCase();
+  const visibleSections = inspectorSections.map((section) => ({
+    ...section,
+    fields: section.fields.filter((field) => !normalizedPropertyQuery || `${field.label} ${field.key} ${field.section || ''} ${field.keywords || ''} ${field.help || ''}`.toLowerCase().includes(normalizedPropertyQuery)),
+  })).filter((section) => section.fields.length);
+  const resultCount = visibleSections.reduce((sum, section) => sum + section.fields.length, 0);
+  const suggestion = node ? NEXT_NODE_SUGGESTIONS[node.type] : null;
+  const suggestedDefinition = suggestion ? getGraphNodeDefinition(suggestion.type) : null;
   const title = group ? 'Group' : definition?.label || 'Nothing selected';
   return (
     <aside className="node-inspector" aria-label="Selected node properties">
@@ -215,6 +279,7 @@ function NodeInspector({
           <strong>{title}</strong>
         </div>
         <GripVertical className="node-dock-drag-cue" size={15} aria-hidden />
+        {node && definition ? <button type="button" className="node-inspector-reset" onClick={onReset} title="Reset this node to its defaults"><RotateCcw size={14} /><span>Reset</span></button> : null}
       </header>
       {group ? (
         <div className="node-inspector__body">
@@ -240,31 +305,64 @@ function NodeInspector({
           <button type="button" className="node-danger-button node-ungroup-button" onClick={onUngroup}><Ungroup size={14} /> Remove group frame</button>
         </div>
       ) : node && definition ? (
-        <div className="node-inspector__body">
-          <label className="node-inspector-field node-name-field">
-            <span>Name</span>
-            <input value={node.label} onChange={(event) => onRename(event.target.value)} />
-          </label>
-          <p className="node-inspector-description">{definition.description}</p>
-          {node.type === 'currentTerrain' ? (
-            <div className="node-inspector-snapshot">
-              <span>Compatibility snapshot</span>
-              <strong>{node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0} active layers</strong>
-              <small>Its Noise Stack is frozen so first entry preserves the current terrain.</small>
-            </div>
-          ) : null}
-          {inspectorSections.map((section) => (
-            <section className="node-inspector-section" key={section.label}>
-              <h4>{section.label}</h4>
-              {section.fields.map((field) => (
-                <InspectorField key={field.key} field={field} value={node.params?.[field.key] ?? field.default} onChange={(value, structural) => onParam(field.key, value, structural)} />
-              ))}
-            </section>
-          ))}
-          {!definition.permanent ? (
-            <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} /> Delete node</button>
-          ) : null}
-        </div>
+        <>
+          <div className="node-inspector-search-wrap">
+            <Search size={15} aria-hidden />
+            <input
+              type="search" value={propertyQuery}
+              onChange={(event) => setPropertyQuery(event.target.value)}
+              placeholder="Search settings…" aria-label={`Search ${title} settings`}
+            />
+            {propertyQuery ? <button type="button" onClick={() => setPropertyQuery('')} title="Clear settings search"><X size={14} /></button> : null}
+          </div>
+          <div className="node-inspector__body">
+            <label className="node-inspector-field node-name-field">
+              <span>Name</span>
+              <input value={node.label} onChange={(event) => onRename(event.target.value)} />
+            </label>
+            <p className="node-inspector-description">{definition.description}</p>
+            {suggestedDefinition ? (
+              <div className="node-inspector-recommendation">
+                <span><Sparkles size={13} /> Recommended next</span>
+                <strong>{suggestedDefinition.label}</strong>
+                <p>{suggestion.reason}</p>
+                <button type="button" onClick={() => onInsertAfter(suggestion.type)}><Plus size={13} /> Add and connect</button>
+              </div>
+            ) : null}
+            {node.type === 'currentTerrain' ? (
+              <div className="node-inspector-snapshot">
+                <span>Compatibility snapshot</span>
+                <strong>{node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0} active layers</strong>
+                <small>Its Noise Stack is frozen so first entry preserves the current terrain.</small>
+              </div>
+            ) : null}
+            {normalizedPropertyQuery ? <div className="node-inspector-search-count">{resultCount} {resultCount === 1 ? 'setting' : 'settings'} found</div> : null}
+            {visibleSections.map((section, index) => {
+              const sectionKey = `${node.type}:${section.label}`;
+              const defaultOpen = section.label === 'Essentials' || index === 0 || section.fields.some((field) => field.defaultOpen);
+              const expanded = normalizedPropertyQuery ? true : (openSections[sectionKey] ?? defaultOpen);
+              return (
+                <section className={`node-inspector-section${expanded ? ' expanded' : ' collapsed'}`} key={section.label}>
+                  <button
+                    type="button" className="node-inspector-section-toggle" aria-expanded={expanded}
+                    onClick={() => setOpenSections((current) => ({ ...current, [sectionKey]: !expanded }))}
+                  >
+                    <span>{section.label}</span><small>{section.fields.length}</small><ChevronDown size={15} aria-hidden />
+                  </button>
+                  {expanded ? <div className="node-inspector-section-body">{section.fields.map((field) => (
+                    <InspectorField key={field.key} field={field} value={node.params?.[field.key] ?? field.default} onChange={(value, structural) => onParam(field.key, value, structural)} />
+                  ))}</div> : null}
+                </section>
+              );
+            })}
+            {!visibleSections.length && normalizedPropertyQuery ? (
+              <div className="node-inspector-no-results"><Search size={20} /><strong>No matching settings</strong><span>Try a parameter name such as “seed”, “talus”, or “scale”.</span></div>
+            ) : null}
+            {!definition.permanent ? (
+              <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} /> Delete node</button>
+            ) : null}
+          </div>
+        </>
       ) : (
         <div className="node-inspector-empty">
           <Boxes size={26} />
@@ -297,7 +395,6 @@ export default function NodeWorkspace({
   const [paletteQuery, setPaletteQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [instance, setInstance] = useState(null);
-  const [connectionSource, setConnectionSource] = useState(null);
   const [draggingDock, setDraggingDock] = useState(null);
   const [snapHint, setSnapHint] = useState(null);
   const rootRef = useRef(null);
@@ -347,27 +444,7 @@ export default function NodeWorkspace({
     return definitions.filter((definition) => !query || `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query));
   }, [definitions, searchQuery]);
 
-  const completeClickConnection = useCallback((target) => {
-    if (!connectionSource) return;
-    try {
-      commit(connectGraphNodes(graphRef.current, {
-        source: connectionSource.nodeId, sourceHandle: connectionSource.handleId,
-        target: target.nodeId, targetHandle: target.handleId,
-      }), { structural: true, history: true });
-      setConnectionSource(null);
-    } catch (error) {
-      graphState?.onDiagnostic?.(error.message);
-    }
-  }, [connectionSource, commit, graphState]);
-
-  const startClickConnection = useCallback((source) => {
-    setConnectionSource((current) => current?.nodeId === source.nodeId && current?.handleId === source.handleId ? null : source);
-  }, []);
-
   const invalidNodes = useMemo(() => new Set((graphState?.diagnostics || []).map((diagnostic) => diagnostic.nodeId).filter(Boolean)), [graphState]);
-  useEffect(() => {
-    if (connectionSource && !localGraph.nodes.some((node) => node.id === connectionSource.nodeId)) setConnectionSource(null);
-  }, [connectionSource, localGraph.nodes]);
   const collapsedNodes = useMemo(() => new Set((localGraph.groups || [])
     .filter((group) => group.collapsed).flatMap((group) => group.nodeIds)), [localGraph.groups]);
   const flowNodes = useMemo(() => [
@@ -383,13 +460,12 @@ export default function NodeWorkspace({
       measured: nodeMeasurements[node.id], zIndex: 2,
       data: {
         node, definition: getGraphNodeDefinition(node.type), invalid: invalidNodes.has(node.id),
-        connectionSource, onStartConnection: startClickConnection, onCompleteConnection: completeClickConnection,
       },
       selected: selectedNodes.has(node.id), deletable: node.type !== 'terrainOutput',
     })),
-  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, connectionSource, nodeMeasurements, collapsedNodes, toggleGroup, startClickConnection, completeClickConnection]);
+  ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, nodeMeasurements, collapsedNodes, toggleGroup]);
   const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
-    ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false,
+    ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false, zIndex: 1,
     className: `terrain-flow-edge ${edge.type === ANALYTIC_COLOR ? 'edge-color' : 'edge-height'}`,
   })), [localGraph.edges, localGraph.nodes, selectedEdges, collapsedNodes]);
 
@@ -404,19 +480,26 @@ export default function NodeWorkspace({
   }, [commit, onRequestInspector]);
 
   const addNodeFromPalette = useCallback((type) => {
+    const definition = getGraphNodeDefinition(type);
+    const output = localGraph.nodes.find((node) => node.id === TERRAIN_OUTPUT_ID);
+    const isBlankSource = localGraph.nodes.length === 1 && output && (definition?.inputs?.length || 0) === 0;
+    if (isBlankSource) {
+      addNodeAt(type, { x: output.position.x - 280, y: output.position.y });
+      return;
+    }
     const rect = graphDockRef.current?.getBoundingClientRect();
     const screenPosition = rect ? {
       x: Math.min(rect.right - 120, rect.left + Math.max(260, rect.width * 0.54)),
       y: Math.min(rect.bottom - 80, rect.top + Math.max(110, rect.height * 0.48)),
     } : pointerRef.current;
     addNodeAt(type, instance?.screenToFlowPosition(screenPosition) || { x: 180, y: 120 });
-  }, [addNodeAt, instance]);
+  }, [addNodeAt, instance, localGraph.nodes]);
 
   const createGroupFromSelection = useCallback(() => {
     const nodes = graphRef.current.nodes.filter((node) => selectedNodes.has(node.id));
     if (!nodes.length) return;
     const bounds = nodes.reduce((box, node) => {
-      const measured = nodeMeasurements[node.id] || { width: 176, height: 90 };
+      const measured = nodeMeasurements[node.id] || { width: 188, height: 90 };
       return {
         minX: Math.min(box.minX, node.position.x), minY: Math.min(box.minY, node.position.y),
         maxX: Math.max(box.maxX, node.position.x + measured.width), maxY: Math.max(box.maxY, node.position.y + measured.height),
@@ -563,13 +646,55 @@ export default function NodeWorkspace({
   };
   const beginInspectorResize = (event) => {
     event.preventDefault(); const rect = rootRef.current.getBoundingClientRect();
-    const move = (pointer) => updateLayout({ inspectorWidth: Math.max(260, Math.min(460, layout.inspectorSide === 'right' ? rect.right - pointer.clientX : pointer.clientX - rect.left)) });
+    const move = (pointer) => updateLayout({ inspectorWidth: Math.max(320, Math.min(500, layout.inspectorSide === 'right' ? rect.right - pointer.clientX : pointer.clientX - rect.left)) });
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true });
   };
 
   const selectedGroup = (localGraph.groups || []).find((group) => selectedGroups.has(group.id)) || null;
   const selectedNode = selectedGroup ? null : localGraph.nodes.find((node) => selectedNodes.has(node.id)) || null;
+  const insertAfterSelected = useCallback((type) => {
+    if (!selectedNode || !getGraphNodeDefinition(type)) return;
+    const current = graphRef.current;
+    const sourceNode = current.nodes.find((candidate) => candidate.id === selectedNode.id);
+    if (!sourceNode) return;
+    const measured = nodeMeasurements[sourceNode.id] || { width: 188 };
+    const outgoing = current.edges.find((edge) => edge.source === sourceNode.id && edge.type !== ANALYTIC_COLOR);
+    try {
+      const insertPosition = { x: sourceNode.position.x + measured.width + 72, y: sourceNode.position.y };
+      let prepared = current;
+      const outgoingNode = outgoing ? current.nodes.find((candidate) => candidate.id === outgoing.target) : null;
+      const minimumDownstreamX = insertPosition.x + 188 + 72;
+      const downstreamShift = outgoingNode ? Math.max(0, minimumDownstreamX - outgoingNode.position.x) : 0;
+      if (outgoingNode && downstreamShift > 0) {
+        const downstreamIds = new Set([outgoingNode.id]);
+        const queue = [outgoingNode.id];
+        while (queue.length) {
+          const parentId = queue.shift();
+          for (const edge of current.edges.filter((candidate) => candidate.source === parentId)) {
+            if (!downstreamIds.has(edge.target)) { downstreamIds.add(edge.target); queue.push(edge.target); }
+          }
+        }
+        const positions = Object.fromEntries(current.nodes
+          .filter((candidate) => downstreamIds.has(candidate.id))
+          .map((candidate) => [candidate.id, { x: candidate.position.x + downstreamShift, y: candidate.position.y }]));
+        prepared = moveGraphNodes(current, positions);
+      }
+      let next = addGraphNode(prepared, type, insertPosition);
+      const added = next.nodes.at(-1);
+      next = connectGraphNodes(next, { source: sourceNode.id, target: added.id });
+      if (outgoing) {
+        next = connectGraphNodes(next, {
+          source: added.id, target: outgoing.target, targetHandle: outgoing.targetHandle,
+        });
+      }
+      commit(next, { structural: true, history: true });
+      setSelectedNodes(new Set([added.id])); setSelectedGroups(new Set()); setSelectedEdges(new Set());
+      requestAnimationFrame(() => instance?.fitView({ nodes: [{ id: added.id }], padding: 0.7, duration: 260 }));
+    } catch (error) {
+      graphState?.onDiagnostic?.(error.message);
+    }
+  }, [commit, graphState, instance, nodeMeasurements, selectedNode]);
   const inspectorOffset = inspectorReplaced ? 0 : layout.inspectorWidth;
   const paletteOffset = layout.paletteDetached ? layout.paletteWidth : 0;
   const toolsSideOffset = (side) => toolsRailVisible && toolsRailEdge === side ? 64 : 0;
@@ -636,14 +761,13 @@ export default function NodeWorkspace({
         {!layout.paletteDetached && !layout.paletteCollapsed ? palette : null}
         {!layout.paletteDetached && layout.paletteCollapsed ? <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title="Show quick nodes"><ChevronRight size={15} /></button> : null}
 
-        <div className="node-flow-frame">
+        <div className="node-flow-frame" data-edge-count={flowEdges.length}>
         <ReactFlow
-          key={[...(localGraph.groups || []), ...localGraph.nodes].map((item) => item.id).sort().join('|')}
           nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={setInstance}
           defaultViewport={graphView || { x: 0, y: 0, zoom: 1 }} minZoom={0.18} maxZoom={2.2}
-          snapToGrid snapGrid={[12, 12]} connectionRadius={30} selectionOnDrag panOnDrag={[1, 2]}
+          snapToGrid snapGrid={[12, 12]} connectionRadius={36} selectionOnDrag panOnDrag={[1, 2]} connectOnClick connectionMode={ConnectionMode.Strict}
           isValidConnection={(connection) => canConnectGraphNodes(graphRef.current, connection)}
-          connectionLineStyle={{ stroke: connectionSource?.type === ANALYTIC_COLOR ? 'var(--node-rose)' : 'var(--node-cyan)', strokeWidth: 2 }}
+          connectionLineStyle={{ stroke: 'var(--node-cyan)', strokeWidth: 2.4 }}
           elevateNodesOnSelect={false}
           deleteKeyCode={null} multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
           onMoveEnd={(_, viewport) => onGraphViewChange?.(viewport)}
@@ -704,7 +828,7 @@ export default function NodeWorkspace({
             if (removed.length) commit(removeGraphEdges(graphRef.current, removed), { structural: true, history: true });
           }}
           onConnect={(connection) => {
-            try { commit(connectGraphNodes(graphRef.current, connection), { structural: true, history: true }); setConnectionSource(null); }
+            try { commit(connectGraphNodes(graphRef.current, connection), { structural: true, history: true }); }
             catch (error) { graphState?.onDiagnostic?.(error.message); }
           }}
           colorMode="dark" proOptions={{ hideAttribution: true }}
@@ -745,6 +869,11 @@ export default function NodeWorkspace({
             onHeaderPointerDown={(event) => beginDockDrag('inspector', event)}
             onRename={(label) => commit(updateGraphNode(graphRef.current, selectedNode.id, { label }), { structural: false, history: true })}
             onParam={(key, value, structural) => commit(updateGraphNodeParams(graphRef.current, selectedNode.id, { [key]: value }), { structural, history: true })}
+            onReset={() => {
+              const definition = getGraphNodeDefinition(selectedNode.type);
+              if (definition) commit(updateGraphNodeParams(graphRef.current, selectedNode.id, definition.defaults), { structural: true, history: true });
+            }}
+            onInsertAfter={insertAfterSelected}
             onDelete={() => { const next = removeGraphNodes(graphRef.current, [selectedNode.id]); commit(next, { structural: true, history: true }); setSelectedNodes(new Set()); }}
             onGroupPatch={(patch) => commit(updateGraphGroup(graphRef.current, selectedGroup.id, patch), { structural: false, history: true })}
             onUngroup={() => ungroupSelection([selectedGroup.id])}

@@ -4,15 +4,15 @@ import {
 
 export const NODE_PROJECT_TEMPLATES = Object.freeze([
   { id: 'nodes-blank', name: 'Blank graph', description: 'A flat slab with only Terrain Output.', icon: 'boxes' },
-  { id: 'nodes-alpine', name: 'Alpine ridges', description: 'Weathered branching ridges with satellite-style alpine color.', icon: 'mountain' },
-  { id: 'nodes-highlands', name: 'Layered highlands', description: 'Broad landforms, eroded rock structure, and temperate vegetation bands.', icon: 'layers' },
+  { id: 'nodes-alpine', name: 'Alpine ridges', description: 'A staged massif with shaped body, broken strata, scree, drainage, and alpine surface color.', icon: 'mountain' },
+  { id: 'nodes-highlands', name: 'Layered highlands', description: 'Broad combined landforms with mass shaping, strata, thermal weathering, and temperate color.', icon: 'layers' },
   { id: 'nodes-dunes', name: 'Wind dunes', description: 'Wind-shaped dune fields with mineral-rich arid grading.', icon: 'waves' },
   { id: 'nodes-craters', name: 'Crater basin', description: 'Eroded impact terrain with basalt, scoria, and ash coloration.', icon: 'orbit' },
   { id: 'nodes-rivers', name: 'River valleys', description: 'Carved drainage through damp coastal highlands.', icon: 'route' },
 ]);
 
 export function nodeTemplatePreviewCacheKey(id) {
-  return `terrain-template-preview:nodes-v3:${id}`;
+  return `terrain-template-preview:nodes-v4:${id}`;
 }
 
 const templateById = new Map(NODE_PROJECT_TEMPLATES.map((template) => [template.id, template]));
@@ -64,30 +64,38 @@ function buildGraph(templateId, nodeSpecs, connectionSpecs, outputParams = {}) {
 const factories = {
   'nodes-blank': () => createBlankGraph('terrain'),
   'nodes-alpine': () => buildGraph('alpine', [
-    { key: 'ridges', type: 'mountainRange', position: { x: 40, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { height: 1.3, scale: 0.72, direction: 0.7, width: 0.44, length: 2.7, sharpness: 2.1, roughness: 0.7, octaves: 6, persistence: 0.48, lacunarity: 2.12, seed: 1201 } },
-    { key: 'warp', type: 'domainWarp', position: { x: 245, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { strength: 0.52, scale: 0.78, octaves: 3, seedOffset: 7 } },
-    { key: 'erosion', type: 'naturalErosion', position: { x: 450, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { strength: 0.42, radius: 30, talus: 0.68, channels: 0.24, channelScale: 1.6, deposition: 0.2, seed: 1249 } },
-    { key: 'geology', type: 'geologyDetail', position: { x: 655, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { strength: 0.085, scale: 4.1, roughness: 0.64, strata: 0.18, strataScale: 13, octaves: 5, persistence: 0.46, lacunarity: 2.2, seed: 1297 } },
+    { key: 'ridges', type: 'mountain', position: { x: 40, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { style: 'alpine', bulk: 'high', scale: 0.55, height: 1.45, reduceDetails: true, seed: 1201, x: 0, y: 0 } },
+    { key: 'shaper', type: 'shaper', position: { x: 245, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { shape: 0.46, strength: 0.86, featureScale: 48, detailPreservation: 0.86 } },
+    { key: 'warp', type: 'domainWarp', position: { x: 450, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { scale: 0.9, strength: 0.38, perturbation: 0.28, octaves: 3, roughness: 0.48, seedOffset: 7 } },
+    { key: 'strata', type: 'stratify', position: { x: 655, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { spacing: 0.095, intensity: 0.28, shape: 0.68, tilt: 0.14, direction: 0.8, octaves: 4, seed: 1279 } },
+    { key: 'thermal', type: 'thermalErosion', position: { x: 860, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { duration: 16, strength: 0.56, featureScale: 24, talusAngle: 38, anisotropy: 0.16, settling: 0.68, sedimentRemoval: 0.16, seed: 1319 } },
+    { key: 'erosion', type: 'naturalErosion', position: { x: 1065, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { strength: 0.32, radius: 26, talus: 0.68, channels: 0.24, channelScale: 1.6, deposition: 0.18, seed: 1361 } },
+    { key: 'geology', type: 'geologyDetail', position: { x: 1270, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { strength: 0.055, scale: 4.3, roughness: 0.58, strata: 0.1, strataScale: 14, octaves: 4, persistence: 0.44, lacunarity: 2.18, seed: 1409 } },
     { key: 'gradient', type: 'terrainGradient', position: { x: 40, y: 285 }, section: 'Surface color', sectionColor: 'violet', params: { preset: 'alpine', lowPoint: 0.25, highPoint: 0.58, summitPoint: 0.84, variation: 0.18, macroScale: 0.46 } },
     { key: 'rock', type: 'slopeTint', position: { x: 245, y: 285 }, section: 'Surface color', sectionColor: 'violet', params: { rockColor: '#716d66', slopeStart: 0.16, slopeEnd: 0.5, strength: 0.8, variation: 0.14, scale: 0.9 } },
     { key: 'moisture', type: 'moistureTint', position: { x: 450, y: 285 }, section: 'Surface color', sectionColor: 'violet', params: { dryColor: '#80705d', wetColor: '#2e4938', amount: 0.22, balance: 0.46, softness: 0.2 } },
     { key: 'grade', type: 'colorGrade', position: { x: 655, y: 285 }, section: 'Surface color', sectionColor: 'violet', params: { saturation: 0.86, contrast: 1.07, exposure: 0.95, warmth: -0.04 } },
   ], [
-    ['ridges', 'warp', 'source'], ['warp', 'erosion', 'source'], ['erosion', 'geology', 'source'], ['geology', 'output', 'height'],
+    ['ridges', 'shaper', 'source'], ['shaper', 'warp', 'source'], ['warp', 'strata', 'source'], ['strata', 'thermal', 'source'],
+    ['thermal', 'erosion', 'source'], ['erosion', 'geology', 'source'], ['geology', 'output', 'height'],
     ['gradient', 'rock', 'base'], ['rock', 'moisture', 'base'], ['moisture', 'grade', 'base'], ['grade', 'output', 'color'],
   ], { normalize: true, outMax: 2.35 }),
   'nodes-highlands': () => buildGraph('highlands', [
-    { key: 'landforms', type: 'mountain', position: { x: 35, y: 35 }, section: 'Height synthesis', sectionColor: 'green', params: { height: 1.05, scale: 0.58, radius: 1.5, sharpness: 1.25, roughness: 0.5, octaves: 6, persistence: 0.52, lacunarity: 2.02, seed: 1701 } },
+    { key: 'landforms', type: 'mountain', position: { x: 35, y: 35 }, section: 'Height synthesis', sectionColor: 'green', params: { style: 'old', bulk: 'high', height: 1.12, scale: 0.62, reduceDetails: true, seed: 1701, x: -0.12, y: 0.04 } },
     { key: 'chains', type: 'ridge', position: { x: 35, y: 175 }, section: 'Height synthesis', sectionColor: 'green', params: { height: 0.5, scale: 0.88, direction: 1.15, width: 0.34, sharpness: 2.4, breakup: 1.6, roughness: 0.35, octaves: 5, persistence: 0.47, lacunarity: 2.16, seed: 1901 } },
     { key: 'combine', type: 'combine', position: { x: 245, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { operation: 'add', mix: 0.5 } },
-    { key: 'erosion', type: 'naturalErosion', position: { x: 450, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { strength: 0.46, radius: 46, talus: 0.58, channels: 0.32, channelScale: 1.18, deposition: 0.28, seed: 1987 } },
-    { key: 'geology', type: 'geologyDetail', position: { x: 655, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { strength: 0.07, scale: 3, roughness: 0.5, strata: 0.28, strataScale: 9, octaves: 5, persistence: 0.5, lacunarity: 2.08, seed: 2029 } },
+    { key: 'shaper', type: 'shaper', position: { x: 450, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { shape: 0.3, strength: 0.72, featureScale: 58, detailPreservation: 0.8 } },
+    { key: 'strata', type: 'stratify', position: { x: 655, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { spacing: 0.14, intensity: 0.22, shape: 0.54, tilt: 0.2, direction: 1.1, octaves: 3, seed: 1949 } },
+    { key: 'thermal', type: 'thermalErosion', position: { x: 860, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { duration: 13, strength: 0.48, featureScale: 38, talusAngle: 34, anisotropy: 0.2, settling: 0.76, sedimentRemoval: 0.12, seed: 1987 } },
+    { key: 'erosion', type: 'naturalErosion', position: { x: 1065, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { strength: 0.38, radius: 46, talus: 0.58, channels: 0.32, channelScale: 1.18, deposition: 0.28, seed: 2029 } },
+    { key: 'geology', type: 'geologyDetail', position: { x: 1270, y: 95 }, section: 'Height synthesis', sectionColor: 'green', params: { strength: 0.045, scale: 3, roughness: 0.5, strata: 0.1, strataScale: 9, octaves: 4, persistence: 0.5, lacunarity: 2.08, seed: 2053 } },
     { key: 'gradient', type: 'terrainGradient', position: { x: 35, y: 340 }, section: 'Surface color', sectionColor: 'violet', params: { preset: 'temperate', lowPoint: 0.26, highPoint: 0.6, summitPoint: 0.9, variation: 0.22, macroScale: 0.34 } },
     { key: 'moisture', type: 'moistureTint', position: { x: 245, y: 340 }, section: 'Surface color', sectionColor: 'violet', params: { dryColor: '#78684f', wetColor: '#294536', amount: 0.36, balance: 0.48, softness: 0.2 } },
     { key: 'rock', type: 'slopeTint', position: { x: 450, y: 340 }, section: 'Surface color', sectionColor: 'violet', params: { rockColor: '#6e6b62', slopeStart: 0.2, slopeEnd: 0.58, strength: 0.68, variation: 0.12, scale: 0.7 } },
     { key: 'grade', type: 'colorGrade', position: { x: 655, y: 340 }, section: 'Surface color', sectionColor: 'violet', params: { saturation: 0.9, contrast: 1.04, exposure: 0.96, warmth: 0.03 } },
   ], [
-    ['landforms', 'combine', 'a'], ['chains', 'combine', 'b'], ['combine', 'erosion', 'source'], ['erosion', 'geology', 'source'], ['geology', 'output', 'height'],
+    ['landforms', 'combine', 'a'], ['chains', 'combine', 'b'], ['combine', 'shaper', 'source'], ['shaper', 'strata', 'source'],
+    ['strata', 'thermal', 'source'], ['thermal', 'erosion', 'source'], ['erosion', 'geology', 'source'], ['geology', 'output', 'height'],
     ['gradient', 'moisture', 'base'], ['moisture', 'rock', 'base'], ['rock', 'grade', 'base'], ['grade', 'output', 'color'],
   ], { normalize: true, outMax: 1.95 }),
   'nodes-dunes': () => buildGraph('dunes', [

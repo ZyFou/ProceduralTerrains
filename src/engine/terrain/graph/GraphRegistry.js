@@ -23,10 +23,18 @@ const execute = (kind) => (context) => context[kind]();
 
 const SOURCE_TYPES = ['fbm', 'ridged', 'billow', 'value', 'white', 'constant', 'voronoi', 'crater', 'dune', 'flow'];
 
-const MOUNTAIN_FORMATION_OPTIONS = [
+const MOUNTAIN_STYLE_OPTIONS = [
+  { value: 'basic', label: 'Basic' },
+  { value: 'eroded', label: 'Eroded' },
+  { value: 'old', label: 'Old' },
   { value: 'alpine', label: 'Alpine' },
   { value: 'strata', label: 'Strata' },
-  { value: 'weathered', label: 'Weathered' },
+];
+
+const MOUNTAIN_BULK_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
 ];
 
 function sourceDefinition(type) {
@@ -87,23 +95,16 @@ const terrainNode = ({ id, label, description, color = 'green', inspector }) => 
 const LANDFORM_DEFINITIONS = [
   terrainNode({
     id: 'mountain', label: 'Mountain',
-    description: 'Builds an asymmetric multi-peak massif with branching ridges, drainage valleys, foothills, and formation-aware rock structure.',
+    description: 'Builds a seeded multi-peak massif from organically distorted cellular structure, with branching ridges, drainage valleys, and natural foothills.',
     inspector: [
-      select('formation', 'Formation', MOUNTAIN_FORMATION_OPTIONS, 'alpine', { section: 'Form' }),
-      number('height', 'Height', 0, 2.5, 0.01, 1.15, { section: 'Form' }),
-      number('scale', 'Scale', 0.1, 4, 0.01, 0.75, { section: 'Form' }),
-      number('radius', 'Radius', 0.2, 3, 0.01, 1.25, { section: 'Form' }),
-      number('peakSpread', 'Peak Spread', 0.15, 1.25, 0.01, 0.78, { section: 'Form' }),
-      number('sharpness', 'Peak Sharpness', 0.5, 5, 0.01, 1.65, { section: 'Form' }),
-      number('asymmetry', 'Asymmetry', 0, 1, 0.01, 0.72, { section: 'Structure' }),
-      number('ridgeStrength', 'Branching Ridges', 0, 1.5, 0.01, 0.98, { section: 'Structure' }),
-      number('valleyDepth', 'Valley Depth', 0, 1.5, 0.01, 0.72, { section: 'Structure' }),
-      number('foothills', 'Foothills', 0, 1, 0.01, 0.32, { section: 'Structure' }),
-      number('roughness', 'Roughness', 0, 1, 0.01, 0.55, { section: 'Surface' }),
-      number('octaves', 'Detail Octaves', 1, 8, 1, 5, { structural: true, section: 'Surface' }),
-      number('persistence', 'Persistence', 0.15, 0.85, 0.01, 0.5, { section: 'Surface' }),
-      number('lacunarity', 'Lacunarity', 1.5, 3.5, 0.01, 2, { section: 'Surface' }),
-      number('seed', 'Seed', 0, 999999, 1, 1201, { section: 'Variation' }),
+      select('style', 'Style', MOUNTAIN_STYLE_OPTIONS, 'alpine', { section: 'Mountain', tier: 'essential', control: 'segmented', help: 'Changes the geological character without rebuilding the whole graph.' }),
+      select('bulk', 'Bulk', MOUNTAIN_BULK_OPTIONS, 'medium', { section: 'Mountain', tier: 'essential', control: 'segmented', help: 'Controls how much high-altitude mass survives later erosion.' }),
+      number('scale', 'Scale', 0.1, 4, 0.01, 0.62, { section: 'Mountain', tier: 'essential', help: 'Sets the mountain footprint.' }),
+      number('height', 'Height', 0, 2.5, 0.01, 1.25, { section: 'Mountain', tier: 'essential', help: 'Controls vertical relief before output normalization.' }),
+      { key: 'reduceDetails', label: 'Reduce Details', type: 'boolean', default: false, section: 'Mountain', tier: 'essential', help: 'Keeps the primitive broad when later nodes will provide the surface detail.' },
+      number('seed', 'Seed', 0, 999999, 1, 1201, { section: 'Variation', control: 'seed', help: 'Generates a deterministic variation of the same settings.' }),
+      number('x', 'X', -2, 2, 0.01, 0, { section: 'Placement' }),
+      number('y', 'Y', -2, 2, 0.01, 0, { section: 'Placement' }),
     ],
   }),
   terrainNode({
@@ -202,18 +203,35 @@ const definitions = [
   ...SOURCE_TYPES.map(sourceDefinition),
   ...LANDFORM_DEFINITIONS,
   {
-    id: 'domainWarp', label: 'Domain Warp', category: 'Transform', color: 'cyan',
-    description: 'Distorts the source coordinates before evaluating the connected terrain.',
+    id: 'domainWarp', label: 'Organic Warp', category: 'Transform', color: 'cyan',
+    description: 'Uses a seeded vector field to bend terrain into broad organic forms without directional tearing.',
     executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
     inspector: [
-      number('strength', 'Strength', 0, 4, 0.01, 0.7),
-      number('scale', 'Scale', 0.1, 8, 0.05, 1),
-      number('octaves', 'Octaves', 1, 6, 1, 4, { structural: true }),
-      number('seedOffset', 'Seed Offset', -999, 999, 1, 0),
+      number('scale', 'Size', 0.1, 8, 0.05, 1, { section: 'Vector Field', tier: 'essential', help: 'Sets the size of the broad bends.' }),
+      number('strength', 'Strength', 0, 4, 0.01, 0.7, { section: 'Vector Field', tier: 'essential', help: 'Controls displacement without changing elevation directly.' }),
+      number('perturbation', 'Perturbation', 0, 1, 0.01, 0.28, { section: 'Vector Field', tier: 'essential', help: 'Breaks symmetry in the vector field.' }),
+      number('octaves', 'Complexity', 1, 6, 1, 4, { structural: true, section: 'Detail' }),
+      number('roughness', 'Roughness', 0.2, 0.8, 0.01, 0.5, { section: 'Detail' }),
+      number('seedOffset', 'Seed', -999, 999, 1, 0, { section: 'Variation' }),
     ],
-    defaults: { strength: 0.7, scale: 1, octaves: 4, seedOffset: 0 },
+    defaults: { strength: 0.7, scale: 1, perturbation: 0.28, octaves: 4, roughness: 0.5, seedOffset: 0 },
     structuralParams: ['octaves'], uniformSlots: () => 1,
     glslCompiler: execute('domainWarp'), cpuEvaluator: execute('domainWarp'),
+  },
+  {
+    id: 'shaper', label: 'Shaper', category: 'Adjust', color: 'violet',
+    description: 'Adds or removes large-scale body before erosion while retaining the source terrain\'s fine structure.',
+    executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
+    inspector: [
+      number('shape', 'Shape', -1, 1, 0.01, 0.38, { section: 'Mass', tier: 'essential', help: 'Positive values bulk up peaks; negative values carve mass away.' }),
+      number('strength', 'Strength', 0, 1, 0.01, 0.8, { section: 'Mass', tier: 'essential' }),
+      number('featureScale', 'Body Scale', 5, 150, 1, 42, { section: 'Scale', tier: 'essential', digits: 0, help: 'Sets the neighborhood used to build the large-scale body.' }),
+      number('detailPreservation', 'Preserve Fine Details', 0, 1, 0.01, 0.82, { section: 'Detail', help: 'Restores the source microstructure after mass shaping.' }),
+    ],
+    defaults: { shape: 0.38, strength: 0.8, featureScale: 42, detailPreservation: 0.82 },
+    structuralParams: [], uniformSlots: () => 1,
+    glslCompiler: execute('shaper'), cpuEvaluator: execute('shaper'),
+    terrainOnly: true, workspaceModes: ['terrain'],
   },
   {
     id: 'combine', label: 'Combine', category: 'Combine', color: 'blue',
@@ -261,6 +279,24 @@ const definitions = [
     glslCompiler: execute('terrace'), cpuEvaluator: execute('terrace'),
   },
   {
+    id: 'stratify', label: 'Stratify', category: 'Surface', color: 'amber',
+    description: 'Cuts localized, broken, non-linear rock layers into the source instead of quantizing the whole terrain into terraces.',
+    executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
+    inspector: [
+      number('spacing', 'Spacing', 0.02, 0.4, 0.005, 0.11, { section: 'Layers', tier: 'essential', digits: 3, help: 'Distance between geological bands.' }),
+      number('intensity', 'Intensity', 0, 1, 0.01, 0.42, { section: 'Layers', tier: 'essential', help: 'How strongly layers affect exposed rock.' }),
+      number('shape', 'Layer Shape', 0, 1, 0.01, 0.62, { section: 'Layers', tier: 'essential', help: 'Moves from soft beds to sharper broken strata.' }),
+      number('tilt', 'Tilt', -1, 1, 0.01, 0.16, { section: 'Orientation' }),
+      number('direction', 'Direction', 0, 6.283, 0.01, 0.7, { section: 'Orientation' }),
+      number('octaves', 'Breakup Octaves', 1, 6, 1, 4, { structural: true, section: 'Breakup' }),
+      number('seed', 'Seed', 0, 999999, 1, 7603, { section: 'Variation', control: 'seed' }),
+    ],
+    defaults: { spacing: 0.11, intensity: 0.42, shape: 0.62, tilt: 0.16, direction: 0.7, octaves: 4, seed: 7603 },
+    structuralParams: ['octaves'], uniformSlots: () => 1,
+    glslCompiler: execute('stratify'), cpuEvaluator: execute('stratify'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
     id: 'geologyDetail', label: 'Geology Detail', category: 'Surface', color: 'amber',
     description: 'Adds multi-scale rock structure, broken strata, and restrained ridge detail without flattening the base landform.',
     executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
@@ -281,19 +317,19 @@ const definitions = [
   },
   {
     id: 'thermalErosion', label: 'Thermal Erosion', category: 'Simulate', color: 'amber',
-    description: 'Relaxes slopes above the talus threshold, moves loose material downslope, and builds broken scree deposits while preserving the massif.',
+    description: 'Relaxes slopes above a talus angle, moves loose material downslope, and balances settling against sediment removal.',
     executionKind: 'analytical', inputs: [input('source', 'Source')], outputs: [output()],
     inspector: [
-      number('strength', 'Relaxation', 0, 1, 0.01, 0.58, { section: 'Thermal' }),
-      number('radius', 'Feature Radius', 2, 160, 1, 30, { section: 'Thermal', digits: 0 }),
-      number('talus', 'Talus Threshold', 0.005, 0.3, 0.005, 0.07, { section: 'Thermal', digits: 3 }),
-      number('iterations', 'Thermal Passes', 1, 16, 1, 7, { section: 'Thermal', digits: 0 }),
-      number('deposition', 'Deposition', 0, 1, 0.01, 0.72, { section: 'Sediment' }),
-      number('scree', 'Scree Breakup', 0, 1, 0.01, 0.2, { section: 'Sediment' }),
-      number('screeScale', 'Scree Scale', 0.5, 12, 0.05, 4.8, { section: 'Sediment' }),
-      number('seed', 'Seed', 0, 999999, 1, 9103, { section: 'Variation' }),
+      number('duration', 'Duration', 1, 40, 1, 12, { section: 'General', tier: 'essential', digits: 0, help: 'Increases the amount of slope relaxation.' }),
+      number('strength', 'Strength', 0, 1, 0.01, 0.58, { section: 'General', tier: 'essential' }),
+      number('featureScale', 'Feature Scale', 2, 160, 1, 30, { section: 'General', tier: 'essential', digits: 0, help: 'Controls the size of talus and scree features.' }),
+      number('talusAngle', 'Talus Angle', 15, 60, 0.5, 35, { section: 'Material', digits: 1, unit: '°', help: 'Material moves when the local slope exceeds this angle.' }),
+      number('anisotropy', 'Anisotropy', 0, 1, 0.01, 0.16, { section: 'Material', help: 'Adds directional bias to the material flow.' }),
+      number('settling', 'Settling', 0, 1, 0.01, 0.72, { section: 'Sediment' }),
+      number('sedimentRemoval', 'Sediment Removal', 0, 1, 0.01, 0.18, { section: 'Sediment' }),
+      number('seed', 'Seed', 0, 999999, 1, 9103, { section: 'Variation', control: 'seed' }),
     ],
-    defaults: { strength: 0.58, radius: 30, talus: 0.07, iterations: 7, deposition: 0.72, scree: 0.2, screeScale: 4.8, seed: 9103 },
+    defaults: { duration: 12, strength: 0.58, featureScale: 30, talusAngle: 35, anisotropy: 0.16, settling: 0.72, sedimentRemoval: 0.18, seed: 9103 },
     structuralParams: [], uniformSlots: () => 1,
     glslCompiler: execute('thermalErosion'), cpuEvaluator: execute('thermalErosion'),
     terrainOnly: true, workspaceModes: ['terrain'],
