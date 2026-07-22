@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Search, X } from 'lucide-react';
 import { PanelTabs } from '../panels/SidePanel.jsx';
+import ControlSection from './ControlSection.jsx';
 import PanelResetButton from './PanelResetButton.jsx';
 import { SliderCtl, ToggleRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
@@ -39,6 +41,14 @@ const SHORE_SLIDERS = [
   slider('visualsShallowWaterSoftness', 'Shallow Water Softness', 0, 1, 0.02, { digits: 2 }),
 ];
 
+const VISUALS_TABS = [
+  { id: 'post', label: 'Post FX' },
+  { id: 'sky', label: 'HDR Sky' },
+  { id: 'terrain', label: 'Terrain Surface' },
+  { id: 'shoreline', label: 'Shoreline' },
+  { id: 'camera', label: 'Camera Shaders' },
+];
+
 const CAMERA_SLIDERS = {
   pixelResolution: slider('visualsPixelResolution', 'Virtual Resolution', 120, 720, 8, { unit: 'p' }),
   ditheringStrength: slider('visualsDitheringStrength', 'Dithering Strength', 0, 1, 0.02, { digits: 2 }),
@@ -50,25 +60,20 @@ const CAMERA_SLIDERS = {
   chromaticStrength: slider('visualsChromaticAberrationStrength', 'Chromatic Offset', 0, 8, 0.1, { digits: 1, unit: ' px' }),
 };
 
-const VISUALS_TABS = [
-  { id: 'post', label: 'Post FX' },
-  { id: 'sky', label: 'HDR Sky' },
-  { id: 'terrain', label: 'Terrain Surface' },
-  { id: 'shoreline', label: 'Shoreline' },
-  { id: 'camera', label: 'Camera Shaders' },
-];
-
 function val(params, key) {
   return params[key] ?? VISUAL_DEFAULT_PARAMS[key];
 }
 
-function SliderList({ items, params, onParam }) {
-  return items.map((def) => (
+function SliderList({ items, params, onParam, disabled, query = '' }) {
+  const normalized = query.trim().toLowerCase();
+  return items.filter((def) => !normalized || `${def.label} ${def.key}`.toLowerCase().includes(normalized)).map((def) => (
     <SliderCtl
       key={def.key}
       def={def}
       value={val(params, def.key)}
       onChange={(v) => onParam(def.key, v)}
+      disabled={disabled}
+      disabledTooltip="Enable this visual group to edit its settings."
       settingId={`visuals.${def.key}`}
     />
   ));
@@ -78,17 +83,38 @@ export default function VisualsPanel({ ctx }) {
   const { params, onParam, settingsTarget } = ctx;
   const tint = val(params, 'visualsAtmosphereTint');
   const [tab, setTab] = useState('post');
-
+  const [query, setQuery] = useState('');
+  const [enabled, setEnabled] = useState({ post: true, sky: true, terrain: true, shoreline: true });
   useEffect(() => {
     const targetTab = settingsTarget?.panelId === 'visuals' ? settingsTarget?.tabId : null;
-    if (targetTab && targetTab !== tab) setTab(targetTab);
-  }, [settingsTarget, tab]);
+    if (targetTab && VISUALS_TABS.some((item) => item.id === targetTab)) setTab(targetTab);
+  }, [settingsTarget]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = (label, keywords = '') => !normalizedQuery || `${label} ${keywords}`.toLowerCase().includes(normalizedQuery);
+  const group = (id, label, keywords, children, tabId = id) => {
+    const settingKey = ({ pixelated: 'visualsPixelatedEnabled', dithering: 'visualsDitheringEnabled', crt: 'visualsCrtEnabled', chromatic: 'visualsChromaticAberrationEnabled' })[id];
+    const active = settingKey ? !!val(params, settingKey) : enabled[id] !== false;
+    const setActive = settingKey
+      ? (value) => onParam(settingKey, value)
+      : (value) => setEnabled((current) => ({ ...current, [id]: value }));
+    return tab === tabId && matches(label, keywords) && (
+    <ControlSection id={`visuals-${id}`} title={label} defaultOpen={id === 'post' || id === 'pixelated'} enabled={active} onEnabledChange={setActive}>
+      <div className={!active ? 'visuals-section-disabled' : ''}>{children}</div>
+    </ControlSection>
+    );
+  };
 
   return (
     <>
+      <div className="visuals-search-wrap">
+        <Search size={14} aria-hidden />
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search visual settings…" aria-label="Search visual settings" />
+        {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear visual settings search"><X size={13} /></button>}
+      </div>
+
       <PanelTabs active={tab} onChange={setTab} tabs={VISUALS_TABS} />
 
-      {tab === 'post' && (
+      {group('post', 'Post Processing', 'post fx exposure contrast saturation vignette bloom rays', (
         <>
           <ToggleRow
             label="Post Processing"
@@ -97,13 +123,13 @@ export default function VisualsPanel({ ctx }) {
             settingId="visuals.visualsPostEnabled"
             info="Tile-mode color grading, bloom, vignette, and sun rays."
           />
-          <SliderList items={POST_SLIDERS} params={params} onParam={onParam} />
+          <SliderList items={POST_SLIDERS} params={params} onParam={onParam} disabled={enabled.post === false} query={query} />
         </>
-      )}
+      ))}
 
-      {tab === 'sky' && (
+      {group('sky', 'HDR Sky', 'sky hdr intensity glow horizon atmosphere tint', (
         <>
-          <SliderList items={SKY_SLIDERS} params={params} onParam={onParam} />
+          <SliderList items={SKY_SLIDERS} params={params} onParam={onParam} disabled={enabled.sky === false} query={query} />
           <div className="color-field" data-setting-id="visuals.visualsAtmosphereTint">
             <div className="label-with-icon" data-tooltip="Tint applied to the procedural sky environment.">
               <span className="setting-label">Atmosphere Tint</span>
@@ -114,23 +140,25 @@ export default function VisualsPanel({ ctx }) {
             />
           </div>
         </>
-      )}
+      ))}
 
-      {tab === 'terrain' && (
+      {group('terrain', 'Terrain Surface', 'terrain surface color variation height detail rock soil sand render', (
         <>
-          <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} />
+          <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} disabled={enabled.terrain === false} query={query} />
           {RENDER_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} settingId={`visuals.${def.key}`} />
+            (!normalizedQuery || `${def.label} ${def.key}`.toLowerCase().includes(normalizedQuery)) && <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} disabled={enabled.terrain === false} disabledTooltip="Enable this visual group to edit its settings." settingId={`visuals.${def.key}`} />
           ))}
         </>
-      )}
+      ))}
 
-      {tab === 'shoreline' && (
-        <SliderList items={SHORE_SLIDERS} params={params} onParam={onParam} />
-      )}
+      {group('shoreline', 'Shoreline', 'shore foam wet sand shallow water', (
+        <SliderList items={SHORE_SLIDERS} params={params} onParam={onParam} disabled={enabled.shoreline === false} query={query} />
+      ))}
 
       {tab === 'camera' && (
         <>
+          {group('pixelated', 'Pixelated', 'pixel resolution virtual resolution', (
+            <>
           <ToggleRow
             label="Pixelated"
             value={!!val(params, 'visualsPixelatedEnabled')}
@@ -144,6 +172,10 @@ export default function VisualsPanel({ ctx }) {
             onChange={(v) => onParam('visualsPixelResolution', Math.round(v))}
             settingId="visuals.visualsPixelResolution"
           />
+            </>
+          ), 'camera')}
+          {group('dithering', 'Dithering', 'dither pattern color levels strength scale', (
+            <>
           <ToggleRow
             label="Dithering"
             value={!!val(params, 'visualsDitheringEnabled')}
@@ -169,6 +201,10 @@ export default function VisualsPanel({ ctx }) {
             onChange={(v) => onParam('visualsDitheringScale', Math.round(v))}
             settingId="visuals.visualsDitheringScale"
           />
+            </>
+          ), 'camera')}
+          {group('crt', 'CRT', 'crt scanline lens bend analog noise', (
+            <>
           <ToggleRow
             label="CRT"
             value={!!val(params, 'visualsCrtEnabled')}
@@ -194,6 +230,10 @@ export default function VisualsPanel({ ctx }) {
             onChange={(v) => onParam('visualsCrtLineWidth', v)}
             settingId="visuals.visualsCrtLineWidth"
           />
+            </>
+          ), 'camera')}
+          {group('chromatic', 'Chromatic Aberration', 'chromatic offset rgb channels lens edges', (
+            <>
           <ToggleRow
             label="Chromatic Aberration"
             value={!!val(params, 'visualsChromaticAberrationEnabled')}
@@ -207,6 +247,8 @@ export default function VisualsPanel({ ctx }) {
             onChange={(v) => onParam('visualsChromaticAberrationStrength', v)}
             settingId="visuals.visualsChromaticAberrationStrength"
           />
+            </>
+          ), 'camera')}
         </>
       )}
 

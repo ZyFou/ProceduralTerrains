@@ -13,6 +13,8 @@ export default function ControlSection({
   nested = false,
   children,
   onToggle,
+  enabled,
+  onEnabledChange,
 }) {
   const flat = useContext(FlatPanelContext);
   const [open, setOpen] = useState(defaultOpen);
@@ -36,19 +38,15 @@ export default function ControlSection({
         data-section={id}
         data-setting-id={sectionKey}
       >
-        <button
-          type="button"
-          className="panel-group-header panel-group-toggle"
-          onClick={toggle}
-          aria-expanded={open}
-        >
-          {icon && <span className="panel-group-icon">{icon}</span>}
-          <span className="panel-group-title">{title}</span>
-          {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
-          <span className={`panel-group-chevron${open ? ' open' : ''}`} aria-hidden>
-            <ChevronDown size={14} strokeWidth={2} />
-          </span>
-        </button>
+        <div className="panel-group-header panel-group-toggle">
+          <button type="button" className="panel-group-header-button" onClick={toggle} aria-expanded={open}>
+            {icon && <span className="panel-group-icon">{icon}</span>}
+            <span className="panel-group-title">{title}</span>
+            {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
+            <span className={`panel-group-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
+          </button>
+          {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => onEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+        </div>
         {open && <div className="panel-group-body">{children}</div>}
       </section>
     );
@@ -56,16 +54,17 @@ export default function ControlSection({
 
   return (
     <section className="control-section" id={id} data-section={id} data-setting-id={settingId ?? id}>
-      <button type="button" className="control-section-header" onClick={toggle} aria-expanded={open}>
-        <span className="control-section-left">
-          {icon && <span className="control-section-icon">{icon}</span>}
-          <span className="control-section-title">{title}</span>
-          {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
-        </span>
-        <span className={`control-section-chevron${open ? ' open' : ''}`} aria-hidden>
-          <ChevronDown size={14} strokeWidth={2} />
-        </span>
-      </button>
+      <div className="control-section-header">
+        <button type="button" className="control-section-header-button" onClick={toggle} aria-expanded={open}>
+          <span className="control-section-left">
+            {icon && <span className="control-section-icon">{icon}</span>}
+            <span className="control-section-title">{title}</span>
+            {statusDot && <span className={`control-section-dot${statusDot === 'active' ? ' active' : ''}`} />}
+          </span>
+          <span className={`control-section-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
+        </button>
+        {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => onEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+      </div>
       <div className={`control-section-body${open ? '' : ' collapsed'}`}>{children}</div>
     </section>
   );
