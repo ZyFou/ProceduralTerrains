@@ -13,7 +13,7 @@ const SESSION_COOKIE_OPTIONS = {
   maxAge: config.session.ttlDays * 24 * 60 * 60,
 };
 
-const publicUser = (row) => ({
+export const publicUser = (row) => ({
   id: row.id,
   email: row.email,
   username: row.username,
@@ -74,7 +74,7 @@ async function findSessionUser(request) {
   return rows[0] ?? null;
 }
 
-async function requireSession(request, reply) {
+export async function requireSession(request, reply) {
   const user = await findSessionUser(request);
   if (user) return user;
   if (request.cookies[config.session.cookieName]) clearSessionCookie(reply);

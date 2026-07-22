@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { config } from './config.js';
 import { closeDatabase, db } from './db.js';
 import { registerAuthRoutes } from './auth-routes.js';
+import { registerProjectRoutes } from './project-routes.js';
 
 const app = Fastify({
   logger: { level: config.logLevel },
@@ -43,6 +44,7 @@ app.get('/api/v1/health', async () => {
 });
 
 await registerAuthRoutes(app);
+await registerProjectRoutes(app);
 
 app.setNotFoundHandler((request, reply) => {
   reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Route not found.' } });

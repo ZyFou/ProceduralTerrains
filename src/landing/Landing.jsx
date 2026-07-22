@@ -10,10 +10,12 @@ import AuthPage from '../auth/AuthPage.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { avatarUrl } from '../auth/authApi.js';
 import ProfilePage from '../auth/ProfilePage.jsx';
+import CloudProjectsPanel from '../project/CloudProjectsPanel.jsx';
+import CommunityPage from '../project/CommunityPage.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const AUTH_VIEWS = new Set(['login', 'register']);
-const HASH_VIEWS = new Set(['login', 'register', 'profile']);
+const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community']);
 
 function viewFromHash() {
   const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -262,7 +264,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   return (
     <div
-      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -283,6 +285,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         <nav className="lp-nav-links" aria-label="Main navigation">
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => showView('projects')}>Projects</button>
           <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => openTemplates()}>Templates</button>
+          <button type="button" className={view === 'community' ? 'active' : ''} onClick={() => showView('community')}>Community</button>
           <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">Docs</a>
         </nav>
         <div className="lp-nav-actions">
@@ -313,6 +316,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             />
           )}
           {view === 'profile' && user && <ProfilePage onBack={goHome} />}
+          {view === 'community' && <CommunityPage onBack={() => showView('projects')} onOpen={open} />}
           {view === 'home' && <>
             <section className="lp-hero">
               <div className="lp-version-pill">v{APP_VERSION}</div>
@@ -339,7 +343,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             return (
               <section className="lp-section lp-view">
                 <div className="lp-section-head">
-                  <h2>All projects</h2>
+                  <h2>Local projects</h2>
                   <div className="lp-head-actions">
                     <button type="button" className="lp-secondary sm" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
                     <button type="button" className="lp-primary sm" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
@@ -352,6 +356,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                 {projects.length === 0 ? emptyProjects
                   : filtered.length === 0 ? <p className="lp-no-results">No project matches &ldquo;{query.trim()}&rdquo;.</p>
                   : <div className="lp-card-grid">{filtered.slice(0, 8).map(renderProjectCard)}</div>}
+                <CloudProjectsPanel localProjects={projects} onOpen={open} />
               </section>
             );
           })()}

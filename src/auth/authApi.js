@@ -20,7 +20,7 @@ export class AuthApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, signal } = {}) {
+export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
   let response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
@@ -50,12 +50,12 @@ async function request(path, { method = 'GET', body, signal } = {}) {
 }
 
 export const authApi = {
-  session: (options) => request('/auth/session', options),
-  register: (input) => request('/auth/register', { method: 'POST', body: input }),
-  login: (input) => request('/auth/login', { method: 'POST', body: input }),
-  logout: () => request('/auth/logout', { method: 'POST' }),
-  updateProfile: (input) => request('/me', { method: 'PATCH', body: input }),
-  updateAvatar: (dataUrl) => request('/me/avatar', { method: 'PUT', body: { dataUrl } }),
-  removeAvatar: () => request('/me/avatar', { method: 'DELETE' }),
-  changePassword: (input) => request('/me/password', { method: 'PUT', body: input }),
+  session: (options) => apiRequest('/auth/session', options),
+  register: (input) => apiRequest('/auth/register', { method: 'POST', body: input }),
+  login: (input) => apiRequest('/auth/login', { method: 'POST', body: input }),
+  logout: () => apiRequest('/auth/logout', { method: 'POST' }),
+  updateProfile: (input) => apiRequest('/me', { method: 'PATCH', body: input }),
+  updateAvatar: (dataUrl) => apiRequest('/me/avatar', { method: 'PUT', body: { dataUrl } }),
+  removeAvatar: () => apiRequest('/me/avatar', { method: 'DELETE' }),
+  changePassword: (input) => apiRequest('/me/password', { method: 'PUT', body: input }),
 };

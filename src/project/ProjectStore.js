@@ -112,6 +112,19 @@ export const projectStore = {
     const copy = normalizeProject({ ...project, id: id(), metadata: { ...project.metadata, name: `${project.metadata.name} copy`, created: now() } });
     return this.save(copy);
   },
+
+  async importCopy(project, { name } = {}) {
+    const imported = normalizeProject({
+      ...project,
+      id: id(),
+      metadata: {
+        ...project?.metadata,
+        name: String(name ?? project?.metadata?.name ?? 'Shared terrain'),
+        created: now(),
+      },
+    });
+    return this.save(imported);
+  },
 };
 
 export function projectStats(project) {
