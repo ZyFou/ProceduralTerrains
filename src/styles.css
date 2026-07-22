@@ -5989,3 +5989,112 @@ input[type="color"].palette-color-input {
 .surface-apply-status.ok { color: var(--success); }
 .surface-apply-status.pending { color: var(--warning); }
 .surface-apply-status.warning { color: var(--warning); }
+
+/* ---- Project-owned popups (notifications, prompts, and confirmations) ---- */
+.app-popup-stack {
+  position: fixed;
+  z-index: 12000;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: min(360px, calc(100vw - 28px));
+  pointer-events: none;
+}
+.app-popup-notice {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 26px;
+  align-items: start;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  background: rgba(15,17,24,.96);
+  color: #d7dbe7;
+  font: 12px/1.45 var(--font, Inter, sans-serif);
+  box-shadow: 0 18px 45px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.035);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+  animation: app-popup-enter .24s cubic-bezier(.22,1,.36,1) both;
+}
+.app-popup-notice.success { border-color: rgba(34,197,94,.32); }
+.app-popup-notice.error { border-color: rgba(239,68,68,.38); }
+.app-popup-notice-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: rgba(96,165,250,.12);
+  color: #8fbbff;
+}
+.app-popup-notice.success .app-popup-notice-icon { background: rgba(34,197,94,.12); color: #77dc98; }
+.app-popup-notice.error .app-popup-notice-icon { background: rgba(239,68,68,.12); color: #f58d8d; }
+.app-popup-notice-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding-top: 1px; }
+.app-popup-notice-copy strong { color: #f5f7fb; font-size: 12px; font-weight: 650; }
+.app-popup-notice-copy > span { overflow-wrap: anywhere; color: #b6bdcc; }
+.app-popup-notice > button,
+.app-popup-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7f8798;
+  cursor: pointer;
+}
+.app-popup-notice > button:hover,
+.app-popup-dialog-close:hover { background: rgba(255,255,255,.07); color: #eef1f7; }
+.app-popup-backdrop {
+  position: fixed;
+  z-index: 13000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2,3,6,.66);
+  backdrop-filter: blur(7px);
+  animation: app-popup-fade .16s ease both;
+}
+.app-popup-dialog {
+  width: min(420px, 100%);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.13);
+  border-radius: 13px;
+  background: #10121a;
+  color: #d8dce7;
+  font-family: var(--font, Inter, sans-serif);
+  box-shadow: 0 28px 80px rgba(0,0,0,.58), inset 0 1px rgba(255,255,255,.04);
+  animation: app-popup-dialog-enter .24s cubic-bezier(.22,1,.36,1) both;
+}
+.app-popup-dialog.danger { border-color: rgba(239,68,68,.3); }
+.app-popup-dialog > header { display: grid; grid-template-columns: 34px 1fr 28px; gap: 11px; align-items: start; padding: 18px 18px 14px; }
+.app-popup-dialog-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: rgba(59,130,246,.12); color: #8cb8ff; }
+.app-popup-dialog.danger .app-popup-dialog-icon { background: rgba(239,68,68,.12); color: #f18a8a; }
+.app-popup-dialog h2 { margin: 0; color: #f4f6fb; font-size: 15px; line-height: 1.35; font-weight: 650; }
+.app-popup-dialog p { margin: 5px 0 0; color: #9da5b5; font-size: 12px; line-height: 1.5; }
+.app-popup-dialog-field { display: flex; flex-direction: column; gap: 6px; padding: 2px 18px 17px; color: #9da5b5; font-size: 10.5px; font-weight: 600; }
+.app-popup-dialog-field input { box-sizing: border-box; width: 100%; height: 38px; padding: 0 11px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; outline: none; background: rgba(255,255,255,.045); color: #f1f3f8; font: 12.5px var(--font, Inter, sans-serif); }
+.app-popup-dialog-field input:focus { border-color: rgba(59,130,246,.75); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+.app-popup-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid rgba(255,255,255,.075); background: rgba(255,255,255,.018); }
+.app-popup-dialog > footer button { height: 34px; padding: 0 14px; border-radius: 7px; font: 600 11.5px var(--font, Inter, sans-serif); cursor: pointer; }
+.app-popup-cancel { border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.035); color: #b6bdca; }
+.app-popup-confirm { border: 1px solid rgba(59,130,246,.55); background: #2563eb; color: white; }
+.app-popup-confirm.danger { border-color: rgba(239,68,68,.75); background: #c93636; }
+.app-popup-dialog > footer button:hover { filter: brightness(1.1); }
+@keyframes app-popup-enter { from { opacity: 0; transform: translate3d(18px,-4px,0) scale(.98); } }
+@keyframes app-popup-fade { from { opacity: 0; } }
+@keyframes app-popup-dialog-enter { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+@media (max-width: 600px) {
+  .app-popup-stack { top: 12px; right: 50%; transform: translateX(50%); }
+  .app-popup-backdrop { align-items: end; padding: 12px; }
+  .app-popup-dialog { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-popup-notice, .app-popup-backdrop, .app-popup-dialog { animation: none; }
+}

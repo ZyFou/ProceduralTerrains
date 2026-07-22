@@ -4,6 +4,7 @@ import Landing from './landing/Landing.jsx';
 import { LandingProvider } from './landing/landingContext.jsx';
 import { randomSessionSeed } from './landing/shared.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
+import { PopupProvider } from './components/ui/PopupProvider.jsx';
 import './landing/landing.css';
 
 const EXIT_MS = 720;
@@ -35,13 +36,15 @@ export default function Root() {
   );
 
   return (
-    <AuthProvider>
-      <LandingProvider value={landing}>
-        <App />
-        {visible && (
-          <Landing exiting={exiting} bootReady={bootReady} onLaunch={dismiss} sessionSeed={sessionSeed} />
-        )}
-      </LandingProvider>
-    </AuthProvider>
+    <PopupProvider>
+      <AuthProvider>
+        <LandingProvider value={landing}>
+          <App />
+          {visible && (
+            <Landing exiting={exiting} bootReady={bootReady} onLaunch={dismiss} sessionSeed={sessionSeed} />
+          )}
+        </LandingProvider>
+      </AuthProvider>
+    </PopupProvider>
   );
 }

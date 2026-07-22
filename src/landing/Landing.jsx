@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -12,6 +12,7 @@ import { avatarUrl } from '../auth/authApi.js';
 import ProfilePage from '../auth/ProfilePage.jsx';
 import CloudProjectsPanel from '../project/CloudProjectsPanel.jsx';
 import CommunityPage from '../project/CommunityPage.jsx';
+import { usePopup } from '../components/ui/PopupProvider.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const AUTH_VIEWS = new Set(['login', 'register']);
@@ -48,6 +49,7 @@ const relTime = (value) => {
 
 export default function Landing({ exiting, bootReady, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
+  const { showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
   const [view, setView] = useState(() => viewFromHash() ?? 'home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
@@ -60,6 +62,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
   const [menuFor, setMenuFor] = useState(null);
   const [query, setQuery] = useState('');
+  const [projectsTab, setProjectsTab] = useState('local');
+  const [cloudRefreshToken, setCloudRefreshToken] = useState(0);
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
   const fileRef = useRef(null);
@@ -197,7 +201,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   };
   const renameProject = async (project) => {
     if (!project || projectActionBusy) return;
-    const nextName = window.prompt('Rename project', project.metadata.name)?.trim();
+    const nextName = (await showPrompt({ title: 'Rename project', inputLabel: 'Project name', initialValue: project.metadata.name, confirmLabel: 'Rename', maxLength: 120 }))?.trim();
     if (!nextName || nextName === project.metadata.name) return;
     setProjectActionBusy(true);
     try { await projectStore.rename(project, nextName); } catch { /* the project remains selected */ }
@@ -305,7 +309,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       </header>
 
       <div className="lp-scroll">
-        <main key={view} className="lp-content">
+        <main className="lp-content">
+          <div key={view} className="lp-content-scroll">
           {AUTH_VIEWS.has(view) && (
             <AuthPage
               key={view}
@@ -343,20 +348,38 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             return (
               <section className="lp-section lp-view">
                 <div className="lp-section-head">
-                  <h2>Local projects</h2>
-                  <div className="lp-head-actions">
-                    <button type="button" className="lp-secondary sm" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
-                    <button type="button" className="lp-primary sm" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
+                  <h2>Projects</h2>
+                  {projectsTab === 'local' && (
+                    <div className="lp-head-actions">
+                      <button type="button" className="lp-secondary sm" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
+                      <button type="button" className="lp-primary sm" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
+                    </div>
+                  )}
+                  {projectsTab === 'cloud' && user && (
+                    <div className="lp-head-actions">
+                      <button type="button" className="lp-secondary sm" onClick={() => setCloudRefreshToken((current) => current + 1)}><RefreshCw size={13} /> Refresh</button>
+                    </div>
+                  )}
+                </div>
+                <div className="lp-project-tabs" role="tablist" aria-label="Project storage">
+                  <button type="button" role="tab" aria-selected={projectsTab === 'local'} aria-controls="local-projects-panel" className={projectsTab === 'local' ? 'active' : ''} onClick={() => setProjectsTab('local')}>Local Projects</button>
+                  <button type="button" role="tab" aria-selected={projectsTab === 'cloud'} aria-controls="cloud-projects-panel" className={projectsTab === 'cloud' ? 'active' : ''} onClick={() => setProjectsTab('cloud')}>Cloud Projects</button>
+                </div>
+                {projectsTab === 'local' ? (
+                  <div key="local-projects" id="local-projects-panel" className="lp-project-tab-panel" role="tabpanel">
+                    <div className="lp-search">
+                      <Search size={14} aria-hidden />
+                      <input type="search" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search local projects" />
+                    </div>
+                    {projects.length === 0 ? emptyProjects
+                      : filtered.length === 0 ? <p className="lp-no-results">No project matches &ldquo;{query.trim()}&rdquo;.</p>
+                      : <div className="lp-card-grid">{filtered.slice(0, 8).map(renderProjectCard)}</div>}
                   </div>
-                </div>
-                <div className="lp-search">
-                  <Search size={14} aria-hidden />
-                  <input type="search" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects" />
-                </div>
-                {projects.length === 0 ? emptyProjects
-                  : filtered.length === 0 ? <p className="lp-no-results">No project matches &ldquo;{query.trim()}&rdquo;.</p>
-                  : <div className="lp-card-grid">{filtered.slice(0, 8).map(renderProjectCard)}</div>}
-                <CloudProjectsPanel localProjects={projects} onOpen={open} />
+                ) : (
+                  <div key="cloud-projects" id="cloud-projects-panel" className="lp-project-tab-panel" role="tabpanel">
+                    <CloudProjectsPanel localProjects={projects} onOpen={open} refreshToken={cloudRefreshToken} />
+                  </div>
+                )}
               </section>
             );
           })()}
@@ -398,6 +421,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             </section>
             );
           })()}
+
+          </div>
 
           <footer className="lp-footer">
             <div className="lp-footer-socials">

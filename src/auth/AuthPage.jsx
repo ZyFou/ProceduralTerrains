@@ -3,22 +3,22 @@ import { ArrowLeft, LogIn, UserPlus } from 'lucide-react';
 import { APP_NAME } from '../constants/app.js';
 import { Logo } from '../landing/shared.jsx';
 import { useAuth } from './AuthContext.jsx';
+import { usePopup } from '../components/ui/PopupProvider.jsx';
 
 const initialFields = { email: '', username: '', identifier: '', password: '', confirmPassword: '' };
 
 export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
   const isRegister = mode === 'register';
   const { login, register } = useAuth();
+  const { showPopup } = usePopup();
   const [fields, setFields] = useState(initialFields);
   const [fieldErrors, setFieldErrors] = useState({});
-  const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
   const change = (name) => (event) => {
     const value = event.target.value;
     setFields((current) => ({ ...current, [name]: value }));
     setFieldErrors((current) => ({ ...current, [name]: undefined }));
-    setMessage('');
   };
 
   const submit = async (event) => {
@@ -34,7 +34,6 @@ export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
     }
 
     setBusy(true);
-    setMessage('');
     setFieldErrors({});
     try {
       if (isRegister) {
@@ -44,7 +43,7 @@ export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
       }
       onSuccess();
     } catch (error) {
-      setMessage(error.message || 'The request could not be completed.');
+      showPopup(error.message || 'The request could not be completed.', { type: 'error', title: isRegister ? 'Account not created' : 'Sign-in failed' });
       setFieldErrors(error.fields ?? {});
     } finally {
       setBusy(false);
@@ -96,8 +95,6 @@ export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
             type: 'password', autoComplete: 'new-password', minLength: 10, maxLength: 128,
             placeholder: '••••••••••', required: true,
           })}
-
-          {message && <div className="auth-error" role="alert">{message}</div>}
 
           <button type="submit" className="lp-primary auth-submit" disabled={busy}>
             {isRegister ? <UserPlus size={15} /> : <LogIn size={15} />}

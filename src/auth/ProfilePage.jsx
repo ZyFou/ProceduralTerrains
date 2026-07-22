@@ -1,26 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Camera, Check, Eye, Globe2, KeyRound, Lock, Save, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, Camera, Eye, Globe2, KeyRound, Lock, Save, Trash2, UserRound } from 'lucide-react';
 import { avatarUrl } from './authApi.js';
 import { useAuth } from './AuthContext.jsx';
+import { usePopup } from '../components/ui/PopupProvider.jsx';
 
 const MAX_AVATAR_BYTES = 1_048_576;
 const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
-function Feedback({ type = 'success', children }) {
-  if (!children) return null;
-  return <div className={`profile-feedback ${type}`} role={type === 'error' ? 'alert' : 'status'}>{type === 'success' && <Check size={13} />}{children}</div>;
-}
-
 export default function ProfilePage({ onBack }) {
   const { user, updateProfile, updateAvatar, removeAvatar, changePassword } = useAuth();
+  const { showPopup } = usePopup();
   const fileRef = useRef(null);
   const [details, setDetails] = useState({ username: '', displayName: '', websiteUrl: '', defaultProjectVisibility: 'private' });
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [detailsErrors, setDetailsErrors] = useState({});
   const [passwordErrors, setPasswordErrors] = useState({});
-  const [detailsMessage, setDetailsMessage] = useState('');
-  const [passwordMessage, setPasswordMessage] = useState('');
-  const [avatarMessage, setAvatarMessage] = useState('');
   const [busy, setBusy] = useState('');
 
   useEffect(() => {
@@ -37,27 +31,24 @@ export default function ProfilePage({ onBack }) {
     const { name, value } = event.target;
     setDetails((current) => ({ ...current, [name]: value }));
     setDetailsErrors((current) => ({ ...current, [name]: undefined }));
-    setDetailsMessage('');
   };
 
   const changePasswords = (event) => {
     const { name, value } = event.target;
     setPasswords((current) => ({ ...current, [name]: value }));
     setPasswordErrors((current) => ({ ...current, [name]: undefined }));
-    setPasswordMessage('');
   };
 
   const saveDetails = async (event) => {
     event.preventDefault();
     setBusy('details');
-    setDetailsMessage('');
     setDetailsErrors({});
     try {
       await updateProfile(details);
-      setDetailsMessage('Profile settings saved.');
+      showPopup('Profile settings saved.', { type: 'success' });
     } catch (error) {
       setDetailsErrors(error.fields ?? {});
-      setDetailsMessage(error.message || 'Could not save your profile.');
+      showPopup(error.message || 'Could not save your profile.', { type: 'error', title: 'Profile not saved' });
     } finally {
       setBusy('');
     }
@@ -72,15 +63,14 @@ export default function ProfilePage({ onBack }) {
       return;
     }
     setBusy('password');
-    setPasswordMessage('');
     setPasswordErrors({});
     try {
       await changePassword({ currentPassword: passwords.currentPassword, newPassword: passwords.newPassword });
       setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setPasswordMessage('Password changed. Your other sessions were signed out.');
+      showPopup('Password changed. Your other sessions were signed out.', { type: 'success' });
     } catch (error) {
       setPasswordErrors(error.fields ?? {});
-      setPasswordMessage(error.message || 'Could not change your password.');
+      showPopup(error.message || 'Could not change your password.', { type: 'error', title: 'Password not changed' });
     } finally {
       setBusy('');
     }
@@ -90,24 +80,23 @@ export default function ProfilePage({ onBack }) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    setAvatarMessage('');
     if (!AVATAR_TYPES.has(file.type)) {
-      setAvatarMessage('Choose a PNG, JPEG, or WebP image.');
+      showPopup('Choose a PNG, JPEG, or WebP image.', { type: 'error', title: 'Unsupported image' });
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
-      setAvatarMessage('Profile pictures must be 1 MB or smaller.');
+      showPopup('Profile pictures must be 1 MB or smaller.', { type: 'error', title: 'Image is too large' });
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => setAvatarMessage('Could not read this image.');
+    reader.onerror = () => showPopup('Could not read this image.', { type: 'error' });
     reader.onload = async () => {
       setBusy('avatar');
       try {
         await updateAvatar(reader.result);
-        setAvatarMessage('Profile picture updated.');
+        showPopup('Profile picture updated.', { type: 'success' });
       } catch (error) {
-        setAvatarMessage(error.fields?.avatar || error.message || 'Could not update your profile picture.');
+        showPopup(error.fields?.avatar || error.message || 'Could not update your profile picture.', { type: 'error' });
       } finally {
         setBusy('');
       }
@@ -117,12 +106,11 @@ export default function ProfilePage({ onBack }) {
 
   const deleteAvatar = async () => {
     setBusy('avatar');
-    setAvatarMessage('');
     try {
       await removeAvatar();
-      setAvatarMessage('Profile picture removed.');
+      showPopup('Profile picture removed.', { type: 'success' });
     } catch (error) {
-      setAvatarMessage(error.message || 'Could not remove your profile picture.');
+      showPopup(error.message || 'Could not remove your profile picture.', { type: 'error' });
     } finally {
       setBusy('');
     }
@@ -165,7 +153,6 @@ export default function ProfilePage({ onBack }) {
             </div>
             <input ref={fileRef} className="profile-file-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseAvatar} />
           </div>
-          <Feedback type={avatarMessage.includes('updated') || avatarMessage.includes('removed') ? 'success' : 'error'}>{avatarMessage}</Feedback>
         </section>
 
         <section className="profile-card profile-details-card">
@@ -186,7 +173,6 @@ export default function ProfilePage({ onBack }) {
               </div>
               {detailsErrors.defaultProjectVisibility && <small>{detailsErrors.defaultProjectVisibility}</small>}
             </fieldset>
-            <Feedback type={detailsMessage === 'Profile settings saved.' ? 'success' : 'error'}>{detailsMessage}</Feedback>
             <button type="submit" className="lp-primary profile-save" disabled={busy === 'details'}><Save size={14} /> {busy === 'details' ? 'Saving...' : 'Save profile'}</button>
           </form>
         </section>
@@ -199,7 +185,6 @@ export default function ProfilePage({ onBack }) {
               {passwordField('newPassword', 'New password', 'new-password')}
               {passwordField('confirmPassword', 'Confirm new password', 'new-password')}
             </div>
-            <Feedback type={passwordMessage.startsWith('Password changed') ? 'success' : 'error'}>{passwordMessage}</Feedback>
             <button type="submit" className="lp-secondary profile-save" disabled={busy === 'password'}><KeyRound size={14} /> {busy === 'password' ? 'Changing...' : 'Change password'}</button>
           </form>
         </section>

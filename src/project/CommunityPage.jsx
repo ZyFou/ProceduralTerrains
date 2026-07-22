@@ -3,10 +3,12 @@ import { ArrowLeft, ArrowRight, Compass, FolderDown, Globe2, KeyRound, Search, U
 import { avatarUrl } from '../auth/authApi.js';
 import { projectStore } from './ProjectStore.js';
 import { projectApi } from './projectApi.js';
+import { usePopup } from '../components/ui/PopupProvider.jsx';
 
 const normalizeCode = (value) => String(value ?? '').toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 10);
 
 export default function CommunityPage({ onBack, onOpen }) {
+  const { showPopup } = usePopup();
   const [projects, setProjects] = useState([]);
   const [query, setQuery] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
@@ -16,22 +18,20 @@ export default function CommunityPage({ onBack, onOpen }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError('');
     try {
       const result = await projectApi.community({ query: activeQuery, page });
       setProjects(result.projects);
       setPages(result.pages);
       setTotal(result.total);
     } catch (requestError) {
-      setError(requestError.message || 'Could not load community projects.');
+      showPopup(requestError.message || 'Could not load community projects.', { type: 'error' });
     } finally {
       setLoading(false);
     }
-  }, [activeQuery, page]);
+  }, [activeQuery, page, showPopup]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -44,11 +44,10 @@ export default function CommunityPage({ onBack, onOpen }) {
   const importByCode = async (code) => {
     const normalized = normalizeCode(code);
     if (normalized.length !== 10) {
-      setError('Enter a complete 10-character sharing code.');
+      showPopup('Enter a complete 10-character sharing code.', { type: 'error', title: 'Incomplete sharing code' });
       return;
     }
     setBusy(normalized);
-    setError('');
     try {
       const result = await projectApi.shared(normalized);
       const imported = await projectStore.importCopy({
@@ -62,7 +61,7 @@ export default function CommunityPage({ onBack, onOpen }) {
       }, { name: result.project.name });
       onOpen(imported);
     } catch (requestError) {
-      setError(requestError.message || 'Could not open this shared project.');
+      showPopup(requestError.message || 'Could not open this shared project.', { type: 'error' });
     } finally {
       setBusy('');
     }
@@ -94,8 +93,6 @@ export default function CommunityPage({ onBack, onOpen }) {
           <button type="submit" className="lp-primary sm" disabled={busy === shareCode}><FolderDown size={14} /> Open code</button>
         </form>
       </div>
-
-      {error && <div className="community-error" role="alert">{error}</div>}
 
       <div className="community-results-head">
         <div><h2>{activeQuery ? `Results for “${activeQuery}”` : 'Recently shared'}</h2><span>{total} public project{total === 1 ? '' : 's'}</span></div>
