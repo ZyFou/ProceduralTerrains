@@ -54,4 +54,18 @@ describe('Nodes project templates', () => {
       ['stratify', 'thermalErosion'], ['thermalErosion', 'naturalErosion'], ['geologyDetail', 'terrainOutput'],
     ]));
   });
+
+  it('uses dedicated coherent landforms for River, Canyon, and Dunes', () => {
+    const riverTypes = createNodeTemplateGraph('nodes-rivers').nodes.map((node) => node.type);
+    expect(riverTypes).toEqual(expect.arrayContaining(['mountain', 'shaper', 'riverCarve', 'thermalErosion', 'naturalErosion']));
+    expect(riverTypes).not.toContain('flow');
+    expect(riverTypes).not.toContain('combine');
+
+    const canyonTypes = createNodeTemplateGraph('nodes-canyon').nodes.map((node) => node.type);
+    expect(canyonTypes).toEqual(expect.arrayContaining(['canyon', 'stratify', 'thermalErosion', 'naturalErosion']));
+
+    const duneTypes = createNodeTemplateGraph('nodes-dunes').nodes.map((node) => node.type);
+    expect(duneTypes).toEqual(expect.arrayContaining(['duneSea', 'domainWarp', 'shaper']));
+    expect(duneTypes).not.toContain('dune');
+  });
 });

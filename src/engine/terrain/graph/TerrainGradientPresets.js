@@ -39,6 +39,30 @@ export const TERRAIN_GRADIENT_PRESETS = Object.freeze({
     variation: 0.18,
     macroScale: 0.38,
   }),
+  river: Object.freeze({
+    label: 'River valley',
+    description: 'Dark wet channels, silty banks, muted floodplain vegetation, and cool weathered uplands.',
+    colors: Object.freeze(['#183a38', '#536448', '#81745a', '#9b9b91']),
+    points: Object.freeze([0, 0.22, 0.58, 0.88]),
+    variation: 0.2,
+    macroScale: 0.34,
+  }),
+  canyon: Object.freeze({
+    label: 'Sedimentary canyon',
+    description: 'Shadowed canyon floors, oxidized sandstone walls, pale shelves, and sun-bleached rims.',
+    colors: Object.freeze(['#3a302b', '#76503c', '#a06d48', '#c4a57f']),
+    points: Object.freeze([0, 0.24, 0.64, 0.9]),
+    variation: 0.22,
+    macroScale: 0.48,
+  }),
+  dunes: Object.freeze({
+    label: 'Windblown desert',
+    description: 'Cool trough shadow, warm dune bodies, ochre slip faces, and pale sunlit crests.',
+    colors: Object.freeze(['#6a5541', '#a47b50', '#c79a62', '#e0c18e']),
+    points: Object.freeze([0, 0.24, 0.62, 0.88]),
+    variation: 0.16,
+    macroScale: 0.56,
+  }),
 });
 
 export const TERRAIN_GRADIENT_OPTIONS = Object.freeze(Object.entries(TERRAIN_GRADIENT_PRESETS)

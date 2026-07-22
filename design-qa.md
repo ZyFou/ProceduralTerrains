@@ -1,70 +1,35 @@
-# Design QA — Gaea-inspired terrain nodes
+# Terrain template design QA
 
-## Visual truth
+## Evidence
 
-- Terrain target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-1f737080-abaf-405b-9cc9-937336740608.png`
-- Property-panel target: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-e8a1b0af-9107-4b94-93e9-af3984059cee.png`
-- Earlier ThreeTerrain state: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-a1fa5a1e-3a5e-45bd-996c-bc91492f78ff.png`
-- Final implementation capture: `C:\Users\g.bondenet\Documents\ThreeTerrain\artifacts\node-terrain-final.png`
-- Combined reference/implementation board: `C:\Users\g.bondenet\Documents\ThreeTerrain\artifacts\node-terrain-comparison.png`
+- Source/problem reference: `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-361f4255-8847-4363-8df2-1edfa8582e3b.png`
+- Combined comparison: `artifacts/terrain-template-qa/river-before-after.png`
+- Live captures: `river-valleys.png`, `wind-dunes.png`, `river-canyon-final.png`, `water-default-colors.png`
+- Browser viewport: 1920 × 855, Chrome, NVIDIA Quadro P2200
 
-The visual target is a coherent mountain massif with large-scale body, branching ridges, drainage, broken strata, thermal scree, and readable compact controls. It is a direction and quality bar, not a request to copy Gaea's proprietary implementation.
+## Visual comparison
 
-## Live implementation check
+The reported River template was dominated by a single broad warp and parallel striped cuts. The new implementation reads as a connected drainage basin: a coherent trunk runs through the landform, tributaries converge into it, banks/floodplain remain continuous, and the green/wet color treatment reinforces the valley instead of producing alternating bands. Height and color cables are visibly connected to Terrain Output.
 
-- URL: `http://127.0.0.1:6061/`
-- Browser: Chrome with WebGL on NVIDIA Quadro P2200
-- Viewport: 2400 × 1068 CSS pixels, DPR 0.8
-- Template: Nodes → Alpine ridges
-- Compile result: Ready; live terrain visible and editor responsive
-- Browser console: no warnings or errors
-- Graph: 14 rendered graph items including two groups, 11 visible edges, seven height cables and four color cables
-- DOM response after compile: 111 ms for a complete accessible snapshot
+Wind dunes now sit on a continuous raised sand sheet with restrained relief. The template has softer troughs, asymmetric slip faces, macro undulation, and a warm sand gradient without the clipped vertical ribbons observed during the first pass.
 
-## Comparison
+River canyon presents a narrower drainage-led slot with branching wall erosion, softened strata, sandstone grading, and a linked five-node height chain. The form remains intentionally more monumental than River valleys so the two templates have distinct jobs.
 
-### Terrain form
+The procedural Water panel exposes natural defaults: Deep Water `#031324`, Shallow `#0f4a54`, and Foam `#d1e6f0`. The live viewport shows deep blue water, cyan shallows, and pale shoreline foam.
 
-The implementation now reads as a mountain rather than a single noisy cone or concentric terrace. It has an asymmetric multi-peak body, an elevated ridge spine, broad drainage cuts, foothill decay, localized strata, thermal slope relaxation, and restrained alpine color. The Gaea reference still has denser multi-scale erosion and sharper secondary ridges; that remains a future quality-tuning opportunity rather than a functional blocker.
+## Interaction and readability
 
-### Graph and linking
-
-All expected template edges render. Height and color cables are visually distinct and remain visible across grouped template layouts. Native React Flow click/drag connection behavior was checked on a blank graph, and smart insertion produced Mountain → Shaper → Output without overlap.
-
-### Properties panel
-
-The panel now uses readable typography, a persistent settings search, reset action, semantic collapsible groups, segmented Style/Bulk controls, value fields, inline explanations, and a recommended-next-node action. Mountain and Thermal Erosion were both selected and inspected in the live template.
-
-### Functional states exercised
-
-- Opened the Nodes template catalog and created Alpine ridges.
-- Waited through shader compilation and confirmed the Ready state.
-- Selected Mountain and Thermal Erosion.
-- Verified searchbox and grouped settings are present and readable.
-- Verified 11 visible links and typed cable colors.
-- Opened the optional 2D/minimap preview.
-- Confirmed no console warnings or errors.
-
-## Accessibility and readability
-
-- Node ports expose descriptive accessible labels for accepted/output cable types.
-- Inspector search, reset, segmented controls, checkboxes, sliders, number inputs, and section toggles expose semantic roles.
-- Inspector type and control targets are materially larger than the earlier implementation.
-- Dark surfaces retain the original ThreeTerrain visual language while selected values, focus states, and typed cables have stronger contrast.
-
-## Performance regression
-
-The first staged Alpine build revealed a GPU driver lock caused by nested upstream terrain sampling. The final implementation evaluates Thermal's upstream height once, derives directional talus/scree procedurally, and gives `reduceDetails` a true reduced Mountain shader. The final Alpine height source is 9,313 characters, contains no 3×3 cellular loop, compiles successfully, and leaves the editor responsive.
+- River, canyon, and dune graphs compile and render at 56–60 FPS in the tested viewport.
+- Node links are visible for both height and color pipelines.
+- New Canyon, Dune Sea, and River Carve nodes appear in the searchable node panel.
+- No clipped labels, overlapping controls, or unreadable primary text observed in the tested states.
+- Repeated rapid creation of several WebGL projects can exhaust the Chrome QA context; using the app's Reload recovery restored the preview. This did not reproduce in normal single-project use.
 
 ## Findings
 
-- P2: The live Alpine preset is still coarser than the Gaea reference in secondary drainage density and micro-erosion. More tuning can improve visual parity, but the node architecture and controls now support that work.
-- No P0 or P1 issues found in the requested editor, linking, template, or shader-compile flows.
+- P0: none
+- P1: none
+- P2: none
+- P3: the River canyon camera angle initially hides some of the narrow central slot; orbiting or top-down view reveals its drainage structure.
 
-## Verification
-
-- `npm.cmd test`: 15 files, 175 tests passed.
-- `npm.cmd run build`: passed; only the existing Engine chunk-size warning remains.
-- `git diff --check`: clean.
-
-final result: pass
+final result: passed

@@ -29,11 +29,14 @@ const GRAPH_EDGES = ['bottom', 'left', 'top', 'right'];
 const NEXT_NODE_SUGGESTIONS = {
   mountain: { type: 'shaper', reason: 'Add durable mass before weathering.' },
   mountainRange: { type: 'shaper', reason: 'Give the range a broader, erosion-ready body.' },
+  canyon: { type: 'stratify', reason: 'Expose broken sedimentary layers on the canyon walls.' },
+  duneSea: { type: 'domainWarp', reason: 'Break up the dune field with a restrained wind-scale bend.' },
   shaper: { type: 'domainWarp', reason: 'Introduce broad organic displacement.' },
   domainWarp: { type: 'stratify', reason: 'Add broken geological layers.' },
   stratify: { type: 'thermalErosion', reason: 'Relax exposed slopes and form scree.' },
   geologyDetail: { type: 'thermalErosion', reason: 'Redistribute loose rock on steep faces.' },
   thermalErosion: { type: 'naturalErosion', reason: 'Carve drainage after slope relaxation.' },
+  riverCarve: { type: 'thermalErosion', reason: 'Settle freshly cut banks without breaking the river path.' },
 };
 
 function loadLayout() {

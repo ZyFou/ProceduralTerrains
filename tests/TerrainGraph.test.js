@@ -231,6 +231,63 @@ describe('analytical terrain graph compiler', () => {
     expect(getGraphNodeDefinition('stratify').description).toContain('non-linear');
   });
 
+  it('exposes dedicated Canyon, Dune Sea, and River Carve controls', () => {
+    const canyon = getGraphNodeDefinition('canyon');
+    expect(canyon.inspector.map((field) => field.key)).toEqual(expect.arrayContaining([
+      'style', 'slot', 'valley', 'surrounding', 'depth', 'structuralWarp', 'formation', 'detailWarp',
+    ]));
+    expect(canyon.inspector.find((field) => field.key === 'style').options.map((option) => option.value))
+      .toEqual(['classic', 'eroded', 'eroded2', 'strata', 'both']);
+
+    const dunes = getGraphNodeDefinition('duneSea');
+    expect(dunes.inspector.find((field) => field.key === 'duneType').options.map((option) => option.value))
+      .toEqual(['transverse', 'barchan', 'seif', 'star']);
+
+    const river = getGraphNodeDefinition('riverCarve');
+    expect(river.inputs[0]).toMatchObject({ id: 'source', label: 'Terrain', type: ANALYTIC_HEIGHT });
+    expect(river.inspector.map((field) => field.key)).toEqual(expect.arrayContaining([
+      'water', 'width', 'depth', 'downcutting', 'valleyWidth', 'headwaters', 'direction', 'meander',
+    ]));
+  });
+
+  it('builds nontrivial finite Canyon and Dune Sea fields and a one-sample connected river network', () => {
+    const sampleProgram = (type, params = {}) => {
+      let graph = createBlankGraph('terrain');
+      graph = addGraphNode(graph, type, { x: 0, y: 0 }, { params });
+      const node = graph.nodes.at(-1);
+      graph = connectGraphNodes(graph, { source: node.id, target: TERRAIN_OUTPUT_ID });
+      return compileTerrainGraph(graph).program;
+    };
+    for (const [type, params] of [
+      ['canyon', { style: 'both', seed: 3607 }],
+      ['duneSea', { duneType: 'barchan', chaos: 'medium', undulation: 'medium', seed: 3001 }],
+    ]) {
+      const program = sampleProgram(type, params);
+      const samples = [];
+      for (let z = -180; z <= 180; z += 18) for (let x = -180; x <= 180; x += 18) samples.push(program.evaluate2D(x, z, ctx));
+      expect(samples.every(Number.isFinite)).toBe(true);
+      expect(Math.max(...samples) - Math.min(...samples)).toBeGreaterThan(0.18);
+    }
+
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'constant', { x: 0, y: 0 }, { params: { value: 0.9, strength: 1 } });
+    const source = graph.nodes.at(-1);
+    graph = addGraphNode(graph, 'riverCarve', { x: 200, y: 0 }, { params: { seed: 5147, headwaters: 5 } });
+    const river = graph.nodes.at(-1);
+    graph = connectGraphNodes(graph, { source: source.id, target: river.id, targetHandle: 'source' });
+    graph = connectGraphNodes(graph, { source: river.id, target: TERRAIN_OUTPUT_ID });
+    const program = compileTerrainGraph(graph).program;
+    const sourceFn = `graph_${source.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const riverFn = `graph_${river.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const riverSource = program.body2d.slice(program.body2d.indexOf(`float ${riverFn}`));
+    expect((riverSource.match(new RegExp(`${sourceFn}\\(xz,c\\)`, 'g')) || [])).toHaveLength(1);
+    expect(riverSource).toContain('tributaries');
+    const samples = [];
+    for (let z = -180; z <= 180; z += 18) for (let x = -180; x <= 180; x += 18) samples.push(program.evaluate2D(x, z, ctx));
+    expect(samples.every(Number.isFinite)).toBe(true);
+    expect(Math.max(...samples) - Math.min(...samples)).toBeGreaterThan(0.08);
+  });
+
   it('builds a cellular asymmetric massif and redistributes steep material with Thermal Erosion', () => {
     let mountainGraph = createBlankGraph('terrain');
     mountainGraph = addGraphNode(mountainGraph, 'mountain', { x: 0, y: 0 });

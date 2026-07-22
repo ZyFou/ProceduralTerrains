@@ -85,7 +85,8 @@ const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
   key,
-  key === 'snow' || key === 'foam' ? [0.88, 0.89, 0.91]
+  key === 'deep' || key === 'shallow' || key === 'foam' ? [...EARTH_PALETTE[key]]
+    : key === 'snow' ? [0.88, 0.89, 0.91]
     : key === 'rock' || key === 'rockHi' ? [0.62, 0.63, 0.65]
       : [0.74, 0.75, 0.77],
 ]));

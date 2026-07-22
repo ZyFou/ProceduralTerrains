@@ -37,6 +37,28 @@ const MOUNTAIN_BULK_OPTIONS = [
   { value: 'high', label: 'High' },
 ];
 
+const CANYON_STYLE_OPTIONS = [
+  { value: 'classic', label: 'Classic' },
+  { value: 'eroded', label: 'Eroded' },
+  { value: 'eroded2', label: 'Eroded 2' },
+  { value: 'strata', label: 'Strata' },
+  { value: 'both', label: 'Both' },
+];
+
+const DUNE_TYPE_OPTIONS = [
+  { value: 'transverse', label: 'Transverse' },
+  { value: 'barchan', label: 'Barchan' },
+  { value: 'seif', label: 'Seif' },
+  { value: 'star', label: 'Star' },
+];
+
+const AMOUNT_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
+
 function sourceDefinition(type) {
   const noise = getNoiseType(type);
   const inspector = [
@@ -171,6 +193,38 @@ const LANDFORM_DEFINITIONS = [
       number('seed', 'Seed', 0, 999999, 1, 5501, { section: 'Variation' }),
     ],
   }),
+  terrainNode({
+    id: 'canyon', label: 'Canyon', color: 'amber',
+    description: 'Builds a drainage-led canyon with a meandering slot, broad valley shoulders, branching gullies, eroded walls, and optional strata.',
+    inspector: [
+      select('style', 'Style', CANYON_STYLE_OPTIONS, 'both', { section: 'Structure', tier: 'essential', control: 'segmented', help: 'Selects clean, eroded, stratified, or combined wall character.' }),
+      number('scale', 'Scale', 0.15, 4, 0.01, 0.72, { section: 'Structure', tier: 'essential' }),
+      number('slot', 'Slot', 0.05, 1.5, 0.01, 0.34, { section: 'Carving', tier: 'essential', help: 'Controls the tight deepest cut at the canyon floor.' }),
+      number('valley', 'Valley', 0.2, 4, 0.01, 1.65, { section: 'Carving', tier: 'essential', help: 'Controls the width of the broader canyon shoulders.' }),
+      number('surrounding', 'Surrounding', 0, 1, 0.01, 0.72, { section: 'Carving', help: 'Blends the carved channel into the surrounding plateau.' }),
+      number('depth', 'Depth', 0, 2.5, 0.01, 1.12, { section: 'Carving', tier: 'essential' }),
+      number('structuralWarp', 'Structural Warp', 0, 2, 0.01, 0.68, { section: 'Formation', help: 'Adds large bends without breaking the drainage path.' }),
+      number('formation', 'Formation', 0, 1, 0.01, 0.62, { section: 'Formation', help: 'Controls wall breakup and tributary gullies.' }),
+      number('detailWarp', 'Detail Warp', 0, 1, 0.01, 0.34, { section: 'Formation' }),
+      number('alternateStyle', 'Alternate Style', 0, 1, 0.01, 0.28, { section: 'Formation' }),
+      number('seed', 'Seed', 0, 999999, 1, 6101, { section: 'Variation', control: 'seed' }),
+    ],
+  }),
+  terrainNode({
+    id: 'duneSea', label: 'Dune Sea', color: 'amber',
+    description: 'Creates broad wind-shaped dune fields with asymmetric slip faces, macro undulation, controlled chaos, and fine sand ripples.',
+    inspector: [
+      select('duneType', 'Dune Type', DUNE_TYPE_OPTIONS, 'barchan', { section: 'Dune Sea', tier: 'essential', control: 'segmented' }),
+      select('chaos', 'Chaos', AMOUNT_OPTIONS, 'medium', { section: 'Dune Sea', tier: 'essential', control: 'segmented' }),
+      select('undulation', 'Undulation', AMOUNT_OPTIONS, 'medium', { section: 'Dune Sea', tier: 'essential', control: 'segmented' }),
+      number('scale', 'Scale', 0.15, 6, 0.01, 1.05, { section: 'Form', tier: 'essential' }),
+      number('direction', 'Direction', 0, 6.283, 0.01, 0.72, { section: 'Wind', tier: 'essential' }),
+      number('height', 'Height', 0, 2.5, 0.01, 0.82, { section: 'Form', tier: 'essential' }),
+      number('softness', 'Softness', 0, 1, 0.01, 0.46, { section: 'Profile' }),
+      number('sharpness', 'Sharpness', 0.3, 5, 0.01, 2.15, { section: 'Profile' }),
+      number('seed', 'Seed', 0, 999999, 1, 7101, { section: 'Variation', control: 'seed' }),
+    ],
+  }),
 ];
 
 const BLEND_OPTIONS = [
@@ -231,6 +285,26 @@ const definitions = [
     defaults: { shape: 0.38, strength: 0.8, featureScale: 42, detailPreservation: 0.82 },
     structuralParams: [], uniformSlots: () => 1,
     glslCompiler: execute('shaper'), cpuEvaluator: execute('shaper'),
+    terrainOnly: true, workspaceModes: ['terrain'],
+  },
+  {
+    id: 'riverCarve', label: 'River Carve', category: 'Simulate', color: 'cyan',
+    description: 'Cuts a continuous meandering river, converging tributaries, and a softly graded floodplain into an existing terrain.',
+    executionKind: 'analytical', inputs: [input('source', 'Terrain')], outputs: [output()],
+    inspector: [
+      number('water', 'Headwater Flow', 0, 2, 0.01, 0.88, { section: 'River', tier: 'essential', help: 'Controls how strongly tributaries feed the main channel.' }),
+      number('width', 'River Width', 0.02, 1.2, 0.01, 0.16, { section: 'River', tier: 'essential' }),
+      number('depth', 'River Depth', 0, 1.5, 0.01, 0.34, { section: 'River', tier: 'essential' }),
+      number('downcutting', 'Downcutting', 0, 2, 0.01, 0.72, { section: 'Carving', tier: 'essential', help: 'Controls how deeply water cuts through rock and soil.' }),
+      number('valleyWidth', 'River Valley Width', 0.5, 5, 0.05, 2.4, { section: 'Carving', tier: 'essential', help: 'Widens the surrounding valley without widening the water channel.' }),
+      number('headwaters', 'Headwaters', 1, 8, 1, 5, { section: 'Network', digits: 0 }),
+      number('direction', 'Flow Direction', 0, 6.283, 0.01, 1.05, { section: 'Network' }),
+      number('meander', 'Meander', 0, 3, 0.01, 0.92, { section: 'Network' }),
+      number('seed', 'Seed', 0, 999999, 1, 8101, { section: 'Variation', control: 'seed' }),
+    ],
+    defaults: { water: 0.88, width: 0.16, depth: 0.34, downcutting: 0.72, valleyWidth: 2.4, headwaters: 5, direction: 1.05, meander: 0.92, seed: 8101 },
+    structuralParams: [], uniformSlots: () => 1,
+    glslCompiler: execute('riverCarve'), cpuEvaluator: execute('riverCarve'),
     terrainOnly: true, workspaceModes: ['terrain'],
   },
   {

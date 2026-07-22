@@ -47,6 +47,17 @@ const MOUNTAIN_BULK_TUNING = {
   high: { radius: 1.48, mass: 1.14, spread: 0.94 },
 };
 
+const CANYON_STYLE_TUNING = {
+  classic: { erosion: 0.18, strata: 0.0, sharpness: 1.05 },
+  eroded: { erosion: 0.72, strata: 0.05, sharpness: 0.92 },
+  eroded2: { erosion: 1.0, strata: 0.08, sharpness: 0.84 },
+  strata: { erosion: 0.28, strata: 0.9, sharpness: 1.12 },
+  both: { erosion: 0.82, strata: 0.72, sharpness: 0.94 },
+};
+
+const AMOUNT_TUNING = { none: 0, low: 0.28, medium: 0.58, high: 0.92 };
+const DUNE_TYPE_INDEX = { transverse: 0, barchan: 1, seif: 2, star: 3 };
+
 function mountainStyle(node) {
   const legacy = ({ weathered: 'old' }[node.params.formation] || node.params.formation);
   const requested = node.params.style;
@@ -76,6 +87,19 @@ function mountainParams(node) {
     x: num(node.params.x),
     y: num(node.params.y),
   };
+}
+
+function canyonStyle(node) {
+  const key = CANYON_STYLE_TUNING[node.params.style] ? node.params.style : 'both';
+  return { key, ...CANYON_STYLE_TUNING[key] };
+}
+
+function amountValue(value, fallback = 'medium') {
+  return AMOUNT_TUNING[value] ?? AMOUNT_TUNING[fallback];
+}
+
+function duneTypeIndex(node) {
+  return DUNE_TYPE_INDEX[node.params.duneType] ?? DUNE_TYPE_INDEX.barchan;
 }
 
 function thermalParams(node) {
@@ -298,6 +322,74 @@ float ${fn}(vec2 xz, Climate c) {
   return depth*(bowl+rim+breakup);
 }`;
     },
+    canyon: () => {
+      const style = canyonStyle(node);
+      return `float ${fn}(vec2 xz, Climate c) {
+  float depth=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  float turn=seed*0.0131+0.57;
+  vec2 dir=vec2(cos(turn),sin(turn)), side=vec2(-dir.y,dir.x);
+  float along=dot(p,dir), across=dot(p,side);
+  float macroBend=(vnoise(vec2(along*0.31+seed*0.07,seed*0.17+19.0))-0.5)*2.0;
+  float secondaryBend=(vnoise(vec2(along*0.83-seed*0.03,seed*0.11+73.0))-0.5)*2.0;
+  across+=macroBend*pa.w+secondaryBend*pb.y*0.22;
+  float slotWidth=max(pa.x,0.025), valleyWidth=max(slotWidth*pa.y+0.16,slotWidth*1.4);
+  float distanceToRiver=abs(across);
+  float slot=exp(-pow(distanceToRiver/slotWidth,2.0));
+  float valley=exp(-pow(distanceToRiver/valleyWidth,1.45));
+  float branchWarp=(vnoise(vec2(along*0.67+seed*0.19,seed*0.23+41.0))-0.5)*pb.y*0.42;
+  float tributaryA=exp(-pow(abs(across+along*0.46-0.68+branchWarp)/max(slotWidth*0.72,0.025),2.0))*smoothstep(-2.2,-0.15,along)*(1.0-smoothstep(0.42,1.15,along));
+  float tributaryB=exp(-pow(abs(across-along*0.38+0.72-branchWarp)/max(slotWidth*0.62,0.025),2.0))*smoothstep(-1.5,0.1,along)*(1.0-smoothstep(0.55,1.35,along));
+  float tributaries=max(tributaryA,tributaryB)*pb.x;
+  ${glslFbm('plateauNoise', 'p*0.38+vec2(seed*0.07,seed*0.13+11.0)', 3, '0.54', '2.03')}
+  ${glslFbm('wallNoise', 'vec2(along*1.15,across*3.2)+vec2(seed*0.17,seed*0.29+7.0)', 4, '0.5', '2.08')}
+  float plateau=mix(0.78,0.58+plateauNoise*0.48,clamp(pa.z,0.0,1.0));
+  float wallZone=valley*(1.0-slot);
+  float erodedRibs=pow(max(1.0-abs(wallNoise*2.0-1.0),0.0),1.55);
+  float carved=slot*0.68+valley*0.38+tributaries*0.36;
+  float h=plateau-depth*carved;
+  h-=wallZone*(erodedRibs-0.42)*depth*pb.x*${glsl(style.erosion)}*0.16;
+  float strataWave=sin((h*12.0+along*0.34+(wallNoise-0.5)*1.4)*6.2831853);
+  h+=strataWave*wallZone*depth*${glsl(style.strata)}*(0.022+pb.z*0.018);
+  float shoulder=pow(max(1.0-valley,0.0),${glsl(style.sharpness)});
+  h+=shoulder*(plateauNoise-0.5)*0.08*pb.z;
+  return h;
+}`;
+    },
+    duneSea: () => {
+      const type = duneTypeIndex(node);
+      const typeExpression = [
+        'duneA',
+        'duneA*mix(0.72,1.08,0.5+0.5*sin(along*0.62+macro*3.0))',
+        'max(duneA*0.82,duneB*0.72)',
+        'max(duneA,max(duneB*0.78,duneC*0.64))',
+      ][type];
+      return `float ${fn}(vec2 xz, Climate c) {
+  float height=uLayerStrength[${slot}], scale=uLayerScale[${slot}], seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  vec2 p=xz*uFrequency*scale;
+  vec2 dir=vec2(cos(pa.x),sin(pa.x)), side=vec2(-dir.y,dir.x);
+  float along=dot(p,dir), across=dot(p,side);
+  ${glslFbm('macro', 'p*0.21+vec2(seed*0.11,seed*0.17+31.0)', 3, '0.54', '2.03')}
+  ${glslFbm('chaosField', 'p*0.54+vec2(seed*0.07+17.0,seed*0.19+5.0)', 3, '0.5', '2.11')}
+  float phase=across*3.25+(chaosField-0.5)*pa.w*4.8+sin(along*0.38+macro*2.7)*pa.w*1.3;
+  float waveA=0.5+0.5*sin(phase);
+  float duneA=pow(smoothstep(0.04,mix(0.88,0.48,pa.y),waveA),max(pa.z,0.3));
+  float phaseB=(across*0.72+along*0.58)*3.05+(chaosField-0.5)*pa.w*4.1+1.7;
+  float duneB=pow(smoothstep(0.05,mix(0.9,0.52,pa.y),0.5+0.5*sin(phaseB)),max(pa.z*0.86,0.3));
+  float phaseC=(across*0.55-along*0.74)*2.82+(macro-0.5)*pa.w*3.6+4.1;
+  float duneC=pow(smoothstep(0.05,mix(0.9,0.54,pa.y),0.5+0.5*sin(phaseC)),max(pa.z*0.78,0.3));
+  float dune=${typeExpression};
+  float slipFace=pow(max(dune,0.0),mix(0.72,1.8,clamp(1.0-pa.y,0.0,1.0)));
+  float undulation=(macro-0.5)*pb.x*0.24;
+  float ripple=sin(across*24.0+along*0.9+(chaosField-0.5)*5.0)*0.012*(0.28+0.72*dune);
+  float windShadow=smoothstep(0.18,0.82,chaosField)*pa.w*0.045;
+  // A raised sand sheet keeps troughs continuous and avoids the zero-height
+  // walls that made the old template look like clipped mountain ribbons.
+  return height*max(0.12+undulation+slipFace*0.56+ripple-windShadow,0.055);
+}`;
+    },
     domainWarp: () => {
       const oct = Math.max(1, Math.min(6, Math.round(num(node.params.octaves, 4))));
       return `float ${fn}(vec2 xz, Climate c) {
@@ -324,6 +416,36 @@ float ${fn}(vec2 xz, Climate c) {
   float shapedBody=sign(h)*pow(max(abs(h)/bodyScale,1e-6),exponent)*bodyScale;
   float preservedDetail=mix(shapedBody,h+(shapedBody-h)*0.45,clamp(pa.y,0.0,1.0));
   return mix(h,preservedDetail,clamp(strength,0.0,1.0));
+}`;
+    },
+    riverCarve: () => {
+      return `float ${fn}(vec2 xz, Climate c) {
+  float depth=uLayerStrength[${slot}], width=max(uLayerScale[${slot}],0.02), seed=uLayerSeed[${slot}];
+  vec4 pa=uLayerParamsA[${slot}], pb=uLayerParamsB[${slot}];
+  float h=${source}(xz,c);
+  vec2 p=xz*uFrequency;
+  vec2 dir=vec2(cos(pb.x),sin(pb.x)), side=vec2(-dir.y,dir.x);
+  float along=dot(p,dir), across=dot(p,side);
+  float bend=(vnoise(vec2(along*0.42+seed*0.13,seed*0.19+17.0))-0.5)*2.0*pb.y;
+  bend+=sin(along*0.51+seed*0.07)*pb.y*0.18;
+  float riverX=across+bend;
+  float channel=exp(-pow(abs(riverX)/width,2.0));
+  float valleyWidth=max(width*pa.y+0.16,width*1.8);
+  float floodplain=exp(-pow(abs(riverX)/valleyWidth,1.55));
+  float branchNoise=(vnoise(vec2(along*0.71+seed*0.23,seed*0.31+61.0))-0.5)*pb.y*0.32;
+  float tribA=exp(-pow(abs(riverX+along*0.43-0.68+branchNoise)/max(width*0.7,0.02),2.0))*smoothstep(-2.4,-0.25,along)*(1.0-smoothstep(0.35,1.25,along));
+  float tribB=exp(-pow(abs(riverX-along*0.36+0.74-branchNoise)/max(width*0.64,0.02),2.0))*smoothstep(-1.8,-0.05,along)*(1.0-smoothstep(0.5,1.45,along));
+  float tribC=exp(-pow(abs(riverX+along*0.24+0.92+branchNoise)/max(width*0.52,0.02),2.0))*smoothstep(-2.0,-0.35,along)*(1.0-smoothstep(0.1,0.9,along));
+  float activeB=smoothstep(2.0,3.0,pa.w), activeC=smoothstep(4.0,5.0,pa.w);
+  float tributaries=max(tribA,max(tribB*activeB,tribC*activeC))*clamp(pa.z,0.0,2.0);
+  float tributaryValley=pow(clamp(tributaries,0.0,1.0),0.34);
+  float waterway=max(channel,tributaries);
+  float valleyMask=max(floodplain,tributaryValley*0.52);
+  float downcut=clamp(pa.x,0.0,2.0);
+  float channelCut=depth*waterway*(0.62+downcut*0.46);
+  float valleyCut=depth*valleyMask*downcut*0.16;
+  float bank=exp(-pow((abs(riverX)-width*2.1)/max(width*1.25,0.03),2.0))*(1.0-channel)*depth*0.045;
+  return h-channelCut-valleyCut+bank;
 }`;
     },
     combine: () => {
@@ -613,6 +735,14 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
       } else if (node.type === 'singleCrater') {
         packed.strength[slot] = num(node.params.depth, 0.75);
         packed.paramsA[slot] = [num(node.params.radius, 0.9), num(node.params.rimHeight, 0.42), num(node.params.rimWidth, 0.18), num(node.params.roughness, 0.2)];
+      } else if (node.type === 'canyon') {
+        packed.strength[slot] = num(node.params.depth, 1.12);
+        packed.paramsA[slot] = [num(node.params.slot, 0.34), num(node.params.valley, 1.65), num(node.params.surrounding, 0.72), num(node.params.structuralWarp, 0.68)];
+        packed.paramsB[slot] = [num(node.params.formation, 0.62), num(node.params.detailWarp, 0.34), num(node.params.alternateStyle, 0.28), 0];
+      } else if (node.type === 'duneSea') {
+        packed.strength[slot] = num(node.params.height, 0.82);
+        packed.paramsA[slot] = [num(node.params.direction, 0.72), num(node.params.softness, 0.46), num(node.params.sharpness, 2.15), amountValue(node.params.chaos)];
+        packed.paramsB[slot] = [amountValue(node.params.undulation), duneTypeIndex(node), 0, 0];
       }
     } else if (node.type === 'domainWarp') {
       packed.strength[slot] = num(node.params.strength, 0.7); packed.scale[slot] = num(node.params.scale, 1); packed.seed[slot] = seedDomainOffset(node.params.seedOffset);
@@ -621,6 +751,12 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
       packed.strength[slot] = num(node.params.strength, 0.8);
       packed.scale[slot] = num(node.params.featureScale, 42);
       packed.paramsA[slot] = [num(node.params.shape, 0.38), num(node.params.detailPreservation, 0.82), 0, 0];
+    } else if (node.type === 'riverCarve') {
+      packed.strength[slot] = num(node.params.depth, 0.34);
+      packed.scale[slot] = num(node.params.width, 0.16);
+      packed.seed[slot] = seedDomainOffset(node.params.seed);
+      packed.paramsA[slot] = [num(node.params.downcutting, 0.72), num(node.params.valleyWidth, 2.4), num(node.params.water, 0.88), num(node.params.headwaters, 5)];
+      packed.paramsB[slot] = [num(node.params.direction, 1.05), num(node.params.meander, 0.92), 0, 0];
     } else if (node.type === 'combine') packed.paramsA[slot][0] = num(node.params.mix, 0.5);
     else if (node.type === 'math') packed.paramsA[slot] = [num(node.params.value, 1), num(node.params.min), num(node.params.max, 1), 0];
     else if (node.type === 'remap') packed.paramsA[slot] = [num(node.params.inMin), num(node.params.inMax, 1), num(node.params.outMin), num(node.params.outMax, 1)];
@@ -798,6 +934,66 @@ function cpuEvaluator(graph) {
         const breakup = (damage - 0.5) * num(node.params.roughness, 0.2) * (1 - smoothstep(1, 1.4, r));
         return num(node.params.depth, 0.75) * (bowl + rim + breakup);
       },
+      canyon: () => {
+        const { px, pz, seed } = point(), style = canyonStyle(node);
+        const turn = seed * 0.0131 + 0.57, dirX = Math.cos(turn), dirZ = Math.sin(turn);
+        const sideX = -dirZ, sideZ = dirX;
+        const along = px * dirX + pz * dirZ;
+        let across = px * sideX + pz * sideZ;
+        const structuralWarp = num(node.params.structuralWarp, 0.68), detailWarp = num(node.params.detailWarp, 0.34);
+        const macroBend = (vnoise2(along * 0.31 + seed * 0.07, seed * 0.17 + 19) - 0.5) * 2;
+        const secondaryBend = (vnoise2(along * 0.83 - seed * 0.03, seed * 0.11 + 73) - 0.5) * 2;
+        across += macroBend * structuralWarp + secondaryBend * detailWarp * 0.22;
+        const slotWidth = Math.max(num(node.params.slot, 0.34), 0.025);
+        const valleyWidth = Math.max(slotWidth * num(node.params.valley, 1.65) + 0.16, slotWidth * 1.4);
+        const distanceToRiver = Math.abs(across);
+        const slot = Math.exp(-Math.pow(distanceToRiver / slotWidth, 2));
+        const valley = Math.exp(-Math.pow(distanceToRiver / valleyWidth, 1.45));
+        const formation = num(node.params.formation, 0.62);
+        const branchWarp = (vnoise2(along * 0.67 + seed * 0.19, seed * 0.23 + 41) - 0.5) * detailWarp * 0.42;
+        const tributaryA = Math.exp(-Math.pow(Math.abs(across + along * 0.46 - 0.68 + branchWarp) / Math.max(slotWidth * 0.72, 0.025), 2)) * smoothstep(-2.2, -0.15, along) * (1 - smoothstep(0.42, 1.15, along));
+        const tributaryB = Math.exp(-Math.pow(Math.abs(across - along * 0.38 + 0.72 - branchWarp) / Math.max(slotWidth * 0.62, 0.025), 2)) * smoothstep(-1.5, 0.1, along) * (1 - smoothstep(0.55, 1.35, along));
+        const tributaries = Math.max(tributaryA, tributaryB) * formation;
+        const plateauNoise = fractal(px * 0.38 + seed * 0.07, pz * 0.38 + seed * 0.13 + 11, 3, 0.54, 2.03);
+        const wallNoise = fractal(along * 1.15 + seed * 0.17, across * 3.2 + seed * 0.29 + 7, 4, 0.5, 2.08);
+        const surrounding = Math.max(0, Math.min(1, num(node.params.surrounding, 0.72)));
+        const plateau = 0.78 + ((0.58 + plateauNoise * 0.48) - 0.78) * surrounding;
+        const wallZone = valley * (1 - slot);
+        const erodedRibs = Math.pow(Math.max(1 - Math.abs(wallNoise * 2 - 1), 0), 1.55);
+        const depth = num(node.params.depth, 1.12);
+        let h = plateau - depth * (slot * 0.68 + valley * 0.38 + tributaries * 0.36);
+        h -= wallZone * (erodedRibs - 0.42) * depth * formation * style.erosion * 0.16;
+        const strataWave = Math.sin((h * 12 + along * 0.34 + (wallNoise - 0.5) * 1.4) * Math.PI * 2);
+        const alternate = num(node.params.alternateStyle, 0.28);
+        h += strataWave * wallZone * depth * style.strata * (0.022 + alternate * 0.018);
+        const shoulder = Math.pow(Math.max(1 - valley, 0), style.sharpness);
+        h += shoulder * (plateauNoise - 0.5) * 0.08 * alternate;
+        return h;
+      },
+      duneSea: () => {
+        const { px, pz, seed } = point();
+        const direction = num(node.params.direction, 0.72), dirX = Math.cos(direction), dirZ = Math.sin(direction);
+        const along = px * dirX + pz * dirZ, across = px * -dirZ + pz * dirX;
+        const macro = fractal(px * 0.21 + seed * 0.11, pz * 0.21 + seed * 0.17 + 31, 3, 0.54, 2.03);
+        const chaosField = fractal(px * 0.54 + seed * 0.07 + 17, pz * 0.54 + seed * 0.19 + 5, 3, 0.5, 2.11);
+        const chaos = amountValue(node.params.chaos), softness = num(node.params.softness, 0.46), sharpness = Math.max(num(node.params.sharpness, 2.15), 0.3);
+        const duneProfile = (phase, sharp = sharpness) => Math.pow(smoothstep(0.04, 0.88 + (0.48 - 0.88) * softness, 0.5 + 0.5 * Math.sin(phase)), Math.max(sharp, 0.3));
+        const duneA = duneProfile(across * 3.25 + (chaosField - 0.5) * chaos * 4.8 + Math.sin(along * 0.38 + macro * 2.7) * chaos * 1.3);
+        const duneB = duneProfile((across * 0.72 + along * 0.58) * 3.05 + (chaosField - 0.5) * chaos * 4.1 + 1.7, sharpness * 0.86);
+        const duneC = duneProfile((across * 0.55 - along * 0.74) * 2.82 + (macro - 0.5) * chaos * 3.6 + 4.1, sharpness * 0.78);
+        const type = duneTypeIndex(node);
+        const dunes = [
+          duneA,
+          duneA * (0.72 + (1.08 - 0.72) * (0.5 + 0.5 * Math.sin(along * 0.62 + macro * 3))),
+          Math.max(duneA * 0.82, duneB * 0.72),
+          Math.max(duneA, duneB * 0.78, duneC * 0.64),
+        ][type];
+        const slipFace = Math.pow(Math.max(dunes, 0), 0.72 + (1.8 - 0.72) * Math.max(0, Math.min(1, 1 - softness)));
+        const undulation = (macro - 0.5) * amountValue(node.params.undulation) * 0.24;
+        const ripple = Math.sin(across * 24 + along * 0.9 + (chaosField - 0.5) * 5) * 0.012 * (0.28 + 0.72 * dunes);
+        const windShadow = smoothstep(0.18, 0.82, chaosField) * chaos * 0.045;
+        return num(node.params.height, 0.82) * Math.max(0.12 + undulation + slipFace * 0.56 + ripple - windShadow, 0.055);
+      },
       domainWarp: () => {
         const seed = seedDomainOffset(node.params.seedOffset), freq = u.uFrequency.value;
         const pwX = x * freq + u.uSeedOffset.value.x + seed, pwZ = z * freq + u.uSeedOffset.value.y + seed * 1.7 + 3.1;
@@ -821,6 +1017,32 @@ function cpuEvaluator(graph) {
         const preserve = Math.max(0, Math.min(1, num(node.params.detailPreservation, 0.82)));
         const preservedDetail = shapedBody + (h + (shapedBody - h) * 0.45 - shapedBody) * preserve;
         return h + (preservedDetail - h) * Math.max(0, Math.min(1, num(node.params.strength, 0.8)));
+      },
+      riverCarve: () => {
+        const h = get('source'), freq = u.uFrequency.value, seed = seedDomainOffset(node.params.seed);
+        const px = x * freq, pz = z * freq, direction = num(node.params.direction, 1.05);
+        const dirX = Math.cos(direction), dirZ = Math.sin(direction), sideX = -dirZ, sideZ = dirX;
+        const along = px * dirX + pz * dirZ, across = px * sideX + pz * sideZ;
+        const meander = num(node.params.meander, 0.92);
+        let bend = (vnoise2(along * 0.42 + seed * 0.13, seed * 0.19 + 17) - 0.5) * 2 * meander;
+        bend += Math.sin(along * 0.51 + seed * 0.07) * meander * 0.18;
+        const riverX = across + bend, width = Math.max(num(node.params.width, 0.16), 0.02);
+        const channel = Math.exp(-Math.pow(Math.abs(riverX) / width, 2));
+        const valleyWidth = Math.max(width * num(node.params.valleyWidth, 2.4) + 0.16, width * 1.8);
+        const floodplain = Math.exp(-Math.pow(Math.abs(riverX) / valleyWidth, 1.55));
+        const branchNoise = (vnoise2(along * 0.71 + seed * 0.23, seed * 0.31 + 61) - 0.5) * meander * 0.32;
+        const tribA = Math.exp(-Math.pow(Math.abs(riverX + along * 0.43 - 0.68 + branchNoise) / Math.max(width * 0.7, 0.02), 2)) * smoothstep(-2.4, -0.25, along) * (1 - smoothstep(0.35, 1.25, along));
+        const tribB = Math.exp(-Math.pow(Math.abs(riverX - along * 0.36 + 0.74 - branchNoise) / Math.max(width * 0.64, 0.02), 2)) * smoothstep(-1.8, -0.05, along) * (1 - smoothstep(0.5, 1.45, along));
+        const tribC = Math.exp(-Math.pow(Math.abs(riverX + along * 0.24 + 0.92 + branchNoise) / Math.max(width * 0.52, 0.02), 2)) * smoothstep(-2, -0.35, along) * (1 - smoothstep(0.1, 0.9, along));
+        const headwaters = num(node.params.headwaters, 5), water = Math.max(0, Math.min(2, num(node.params.water, 0.88)));
+        const tributaries = Math.max(tribA, tribB * smoothstep(2, 3, headwaters), tribC * smoothstep(4, 5, headwaters)) * water;
+        const tributaryValley = Math.pow(Math.max(0, Math.min(1, tributaries)), 0.34);
+        const waterway = Math.max(channel, tributaries), valleyMask = Math.max(floodplain, tributaryValley * 0.52);
+        const downcutting = Math.max(0, Math.min(2, num(node.params.downcutting, 0.72))), depth = num(node.params.depth, 0.34);
+        const channelCut = depth * waterway * (0.62 + downcutting * 0.46);
+        const valleyCut = depth * valleyMask * downcutting * 0.16;
+        const bank = Math.exp(-Math.pow((Math.abs(riverX) - width * 2.1) / Math.max(width * 1.25, 0.03), 2)) * (1 - channel) * depth * 0.045;
+        return h - channelCut - valleyCut + bank;
       },
       combine: () => { const av=get('a'), bv=get('b'); return node.params.operation === 'mix' ? av + (bv-av)*num(node.params.mix,0.5) : blendJs(node.params.operation,av,bv); },
       math: () => {
