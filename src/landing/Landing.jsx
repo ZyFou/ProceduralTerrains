@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Mail, Mountain, Orbit, Pencil, Plus, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -261,7 +261,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <section className="lp-hero">
               <div className="lp-version-pill">v{APP_VERSION}</div>
               <h1>Craft <em>stunning worlds</em> with procedural power</h1>
-              <p>{APP_NAME} helps you generate, sculpt, and texture realistic environments in minutes — not months.</p>
+              <p>{APP_NAME} helps you generate, shape, and texture terrain for your projects.</p>
               <div className="lp-hero-actions">
                 <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
                 <button type="button" className="lp-secondary" onClick={() => openTemplates()}><LayoutTemplate size={14} /> Browse templates</button>
@@ -343,6 +343,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open GitHub repository" title="GitHub"><FaGithub size={17} /></a>
               <a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer" aria-label="Open X profile" title="X"><FaXTwitter size={15} /></a>
               <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={16} /></a>
+              <a href="mailto:zyfodexe@gmail.com" aria-label="Email zyfodexe@gmail.com" title="Email zyfodexe@gmail.com"><Mail size={16} /></a>
             </div>
             <div className="lp-footer-meta">
               <span>© {new Date().getFullYear()} {APP_NAME}. Open source software.</span>
