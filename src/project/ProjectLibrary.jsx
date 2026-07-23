@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Clock, Cloud, CloudDownload, CloudUpload, Copy, EllipsisVertical,
+  AlertTriangle, CheckCircle2, Clock, Cloud, CloudDownload, CloudUpload, Copy, EllipsisVertical, HardDrive,
   Eye, FolderOpen, Globe2, LayoutTemplate, Lock, Pencil, Plus, RefreshCw, Search, Trash2, Upload,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -275,7 +275,6 @@ export default function ProjectLibrary({
         <div className="lp-head-actions">
           <button type="button" className="lp-secondary sm" onClick={() => fileInputRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
           <button type="button" className="lp-primary sm" onClick={onCreate} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
-          {user && <button type="button" className="lp-secondary sm project-library-refresh" onClick={refreshCloud} disabled={cloudStatus === 'loading'} title="Check cloud changes" aria-label="Check cloud changes"><RefreshCw size={13} className={cloudStatus === 'loading' ? 'spin' : ''} /></button>}
         </div>
       </div>
 
@@ -305,10 +304,8 @@ export default function ProjectLibrary({
             const cloudProject = entry.cloudProject;
             const VisibilityIcon = visibilityIcons[cloudProject?.visibility] || Lock;
             const isBusy = busyId === entry.id;
-            const unavailable = !isCloudUsable && entry.state !== 'cloud-only';
-            const statusLabel = unavailable ? (user ? 'Cloud sync unavailable' : 'Sign in to enable cloud sync') : entry.label;
+            const statusLabel = user && cloudStatus === 'error' && entry.state !== 'cloud-only' ? 'Cloud unavailable' : entry.label;
             const name = projectName(entry);
-            const description = projectDescription(entry);
             const modified = localProject?.metadata.modified ?? cloudProject?.updatedAt;
             const isConflict = entry.state === 'conflict' || entry.state === 'needs-review';
             return (
@@ -321,12 +318,11 @@ export default function ProjectLibrary({
                   {cloudProject && <span className={`project-library-cloud-badge ${cloudProject.visibility}`} title={`In the cloud · ${cloudProject.visibility}`} aria-label={`In the cloud · ${cloudProject.visibility}`}><Cloud size={12} /><VisibilityIcon size={12} /></span>}
                   <span className="project-library-copy">
                     <strong>{name}</strong>
-                    {description && <small className="project-library-description">{description}</small>}
                     <small className="project-library-time"><Clock size={11} aria-hidden /> Updated {relativeTime(modified)}</small>
                   </span>
                 </button>
                 <div className="project-library-footer">
-                  <span className={`project-library-status${isConflict ? ' attention' : ''}`}><span className="project-library-status-icon">{isConflict ? <AlertTriangle size={13} aria-hidden /> : entry.state === 'synced' ? <CheckCircle2 size={13} aria-hidden /> : <Cloud size={13} aria-hidden />}</span>{statusLabel}</span>
+                  <span className={`project-library-status icon-only${isConflict ? ' attention' : ''}`} title={statusLabel} aria-label={statusLabel}><span className="project-library-status-icon">{isConflict ? <AlertTriangle size={14} aria-hidden /> : entry.state === 'synced' ? <CheckCircle2 size={14} aria-hidden /> : localProject && !cloudProject ? <HardDrive size={14} aria-hidden /> : <Cloud size={14} aria-hidden />}</span></span>
                   <div className="project-library-actions">
                     <button type="button" className="project-library-sync" onClick={() => sync(entry)} disabled={isBusy || !isCloudUsable} aria-label={`${entry.action} ${name}`}>
                       {isBusy ? <RefreshCw size={13} className="spin" /> : entry.state === 'cloud-only' || entry.state === 'cloud-changes' ? <CloudDownload size={13} /> : <CloudUpload size={13} />}

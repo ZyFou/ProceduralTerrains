@@ -15,7 +15,7 @@ export function getProjectSyncState({ localProject = null, cloudProject = null, 
 }
 
 export const syncPresentation = {
-  'local-only': { label: 'Only on this device', action: 'Sync to cloud' },
+  'local-only': { label: 'On this device', action: 'Sync to cloud' },
   'cloud-missing': { label: 'Cloud copy was removed', action: 'Sync to cloud' },
   'cloud-only': { label: 'Only in the cloud', action: 'Download' },
   'needs-review': { label: 'Needs sync review', action: 'Review sync' },
