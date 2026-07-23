@@ -40,11 +40,11 @@ export default function ConfidentialityPage({ onBack }) {
         <section>
           <h2>Retention</h2>
           <div className="confidentiality-retention">
-            <span><Database size={14} /><strong>Visit analytics</strong> up to 90 days</span>
-            <span><Database size={14} /><strong>Security events</strong> up to 180 days</span>
-            <span><Database size={14} /><strong>Admin audit events</strong> up to 1 year</span>
+            <span><Database size={14} /><strong>Visit analytics</strong> deleted after 90 days</span>
+            <span><Database size={14} /><strong>Security events</strong> deleted after 180 days</span>
+            <span><Database size={14} /><strong>Admin audit events</strong> deleted after 1 year</span>
           </div>
-          <p>Account and terrain data are kept while the account is active or as required to provide the service. Expired sessions are removed automatically.</p>
+          <p>Retention cleanup runs when the service starts and hourly thereafter. Account and terrain data are kept while the account is active or as required to provide the service. Expired sessions are removed automatically.</p>
         </section>
         <section>
           <h2>Security</h2>

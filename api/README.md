@@ -208,4 +208,4 @@ The dashboard never returns terrain document contents. It exposes terrain metada
 - Administrator authorization is enforced on every admin API route; hiding the frontend link is not considered authorization.
 - Administrator changes are written to an audit log in the same transaction as the protected change.
 - The last active administrator cannot be demoted, and administrators cannot suspend or demote their own account.
-- Visit analytics, security events, and audit events are retained for up to 90 days, 180 days, and one year respectively.
+- On startup and then every hour, the API removes expired sessions plus visit analytics older than 90 days, security events older than 180 days, and audit events older than one year.

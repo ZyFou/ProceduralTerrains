@@ -372,11 +372,13 @@ export default function AdminDashboard({ user, onBack }) {
       </aside>
       <div className="admin-main">
         <header className="admin-topbar">
-          <div className="admin-topbar-title">
-            <button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={15} /> Exit admin</button>
-            <div><span>Three Terrain back office</span><h1 id="admin-title">{title}</h1></div>
+          <div className="admin-topbar-content">
+            <div className="admin-topbar-title">
+              <button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={15} /> Exit admin</button>
+              <div><span>Three Terrain back office</span><h1 id="admin-title">{title}</h1></div>
+            </div>
+            <div className="admin-secure-indicator"><LockKeyhole size={13} /><span>Secure admin session</span></div>
           </div>
-          <div className="admin-secure-indicator"><LockKeyhole size={13} /><span>Secure admin session</span></div>
         </header>
         <div className="admin-mobile-tabs" role="tablist" aria-label="Administration sections">{TABS.map(({ id, label }) => <button type="button" role="tab" aria-selected={tab === id} key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
         <div className="admin-page">

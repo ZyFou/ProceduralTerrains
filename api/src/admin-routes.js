@@ -34,8 +34,6 @@ const validationReply = (reply, errors) => reply.code(400).send({
   error: { code: 'VALIDATION_ERROR', message: 'Check the requested changes.', fields: errors },
 });
 
-let lastAnalyticsCleanup = 0;
-
 export async function registerAdminRoutes(app) {
   app.post('/api/v1/analytics/visit', {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
@@ -53,14 +51,6 @@ export async function registerAdminRoutes(app) {
        VALUES (?, ?, ?, ?, ?)`,
       [sessionUser?.id ?? null, requestIpHash(request), path, referrerHost, requestUserAgent(request)],
     );
-    if (Date.now() - lastAnalyticsCleanup > 86_400_000) {
-      lastAnalyticsCleanup = Date.now();
-      Promise.all([
-        db.execute('DELETE FROM visit_events WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 90 DAY LIMIT 5000'),
-        db.execute('DELETE FROM security_events WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 180 DAY LIMIT 5000'),
-        db.execute('DELETE FROM admin_audit_logs WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 1 YEAR LIMIT 5000'),
-      ]).catch(() => {});
-    }
     return reply.code(204).send();
   });
 

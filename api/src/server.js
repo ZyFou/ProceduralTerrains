@@ -7,6 +7,7 @@ import { closeDatabase, db } from './db.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerProjectRoutes } from './project-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
+import { startRetentionScheduler } from './retention.js';
 
 const app = Fastify({
   logger: { level: config.logLevel },
@@ -59,6 +60,8 @@ app.get('/api/v1/health', async () => {
 await registerAuthRoutes(app);
 await registerProjectRoutes(app);
 await registerAdminRoutes(app);
+const stopRetentionScheduler = await startRetentionScheduler({ database: db, logger: app.log });
+app.addHook('onClose', async () => stopRetentionScheduler());
 
 app.setNotFoundHandler((request, reply) => {
   reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Route not found.' } });
