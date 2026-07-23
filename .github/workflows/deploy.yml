@@ -16,14 +16,19 @@ concurrency:
 
 jobs:
   deploy:
+    name: Build and deploy
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      # -------------------------------------------------------
+      # Repository and Node.js
+      # -------------------------------------------------------
+
+      - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -32,8 +37,11 @@ jobs:
             package-lock.json
             api/package-lock.json
 
+      # -------------------------------------------------------
       # Frontend
-      - name: Install frontend
+      # -------------------------------------------------------
+
+      - name: Install frontend dependencies
         run: npm ci
 
       - name: Test frontend
@@ -42,8 +50,16 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify frontend build
+        run: |
+          test -d dist
+          test -f dist/index.html
+
+      # -------------------------------------------------------
       # Backend
-      - name: Install backend
+      # -------------------------------------------------------
+
+      - name: Install backend dependencies
         working-directory: api
         run: npm ci
 
@@ -51,59 +67,144 @@ jobs:
         working-directory: api
         run: npm test
 
-      # SSH
+      # -------------------------------------------------------
+      # Check GitHub secrets
+      # -------------------------------------------------------
+
+      - name: Check deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "::error::DEPLOY_HOST is missing"
+            exit 1
+          fi
+
+          if [ -z "$DEPLOY_USER" ]; then
+            echo "::error::DEPLOY_USER is missing"
+            exit 1
+          fi
+
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::DEPLOY_SSH_KEY is missing"
+            exit 1
+          fi
+
+      # -------------------------------------------------------
+      # SSH configuration
+      # -------------------------------------------------------
+
       - name: Configure SSH
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_SSH_KEY" \
+            | tr -d '\r' \
+            > ~/.ssh/id_ed25519
+
           chmod 600 ~/.ssh/id_ed25519
 
-          printf '%s\n' "$SSH_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          ssh-keyscan \
+            -T 15 \
+            -H "$DEPLOY_HOST" \
+            >> ~/.ssh/known_hosts
+
           chmod 644 ~/.ssh/known_hosts
 
-      # Frontend : dist/ vers TerrainStudio
+      # -------------------------------------------------------
+      # Test SSH connection
+      # -------------------------------------------------------
+
+      - name: Test SSH connection
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "echo 'SSH connection successful'"
+
+      # -------------------------------------------------------
+      # Prepare server directories
+      # -------------------------------------------------------
+
+      - name: Prepare server directories
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" '
+            mkdir -p /home/TerrainStudio
+            mkdir -p /home/TerrainStudioApi
+          '
+
+      # -------------------------------------------------------
+      # Deploy frontend
+      # dist/ -> /home/TerrainStudio/
+      # -------------------------------------------------------
+
       - name: Deploy frontend
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           rsync \
             -az \
             --delete \
             dist/ \
-            "$USER@$HOST:/home/TerrainStudio/"
+            "$DEPLOY_USER@$DEPLOY_HOST:/home/TerrainStudio/"
 
-      # Backend : api/ vers TerrainStudioApi
+      # -------------------------------------------------------
+      # Deploy backend
+      # api/ -> /home/TerrainStudioApi/
+      # -------------------------------------------------------
+
       - name: Deploy backend
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           rsync \
             -az \
             --delete \
             --exclude='.env' \
             --exclude='node_modules/' \
+            --exclude='logs/' \
+            --exclude='uploads/' \
+            --exclude='storage/' \
             api/ \
-            "$USER@$HOST:/home/TerrainStudioApi/"
+            "$DEPLOY_USER@$DEPLOY_HOST:/home/TerrainStudioApi/"
 
-      - name: Install and restart
+      # -------------------------------------------------------
+      # Install API, run migrations, start PM2
+      # -------------------------------------------------------
+
+      - name: Install and restart services
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh "$USER@$HOST" '
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" '
             set -e
 
-            cd /home/TerrainStudioApi
+            echo "Installing backend dependencies..."
 
+            cd /home/TerrainStudioApi
             npm ci --omit=dev
+
+            echo "Running database migrations..."
+
             npm run migrate
+
+            echo "Starting frontend..."
 
             if pm2 describe TerrainStudio > /dev/null 2>&1; then
               pm2 restart TerrainStudio
@@ -112,6 +213,8 @@ jobs:
                 --name TerrainStudio \
                 --spa
             fi
+
+            echo "Starting backend..."
 
             if pm2 describe TerrainStudioApi > /dev/null 2>&1; then
               pm2 restart TerrainStudioApi --update-env
@@ -124,8 +227,38 @@ jobs:
 
             pm2 save
 
+            echo "Waiting for services..."
             sleep 5
 
-            curl --fail http://127.0.0.1:6061/ > /dev/null
-            curl --fail http://127.0.0.1:6062/health > /dev/null
+            echo "Checking frontend..."
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              http://127.0.0.1:6061/ \
+              > /dev/null
+
+            echo "Checking backend..."
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              http://127.0.0.1:6062/health \
+              > /dev/null
+
+            echo "Deployment successful."
           '
+
+      # -------------------------------------------------------
+      # Summary
+      # -------------------------------------------------------
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontend: \`/home/TerrainStudio\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontend port: \`6061\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Backend: \`/home/TerrainStudioApi\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Backend port: \`6062\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
