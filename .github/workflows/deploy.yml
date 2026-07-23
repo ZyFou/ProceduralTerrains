@@ -68,7 +68,7 @@ jobs:
         run: npm test
 
       # -------------------------------------------------------
-      # Check GitHub secrets
+      # Check secrets
       # -------------------------------------------------------
 
       - name: Check deployment secrets
@@ -92,6 +92,8 @@ jobs:
             exit 1
           fi
 
+          echo "Deployment secrets are present."
+
       # -------------------------------------------------------
       # SSH configuration
       # -------------------------------------------------------
@@ -101,6 +103,8 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
+          set -euxo pipefail
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
@@ -117,8 +121,11 @@ jobs:
 
           chmod 644 ~/.ssh/known_hosts
 
+          echo "SSH configuration created."
+          ls -la ~/.ssh
+
       # -------------------------------------------------------
-      # Test SSH connection
+      # Test SSH
       # -------------------------------------------------------
 
       - name: Test SSH connection
@@ -126,14 +133,17 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          set -euxo pipefail
+
           ssh \
+            -vv \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "echo 'SSH connection successful'"
+            "echo 'SSH connection successful'; whoami; node --version; npm --version; pm2 --version"
 
       # -------------------------------------------------------
-      # Prepare server directories
+      # Prepare server
       # -------------------------------------------------------
 
       - name: Prepare server directories
@@ -141,14 +151,23 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          set -euxo pipefail
+
           ssh "$DEPLOY_USER@$DEPLOY_HOST" '
+            set -eux
+
             mkdir -p /home/TerrainStudio
             mkdir -p /home/TerrainStudioApi
+
+            echo "Frontend directory:"
+            ls -la /home/TerrainStudio
+
+            echo "Backend directory:"
+            ls -la /home/TerrainStudioApi
           '
 
       # -------------------------------------------------------
       # Deploy frontend
-      # dist/ -> /home/TerrainStudio/
       # -------------------------------------------------------
 
       - name: Deploy frontend
@@ -156,15 +175,19 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          set -euxo pipefail
+
           rsync \
-            -az \
+            --archive \
+            --compress \
             --delete \
+            --verbose \
+            --itemize-changes \
             dist/ \
             "$DEPLOY_USER@$DEPLOY_HOST:/home/TerrainStudio/"
 
       # -------------------------------------------------------
       # Deploy backend
-      # api/ -> /home/TerrainStudioApi/
       # -------------------------------------------------------
 
       - name: Deploy backend
@@ -172,9 +195,14 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          set -euxo pipefail
+
           rsync \
-            -az \
+            --archive \
+            --compress \
             --delete \
+            --verbose \
+            --itemize-changes \
             --exclude='.env' \
             --exclude='node_modules/' \
             --exclude='logs/' \
@@ -184,7 +212,7 @@ jobs:
             "$DEPLOY_USER@$DEPLOY_HOST:/home/TerrainStudioApi/"
 
       # -------------------------------------------------------
-      # Install API, run migrations, start PM2
+      # Install, migrate and restart
       # -------------------------------------------------------
 
       - name: Install and restart services
@@ -192,19 +220,143 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh "$DEPLOY_USER@$DEPLOY_HOST" '
-            set -e
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE_SCRIPT'
+            set -Eeuo pipefail
+            set -x
 
-            echo "Installing backend dependencies..."
+            show_debug_info() {
+              EXIT_CODE=$?
+
+              set +e
+
+              echo ""
+              echo "========================================"
+              echo "DEPLOYMENT FAILED"
+              echo "Exit code: $EXIT_CODE"
+              echo "========================================"
+
+              echo ""
+              echo "--- Current user ---"
+              whoami
+              pwd
+
+              echo ""
+              echo "--- Node.js versions ---"
+              node --version
+              npm --version
+              pm2 --version
+
+              echo ""
+              echo "--- PM2 process list ---"
+              pm2 list
+
+              echo ""
+              echo "--- Frontend PM2 information ---"
+              pm2 describe TerrainStudio
+
+              echo ""
+              echo "--- Backend PM2 information ---"
+              pm2 describe TerrainStudioApi
+
+              echo ""
+              echo "--- Frontend logs ---"
+              pm2 logs TerrainStudio \
+                --lines 100 \
+                --nostream
+
+              echo ""
+              echo "--- Backend logs ---"
+              pm2 logs TerrainStudioApi \
+                --lines 150 \
+                --nostream
+
+              echo ""
+              echo "--- Frontend directory ---"
+              ls -la /home/TerrainStudio
+
+              echo ""
+              echo "--- Backend directory ---"
+              ls -la /home/TerrainStudioApi
+
+              echo ""
+              echo "--- Backend package.json ---"
+              cat /home/TerrainStudioApi/package.json
+
+              echo ""
+              echo "--- Environment file status ---"
+
+              if [ -f /home/TerrainStudioApi/.env ]; then
+                echo ".env exists"
+                ls -la /home/TerrainStudioApi/.env
+              else
+                echo "ERROR: /home/TerrainStudioApi/.env does not exist"
+              fi
+
+              echo ""
+              echo "--- Listening ports ---"
+              ss -ltnp | grep -E ':6061|:6062' || true
+
+              echo ""
+              echo "--- Frontend HTTP response ---"
+              curl \
+                --verbose \
+                --connect-timeout 10 \
+                http://127.0.0.1:6061/ || true
+
+              echo ""
+              echo "--- Backend HTTP response ---"
+              curl \
+                --verbose \
+                --connect-timeout 10 \
+                http://127.0.0.1:6062/health || true
+
+              echo ""
+              echo "========================================"
+              echo "END OF DEBUG INFORMATION"
+              echo "========================================"
+
+              exit "$EXIT_CODE"
+            }
+
+            trap show_debug_info ERR
+
+            echo "========================================"
+            echo "Starting deployment"
+            echo "========================================"
+
+            echo ""
+            echo "Current user:"
+            whoami
+
+            echo ""
+            echo "Checking deployed directories..."
+
+            test -d /home/TerrainStudio
+            test -f /home/TerrainStudio/index.html
+
+            test -d /home/TerrainStudioApi
+            test -f /home/TerrainStudioApi/package.json
+            test -f /home/TerrainStudioApi/package-lock.json
+
+            if [ ! -f /home/TerrainStudioApi/.env ]; then
+              echo "ERROR: /home/TerrainStudioApi/.env is missing"
+              exit 1
+            fi
+
+            echo ""
+            echo "Installing backend production dependencies..."
 
             cd /home/TerrainStudioApi
+
             npm ci --omit=dev
 
+            echo ""
             echo "Running database migrations..."
 
             npm run migrate
 
-            echo "Starting frontend..."
+            echo ""
+            echo "Starting or restarting frontend..."
 
             if pm2 describe TerrainStudio > /dev/null 2>&1; then
               pm2 restart TerrainStudio
@@ -214,7 +366,8 @@ jobs:
                 --spa
             fi
 
-            echo "Starting backend..."
+            echo ""
+            echo "Starting or restarting backend..."
 
             if pm2 describe TerrainStudioApi > /dev/null 2>&1; then
               pm2 restart TerrainStudioApi --update-env
@@ -225,40 +378,76 @@ jobs:
                 -- start
             fi
 
+            echo ""
+            echo "Saving PM2 process list..."
+
             pm2 save
 
-            echo "Waiting for services..."
+            echo ""
+            echo "Waiting for services to start..."
+
             sleep 5
 
+            echo ""
+            echo "Current PM2 status:"
+
+            pm2 list
+
+            echo ""
             echo "Checking frontend..."
+
             curl \
               --fail \
-              --silent \
               --show-error \
-              http://127.0.0.1:6061/ \
-              > /dev/null
+              --location \
+              --verbose \
+              --connect-timeout 10 \
+              --max-time 30 \
+              http://127.0.0.1:6061/
 
+            echo ""
             echo "Checking backend..."
+
             curl \
               --fail \
-              --silent \
               --show-error \
-              http://127.0.0.1:6062/health \
-              > /dev/null
+              --location \
+              --verbose \
+              --connect-timeout 10 \
+              --max-time 30 \
+              http://127.0.0.1:6062/health
 
-            echo "Deployment successful."
-          '
+            echo ""
+            echo "========================================"
+            echo "Deployment successful"
+            echo "========================================"
+          REMOTE_SCRIPT
 
       # -------------------------------------------------------
       # Summary
       # -------------------------------------------------------
 
       - name: Deployment summary
+        if: success()
         run: |
           echo "## Deployment successful" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Frontend: \`/home/TerrainStudio\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Frontend port: \`6061\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Backend: \`/home/TerrainStudioApi\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Backend port: \`6062\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Frontend" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Directory: \`/home/TerrainStudio\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Port: \`6061\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PM2 process: \`TerrainStudio\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Backend" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Directory: \`/home/TerrainStudioApi\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Port: \`6062\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PM2 process: \`TerrainStudioApi\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Failure summary
+        if: failure()
+        run: |
+          echo "## Deployment failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Open the failed step to see the complete error and PM2 logs." >> "$GITHUB_STEP_SUMMARY"
