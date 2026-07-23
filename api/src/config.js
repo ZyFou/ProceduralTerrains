@@ -34,7 +34,7 @@ const developmentPrivacySecret = 'three-terrain-development-privacy-secret';
 export const config = Object.freeze({
   environment,
   host: process.env.API_HOST ?? '0.0.0.0',
-  port: integer('API_PORT', 3001, { max: 65535 }),
+  port: integer('API_PORT', 6062, { max: 65535 }),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   trustProxy: boolean('TRUST_PROXY', environment === 'production'),
   bodyLimit: integer('API_BODY_LIMIT_BYTES', 1_048_576),

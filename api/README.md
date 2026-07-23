@@ -18,7 +18,7 @@ npm run migrate
 npm run dev
 ```
 
-The API listens on `http://localhost:3001`. MySQL must already contain the database and user configured in `.env`.
+The API listens on `http://localhost:6062`. MySQL must already contain the database and user configured in `.env`.
 
 ## Linux deployment with PM2
 
@@ -77,7 +77,7 @@ pm2 reload ecosystem.config.cjs --env production --update-env
 
 ## Frontend configuration
 
-`VITE_API_URL` is a frontend build-time variable. Local development defaults to the same-origin `/api/v1` path, which Vite proxies to port `3001`.
+`VITE_API_URL` is a frontend build-time variable. Local development defaults to the same-origin `/api/v1` path, which Vite proxies to port `6062`.
 
 ```env
 VITE_API_URL=https://api.example.com/api/v1
@@ -88,7 +88,7 @@ Configure the API with the exact frontend origin—without a trailing slash:
 ```env
 NODE_ENV=production
 API_HOST=127.0.0.1
-API_PORT=3001
+API_PORT=6062
 FRONTEND_ORIGINS=https://example.com
 COOKIE_SECURE=true
 COOKIE_SAME_SITE=lax
@@ -109,7 +109,7 @@ server {
     server_name api.example.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:6062;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
