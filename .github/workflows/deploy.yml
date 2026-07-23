@@ -1,0 +1,131 @@
+name: Deploy Procedural Terrains
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: procedural-terrains-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+
+      # Frontend
+      - name: Install frontend
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      # Backend
+      - name: Install backend
+        working-directory: api
+        run: npm ci
+
+      - name: Test backend
+        working-directory: api
+        run: npm test
+
+      # SSH
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          printf '%s\n' "$SSH_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # Frontend : dist/ vers TerrainStudio
+      - name: Deploy frontend
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync \
+            -az \
+            --delete \
+            dist/ \
+            "$USER@$HOST:/home/TerrainStudio/"
+
+      # Backend : api/ vers TerrainStudioApi
+      - name: Deploy backend
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync \
+            -az \
+            --delete \
+            --exclude='.env' \
+            --exclude='node_modules/' \
+            api/ \
+            "$USER@$HOST:/home/TerrainStudioApi/"
+
+      - name: Install and restart
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh "$USER@$HOST" '
+            set -e
+
+            cd /home/TerrainStudioApi
+
+            npm ci --omit=dev
+            npm run migrate
+
+            if pm2 describe TerrainStudio > /dev/null 2>&1; then
+              pm2 restart TerrainStudio
+            else
+              pm2 serve /home/TerrainStudio 6061 \
+                --name TerrainStudio \
+                --spa
+            fi
+
+            if pm2 describe TerrainStudioApi > /dev/null 2>&1; then
+              pm2 restart TerrainStudioApi --update-env
+            else
+              pm2 start npm \
+                --name TerrainStudioApi \
+                --cwd /home/TerrainStudioApi \
+                -- start
+            fi
+
+            pm2 save
+
+            sleep 5
+
+            curl --fail http://127.0.0.1:6061/ > /dev/null
+            curl --fail http://127.0.0.1:6062/health > /dev/null
+          '
