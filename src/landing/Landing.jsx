@@ -453,7 +453,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <div className="lp-footer-meta">
               <span>© {new Date().getFullYear()} {APP_NAME}. Open source software.</span>
               <button type="button" className="lp-link" onClick={() => showView('confidentiality')}>Confidentiality</button>
-              <button type="button" className="lp-link" onClick={() => setCreditsOpen(true)}>Credits</button>
             </div>
           </footer>
         </main>
