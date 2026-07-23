@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, normalizeProject } from '../project/ProjectStore.js';
@@ -13,10 +13,12 @@ import ProfilePage from '../auth/ProfilePage.jsx';
 import ProjectLibrary from '../project/ProjectLibrary.jsx';
 import CommunityPage from '../project/CommunityPage.jsx';
 import { usePopup } from '../components/ui/PopupProvider.jsx';
+import AdminDashboard from '../admin/AdminDashboard.jsx';
+import ConfidentialityPage from '../legal/ConfidentialityPage.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const AUTH_VIEWS = new Set(['login', 'register']);
-const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community']);
+const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'admin', 'confidentiality']);
 
 function viewFromHash() {
   const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -119,6 +121,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   };
   useEffect(() => {
     if (view === 'profile' && authStatus !== 'loading' && !user) showView('login');
+    if (view === 'admin' && authStatus !== 'loading' && user?.role !== 'admin') showView(user ? 'home' : 'login');
   }, [view, authStatus, user]);
   const create = (templateId, editorMode = 'procedural') => {
     if (!bootReady || exiting) return;
@@ -260,7 +263,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   return (
     <div
-      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -287,6 +290,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         <div className="lp-nav-actions">
           <button type="button" className="lp-nav-credits" onClick={() => setCreditsOpen(true)} aria-label="Open credits and links" title="Credits and links"><CircleHelp size={17} /></button>
           {user ? <>
+            {user.role === 'admin' && <button type="button" className={`lp-admin-chip${view === 'admin' ? ' active' : ''}`} title="Open administration" onClick={() => showView('admin')}><ShieldCheck size={14} /><span>Admin</span></button>}
             <button type="button" className={`lp-account-chip${view === 'profile' ? ' active' : ''}`} title="Open your profile" onClick={() => showView('profile')}>
               {avatarUrl(user) ? <img src={avatarUrl(user)} alt="" /> : <UserRound size={14} />}
               <span>{user.username}</span>
@@ -315,6 +319,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           )}
           {view === 'profile' && user && <ProfilePage onBack={goHome} />}
           {view === 'community' && <CommunityPage onBack={() => showView('projects')} onOpen={open} />}
+          {view === 'admin' && user?.role === 'admin' && <AdminDashboard user={user} onBack={goHome} />}
+          {view === 'confidentiality' && <ConfidentialityPage onBack={goHome} />}
           {view === 'home' && <>
             <section className="lp-hero">
               <div className="lp-version-pill">v{APP_VERSION}</div>
@@ -446,6 +452,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             </div>
             <div className="lp-footer-meta">
               <span>© {new Date().getFullYear()} {APP_NAME}. Open source software.</span>
+              <button type="button" className="lp-link" onClick={() => showView('confidentiality')}>Confidentiality</button>
               <button type="button" className="lp-link" onClick={() => setCreditsOpen(true)}>Credits</button>
             </div>
           </footer>

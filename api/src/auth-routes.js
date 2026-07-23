@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { db } from './db.js';
 import { hashPassword, validateLogin, validateRegistration, verifyPassword } from './auth-utils.js';
 import { parseAvatarDataUrl, validatePasswordChange, validateProfileUpdate } from './profile-utils.js';
+import { recordSecurityEvent } from './activity.js';
 
 const SESSION_COOKIE_OPTIONS = {
   path: '/',
@@ -23,10 +24,12 @@ export const publicUser = (row) => ({
   avatarUpdatedAt: row.avatar_updated_at ?? null,
   emailVerified: !!row.email_verified_at,
   createdAt: row.created_at,
+  role: row.role === 'admin' || config.adminEmails.includes(String(row.email ?? '').toLowerCase()) ? 'admin' : 'user',
 });
 
 const tokenHash = (token) => createHash('sha256').update(token).digest();
 const dummyPasswordHash = hashPassword(randomBytes(32).toString('base64url'));
+const logSecurityEvent = (details) => recordSecurityEvent(details).catch(() => {});
 
 async function createSession(userId, request, reply, connection = db) {
   const token = randomBytes(32).toString('base64url');
@@ -55,11 +58,11 @@ function clearSessionCookie(reply) {
   });
 }
 
-async function findSessionUser(request) {
+export async function findSessionUser(request, { touch = true } = {}) {
   const token = request.cookies[config.session.cookieName];
   if (!token || token.length > 128) return null;
   const [rows] = await db.execute(
-    `SELECT u.id, u.email, u.username, u.display_name, u.website_url,
+    `SELECT u.id, u.email, u.username, u.display_name, u.website_url, u.role,
             u.default_project_visibility, u.avatar_updated_at,
             u.email_verified_at, u.created_at, s.id AS session_id
        FROM sessions s
@@ -71,7 +74,15 @@ async function findSessionUser(request) {
       LIMIT 1`,
     [tokenHash(token)],
   );
-  return rows[0] ?? null;
+  const user = rows[0] ?? null;
+  if (user && touch) {
+    db.execute(
+      `UPDATE sessions SET last_seen_at = UTC_TIMESTAMP(3)
+        WHERE id = ? AND last_seen_at < UTC_TIMESTAMP(3) - INTERVAL 5 MINUTE`,
+      [user.session_id],
+    ).catch(() => {});
+  }
+  return user;
 }
 
 export async function requireSession(request, reply) {
@@ -127,12 +138,13 @@ export async function registerAuthRoutes(app) {
     }
 
     const [rows] = await db.execute(
-      `SELECT id, email, username, display_name, website_url, default_project_visibility,
+      `SELECT id, email, username, display_name, website_url, default_project_visibility, role,
               avatar_updated_at, email_verified_at, created_at
          FROM users WHERE id = ? LIMIT 1`,
       [userId],
     );
     reply.header('Cache-Control', 'no-store');
+    await logSecurityEvent({ request, userId, eventType: 'account.registered', outcome: 'success', identifier: email });
     return reply.code(201).send({ user: publicUser(rows[0]) });
   });
 
@@ -144,7 +156,7 @@ export async function registerAuthRoutes(app) {
 
     const { identifier, password } = result.value;
     const [rows] = await db.execute(
-      `SELECT id, email, username, password_hash, display_name, website_url,
+      `SELECT id, email, username, password_hash, display_name, website_url, role,
               default_project_visibility, avatar_updated_at, email_verified_at,
               created_at, status, deleted_at
          FROM users
@@ -157,12 +169,16 @@ export async function registerAuthRoutes(app) {
     // and makes account enumeration less useful.
     const valid = await verifyPassword(password, user?.password_hash ?? await dummyPasswordHash);
     if (!user || !valid || user.status !== 'active' || user.deleted_at) {
+      await logSecurityEvent({
+        request, userId: user?.id ?? null, eventType: 'auth.login', outcome: 'failure', identifier,
+      });
       return reply.code(401).send({
         error: { code: 'INVALID_CREDENTIALS', message: 'Email, username, or password is incorrect.' },
       });
     }
 
     await createSession(user.id, request, reply);
+    await logSecurityEvent({ request, userId: user.id, eventType: 'auth.login', outcome: 'success', identifier });
     // Opportunistic cleanup avoids needing a cron job for the small deployment.
     db.execute('DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP(3) LIMIT 500').catch(() => {});
     reply.header('Cache-Control', 'no-store');
@@ -178,10 +194,12 @@ export async function registerAuthRoutes(app) {
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
     const token = request.cookies[config.session.cookieName];
+    const sessionUser = await findSessionUser(request, { touch: false });
     if (token && token.length <= 128) {
       await db.execute('DELETE FROM sessions WHERE token_hash = ?', [tokenHash(token)]);
     }
     clearSessionCookie(reply);
+    if (sessionUser) await logSecurityEvent({ request, userId: sessionUser.id, eventType: 'auth.logout', outcome: 'success' });
     reply.header('Cache-Control', 'no-store');
     return reply.code(204).send();
   });
@@ -310,6 +328,7 @@ export async function registerAuthRoutes(app) {
     } finally {
       connection.release();
     }
+    await logSecurityEvent({ request, userId: user.id, eventType: 'account.password_changed', outcome: 'success' });
     reply.header('Cache-Control', 'no-store');
     return { ok: true };
   });

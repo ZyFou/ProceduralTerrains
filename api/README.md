@@ -1,6 +1,6 @@
 # Procedural Terrains API
 
-Small, self-hostable Node.js/MySQL account service for Procedural Terrains. It implements account sessions, profile settings, profile pictures, and password changes. Terrain projects remain local-first; cloud project storage will be added separately.
+Small, self-hostable Node.js/MySQL service for Three Terrain. It implements account sessions, profile settings, cloud terrain storage, privacy-safe visit analytics, and a secured administration API.
 
 ## Requirements
 
@@ -93,6 +93,8 @@ FRONTEND_ORIGINS=https://example.com
 COOKIE_SECURE=true
 COOKIE_SAME_SITE=lax
 TRUST_PROXY=true
+ADMIN_EMAILS=owner@example.com
+PRIVACY_HASH_SECRET=replace-with-at-least-32-random-characters
 ```
 
 `example.com` and `api.example.com` are same-site, so `lax` is appropriate. If an operator hosts the frontend and API on different top-level domains, use `COOKIE_SAME_SITE=none`; browsers require `COOKIE_SECURE=true` in that configuration.
@@ -146,6 +148,15 @@ PUT  /api/v1/me/avatar
 DELETE /api/v1/me/avatar
 PUT  /api/v1/me/password
 GET  /api/v1/users/:userId/avatar
+POST /api/v1/analytics/visit
+GET  /api/v1/admin/overview
+GET  /api/v1/admin/users
+PATCH /api/v1/admin/users/:userId
+POST /api/v1/admin/users/:userId/revoke-sessions
+GET  /api/v1/admin/visits
+GET  /api/v1/admin/terrains
+GET  /api/v1/admin/audit
+GET  /api/v1/admin/security
 ```
 
 Register body:
@@ -175,13 +186,26 @@ Visibility can be `private`, `unlisted`, or `public`. Profile pictures are sent 
 
 All browser requests must use credentials so the `HttpOnly` session cookie is sent. The included frontend client already does this.
 
+## Administrator access
+
+Set `ADMIN_EMAILS` to a short comma-separated list of exact account emails. These accounts are protected bootstrap administrators and cannot be demoted in the dashboard. Additional administrators can be promoted from the Users page after signing in with a bootstrap administrator.
+
+Run `npm run migrate` before starting the updated API. Migration `0006_admin_dashboard.sql` adds roles, visit analytics, security events, and immutable administrator audit records.
+
+The dashboard never returns terrain document contents. It exposes terrain metadata only. Visit and security records store a monthly rotating HMAC of the network address rather than the raw address. Set a private, random `PRIVACY_HASH_SECRET` with at least 32 characters in production.
+
 ## Security choices
 
 - Passwords use Node's memory-hard scrypt implementation with per-password random salts.
 - Session tokens contain 256 bits of randomness; only SHA-256 token hashes are stored in MySQL.
 - Cookies are `HttpOnly`, configurable for `Secure` and `SameSite`, and are never stored in frontend storage.
 - Browser origins are explicitly allowlisted through `FRONTEND_ORIGINS`.
+- Cross-site state-changing requests are rejected using browser fetch metadata, and API responses include restrictive security headers.
 - Login errors do not reveal whether an account exists.
 - Registration and login are rate-limited per client IP.
 - Profile image signatures are checked server-side; SVG and mismatched content types are rejected.
 - Changing a password invalidates every other active session while preserving the current one.
+- Administrator authorization is enforced on every admin API route; hiding the frontend link is not considered authorization.
+- Administrator changes are written to an audit log in the same transaction as the protected change.
+- The last active administrator cannot be demoted, and administrators cannot suspend or demote their own account.
+- Visit analytics, security events, and audit events are retained for up to 90 days, 180 days, and one year respectively.

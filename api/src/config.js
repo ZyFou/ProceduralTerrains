@@ -29,6 +29,7 @@ function choice(name, fallback, values) {
 }
 
 const environment = process.env.NODE_ENV ?? 'development';
+const developmentPrivacySecret = 'three-terrain-development-privacy-secret';
 
 export const config = Object.freeze({
   environment,
@@ -57,6 +58,8 @@ export const config = Object.freeze({
   password: Object.freeze({
     scryptCost: integer('AUTH_SCRYPT_COST', 65_536, { min: 16_384, max: 1_048_576 }),
   }),
+  adminEmails: list('ADMIN_EMAILS').map((value) => value.toLowerCase()),
+  privacyHashSecret: process.env.PRIVACY_HASH_SECRET || developmentPrivacySecret,
 });
 
 if (environment === 'production') {
@@ -68,6 +71,12 @@ if (environment === 'production') {
   }
   if (!config.session.secureCookie) {
     throw new Error('COOKIE_SECURE must be true in production');
+  }
+  if (config.adminEmails.length === 0) {
+    throw new Error('ADMIN_EMAILS must contain at least one trusted administrator in production');
+  }
+  if (!process.env.PRIVACY_HASH_SECRET || process.env.PRIVACY_HASH_SECRET.length < 32) {
+    throw new Error('PRIVACY_HASH_SECRET must be at least 32 characters in production');
   }
 }
 

@@ -6,6 +6,7 @@ import { randomSessionSeed } from './landing/shared.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
 import { PopupProvider } from './components/ui/PopupProvider.jsx';
 import './landing/landing.css';
+import { adminApi } from './admin/adminApi.js';
 
 const EXIT_MS = 720;
 
@@ -28,6 +29,11 @@ export default function Root() {
     };
     window.addEventListener('terrain-project:home', showProjects);
     return () => window.removeEventListener('terrain-project:home', showProjects);
+  }, []);
+
+  useEffect(() => {
+    const path = `${window.location.pathname}${window.location.hash || ''}`.slice(0, 255);
+    adminApi.trackVisit(path).catch(() => {});
   }, []);
 
   const landing = useMemo(
