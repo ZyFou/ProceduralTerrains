@@ -56,6 +56,7 @@ export function validateProjectCreate(input, defaultVisibility = 'private') {
 export function validateProjectUpdate(input) {
   const errors = {};
   const value = {};
+  let expectedContentRevision = null;
   if (Object.hasOwn(input ?? {}, 'project')) value.projectData = serializeProject(input.project, errors);
   if (Object.hasOwn(input ?? {}, 'name')) value.name = normalizeName(input.name, null, errors);
   if (Object.hasOwn(input ?? {}, 'description')) value.description = normalizeDescription(input.description, null, errors);
@@ -63,6 +64,14 @@ export function validateProjectUpdate(input) {
     value.visibility = String(input.visibility ?? '').toLowerCase();
     if (!PROJECT_VISIBILITIES.includes(value.visibility)) errors.visibility = 'Choose private, unlisted, or public.';
   }
+  if (Object.hasOwn(input ?? {}, 'expectedContentRevision')) {
+    expectedContentRevision = Number(input.expectedContentRevision);
+    if (!Number.isInteger(expectedContentRevision) || expectedContentRevision < 1) {
+      errors.expectedContentRevision = 'Provide a valid cloud content revision.';
+    } else if (!Object.hasOwn(input ?? {}, 'project')) {
+      errors.expectedContentRevision = 'A cloud content revision can only protect a project update.';
+    }
+  }
   if (Object.keys(value).length === 0) errors.project = 'Provide at least one project field.';
-  return { ok: Object.keys(errors).length === 0, errors, value };
+  return { ok: Object.keys(errors).length === 0, errors, value, expectedContentRevision };
 }

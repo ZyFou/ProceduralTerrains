@@ -12,6 +12,7 @@ const projectSummary = (row) => ({
   description: row.description ?? null,
   visibility: row.visibility,
   shareCode: row.share_code,
+  contentRevision: Number(row.content_revision ?? 1),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -54,7 +55,7 @@ export async function registerProjectRoutes(app) {
     const user = await requireSession(request, reply);
     if (!user) return;
     const [rows] = await db.execute(
-      `SELECT id, source_project_id, name, description, visibility, share_code, created_at, updated_at
+      `SELECT id, source_project_id, name, description, visibility, share_code, content_revision, created_at, updated_at
          FROM projects
         WHERE user_id = ?
         ORDER BY updated_at DESC`,
@@ -84,7 +85,7 @@ export async function registerProjectRoutes(app) {
       throw error;
     }
     const [[row]] = await db.execute(
-      `SELECT id, source_project_id, name, description, visibility, share_code, created_at, updated_at
+      `SELECT id, source_project_id, name, description, visibility, share_code, content_revision, created_at, updated_at
          FROM projects WHERE id = ? LIMIT 1`,
       [projectId],
     );
@@ -96,7 +97,7 @@ export async function registerProjectRoutes(app) {
     const user = await requireSession(request, reply);
     if (!user) return;
     const [[row]] = await db.execute(
-      `SELECT id, source_project_id, name, description, visibility, share_code, project_data, created_at, updated_at
+      `SELECT id, source_project_id, name, description, visibility, share_code, project_data, content_revision, created_at, updated_at
          FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
       [String(request.params.projectId ?? '').slice(0, 36), user.id],
     );
@@ -117,13 +118,28 @@ export async function registerProjectRoutes(app) {
     if (!result.ok) return validationReply(reply, result.errors);
     const columns = { name: 'name', description: 'description', visibility: 'visibility', projectData: 'project_data' };
     const entries = Object.entries(result.value);
+    const updatesProjectData = Object.hasOwn(result.value, 'projectData');
+    const assignments = entries.map(([key]) => `${columns[key]} = ?`);
+    if (updatesProjectData) assignments.push('content_revision = content_revision + 1');
+    const expectedClause = result.expectedContentRevision == null ? '' : ' AND content_revision = ?';
+    const values = [...entries.map(([, value]) => value), String(request.params.projectId ?? '').slice(0, 36), user.id];
+    if (result.expectedContentRevision != null) values.push(result.expectedContentRevision);
     const [update] = await db.execute(
-      `UPDATE projects SET ${entries.map(([key]) => `${columns[key]} = ?`).join(', ')} WHERE id = ? AND user_id = ?`,
-      [...entries.map(([, value]) => value), String(request.params.projectId ?? '').slice(0, 36), user.id],
+      `UPDATE projects SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?${expectedClause}`,
+      values,
     );
-    if (!update.affectedRows) return notFound(reply);
+    if (!update.affectedRows) {
+      if (result.expectedContentRevision != null) {
+        const [[existing]] = await db.execute(
+          'SELECT id FROM projects WHERE id = ? AND user_id = ? LIMIT 1',
+          [String(request.params.projectId ?? '').slice(0, 36), user.id],
+        );
+        if (existing) return reply.code(409).send({ error: { code: 'PROJECT_SYNC_CONFLICT', message: 'The cloud copy changed before it could be synced.' } });
+      }
+      return notFound(reply);
+    }
     const [[row]] = await db.execute(
-      `SELECT id, source_project_id, name, description, visibility, share_code, created_at, updated_at
+      `SELECT id, source_project_id, name, description, visibility, share_code, content_revision, created_at, updated_at
          FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
       [String(request.params.projectId ?? '').slice(0, 36), user.id],
     );
@@ -184,7 +200,7 @@ export async function registerProjectRoutes(app) {
       values,
     );
     const [rows] = await db.execute(
-      `SELECT p.id, p.source_project_id, p.name, p.description, p.visibility, p.share_code, p.created_at, p.updated_at,
+      `SELECT p.id, p.source_project_id, p.name, p.description, p.visibility, p.share_code, p.content_revision, p.created_at, p.updated_at,
               u.id AS user_id, u.email, u.username, u.display_name, u.website_url,
               u.default_project_visibility, u.avatar_updated_at, u.email_verified_at, u.created_at AS user_created_at
          FROM projects p JOIN users u ON u.id = p.user_id
@@ -211,7 +227,7 @@ export async function registerProjectRoutes(app) {
     const shareCode = normalizeShareCode(request.params.shareCode);
     if (!shareCode) return notFound(reply);
     const [[row]] = await db.execute(
-      `SELECT p.id, p.source_project_id, p.name, p.description, p.visibility, p.share_code, p.project_data,
+      `SELECT p.id, p.source_project_id, p.name, p.description, p.visibility, p.share_code, p.project_data, p.content_revision,
               p.created_at, p.updated_at, u.id AS user_id, u.email, u.username,
               u.display_name, u.website_url, u.default_project_visibility,
               u.avatar_updated_at, u.email_verified_at, u.created_at AS user_created_at

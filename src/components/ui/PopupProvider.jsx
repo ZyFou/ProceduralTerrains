@@ -31,7 +31,7 @@ function Notice({ notice, onDismiss }) {
 function PopupDialog({ dialog, onClose }) {
   const [value, setValue] = useState(dialog.initialValue ?? '');
   const inputRef = useRef(null);
-  const cancelValue = dialog.kind === 'prompt' ? null : false;
+  const cancelValue = dialog.kind === 'confirm' ? false : null;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -48,6 +48,7 @@ function PopupDialog({ dialog, onClose }) {
 
   const submit = (event) => {
     event.preventDefault();
+    if (dialog.kind === 'choice') return;
     onClose(dialog.kind === 'prompt' ? value : true);
   };
 
@@ -77,12 +78,23 @@ function PopupDialog({ dialog, onClose }) {
             />
           </label>
         )}
-        <footer>
-          <button type="button" className="app-popup-cancel" onClick={() => onClose(cancelValue)}>{dialog.cancelLabel || 'Cancel'}</button>
-          <button ref={dialog.kind === 'prompt' ? undefined : inputRef} type="submit" className={`app-popup-confirm${dialog.danger ? ' danger' : ''}`}>
-            {dialog.confirmLabel || (dialog.kind === 'prompt' ? 'Save' : 'Confirm')}
-          </button>
-        </footer>
+        {dialog.kind === 'choice' ? (
+          <footer>
+            <button type="button" className="app-popup-cancel" onClick={() => onClose(null)}>{dialog.cancelLabel || 'Cancel'}</button>
+            {(dialog.actions ?? []).map((action, index) => (
+              <button key={action.value} ref={index === 0 ? inputRef : undefined} type="button" className={`app-popup-confirm${action.danger ? ' danger' : ''}`} onClick={() => onClose(action.value)}>
+                {action.label}
+              </button>
+            ))}
+          </footer>
+        ) : (
+          <footer>
+            <button type="button" className="app-popup-cancel" onClick={() => onClose(cancelValue)}>{dialog.cancelLabel || 'Cancel'}</button>
+            <button ref={dialog.kind === 'prompt' ? undefined : inputRef} type="submit" className={`app-popup-confirm${dialog.danger ? ' danger' : ''}`}>
+              {dialog.confirmLabel || (dialog.kind === 'prompt' ? 'Save' : 'Confirm')}
+            </button>
+          </footer>
+        )}
       </form>
     </div>
   );
@@ -116,7 +128,7 @@ export function PopupProvider({ children }) {
   const openDialog = useCallback((config) => new Promise((resolve) => {
     if (dialogRef.current) {
       const previous = dialogRef.current;
-      previous.resolve(previous.kind === 'prompt' ? null : false);
+      previous.resolve(previous.kind === 'confirm' ? false : null);
     }
     const next = { ...config, resolve, id: ++nextId.current };
     dialogRef.current = next;
@@ -133,6 +145,11 @@ export function PopupProvider({ children }) {
     return openDialog({ kind: 'prompt', title: 'Enter a value', ...config });
   }, [openDialog]);
 
+  const showChoice = useCallback((options) => {
+    const config = typeof options === 'string' ? { title: options } : options;
+    return openDialog({ kind: 'choice', title: 'Choose an option', actions: [], ...config });
+  }, [openDialog]);
+
   const closeDialog = useCallback((result) => {
     const current = dialogRef.current;
     if (!current) return;
@@ -142,7 +159,7 @@ export function PopupProvider({ children }) {
   }, []);
 
   return (
-    <PopupContext.Provider value={{ showPopup, showConfirm, showPrompt }}>
+    <PopupContext.Provider value={{ showPopup, showConfirm, showPrompt, showChoice }}>
       {children}
       {createPortal(
         <>

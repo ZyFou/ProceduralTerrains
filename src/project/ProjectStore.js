@@ -1,6 +1,9 @@
 const DB_NAME = 'procedural-terrains-projects';
 const STORE_NAME = 'projects';
+const SYNC_STORE_NAME = 'project-sync';
+const DB_VERSION = 2;
 const FALLBACK_KEY = 'procedural-terrains-projects-v1';
+const SYNC_FALLBACK_KEY = 'procedural-terrains-project-sync-v1';
 const now = () => new Date().toISOString();
 const id = () => globalThis.crypto?.randomUUID?.() ?? `project-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -8,21 +11,29 @@ function emitChange() {
   window.dispatchEvent(new Event('terrain-projects:changed'));
 }
 
+function emitSyncChange() {
+  window.dispatchEvent(new Event('terrain-project-sync:changed'));
+}
+
 function openDatabase() {
   if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB is unavailable'));
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME, { keyPath: 'id' });
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(STORE_NAME)) database.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      if (!database.objectStoreNames.contains(SYNC_STORE_NAME)) database.createObjectStore(SYNC_STORE_NAME, { keyPath: 'localProjectId' });
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-async function withStore(mode, action) {
+async function withStore(storeName, mode, action) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, mode);
-    const request = action(tx.objectStore(STORE_NAME));
+    const tx = db.transaction(storeName, mode);
+    const request = action(tx.objectStore(storeName));
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
     tx.oncomplete = () => db.close();
@@ -34,6 +45,52 @@ function fallbackRead() {
   try { return JSON.parse(localStorage.getItem(FALLBACK_KEY) ?? '[]'); } catch { return []; }
 }
 function fallbackWrite(projects) { localStorage.setItem(FALLBACK_KEY, JSON.stringify(projects)); }
+
+function fallbackSyncRead() {
+  try { return JSON.parse(localStorage.getItem(SYNC_FALLBACK_KEY) ?? '[]'); } catch { return []; }
+}
+function fallbackSyncWrite(bindings) { localStorage.setItem(SYNC_FALLBACK_KEY, JSON.stringify(bindings)); }
+
+function normalizeSyncBinding(input = {}) {
+  const localProjectId = String(input.localProjectId ?? '').trim();
+  const cloudProjectId = String(input.cloudProjectId ?? '').trim();
+  const cloudContentRevision = Number(input.cloudContentRevision);
+  const lastSyncedLocalModified = String(input.lastSyncedLocalModified ?? '').trim();
+  if (!localProjectId || !cloudProjectId || !lastSyncedLocalModified || !Number.isInteger(cloudContentRevision) || cloudContentRevision < 1) return null;
+  return { localProjectId, cloudProjectId, lastSyncedLocalModified, cloudContentRevision };
+}
+
+export const projectSyncStore = {
+  async list() {
+    try {
+      const bindings = await withStore(SYNC_STORE_NAME, 'readonly', (store) => store.getAll());
+      return bindings.map(normalizeSyncBinding).filter(Boolean);
+    } catch {
+      return fallbackSyncRead().map(normalizeSyncBinding).filter(Boolean);
+    }
+  },
+
+  async save(binding) {
+    const normalized = normalizeSyncBinding(binding);
+    if (!normalized) throw new Error('A complete cloud sync binding is required.');
+    try { await withStore(SYNC_STORE_NAME, 'readwrite', (store) => store.put(normalized)); }
+    catch {
+      const bindings = fallbackSyncRead().filter((item) => item.localProjectId !== normalized.localProjectId);
+      bindings.push(normalized);
+      fallbackSyncWrite(bindings);
+    }
+    emitSyncChange();
+    return normalized;
+  },
+
+  async remove(localProjectId) {
+    const key = String(localProjectId ?? '').trim();
+    if (!key) return;
+    try { await withStore(SYNC_STORE_NAME, 'readwrite', (store) => store.delete(key)); }
+    catch { fallbackSyncWrite(fallbackSyncRead().filter((item) => item.localProjectId !== key)); }
+    emitSyncChange();
+  },
+};
 
 export function normalizeProject(input = {}) {
   const legacyTerrain = input.terrain ?? input;
@@ -74,7 +131,7 @@ export function normalizeProject(input = {}) {
 export const projectStore = {
   async list() {
     try {
-      const projects = await withStore('readonly', (store) => store.getAll());
+      const projects = await withStore(STORE_NAME, 'readonly', (store) => store.getAll());
       return projects.map(normalizeProject).sort((a, b) => b.metadata.modified.localeCompare(a.metadata.modified));
     } catch {
       return fallbackRead().map(normalizeProject).sort((a, b) => b.metadata.modified.localeCompare(a.metadata.modified));
@@ -84,7 +141,7 @@ export const projectStore = {
   async save(project) {
     const normalized = normalizeProject(project);
     normalized.metadata.modified = now();
-    try { await withStore('readwrite', (store) => store.put(normalized)); }
+    try { await withStore(STORE_NAME, 'readwrite', (store) => store.put(normalized)); }
     catch {
       const projects = fallbackRead();
       const index = projects.findIndex((item) => item.id === normalized.id);
@@ -97,8 +154,9 @@ export const projectStore = {
   },
 
   async remove(projectId) {
-    try { await withStore('readwrite', (store) => store.delete(projectId)); }
+    try { await withStore(STORE_NAME, 'readwrite', (store) => store.delete(projectId)); }
     catch { fallbackWrite(fallbackRead().filter((project) => project.id !== projectId)); }
+    await projectSyncStore.remove(projectId);
     emitChange();
   },
 

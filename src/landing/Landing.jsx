@@ -10,7 +10,7 @@ import AuthPage from '../auth/AuthPage.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { avatarUrl } from '../auth/authApi.js';
 import ProfilePage from '../auth/ProfilePage.jsx';
-import CloudProjectsPanel from '../project/CloudProjectsPanel.jsx';
+import ProjectLibrary from '../project/ProjectLibrary.jsx';
 import CommunityPage from '../project/CommunityPage.jsx';
 import { usePopup } from '../components/ui/PopupProvider.jsx';
 
@@ -62,11 +62,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
   const [menuFor, setMenuFor] = useState(null);
   const [query, setQuery] = useState('');
-  const [projectsTab, setProjectsTab] = useState('local');
-  const [cloudRefreshToken, setCloudRefreshToken] = useState(0);
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
-  const fileRef = useRef(null);
 
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
@@ -167,11 +164,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       } catch { /* invalid files leave the workspace untouched */ }
     };
     reader.readAsText(file);
-  };
-  const onImport = (event) => {
-    const file = event.target.files?.[0];
-    importProjectFile(file, { openAfter: true });
-    event.target.value = '';
   };
   const hasFileDrag = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
   const onFileDragEnter = (e) => {
@@ -304,7 +296,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <button type="button" className="lp-secondary sm lp-auth-login" onClick={() => showView('login')} disabled={authStatus === 'loading'}><LogIn size={13} /> <span>Sign in</span></button>
             <button type="button" className="lp-primary sm lp-auth-register" onClick={() => showView('register')} disabled={authStatus === 'loading'}><UserPlus size={13} /> <span>Create account</span></button>
           </>}
-          <button type="button" className="lp-secondary sm" onClick={openApp} disabled={!bootReady || exiting}><SquareArrowOutUpRight size={14} /> Open App</button>
+
+          {/* <button type="button" className="lp-secondary sm" onClick={openApp} disabled={!bootReady || exiting}><SquareArrowOutUpRight size={14} /> Open App</button> */}
         </div>
       </header>
 
@@ -343,7 +336,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
           </>}
 
-          {view === 'projects' && (() => {
+          {false && (() => {
             const filtered = projects.filter((project) => project.metadata.name.toLowerCase().includes(query.trim().toLowerCase()));
             return (
               <section className="lp-section lp-view">
@@ -369,6 +362,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                   <div key="local-projects" id="local-projects-panel" className="lp-project-tab-panel" role="tabpanel">
                     <div className="lp-search">
                       <Search size={14} aria-hidden />
+
                       <input type="search" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search local projects" />
                     </div>
                     {projects.length === 0 ? emptyProjects
@@ -383,6 +377,25 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               </section>
             );
           })()}
+
+          {view === 'projects' && (
+            <section className="lp-section lp-view">
+              <div className="lp-section-head"><h2>Projects</h2></div>
+              <ProjectLibrary
+                localProjects={projects}
+                bootReady={bootReady}
+                exiting={exiting}
+                onOpen={open}
+                onCreate={() => setCreateOpen(true)}
+                onImportFile={(file) => importProjectFile(file, { openAfter: true })}
+                onRename={renameProject}
+                onDuplicate={duplicateProject}
+                onDelete={setDeleteTarget}
+                projectActionBusy={projectActionBusy}
+                onSignIn={() => showView('login')}
+              />
+            </section>
+          )}
 
           {view === 'templates' && (() => {
             const q = query.trim().toLowerCase();
@@ -473,7 +486,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           </div>
         </section>
       </div>}
-      <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImport} />
     </div>
   );
 }

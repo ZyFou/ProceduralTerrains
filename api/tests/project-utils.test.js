@@ -22,3 +22,11 @@ test('project updates validate visibility and require a field', () => {
   assert.equal(validateProjectUpdate({ visibility: 'friends' }).ok, false);
   assert.equal(validateProjectUpdate({ name: 'Renamed', visibility: 'public' }).ok, true);
 });
+
+test('project document updates validate an optimistic content revision', () => {
+  const protectedUpdate = validateProjectUpdate({ project: { terrain: {} }, expectedContentRevision: 4 });
+  assert.equal(protectedUpdate.ok, true);
+  assert.equal(protectedUpdate.expectedContentRevision, 4);
+  assert.equal(validateProjectUpdate({ project: { terrain: {} }, expectedContentRevision: 0 }).ok, false);
+  assert.equal(validateProjectUpdate({ name: 'Renamed', expectedContentRevision: 2 }).ok, false);
+});
