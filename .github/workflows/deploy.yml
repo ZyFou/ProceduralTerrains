@@ -48,6 +48,8 @@ jobs:
         run: npm test
 
       - name: Build frontend
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: npm run build
 
       - name: Verify frontend build
