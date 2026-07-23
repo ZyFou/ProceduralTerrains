@@ -22,6 +22,11 @@ const dateTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nume
 
 const formatDate = (value, fallback = 'Never') => value ? dateTime.format(new Date(value)) : fallback;
 const actionLabel = (value = '') => value.split('.').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' · ');
+const localDayKey = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 function LoadingState() {
   return <div className="admin-loading" role="status"><span /><strong>Loading secure data</strong><small>Retrieving the latest administration records…</small></div>;
@@ -51,12 +56,12 @@ function Pagination({ page, pages, onPage }) {
 
 function TrendChart({ data = [], valueKey = 'visits' }) {
   const points = useMemo(() => {
-    const byDay = new Map(data.map((item) => [String(item.day).slice(0, 10), item]));
+    const byDay = new Map(data.map((item) => [localDayKey(item.day), item]));
     return Array.from({ length: 14 }, (_, index) => {
       const date = new Date();
       date.setHours(0, 0, 0, 0);
       date.setDate(date.getDate() - (13 - index));
-      const key = date.toISOString().slice(0, 10);
+      const key = localDayKey(date);
       return { day: date, value: Number(byDay.get(key)?.[valueKey] ?? 0) };
     });
   }, [data, valueKey]);
@@ -367,7 +372,10 @@ export default function AdminDashboard({ user, onBack }) {
       </aside>
       <div className="admin-main">
         <header className="admin-topbar">
-          <div><button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={14} /> Exit admin</button><h1 id="admin-title">{title}</h1></div>
+          <div className="admin-topbar-title">
+            <button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={15} /> Exit admin</button>
+            <div><span>Three Terrain back office</span><h1 id="admin-title">{title}</h1></div>
+          </div>
           <div className="admin-secure-indicator"><LockKeyhole size={13} /><span>Secure admin session</span></div>
         </header>
         <div className="admin-mobile-tabs" role="tablist" aria-label="Administration sections">{TABS.map(({ id, label }) => <button type="button" role="tab" aria-selected={tab === id} key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
