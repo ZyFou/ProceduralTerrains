@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { TerrainPicker } from '../engine/terrain/TerrainPicker.js';
+import { PaintBrushCursor } from '../paint/PaintBrushCursor.js';
 import { ManualTerrainField } from './ManualTerrainField.js';
 import {
   createManualShape,
@@ -10,6 +11,15 @@ import {
 } from './ManualShapeCatalog.js';
 
 const TRANSFORM_MODES = new Set(['translate', 'rotate', 'scale']);
+const SCULPT_TOOLS = new Set(['raise', 'lower', 'smooth', 'flatten', 'erode', 'erase']);
+const DEFAULT_SCULPT_STATE = Object.freeze({
+  enabled: false,
+  tool: 'raise',
+  brushSize: 110,
+  strength: 0.32,
+  falloff: 0.72,
+  targetHeight: 120,
+});
 
 function isTypingTarget(target) {
   const tag = target?.tagName?.toLowerCase();
@@ -21,6 +31,7 @@ function cloneShapes(shapes) {
     ...shape,
     position: { ...shape.position },
     scale: { ...shape.scale },
+    mask: { ...shape.mask },
   }));
 }
 
@@ -54,10 +65,14 @@ export class ManualTerrainModeManager {
     this.transformMode = 'translate';
     this.placementType = null;
     this.dragType = null;
+    this.sculpt = { ...DEFAULT_SCULPT_STATE };
+    this._sculpting = false;
+    this._lastSculptPoint = null;
     this._draggingTransform = false;
     this._visuals = new Map();
 
     this.field = new ManualTerrainField({ uniforms, getBounds, gpuTier });
+    this.cursor = new PaintBrushCursor(scene);
     this.picker = new TerrainPicker({
       camera,
       domElement,
@@ -111,11 +126,15 @@ export class ManualTerrainModeManager {
     this._onPointerMove = (event) => this._handlePointerMove(event);
     this._onDragOver = (event) => this._handleDragOver(event);
     this._onDrop = (event) => this._handleDrop(event);
+    this._onPointerUp = () => this._handlePointerUp();
+    this._onWheel = (event) => this._handleWheel(event);
     this._onKeyDown = (event) => this._handleKeyDown(event);
     this.domElement.addEventListener('pointerdown', this._onPointerDown);
     this.domElement.addEventListener('pointermove', this._onPointerMove);
     this.domElement.addEventListener('dragover', this._onDragOver);
     this.domElement.addEventListener('drop', this._onDrop);
+    this.domElement.addEventListener('wheel', this._onWheel, { passive: false });
+    window.addEventListener('pointerup', this._onPointerUp);
     window.addEventListener('keydown', this._onKeyDown, true);
     this._syncUniforms();
   }
@@ -144,7 +163,7 @@ export class ManualTerrainModeManager {
   }
 
   _syncUniforms() {
-    this.uniforms.uManualEnabled.value = this.enabled && this.shapes.length ? 1 : 0;
+    this.uniforms.uManualEnabled.value = this.enabled && (this.shapes.length || !this.field.isSculptEmpty()) ? 1 : 0;
   }
 
   _state() {
@@ -154,6 +173,11 @@ export class ManualTerrainModeManager {
       transformMode: this.transformMode,
       placementType: this.placementType,
       revision: this.field.revision,
+      sculpt: {
+        ...this.sculpt,
+        revision: this.field.sculptRevision,
+        hasData: !this.field.isSculptEmpty(),
+      },
       shapes: cloneShapes(this.shapes),
     };
   }
@@ -168,8 +192,10 @@ export class ManualTerrainModeManager {
     this.enabled = true;
     this._previousControlInputMode = this.controls.inputMode ?? 'all';
     this._previousPrimaryPointerFilter = this.controls.primaryPointerFilter ?? null;
+    this._previousWheelFilter = this.controls.wheelFilter ?? null;
     this.controls.inputMode = 'all';
     this.controls.primaryPointerFilter = (event) => this._canCameraPan(event);
+    this.controls.wheelFilter = (event) => !(this.sculpt.enabled && event.shiftKey);
     this.group.visible = true;
     this._syncVisuals();
     this._emit();
@@ -181,11 +207,16 @@ export class ManualTerrainModeManager {
     this.enabled = false;
     this.placementType = null;
     this.dragType = null;
+    this.sculpt.enabled = false;
+    this._sculpting = false;
+    this._lastSculptPoint = null;
     this.controls.inputMode = this._previousControlInputMode ?? 'all';
     this.controls.primaryPointerFilter = this._previousPrimaryPointerFilter ?? null;
+    this.controls.wheelFilter = this._previousWheelFilter ?? null;
     this.controls.enabled = true;
     this.group.visible = false;
     this.preview.visible = false;
+    this.cursor.setVisible(false);
     this.transform.detach();
     this.transform.visible = false;
     this.marker.visible = false;
@@ -198,6 +229,7 @@ export class ManualTerrainModeManager {
   }
 
   setTransformMode(mode) {
+    if (this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
     this.transformMode = TRANSFORM_MODES.has(mode) ? mode : 'translate';
     this.transform.setMode(this.transformMode);
     this.transform.space = this.transformMode === 'translate' ? 'world' : 'local';
@@ -209,6 +241,7 @@ export class ManualTerrainModeManager {
   }
 
   setPlacementType(type) {
+    if (type && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
     this.placementType = type ? getManualShapeDefinition(type).id : null;
     this.dragType = null;
     this.preview.visible = false;
@@ -216,6 +249,7 @@ export class ManualTerrainModeManager {
   }
 
   beginDrag(type) {
+    if (this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
     this.dragType = getManualShapeDefinition(type).id;
     this.placementType = null;
     this._emit();
@@ -225,6 +259,51 @@ export class ManualTerrainModeManager {
     this.dragType = null;
     this.preview.visible = false;
     this._emit();
+  }
+
+  setSculptEnabled(enabled, { silent = false } = {}) {
+    const next = !!enabled;
+    if (next === this.sculpt.enabled) {
+      if (next) this._emit({ inspectorRequested: true });
+      return;
+    }
+    this.sculpt.enabled = next;
+    this.placementType = null;
+    this.dragType = null;
+    this.preview.visible = false;
+    this._sculpting = false;
+    this._lastSculptPoint = null;
+    if (next) {
+      this.selectedId = null;
+      this._syncVisuals();
+    } else {
+      this.cursor.setVisible(false);
+    }
+    this._syncAnchor();
+    this._emit({ inspectorRequested: next });
+    if (!silent) {
+      this.onToast?.(next
+        ? 'Manual Sculpt — left drag sculpts · Alt + left drag pans · right drag orbits'
+        : 'Exited Manual Sculpt');
+    }
+  }
+
+  setSculptSetting(key, value) {
+    if (key === 'tool') this.sculpt.tool = SCULPT_TOOLS.has(value) ? value : 'raise';
+    else if (key === 'brushSize') this.sculpt.brushSize = Math.max(4, Math.min(900, Number(value) || 4));
+    else if (key === 'strength') this.sculpt.strength = Math.max(0.01, Math.min(1, Number(value) || 0.01));
+    else if (key === 'falloff') this.sculpt.falloff = Math.max(0.02, Math.min(1, Number(value) || 0.02));
+    else if (key === 'targetHeight') this.sculpt.targetHeight = Math.max(-3000, Math.min(3000, Number(value) || 0));
+    this._emit();
+  }
+
+  clearSculpt() {
+    if (this.field.isSculptEmpty()) return false;
+    this.field.clearSculpt();
+    this.cursor.setVisible(false);
+    this._emit({ terrainChanged: true, documentChanged: true, sculptChanged: true, label: 'Cleared sculpt layer' });
+    this.onStableAction?.('Cleared sculpt layer');
+    return true;
   }
 
   addShape(type, position, overrides = {}) {
@@ -250,6 +329,7 @@ export class ManualTerrainModeManager {
       ...patch,
       position: { ...current.position, ...(patch.position || {}) },
       scale: { ...current.scale, ...(patch.scale || {}) },
+      mask: { ...current.mask, ...(patch.mask || {}) },
     }, index);
     this.shapes[index] = next;
     const terrainChanged = Object.keys(patch).some((key) => key !== 'name');
@@ -262,6 +342,7 @@ export class ManualTerrainModeManager {
 
   selectShape(id, { requestInspector = false } = {}) {
     const nextId = this.shapes.some((shape) => shape.id === id) ? id : null;
+    if (nextId && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
     if (nextId === this.selectedId) {
       if (requestInspector && nextId) this._emit({ inspectorRequested: true });
       return;
@@ -298,19 +379,44 @@ export class ManualTerrainModeManager {
     });
   }
 
+  moveShape(id, direction) {
+    const index = this.shapes.findIndex((shape) => shape.id === id);
+    const nextIndex = Math.max(0, Math.min(this.shapes.length - 1, index + Math.sign(direction)));
+    if (index < 0 || nextIndex === index) return false;
+    const [shape] = this.shapes.splice(index, 1);
+    this.shapes.splice(nextIndex, 0, shape);
+    this._rebuildTerrain();
+    this._syncVisuals();
+    this._emit({ terrainChanged: true, documentChanged: true, label: `Reordered ${shape.name}` });
+    this.onStableAction?.(`Reordered ${shape.name}`);
+    return true;
+  }
+
   clear({ emit = true } = {}) {
     this.shapes = [];
     this.selectedId = null;
     this.placementType = null;
     this.dragType = null;
+    this.sculpt.enabled = false;
+    this._sculpting = false;
     this.preview.visible = false;
+    this.cursor.setVisible(false);
+    this.field.clearSculpt();
     this._rebuildTerrain();
     this._syncVisuals();
     if (emit) this._emit({ terrainChanged: true, label: 'Cleared manual terrain' });
   }
 
-  serialize() {
-    return { version: 1, shapes: cloneShapes(this.shapes) };
+  serialize({ includeSculpt = true } = {}) {
+    return {
+      version: 2,
+      shapes: cloneShapes(this.shapes),
+      ...(includeSculpt ? { sculpt: this.field.serializeSculpt() } : {}),
+    };
+  }
+
+  serializeSculpt() {
+    return this.field.serializeSculpt();
   }
 
   load(input, { emit = true } = {}) {
@@ -319,7 +425,11 @@ export class ManualTerrainModeManager {
     this.selectedId = null;
     this.placementType = null;
     this.dragType = null;
+    this.sculpt = { ...DEFAULT_SCULPT_STATE };
+    this._sculpting = false;
     this.preview.visible = false;
+    this.cursor.setVisible(false);
+    this.field.loadSculpt(document.sculpt);
     this._rebuildTerrain();
     this._syncVisuals();
     if (emit) this._emit({ terrainChanged: true, label: 'Loaded manual terrain' });
@@ -365,7 +475,7 @@ export class ManualTerrainModeManager {
       visual.rotation.y = -shape.rotation;
       visual.scale.set(shape.scale.x, 1, shape.scale.z);
       visual.material.color.setHex(shape.id === this.selectedId ? 0x60a5fa : 0x94a3b8);
-      visual.material.opacity = shape.id === this.selectedId ? 0.95 : 0.38;
+      visual.material.opacity = shape.enabled === false ? 0.14 : shape.id === this.selectedId ? 0.95 : 0.38;
     }
 
     this._syncAnchor();
@@ -373,7 +483,7 @@ export class ManualTerrainModeManager {
 
   _syncAnchor() {
     const shape = this.selectedShape;
-    if (!this.enabled || !shape) {
+    if (!this.enabled || !shape || this.sculpt.enabled) {
       this.transform.detach();
       this.transform.visible = false;
       this.marker.visible = false;
@@ -420,6 +530,7 @@ export class ManualTerrainModeManager {
   _pickShapeAt(point) {
     for (let index = this.shapes.length - 1; index >= 0; index--) {
       const shape = this.shapes[index];
+      if (shape.enabled === false) continue;
       const dx = point.x - shape.position.x;
       const dz = point.z - shape.position.z;
       const cos = Math.cos(shape.rotation);
@@ -432,6 +543,7 @@ export class ManualTerrainModeManager {
   }
 
   _canCameraPan(event) {
+    if (this.sculpt.enabled) return !!event.altKey;
     if (!this.enabled || this.placementType || this.dragType || this._draggingTransform || this.transform.axis) return false;
     const point = this.picker.pickEvent(event);
     return !point || !this._pickShapeAt(point);
@@ -439,6 +551,18 @@ export class ManualTerrainModeManager {
 
   _handlePointerDown(event) {
     if (!this.enabled || event.button !== 0 || this._draggingTransform || this.transform.axis) return;
+    if (this.sculpt.enabled) {
+      if (event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = this.picker.pickEvent(event);
+      if (!point) return;
+      this._sculpting = true;
+      this._lastSculptPoint = null;
+      this._updateSculptHit(point);
+      this._stampSculpt(point, true);
+      return;
+    }
     const point = this.picker.pickEvent(event);
     if (!point) return;
     if (this.placementType) {
@@ -458,6 +582,12 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerMove(event) {
+    if (this.enabled && this.sculpt.enabled) {
+      const point = this.picker.pickEvent(event, { quality: this._sculpting ? 'preview' : 'final' });
+      this._updateSculptHit(point);
+      if (this._sculpting && point) this._stampSculpt(point);
+      return;
+    }
     if (!this.enabled || !this.placementType) return;
     const point = this.picker.pickEvent(event, { quality: 'preview' });
     if (!point) {
@@ -484,6 +614,62 @@ export class ManualTerrainModeManager {
     else this.endDrag();
   }
 
+  _handlePointerUp() {
+    if (!this._sculpting) return;
+    this._sculpting = false;
+    this._lastSculptPoint = null;
+    this._emit({
+      terrainChanged: true,
+      documentChanged: true,
+      sculptChanged: true,
+      label: `Sculpted terrain (${this.sculpt.tool})`,
+    });
+    this.onStableAction?.(`Sculpted terrain (${this.sculpt.tool})`);
+  }
+
+  _handleWheel(event) {
+    if (!this.enabled || !this.sculpt.enabled || !event.shiftKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const factor = event.deltaY > 0 ? 0.9 : 1.1;
+    this.setSculptSetting('brushSize', Math.round(this.sculpt.brushSize * factor));
+  }
+
+  _updateSculptHit(point) {
+    this.cursor.update(point, this.sculpt.brushSize);
+  }
+
+  _stampSculpt(point, force = false) {
+    if (!point) return;
+    const current = point.clone();
+    const spacing = Math.max(2, this.sculpt.brushSize * 0.22);
+    if (!force && this._lastSculptPoint && this._lastSculptPoint.distanceTo(current) < spacing) return;
+    if (!force && this._lastSculptPoint) {
+      const start = this._lastSculptPoint.clone();
+      const distance = start.distanceTo(current);
+      const steps = Math.min(48, Math.max(1, Math.floor(distance / spacing)));
+      for (let index = 1; index <= steps; index++) {
+        this._stampSculptAt(start.clone().lerp(current, index / steps));
+      }
+    } else {
+      this._stampSculptAt(current);
+    }
+    this._lastSculptPoint = current;
+  }
+
+  _stampSculptAt(point) {
+    this.field.stamp({
+      x: point.x,
+      z: point.z,
+      radius: this.sculpt.brushSize,
+      strength: this.sculpt.strength,
+      falloff: this.sculpt.falloff,
+      tool: this.sculpt.tool,
+      targetHeight: this.sculpt.targetHeight,
+    });
+    this._syncUniforms();
+  }
+
   _updatePreview(type, point) {
     const definition = getManualShapeDefinition(type);
     this.preview.position.set(point.x, point.y + 8, point.z);
@@ -495,6 +681,11 @@ export class ManualTerrainModeManager {
   _handleKeyDown(event) {
     if (!this.enabled || isTypingTarget(event.target)) return;
     if (event.key === 'Escape') {
+      if (this.sculpt.enabled) {
+        event.preventDefault();
+        this.setSculptEnabled(false);
+        return;
+      }
       this.setPlacementType(null);
       this.selectShape(null);
       return;
@@ -511,6 +702,11 @@ export class ManualTerrainModeManager {
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
+    if (key === 'b') {
+      event.preventDefault();
+      this.setSculptEnabled(!this.sculpt.enabled);
+      return;
+    }
     if (key === 'm' || key === 'r' || key === 's') {
       event.preventDefault();
       if (key === 'm') this.setTransformMode('translate');
@@ -536,6 +732,7 @@ export class ManualTerrainModeManager {
     if (this.enabled) {
       this.controls.inputMode = this._previousControlInputMode ?? 'all';
       this.controls.primaryPointerFilter = this._previousPrimaryPointerFilter ?? null;
+      this.controls.wheelFilter = this._previousWheelFilter ?? null;
       this.controls.enabled = true;
     }
     this.domElement.removeEventListener('pointerdown', this._onPointerDown);
@@ -543,6 +740,8 @@ export class ManualTerrainModeManager {
     this.domElement.removeEventListener('dragover', this._onDragOver);
     this.domElement.removeEventListener('drop', this._onDrop);
     window.removeEventListener('keydown', this._onKeyDown, true);
+    window.removeEventListener('pointerup', this._onPointerUp);
+    this.domElement.removeEventListener('wheel', this._onWheel);
     this.transform.detach();
     this.transform.dispose();
     this.transform.parent?.remove(this.transform);
@@ -556,6 +755,7 @@ export class ManualTerrainModeManager {
     this.preview.material.dispose();
     this.marker.geometry.dispose();
     this.marker.material.dispose();
+    this.cursor.dispose();
     this.field.dispose();
   }
 }

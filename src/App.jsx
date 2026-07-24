@@ -70,6 +70,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     if (before.worldMode !== after.worldMode) return 'Changed world mode';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
+    if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
     if (JSON.stringify(before.tiles) !== JSON.stringify(after.tiles)
       || before.tileAssemblyShape !== after.tileAssemblyShape
       || before.diskRadiusCells !== after.diskRadiusCells) return 'Edited terrain tiles';
@@ -134,6 +135,7 @@ export default function App() {
     selectedId: null,
     transformMode: 'translate',
     placementType: null,
+    sculpt: { enabled: false, tool: 'raise', brushSize: 110, strength: 0.32, falloff: 0.72, targetHeight: 120, revision: 0, hasData: false },
     shapes: [],
   });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
@@ -221,6 +223,7 @@ export default function App() {
   const historyRef = useRef({ past: [], future: [], present: null });
   const paintBlobsRef = useRef(new Map());     // paintRev → heavy paint blob
   const erosionBlobsRef = useRef(new Map());   // erosionRev → heavy erosion blob
+  const manualSculptBlobsRef = useRef(new Map()); // manualSculptRev → heavy sculpt delta
   const histSuppressRef = useRef(false);       // true while applying a restore
   const histTimerRef = useRef(null);           // pending debounced record
   const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
@@ -864,6 +867,11 @@ export default function App() {
         const blob = eng.serializeErosion();
         if (blob) erosionBlobsRef.current.set(erev, blob);
       }
+      const srev = state.manualSculptRev ?? 0;
+      if (srev > 0 && !manualSculptBlobsRef.current.has(srev)) {
+        const blob = eng.serializeManualSculpt();
+        if (blob) manualSculptBlobsRef.current.set(srev, blob);
+      }
       return JSON.stringify(state);
     } catch (err) {
       console.warn('History snapshot failed', err);
@@ -876,15 +884,18 @@ export default function App() {
   const prunePaintBlobs = useCallback(() => {
     const paintMap = paintBlobsRef.current;
     const erosionMap = erosionBlobsRef.current;
-    if (paintMap.size <= 4 && erosionMap.size <= 4) return;
+    const sculptMap = manualSculptBlobsRef.current;
+    if (paintMap.size <= 4 && erosionMap.size <= 4 && sculptMap.size <= 4) return;
     const h = historyRef.current;
     const livePaint = new Set();
     const liveErosion = new Set();
+    const liveSculpt = new Set();
     const collect = (s) => {
       try {
         const snap = JSON.parse(s);
         if (snap.paintRev) livePaint.add(snap.paintRev);
         if (snap.erosionRev) liveErosion.add(snap.erosionRev);
+        if (snap.manualSculptRev) liveSculpt.add(snap.manualSculptRev);
       } catch { /* ignore */ }
     };
     h.past.forEach(collect);
@@ -892,6 +903,7 @@ export default function App() {
     if (h.present) collect(h.present);
     for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
     for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
+    for (const key of sculptMap.keys()) if (!liveSculpt.has(key)) sculptMap.delete(key);
   }, []);
 
   const recordHistory = useCallback(() => {
@@ -953,6 +965,9 @@ export default function App() {
       // and the heavy baked-erosion blob (delta grid + masks)
       snap.erosion = (snap.erosionRev ?? 0) > 0
         ? (erosionBlobsRef.current.get(snap.erosionRev) ?? null)
+        : null;
+      snap.manualSculpt = (snap.manualSculptRev ?? 0) > 0
+        ? (manualSculptBlobsRef.current.get(snap.manualSculptRev) ?? null)
         : null;
       // a different world mode is a heavy, async rebuild — do it first (and
       // quietly) through the same blocking-overlay path as the mode bar.
@@ -1834,6 +1849,13 @@ export default function App() {
               onUpdate={(id, patch) => engine().updateManualShape(id, patch)}
               onDelete={(id) => engine().deleteManualShape(id)}
               onDuplicate={(id) => engine().duplicateManualShape(id)}
+              onReorder={(id, direction) => engine().moveManualShape(id, direction)}
+              onSculptEnabled={(enabled) => {
+                setActivePanel(null);
+                engine().setManualSculptEnabled(enabled);
+              }}
+              onSculptSetting={(key, value) => engine().setManualSculptSetting(key, value)}
+              onClearSculpt={() => engine().clearManualSculpt()}
             />
           )}
 

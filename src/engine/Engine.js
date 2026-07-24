@@ -4253,6 +4253,10 @@ export class Engine {
   updateManualShape(id, patch) { return this.manualTerrain?.updateShape(id, patch); }
   deleteManualShape(id) { return this.manualTerrain?.deleteShape(id); }
   duplicateManualShape(id) { return this.manualTerrain?.duplicateShape(id); }
+  moveManualShape(id, direction) { return this.manualTerrain?.moveShape(id, direction); }
+  setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
+  setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
+  clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
 
   // ---------------------------------------------------------- creator tools
 
@@ -4472,7 +4476,8 @@ export class Engine {
     this._syncCpuHeightProgram();
     this._applyUniforms();
     this.uniforms.uPaintEnabled.value = 1;
-    this.uniforms.uManualEnabled.value = this.projectMode === 'manual' && this.manualTerrain?.shapes?.length ? 1 : 0;
+    this.uniforms.uManualEnabled.value = this.projectMode === 'manual'
+      && (this.manualTerrain?.shapes?.length || !this.manualTerrain?.field?.isSculptEmpty?.()) ? 1 : 0;
     this._rebuildStackMaterialsAsync(this._activeHeightProgram());
 
     this.scene.background = new THREE.Color(0x0b0e14);
@@ -5373,7 +5378,7 @@ export class Engine {
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
     };
-    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 1, shapes: [] };
+    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 2, shapes: [], sculpt: null };
     const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
     if (realWorldSource) data.realWorldSource = realWorldSource;
     // Only embed paint pixel data when something was actually painted —
@@ -5520,7 +5525,8 @@ export class Engine {
       generationSource: this.generationSource,
       terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
-      manualTerrain: this.manualTerrain?.serialize() ?? { version: 1, shapes: [] },
+      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false }) ?? { version: 2, shapes: [] },
+      manualSculptRev: this.manualTerrain?.field?.sculptRevision ?? 0,
     };
   }
 
@@ -5532,6 +5538,11 @@ export class Engine {
   /** Heavy erosion blob (baked delta grid + masks) for undo history. */
   serializeErosion() {
     return this.erosionField?.serialize() ?? null;
+  }
+
+  /** Heavy Manual Sculpt delta blob, deduplicated by sculpt revision in App history. */
+  serializeManualSculpt() {
+    return this.manualTerrain?.serializeSculpt() ?? null;
   }
 
   /**
@@ -5635,7 +5646,9 @@ export class Engine {
       this.paintMode.setBaseMode(this.projectMode === 'manual' ? 'flat' : (snap.paintBaseMode ?? 'generated'));
     }
     this.manualTerrain?.setEnabled(false);
-    this.manualTerrain?.load(this.projectMode === 'manual' ? snap.manualTerrain : null, { emit: false });
+    this.manualTerrain?.load(this.projectMode === 'manual'
+      ? { ...(snap.manualTerrain || {}), sculpt: snap.manualSculpt ?? null }
+      : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
 
     // Creator sources are serialised, not their generated render targets. A

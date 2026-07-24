@@ -38,6 +38,7 @@ export class EditorControls {
     this.autoOrbitSpeed = 0.045;   // radians per second
     this.inputMode = 'all';        // 'all' or 'orbitOnly' while paint mode owns left drag
     this.primaryPointerFilter = null; // optional editor-mode gate for left mouse / primary touch
+    this.wheelFilter = null;        // optional editor-mode gate for wheel gestures
     this._interacted = false;
     this._drag = null;             // { button, x, y }
     this._touches = new Map();      // active touch pointers for pan / pinch zoom
@@ -72,6 +73,7 @@ export class EditorControls {
     this._pinch = null;
     this.onFirstInteract = null;
     this.primaryPointerFilter = null;
+    this.wheelFilter = null;
   }
 
   setBoardSize(boardSize, center = null) {
@@ -246,6 +248,7 @@ export class EditorControls {
 
   _onWheel(e) {
     if (!this.enabled) return;
+    if (this.wheelFilter && !this.wheelFilter(e)) return;
     e.preventDefault();
     this._markInteract();
     this.goalRadius = Math.min(
