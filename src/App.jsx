@@ -307,6 +307,7 @@ export default function App() {
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
           onManualTerrainState: (s, meta) => {
             setManualTerrainState(s);
+            if (meta?.inspectorRequested) setActivePanel(null);
             if (meta?.terrainChanged || meta?.documentChanged) scheduleRecordRef.current?.();
           },
           onSplineState: (s) => { setSplineState(s); scheduleRecordRef.current?.(); },

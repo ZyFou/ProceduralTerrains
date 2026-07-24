@@ -167,7 +167,9 @@ export class ManualTerrainModeManager {
     if (this.enabled) return;
     this.enabled = true;
     this._previousControlInputMode = this.controls.inputMode ?? 'all';
-    this.controls.inputMode = 'orbitOnly';
+    this._previousPrimaryPointerFilter = this.controls.primaryPointerFilter ?? null;
+    this.controls.inputMode = 'all';
+    this.controls.primaryPointerFilter = (event) => this._canCameraPan(event);
     this.group.visible = true;
     this._syncVisuals();
     this._emit();
@@ -180,6 +182,7 @@ export class ManualTerrainModeManager {
     this.placementType = null;
     this.dragType = null;
     this.controls.inputMode = this._previousControlInputMode ?? 'all';
+    this.controls.primaryPointerFilter = this._previousPrimaryPointerFilter ?? null;
     this.controls.enabled = true;
     this.group.visible = false;
     this.preview.visible = false;
@@ -257,12 +260,15 @@ export class ManualTerrainModeManager {
     return next;
   }
 
-  selectShape(id) {
+  selectShape(id, { requestInspector = false } = {}) {
     const nextId = this.shapes.some((shape) => shape.id === id) ? id : null;
-    if (nextId === this.selectedId) return;
+    if (nextId === this.selectedId) {
+      if (requestInspector && nextId) this._emit({ inspectorRequested: true });
+      return;
+    }
     this.selectedId = nextId;
     this._syncVisuals();
-    this._emit();
+    this._emit({ inspectorRequested: requestInspector && !!nextId });
   }
 
   deleteShape(id = this.selectedId) {
@@ -425,17 +431,30 @@ export class ManualTerrainModeManager {
     return null;
   }
 
+  _canCameraPan(event) {
+    if (!this.enabled || this.placementType || this.dragType || this._draggingTransform || this.transform.axis) return false;
+    const point = this.picker.pickEvent(event);
+    return !point || !this._pickShapeAt(point);
+  }
+
   _handlePointerDown(event) {
     if (!this.enabled || event.button !== 0 || this._draggingTransform || this.transform.axis) return;
     const point = this.picker.pickEvent(event);
     if (!point) return;
-    event.preventDefault();
-    event.stopPropagation();
     if (this.placementType) {
+      event.preventDefault();
+      event.stopPropagation();
       this.addShape(this.placementType, point);
       return;
     }
-    this.selectShape(this._pickShapeAt(point)?.id ?? null);
+    const shape = this._pickShapeAt(point);
+    if (shape) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectShape(shape.id, { requestInspector: true });
+      return;
+    }
+    this.selectShape(null);
   }
 
   _handlePointerMove(event) {
@@ -492,9 +511,12 @@ export class ManualTerrainModeManager {
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
-    if (key === 'm') this.setTransformMode('translate');
-    else if (key === 'r') this.setTransformMode('rotate');
-    else if (key === 's') this.setTransformMode('scale');
+    if (key === 'm' || key === 'r' || key === 's') {
+      event.preventDefault();
+      if (key === 'm') this.setTransformMode('translate');
+      else if (key === 'r') this.setTransformMode('rotate');
+      else this.setTransformMode('scale');
+    }
   }
 
   update() {
@@ -511,6 +533,11 @@ export class ManualTerrainModeManager {
   }
 
   dispose() {
+    if (this.enabled) {
+      this.controls.inputMode = this._previousControlInputMode ?? 'all';
+      this.controls.primaryPointerFilter = this._previousPrimaryPointerFilter ?? null;
+      this.controls.enabled = true;
+    }
     this.domElement.removeEventListener('pointerdown', this._onPointerDown);
     this.domElement.removeEventListener('pointermove', this._onPointerMove);
     this.domElement.removeEventListener('dragover', this._onDragOver);

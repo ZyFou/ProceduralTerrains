@@ -37,6 +37,7 @@ export class EditorControls {
     this.autoOrbit = false;        // slow showcase spin (landing page)
     this.autoOrbitSpeed = 0.045;   // radians per second
     this.inputMode = 'all';        // 'all' or 'orbitOnly' while paint mode owns left drag
+    this.primaryPointerFilter = null; // optional editor-mode gate for left mouse / primary touch
     this._interacted = false;
     this._drag = null;             // { button, x, y }
     this._touches = new Map();      // active touch pointers for pan / pinch zoom
@@ -70,6 +71,7 @@ export class EditorControls {
     this._touches.clear();
     this._pinch = null;
     this.onFirstInteract = null;
+    this.primaryPointerFilter = null;
   }
 
   setBoardSize(boardSize, center = null) {
@@ -154,6 +156,7 @@ export class EditorControls {
 
   _onDown(e) {
     if (!this.enabled) return;
+    if ((e.button === 0 || e.pointerType === 'touch') && this.primaryPointerFilter && !this.primaryPointerFilter(e)) return;
     if (e.pointerType === 'touch') {
       if (this.inputMode === 'orbitOnly') return;
       this._markInteract();

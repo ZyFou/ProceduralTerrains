@@ -4249,7 +4249,7 @@ export class Engine {
   beginManualShapeDrag(type) { this.manualTerrain?.beginDrag(type); }
   endManualShapeDrag() { this.manualTerrain?.endDrag(); }
   setManualTransformMode(mode) { this.manualTerrain?.setTransformMode(mode); }
-  selectManualShape(id) { this.manualTerrain?.selectShape(id); }
+  selectManualShape(id) { this.manualTerrain?.selectShape(id, { requestInspector: !!id }); }
   updateManualShape(id, patch) { return this.manualTerrain?.updateShape(id, patch); }
   deleteManualShape(id) { return this.manualTerrain?.deleteShape(id); }
   duplicateManualShape(id) { return this.manualTerrain?.duplicateShape(id); }
