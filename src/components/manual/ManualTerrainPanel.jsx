@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -46,116 +46,31 @@ const SCULPT_TOOLS = [
   { id: 'erase', label: 'Erase', Icon: Eraser, description: 'Remove sculpted detail and reveal the procedural shapes.' },
 ];
 
-const PIXEL_PREVIEWS = {
-  mountain: [
-    '0000000010000000',
-    '0000000121000000',
-    '0000001222100000',
-    '0000012222210000',
-    '0000122233221000',
-    '0001222333322100',
-    '0012233333332210',
-    '0122333333333221',
-    '1223333333333222',
-    '2222222222222222',
-  ],
-  'sharp-peak': [
-    '0000000010000000',
-    '0000000131000000',
-    '0000001333100000',
-    '0000001333210000',
-    '0000013333221000',
-    '0000133333322100',
-    '0001333333332210',
-    '0013333333333221',
-    '0133333333333322',
-    '1333333333333332',
-  ],
-  ridge: [
-    '0000000000000000',
-    '0000100000010000',
-    '0001210000121000',
-    '0012321001232100',
-    '0123332123333210',
-    '1233332333333321',
-    '2333333333333332',
-    '3333333333333333',
-    '3333333333333333',
-    '2222222222222222',
-  ],
-  valley: [
-    '4444444444444444',
-    '4444444444444444',
-    '4422222222222244',
-    '4222222222222224',
-    '2222111111112222',
-    '2221100000011222',
-    '2211000000001122',
-    '2221100000011222',
-    '2222111111112222',
-    '4222222222222224',
-  ],
-  canyon: [
-    '4444444444444444',
-    '4222222222222224',
-    '2222222222222222',
-    '2222211111122222',
-    '2222110000112222',
-    '2221100000011222',
-    '2221100000011222',
-    '2222110000112222',
-    '2222211111122222',
-    '2222222222222222',
-  ],
-  plateau: [
-    '0000000000000000',
-    '0001111111111000',
-    '0012222222222100',
-    '0122222222222210',
-    '1222222222222221',
-    '2333333333333332',
-    '2333333333333332',
-    '2333333333333332',
-    '2333333333333332',
-    '2222222222222222',
-  ],
-  crater: [
-    '0000011111100000',
-    '0001222222210000',
-    '0012222222222100',
-    '0122233333222210',
-    '1223300000332221',
-    '1223000000032221',
-    '1223300000332221',
-    '0122233333222210',
-    '0012222222222100',
-    '0001222222210000',
-  ],
-};
-
-const PIXEL_COLORS = {
-  '0': 'transparent',
-  '1': 'var(--terrain-preview-highlight)',
-  '2': 'var(--terrain-preview-light)',
-  '3': 'var(--terrain-preview-mid)',
-  '4': 'var(--terrain-preview-ground)',
-};
+const MIN_LIBRARY_HEIGHT = 150;
+const MAX_LIBRARY_HEIGHT = 520;
+const MIN_VISIBLE_VIEWPORT_HEIGHT = 220;
 
 function TerrainShapePreview({ type }) {
-  const pixels = PIXEL_PREVIEWS[type] ?? PIXEL_PREVIEWS.mountain;
+  const previewType = MANUAL_SHAPE_CATALOG.some((shape) => shape.id === type) ? type : 'mountain';
+  const previewSrc = `${import.meta.env.BASE_URL}assets/manual-shapes/${previewType}.webp`;
 
   return (
-    <svg className="manual-pixel-preview" viewBox="0 0 64 32" aria-hidden="true" shapeRendering="crispEdges">
-      {pixels.flatMap((row, y) => [...row].map((pixel, x) => (
-        pixel === '0' ? null : <rect key={`${x}-${y}`} x={x * 4} y={y * 4} width="4" height="4" fill={PIXEL_COLORS[pixel]} />
-      )))}
-    </svg>
+    <img
+      className="manual-shape-preview"
+      src={previewSrc}
+      alt=""
+      aria-hidden="true"
+      draggable="false"
+      decoding="async"
+    />
   );
 }
 
 export default function ManualTerrainPanel({
   state,
   boardSize,
+  libraryHeight = 214,
+  onLibraryHeightChange,
   inspectorReplaced = false,
   toolsRailVisible = false,
   toolsRailEdge = 'left',
@@ -188,7 +103,71 @@ export default function ManualTerrainPanel({
   const topToolOffset = toolsRailVisible && toolsRailEdge === 'top' ? 58 : 0;
   const bottomToolOffset = toolsRailVisible && toolsRailEdge === 'bottom' ? 58 : 0;
   const inspectorWidth = 304;
+  const workspaceRef = useRef(null);
+  const libraryResizeRef = useRef(null);
 
+  const clampLibraryHeight = (height, target) => {
+    const workspace = target?.matches?.('.manual-terrain-workspace')
+      ? target
+      : target?.closest('.manual-terrain-workspace');
+    const workspaceHeight = workspace?.getBoundingClientRect().height ?? window.innerHeight;
+    const availableHeight = Math.max(
+      MIN_LIBRARY_HEIGHT,
+      workspaceHeight - bottomToolOffset - MIN_VISIBLE_VIEWPORT_HEIGHT,
+    );
+    return Math.round(Math.min(MAX_LIBRARY_HEIGHT, availableHeight, Math.max(MIN_LIBRARY_HEIGHT, height)));
+  };
+
+  const startLibraryResize = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    libraryResizeRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: libraryHeight,
+    };
+  };
+
+  const resizeLibrary = (event) => {
+    const resize = libraryResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    onLibraryHeightChange?.(clampLibraryHeight(
+      resize.startHeight + resize.startY - event.clientY,
+      event.currentTarget,
+    ));
+  };
+
+  const finishLibraryResize = (event) => {
+    const resize = libraryResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    libraryResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const resizeLibraryWithKeyboard = (event) => {
+    const step = event.shiftKey ? 32 : 12;
+    let nextHeight = null;
+    if (event.key === 'ArrowUp') nextHeight = libraryHeight + step;
+    if (event.key === 'ArrowDown') nextHeight = libraryHeight - step;
+    if (event.key === 'Home') nextHeight = MIN_LIBRARY_HEIGHT;
+    if (event.key === 'End') nextHeight = MAX_LIBRARY_HEIGHT;
+    if (nextHeight == null) return;
+    event.preventDefault();
+    onLibraryHeightChange?.(clampLibraryHeight(nextHeight, event.currentTarget));
+  };
+
+  useEffect(() => {
+    const fitLibraryToWorkspace = () => {
+      const nextHeight = clampLibraryHeight(libraryHeight, workspaceRef.current);
+      if (nextHeight !== libraryHeight) onLibraryHeightChange?.(nextHeight);
+    };
+    fitLibraryToWorkspace();
+    window.addEventListener('resize', fitLibraryToWorkspace);
+    return () => window.removeEventListener('resize', fitLibraryToWorkspace);
+  }, [libraryHeight, bottomToolOffset, onLibraryHeightChange]);
   const positionX = { label: 'Position X', min: -half, max: half, step: 1, digits: 0, unit: 'u' };
   const positionZ = { label: 'Position Z', min: -half, max: half, step: 1, digits: 0, unit: 'u' };
   const rotation = { label: 'Rotation', min: -180, max: 180, step: 1, digits: 0, unit: 'deg' };
@@ -217,6 +196,7 @@ export default function ManualTerrainPanel({
     left: sideToolOffset('left'),
     right: sideToolOffset('right') + (inspectorReplaced ? 0 : inspectorWidth),
     bottom: bottomToolOffset,
+    height: libraryHeight,
   };
   const inspectorStyle = {
     right: sideToolOffset('right'),
@@ -226,7 +206,7 @@ export default function ManualTerrainPanel({
   };
 
   return (
-    <section className={`manual-terrain-workspace${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Manual Terrain workspace">
+    <section ref={workspaceRef} className={`manual-terrain-workspace${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Manual Terrain workspace">
       <div className="manual-viewport-tools" role="toolbar" aria-label="Shape transform tools">
         {TRANSFORMS.map(({ id, label, Icon, shortcut }) => (
           <button
@@ -258,6 +238,22 @@ export default function ManualTerrainPanel({
       </div>
 
       <div className="manual-library-dock" style={libraryStyle}>
+        <div
+          className="manual-library-resizer"
+          role="separator"
+          aria-label="Resize Shape Library"
+          aria-orientation="horizontal"
+          aria-valuemin={MIN_LIBRARY_HEIGHT}
+          aria-valuemax={MAX_LIBRARY_HEIGHT}
+          aria-valuenow={Math.round(libraryHeight)}
+          tabIndex={0}
+          onPointerDown={startLibraryResize}
+          onPointerMove={resizeLibrary}
+          onPointerUp={finishLibraryResize}
+          onPointerCancel={finishLibraryResize}
+          onKeyDown={resizeLibraryWithKeyboard}
+          title="Drag to resize the Shape Library"
+        />
         <header className="manual-dock-header">
           <div className="node-dock-heading">
             <span className="node-dock-kicker">Manual</span>

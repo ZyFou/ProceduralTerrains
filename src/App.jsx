@@ -52,6 +52,19 @@ const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverl
 const SideDrawer = lazy(() => import('./components/ui/SideDrawer.jsx'));
 const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
 const NodeWorkspace = lazy(loadNodeWorkspace);
+const MANUAL_LIBRARY_HEIGHT_KEY = 'terrain-studio:manual-library-height';
+const DEFAULT_MANUAL_LIBRARY_HEIGHT = 214;
+
+const loadManualLibraryHeight = () => {
+  try {
+    const stored = Number(window.localStorage.getItem(MANUAL_LIBRARY_HEIGHT_KEY));
+    return Number.isFinite(stored)
+      ? Math.min(520, Math.max(150, stored))
+      : DEFAULT_MANUAL_LIBRARY_HEIGHT;
+  } catch {
+    return DEFAULT_MANUAL_LIBRARY_HEIGHT;
+  }
+};
 
 const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
 const yesNo = (value) => (value ? 'On' : 'Off');
@@ -187,6 +200,7 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
+  const [manualLibraryHeight, setManualLibraryHeight] = useState(loadManualLibraryHeight);
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
   const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0, colorSlotCount: 0 });
@@ -1483,6 +1497,12 @@ export default function App() {
   const toolsRailAttr = toolsRailLayout.edge ?? 'left';
   const drawerSideAttr = drawerLayout.side ?? 'right';
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MANUAL_LIBRARY_HEIGHT_KEY, String(Math.round(manualLibraryHeight)));
+    } catch { /* The layout still works when storage is unavailable. */ }
+  }, [manualLibraryHeight]);
+
   const handleToolsRailLayout = useCallback((next) => {
     setToolsRailLayout(next);
     saveToolsRailLayout(next);
@@ -1785,7 +1805,11 @@ export default function App() {
         data-tools-rail={toolsRailAttr}
         data-drawer-side={drawerSideAttr}
         data-node-palette-side={nodesWorkspaceActive && nodePaletteDock.detached ? nodePaletteDock.side : 'attached'}
-        style={{ '--node-palette-shell-width': `${nodePaletteDock.width || 208}px` }}
+        style={{
+          '--node-palette-shell-width': `${nodePaletteDock.width || 208}px`,
+          '--manual-library-height': `${manualLibraryHeight}px`,
+          '--manual-library-bottom-offset': toolsRailAttr === 'bottom' ? '58px' : '0px',
+        }}
       >
         {showToolPanels && (
           <LeftToolbar
@@ -1873,6 +1897,8 @@ export default function App() {
             <ManualTerrainPanel
               state={manualTerrainState}
               boardSize={boardSize}
+              libraryHeight={manualLibraryHeight}
+              onLibraryHeightChange={setManualLibraryHeight}
               inspectorReplaced={!!effectivePanel}
               toolsRailVisible={showToolPanels}
               toolsRailEdge={toolsRailAttr}
