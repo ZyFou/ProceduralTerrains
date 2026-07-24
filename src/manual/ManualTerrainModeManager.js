@@ -171,7 +171,7 @@ export class ManualTerrainModeManager {
     this.group.visible = true;
     this._syncVisuals();
     this._emit();
-    if (!silent) this.onToast?.('Manual Terrain — drag a shape onto the terrain, then use W / E / R to transform it');
+    if (!silent) this.onToast?.('Manual Terrain — drag a shape onto the terrain, then use M / R / S to transform it');
   }
 
   disable() {
@@ -492,9 +492,9 @@ export class ManualTerrainModeManager {
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
-    if (key === 'w') this.setTransformMode('translate');
-    else if (key === 'e') this.setTransformMode('rotate');
-    else if (key === 'r') this.setTransformMode('scale');
+    if (key === 'm') this.setTransformMode('translate');
+    else if (key === 'r') this.setTransformMode('rotate');
+    else if (key === 's') this.setTransformMode('scale');
   }
 
   update() {

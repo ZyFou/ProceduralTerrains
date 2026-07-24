@@ -281,7 +281,7 @@ export default function TopBar({
                 ? <><Eye size={14} strokeWidth={1.75} aria-hidden /> Show UI</>
                 : <><EyeOff size={14} strokeWidth={1.75} aria-hidden /> Hide UI</>}
             </button>
-            {projectMode === 'nodes' ? <>
+            {projectMode === 'nodes' || projectMode === 'manual' ? <>
               <div className="tb-menu-divider" role="separator" />
               <button
                 type="button"

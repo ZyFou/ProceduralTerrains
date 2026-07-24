@@ -1082,8 +1082,8 @@ export default function App() {
   const touchExplore = isInfinite || exploring;
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
-  const nodeToolsVisible = projectMode !== 'nodes' || uiPrefs.nodeToolsVisible !== false;
-  const showToolPanels = !previewMode && !paintMode && !manualMode && !planetExploring && nodeToolsVisible;
+  const nodeToolsVisible = !['nodes', 'manual'].includes(projectMode) || uiPrefs.nodeToolsVisible !== false;
+  const showToolPanels = !previewMode && !paintMode && !planetExploring && nodeToolsVisible;
   const searchEnabled = showToolPanels && projectMode === 'procedural';
   const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
 
@@ -1422,7 +1422,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [uiSettingsOpen]);
 
-  const projectPanelAvailable = (id) => projectMode !== 'nodes' || NODE_PANEL_IDS.includes(id);
+  const projectPanelAvailable = (id) => !['nodes', 'manual'].includes(projectMode) || NODE_PANEL_IDS.includes(id);
   const togglePanel = (id) => {
     if (!projectPanelAvailable(id)) return;
     setActivePanel((cur) => (cur === id ? null : id));
@@ -1745,7 +1745,7 @@ export default function App() {
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
             showLabels={uiPrefs.toolbarLabels}
-            panelIds={projectMode === 'nodes' ? NODE_PANEL_IDS : undefined}
+            panelIds={['nodes', 'manual'].includes(projectMode) ? NODE_PANEL_IDS : undefined}
           />
         )}
 
@@ -1822,6 +1822,9 @@ export default function App() {
             <ManualTerrainPanel
               state={manualTerrainState}
               boardSize={boardSize}
+              inspectorReplaced={!!effectivePanel}
+              toolsRailVisible={showToolPanels}
+              toolsRailEdge={toolsRailAttr}
               onPlacementType={(type) => engine().setManualPlacementType(type)}
               onBeginDrag={(type) => engine().beginManualShapeDrag(type)}
               onEndDrag={() => engine().endManualShapeDrag()}
