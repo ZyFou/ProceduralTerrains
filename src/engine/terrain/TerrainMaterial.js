@@ -48,7 +48,11 @@ varying float vWall;
 varying float vWallMesh;
 
 void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vec4 localPosition = vec4(position, 1.0);
+  #ifdef USE_INSTANCING
+    localPosition = instanceMatrix * localPosition;
+  #endif
+  vec4 wp = modelMatrix * localPosition;
   float h = heightAt(wp.xz);
 
   float skirt = aSkirt;

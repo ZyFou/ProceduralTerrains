@@ -28,6 +28,8 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(infinite.fragmentShader).toBe(tile.fragmentShader);
     expect(infinite.userData.minimalFragment).not.toBe(true);
     expect(infinite.defines.INFINITE_MODE).toBeUndefined();
+    expect(infinite.vertexShader).toContain('#ifdef USE_INSTANCING');
+    expect(infinite.vertexShader).toContain('instanceMatrix * localPosition');
   });
 
   it('uses one runtime mode uniform instead of preprocessor variants', () => {

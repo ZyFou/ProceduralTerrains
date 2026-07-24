@@ -6370,6 +6370,8 @@ export class Engine {
           visibleChunks: this.infiniteWorld ? this.infiniteWorld.visibleChunkCount : 0,
           culledChunks: this.infiniteWorld ? this.infiniteWorld.culledChunkCount : 0,
           lodCounts: this.infiniteWorld ? [...this.infiniteWorld.lodCounts] : [0, 0, 0, 0],
+          pendingChunks: this.infiniteWorld ? this.infiniteWorld.pendingChunkCount : 0,
+          terrainDrawCalls: this.infiniteWorld ? this.infiniteWorld.terrainDrawCallCount : 0,
         });
       }
       this.cb.onStats({ fps: this._fps, triangles, drawCalls });
@@ -6570,6 +6572,12 @@ export class Engine {
         renderDistance: w.viewRadius * w.chunkSize,
         lodThresholds: Array.isArray(w.lodThresholds) ? [...w.lodThresholds] : [],
         lastChunkGenMs: this.profiler.getMetric('lastChunkGenMs') ?? null,
+        renderer: 'instanced',
+        terrainDrawCalls: w.terrainDrawCallCount,
+        pendingChunks: w.pendingChunkCount,
+        createdThisFrame: w.createdChunkCount,
+        removedThisFrame: w.removedChunkCount,
+        streamTimeMs: w.streamTimeMs,
       };
       diag.culling = {
         total: w.activeChunkCount,

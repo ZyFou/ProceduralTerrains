@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
-import { cullChunks } from './InfiniteTerrainCulling.js';
+import { createCullingContext, cullChunks } from './InfiniteTerrainCulling.js';
 
 // ============================================================================
 // ONE fixed terrain board. The board never moves, never streams, and is
@@ -622,27 +622,36 @@ export class TerrainBoard {
       return;
     }
 
+    camera.updateMatrixWorld(true);
+    const cullingContext = createCullingContext(
+      camera,
+      this.chunkSize,
+      this.behindCameraCulling,
+      this.cullingAggressiveness,
+      {},
+      -this._skirtDepth
+    );
     const chunkResult = cullChunks(
       this._activeChunks(),
       camera,
       this.chunkSize,
       this._maxHeight,
       this.behindCameraCulling,
-      this.cullingAggressiveness
+      this.cullingAggressiveness,
+      cullingContext
     );
     let visible = chunkResult.visibleCount;
     let culled = chunkResult.culledCount;
 
     if (this._mergedNodes.length) {
-      // Folded nodes vary in size; use the board span as a conservative
-      // bounding-sphere radius so big folded blocks are never wrongly culled.
       const mergeResult = cullChunks(
         this._mergedNodes,
         camera,
-        this.boardSize,
+        this.chunkSize,
         this._maxHeight,
         this.behindCameraCulling,
-        this.cullingAggressiveness
+        this.cullingAggressiveness,
+        cullingContext
       );
       visible += mergeResult.visibleCount;
       culled += mergeResult.culledCount;

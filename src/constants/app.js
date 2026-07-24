@@ -1,5 +1,5 @@
 // Single source of truth for the app version. Display it everywhere from here.
-export const APP_VERSION = '1.0.2-b';
+export const APP_VERSION = '1.0.3-b';
 export const APP_NAME = 'Procedural Terrains';
 export const GITHUB_REPO_URL = 'https://github.com/ZyFou/ProceduralTerrains';
 export const AUTHOR_NAME = 'ZyFod';

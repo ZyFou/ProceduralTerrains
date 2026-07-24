@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
-import { cullChunks } from './InfiniteTerrainCulling.js';
+import { createCullingContext, cullChunks } from './InfiniteTerrainCulling.js';
+import { ChunkStreamScheduler, getRadialOffsets } from './ChunkStreamScheduler.js';
+import { InfiniteTerrainBatches } from './InfiniteTerrainBatches.js';
 import { MergeQuadtree } from './MergeQuadtree.js';
 
 // ============================================================================
 // InfiniteWorld: streams terrain chunks around the player camera.
-// Chunks are placed on an integer grid (cx, cz). Each chunk is a THREE.Mesh
-// using the shared infinite-mode terrain material and one of 4 shared LOD
-// geometries. Chunks outside the view radius are disposed.
+// Chunks are lightweight logical records on an integer grid (cx, cz). Visible
+// records are compacted into four InstancedMesh batches, one per LOD, keeping
+// terrain draw calls and scene-graph objects constant while the player moves.
 // ============================================================================
 
 const LOD_RESOLUTIONS = [64, 32, 16, 8];
@@ -40,6 +42,7 @@ export class InfiniteWorld {
     this.skirtDepth = opts.skirtDepth;
     this.seaLevel = opts.seaLevel ?? 42;
     this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
+    this.chunkStreamBudgetMs = 1.5;
     this.lodSegments = opts.lodSegments ? [...opts.lodSegments] : [...LOD_RESOLUTIONS];
 
     // Culling options
@@ -92,35 +95,55 @@ export class InfiniteWorld {
       : [...DEFAULT_LOD_DISTANCES];           // multiplied by chunkSize
     this._lodMultiplier = 1.0;
     this.lodThresholds = this._baseLodThresholds.map(m => m * this.chunkSize);
+    this._lodThresholds2 = this.lodThresholds.map(t => t * t);
 
-    // chunk map: "cx,cz" -> { mesh, cx, cz, center, lod }
+    // chunk map: "cx,cz" -> { cx, cz, centerX, centerZ, lod, visible }
     this.chunks = new Map();
 
     // player chunk tracking
     this._lastPlayerCX = Infinity;
     this._lastPlayerCZ = Infinity;
 
-    // chunk loading queue
-    this._pendingChunks = [];
+    // Time-budgeted nearest-first chunk streaming queue.
+    this.streamScheduler = new ChunkStreamScheduler({
+      budgetMs: this.chunkStreamBudgetMs,
+    });
 
-    // quadtree merge layer (folds far chunk blocks into single meshes)
+    // Instancing already solves the draw-call problem that MergeQuadtree was
+    // built for. Keep the public merge object for settings/diagnostics, but do
+    // not build or visit its tree on the instanced path.
     this.merge = new MergeQuadtree(this.group, this.terrainMaterial);
     this.merge.setChunkSize(this.chunkSize);
+    this.merge.setOptions({ enabled: false });
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
+
+    this.batches = new InfiniteTerrainBatches({
+      group: this.group,
+      material: this.terrainMaterial,
+      geometries: this.geometries,
+      capacity: getRadialOffsets(this.viewRadius + 2).length,
+    });
+    this._batchesDirty = true;
+    this._cullingContext = {};
 
     // stats
     this.activeChunkCount = 0;
     this.visibleChunkCount = 0;
     this.culledChunkCount = 0;
     this.lodCounts = [0, 0, 0, 0];
-
-    this._tmp = new THREE.Vector3();
+    this.pendingChunkCount = 0;
+    this.createdChunkCount = 0;
+    this.removedChunkCount = 0;
+    this.streamTimeMs = 0;
+    this.terrainDrawCallCount = 0;
   }
 
   /** Tune the merge layer (performance settings). */
   setMergeOptions(opts) {
-    this.merge.setOptions(opts);
+    // Merge meshes and instanced batches solve the same draw-call problem.
+    // Building both would add traversal/rebuild cost without reducing draws.
+    this.merge.setOptions({ ...opts, enabled: false });
   }
 
   /** Toggle the merge-debug surface tint (drives the shared uMergeDebug). */
@@ -157,6 +180,9 @@ export class InfiniteWorld {
     this.viewRadius = r;
     this._recalcLodThresholds();
     this._updateWaterSize();
+    if (this.batches.ensureCapacity(getRadialOffsets(this.viewRadius + 2).length)) {
+      this._batchesDirty = true;
+    }
     // Force recalc on next update
     this._lastPlayerCX = Infinity;
     this._lastPlayerCZ = Infinity;
@@ -185,20 +211,29 @@ export class InfiniteWorld {
     this.lodThresholds = this._baseLodThresholds.map(
       m => m * this.chunkSize * this._lodMultiplier * this._budgetScale
     );
+    this._lodThresholds2 = this.lodThresholds.map(t => t * t);
   }
 
   /**
-   * Change max chunk creates per frame (performance tuning). 0 = instant.
+   * Change max chunk creates per frame. 0 selects the automatic time-budgeted
+   * scheduler; it no longer means unbounded work in one frame.
    */
   setMaxCreatesPerFrame(n) {
     const v = Number(n);
     if (!Number.isFinite(v)) {
       this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
     } else if (v <= 0) {
-      this.maxCreatesPerFrame = Infinity;
+      this.maxCreatesPerFrame = DEFAULT_MAX_CREATES;
     } else {
       this.maxCreatesPerFrame = Math.max(1, Math.round(v));
     }
+  }
+
+  setChunkStreamBudget(ms) {
+    const value = Number(ms);
+    if (!Number.isFinite(value) || value <= 0) return;
+    this.chunkStreamBudgetMs = Math.min(8, Math.max(0.25, value));
+    this.streamScheduler.budgetMs = this.chunkStreamBudgetMs;
   }
 
   /**
@@ -229,9 +264,8 @@ export class InfiniteWorld {
     this.geometries[lod] = geo;
     this.lodSegments[lod] = res;
 
-    for (const chunk of this.chunks.values()) {
-      if (chunk.lod === lod) chunk.mesh.geometry = geo;
-    }
+    this.batches.updateGeometry(lod, geo);
+    this._batchesDirty = true;
     old.dispose();
   }
 
@@ -305,18 +339,18 @@ export class InfiniteWorld {
     // Process at most one gradual LOD geometry rebuild per frame
     this._processLodRebuild();
 
-    // Fold far chunk blocks into single meshes (quadtree). Distance scale
-    // mirrors the active LOD scaling so it tracks the quality preset.
-    this.merge.distanceScale = this._lodMultiplier * this._budgetScale;
-    this.merge.update(this.chunks.values(), playerPos);
-    this.mergedGroupCount = this.merge.mergedNodes.length;
-    this.savedDrawCalls = Math.max(0, this.merge.hiddenCount - this.merge.mergedNodes.length);
-
-    // Update LOD for the chunks still rendered individually (skip folded ones)
+    // Select logical LODs, then cull and compact only visible records into the
+    // four persistent GPU batches.
     this._updateLOD(playerPos);
-
-    // Cull invisible terrain meshes (chunks + folded nodes)
     if (camera) this._cull(camera);
+    if (this._batchesDirty) {
+      const batchCounts = this.batches.commit(this.chunks.values(), this.chunkSize);
+      this.terrainDrawCallCount = batchCounts.reduce(
+        (total, count) => total + (count > 0 ? 1 : 0),
+        0
+      );
+      this._batchesDirty = false;
+    }
   }
 
   /** Frustum + behind-camera cull for active chunks and folded node meshes. */
@@ -324,38 +358,34 @@ export class InfiniteWorld {
     if (!this.cullingEnabled) {
       let visibleCount = 0;
       for (const chunk of this.chunks.values()) {
-        if (chunk.merged) { if (chunk.mesh.visible) chunk.mesh.visible = false; continue; }
-        if (!chunk.mesh.visible) chunk.mesh.visible = true;
+        if (chunk.visible === false) {
+          chunk.visible = true;
+          this._batchesDirty = true;
+        }
         visibleCount++;
       }
-      for (const node of this.merge.mergedNodes) { node.mesh.visible = true; visibleCount++; }
       this.visibleChunkCount = visibleCount;
       this.culledChunkCount = 0;
       return;
     }
 
-    const chunkResult = cullChunks(
-      this._activeChunks(), camera, this.chunkSize,
-      this.maxHeight, this.behindCameraCulling, this.cullingAggressiveness
+    camera.updateMatrixWorld(true);
+    createCullingContext(
+      camera,
+      this.chunkSize,
+      this.behindCameraCulling,
+      this.cullingAggressiveness,
+      this._cullingContext,
+      -this.skirtDepth
     );
-    let visible = chunkResult.visibleCount;
-    let culled = chunkResult.culledCount;
-
-    if (this.merge.mergedNodes.length) {
-      const r = this.viewRadius * this.chunkSize;   // conservative bound for big folds
-      const mergeResult = cullChunks(
-        this.merge.mergedNodes, camera, r,
-        this.maxHeight, this.behindCameraCulling, this.cullingAggressiveness
-      );
-      visible += mergeResult.visibleCount;
-      culled += mergeResult.culledCount;
-    }
-    this.visibleChunkCount = visible;
-    this.culledChunkCount = culled;
-  }
-
-  *_activeChunks() {
-    for (const chunk of this.chunks.values()) if (!chunk.merged) yield chunk;
+    const chunkResult = cullChunks(
+      this.chunks, camera, this.chunkSize,
+      this.maxHeight, this.behindCameraCulling, this.cullingAggressiveness,
+      this._cullingContext
+    );
+    if (chunkResult.changedCount) this._batchesDirty = true;
+    this.visibleChunkCount = chunkResult.visibleCount;
+    this.culledChunkCount = chunkResult.culledCount;
   }
 
   /**
@@ -364,29 +394,17 @@ export class InfiniteWorld {
    */
   _recalcChunkSet(pcx, pcz) {
     const r = this.viewRadius;
-    const r2 = r * r;
     const unloadR2 = (r + 2) * (r + 2);  // hysteresis buffer
 
-    // Build set of desired chunk keys
-    const desired = new Set();
-    this._pendingChunks = [];
-
-    for (let dz = -r; dz <= r; dz++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dz * dz > r2) continue;  // circular radius
-        const cx = pcx + dx;
-        const cz = pcz + dz;
-        const key = `${cx},${cz}`;
-        desired.add(key);
-        if (!this.chunks.has(key)) {
-          // Priority: closer chunks first
-          this._pendingChunks.push({ cx, cz, dist2: dx * dx + dz * dz });
-        }
-      }
+    const pending = [];
+    for (const { dx, dz, dist2 } of getRadialOffsets(r)) {
+      const cx = pcx + dx;
+      const cz = pcz + dz;
+      const key = `${cx},${cz}`;
+      if (!this.chunks.has(key)) pending.push({ cx, cz, dist2 });
     }
-
-    // Sort pending by distance (closest first)
-    this._pendingChunks.sort((a, b) => a.dist2 - b.dist2);
+    this.streamScheduler.reset(pending);
+    this.pendingChunkCount = pending.length;
 
     // Remove chunks outside unload radius
     let removed = 0;
@@ -394,62 +412,55 @@ export class InfiniteWorld {
       const dx = chunk.cx - pcx;
       const dz = chunk.cz - pcz;
       if (dx * dx + dz * dz > unloadR2) {
-        this.group.remove(chunk.mesh);
         this.chunks.delete(key);
         removed++;
       }
     }
-    if (removed) this.merge.markDirty();   // chunk set changed → rebuild quadtree
+    this.removedChunkCount = removed;
+    if (removed) this._batchesDirty = true;
   }
 
   /**
    * Create a batch of pending chunks (up to maxCreatesPerFrame).
    */
   _createPending() {
-    let created = 0;
-    while (this._pendingChunks.length > 0 && created < this.maxCreatesPerFrame) {
-      const { cx, cz } = this._pendingChunks.shift();
+    const result = this.streamScheduler.process(({ cx, cz }) => {
       const key = `${cx},${cz}`;
-      if (this.chunks.has(key)) continue;  // already exists (edge case)
-
-      const mesh = new THREE.Mesh(this.geometries[3], this.terrainMaterial);
-      mesh.position.set(cx * this.chunkSize, 0, cz * this.chunkSize);
-      mesh.scale.setScalar(this.chunkSize);
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      mesh.updateMatrixWorld(true);
-
-      this.group.add(mesh);
+      if (this.chunks.has(key)) return false;
       this.chunks.set(key, {
-        mesh,
         cx, cz,
-        center: new THREE.Vector3(
-          cx * this.chunkSize + this.chunkSize / 2,
-          0,
-          cz * this.chunkSize + this.chunkSize / 2
-        ),
+        centerX: cx * this.chunkSize + this.chunkSize / 2,
+        centerZ: cz * this.chunkSize + this.chunkSize / 2,
         lod: 3,
-        merged: false,
+        visible: true,
       });
-      created++;
-    }
-    if (created) this.merge.markDirty();   // chunk set changed → rebuild quadtree
+      return true;
+    }, {
+      budgetMs: this.chunkStreamBudgetMs,
+      maxItems: this.maxCreatesPerFrame,
+    });
+    this.createdChunkCount = result.created;
+    this.pendingChunkCount = result.pendingCount;
+    this.streamTimeMs = result.elapsedMs;
+    if (result.created) this._batchesDirty = true;
   }
 
   /**
    * Update LOD level per chunk based on distance from player.
    */
   _updateLOD(playerPos) {
-    const [t0, t1, t2] = this.lodThresholds;
+    const [t0, t1, t2] = this._lodThresholds2;
     const counts = [0, 0, 0, 0];
 
     for (const chunk of this.chunks.values()) {
-      if (chunk.merged) continue;   // folded into a merged node mesh
-      const d = this._tmp.copy(chunk.center).sub(playerPos).length();
-      const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
+      const dx = chunk.centerX - playerPos.x;
+      const dy = -playerPos.y;
+      const dz = chunk.centerZ - playerPos.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const lod = d2 < t0 ? 0 : d2 < t1 ? 1 : d2 < t2 ? 2 : 3;
       if (lod !== chunk.lod) {
         chunk.lod = lod;
-        chunk.mesh.geometry = this.geometries[lod];
+        this._batchesDirty = true;
       }
       counts[lod]++;
     }
@@ -481,6 +492,7 @@ export class InfiniteWorld {
    */
   setVisible(visible) {
     this.group.visible = visible;
+    this.batches.setVisible(visible);
     this.waterPlane.visible = visible && this.seaLevel > 0.5;
   }
 
@@ -489,11 +501,9 @@ export class InfiniteWorld {
    */
   dispose() {
     this.merge.dispose();
-    for (const chunk of this.chunks.values()) {
-      this.group.remove(chunk.mesh);
-    }
+    this.batches.dispose();
     this.chunks.clear();
-    this._pendingChunks = [];
+    this.streamScheduler.clear();
     this._lodRebuildQueue = [];
 
     for (const geo of this.geometries) {
