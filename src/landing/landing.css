@@ -1035,6 +1035,7 @@ body:has(.landing-overlay) {
 
 /* ---- Footer ---- */
 .lp-footer {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1044,6 +1045,10 @@ body:has(.landing-overlay) {
   padding: 14px 0 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   background: #05060a;
+  /* The footer remains aligned with the content column, while its dark surface
+     extends across the viewport at every breakpoint. */
+  box-shadow: 0 0 0 100vmax #05060a;
+  clip-path: inset(0 -100vmax);
 }
 .lp--profile .lp-footer,
 .lp--community .lp-footer {
