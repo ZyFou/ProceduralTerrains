@@ -55,4 +55,28 @@ describe('project sync state', () => {
     const binding = { ...syncBindingFor(localProject, cloud()), cloudProjectId: 'deleted-cloud-copy' };
     expect(getProjectSyncState({ localProject, binding })).toBe('cloud-missing');
   });
+
+  it('preserves cloud visibility alongside each local project sync state', () => {
+    const privateLocal = local('private-local');
+    const unlistedLocal = local('unlisted-local');
+    const publicLocal = local('public-local');
+    const privateCloud = { ...cloud('private-cloud', 1, privateLocal.id), visibility: 'private' };
+    const unlistedCloud = { ...cloud('unlisted-cloud', 1, unlistedLocal.id), visibility: 'unlisted' };
+    const publicCloud = { ...cloud('public-cloud', 1, publicLocal.id), visibility: 'public' };
+    const entries = buildUnifiedProjectIndex({
+      localProjects: [privateLocal, unlistedLocal, publicLocal],
+      cloudProjects: [privateCloud, unlistedCloud, publicCloud],
+      bindings: [
+        syncBindingFor(privateLocal, privateCloud),
+        syncBindingFor(unlistedLocal, unlistedCloud),
+        syncBindingFor(publicLocal, publicCloud),
+      ],
+    });
+
+    expect(entries.map((entry) => [entry.localProject.id, entry.state, entry.cloudProject.visibility])).toEqual([
+      ['private-local', 'synced', 'private'],
+      ['unlisted-local', 'synced', 'unlisted'],
+      ['public-local', 'synced', 'public'],
+    ]);
+  });
 });

@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, Copy, EllipsisVertical, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, EllipsisVertical, Eye, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
-import { projectStore, normalizeProject } from '../project/ProjectStore.js';
+import { projectStore, projectSyncStore, normalizeProject } from '../project/ProjectStore.js';
+import { projectApi } from '../project/projectApi.js';
+import { buildUnifiedProjectIndex } from '../project/projectSync.js';
 import { PROJECT_TEMPLATES, getProjectTemplate, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
 import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
 import { Logo } from './shared.jsx';
@@ -17,6 +19,7 @@ import AdminDashboard from '../admin/AdminDashboard.jsx';
 import ConfidentialityPage from '../legal/ConfidentialityPage.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
+const VISIBILITY_ICONS = { private: Lock, unlisted: Eye, public: Globe2 };
 const AUTH_VIEWS = new Set(['login', 'register']);
 const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'admin', 'confidentiality']);
 
@@ -53,6 +56,9 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
   const { showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [syncBindings, setSyncBindings] = useState([]);
+  const [cloudRefreshToken, setCloudRefreshToken] = useState(0);
   const [view, setView] = useState(() => viewFromHash() ?? 'home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [templateKind, setTemplateKind] = useState('procedural');
@@ -76,6 +82,33 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     window.addEventListener('terrain-projects:changed', load);
     return () => window.removeEventListener('terrain-projects:changed', load);
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const loadBindings = () => projectSyncStore.list()
+      .then((items) => { if (!cancelled) setSyncBindings(items); })
+      .catch(() => { if (!cancelled) setSyncBindings([]); });
+    const refresh = () => {
+      loadBindings();
+      setCloudRefreshToken((current) => current + 1);
+    };
+    loadBindings();
+    window.addEventListener('terrain-project-sync:changed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('terrain-project-sync:changed', refresh);
+    };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    if (!user || view !== 'home') {
+      if (!user) setCloudProjects([]);
+      return () => { cancelled = true; };
+    }
+    projectApi.listMine()
+      .then((result) => { if (!cancelled) setCloudProjects(result.projects); })
+      .catch(() => { if (!cancelled) setCloudProjects([]); });
+    return () => { cancelled = true; };
+  }, [cloudRefreshToken, user, view]);
   useEffect(() => {
     if (!bootReady) return undefined;
     const onThumbnail = (event) => {
@@ -104,6 +137,11 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   }, []);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const recentProjectCloudEntries = useMemo(() => new Map(
+    buildUnifiedProjectIndex({ localProjects: projects, cloudProjects, bindings: syncBindings })
+      .filter((entry) => entry.localProject)
+      .map((entry) => [entry.localProject.id, entry]),
+  ), [cloudProjects, projects, syncBindings]);
 
   const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -221,10 +259,22 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     finally { setProjectActionBusy(false); setDeleteTarget(null); }
   };
 
-  const renderProjectCard = (project) => (
+  const renderProjectCard = (project) => {
+    const cloudEntry = recentProjectCloudEntries.get(project.id);
+    const cloudProject = cloudEntry?.cloudProject;
+    const isSynced = cloudEntry?.state === 'synced';
+    const VisibilityIcon = VISIBILITY_ICONS[cloudProject?.visibility] || Lock;
+    const syncLabel = isSynced ? 'Synced to cloud' : 'Not synced to cloud';
+    const visibilityLabel = cloudProject?.visibility ? `Cloud visibility: ${cloudProject.visibility}` : '';
+    const SyncIcon = isSynced ? CloudCheck : CloudOff;
+    return (
     <article className={`lp-card${menuFor === project.id ? ' menu-open' : ''}`} key={project.id}>
       <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!bootReady || exiting}>
         <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
+        <span role="img" className={`lp-card-cloud-badge${isSynced ? ' synced' : ' unsynced'}`} title={visibilityLabel ? `${syncLabel} · ${visibilityLabel}` : syncLabel} aria-label={visibilityLabel ? `${syncLabel}. ${visibilityLabel}.` : syncLabel}>
+          <SyncIcon size={13} aria-hidden />
+          {cloudProject && <span className={`lp-card-visibility-icon ${cloudProject.visibility}`}><VisibilityIcon size={12} aria-hidden /></span>}
+        </span>
         <span className={`lp-template-kind-badge ${project.terrain.editorMode}`}>
           {project.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}
         </span>
@@ -250,7 +300,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </div>
       )}
     </article>
-  );
+    );
+  };
 
   const emptyProjects = (
     <div className="lp-empty">

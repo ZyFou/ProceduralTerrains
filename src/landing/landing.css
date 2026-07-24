@@ -873,6 +873,12 @@ body:has(.landing-overlay) {
 .lp-project-kind.nodes { border-color: rgba(37,99,235,.35); background: rgba(37,99,235,.12); color: #8bb4ff; }
 .lp-template-kind-badge { position: absolute; top: 12px; right: 12px; padding: 3px 6px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; background: rgba(5,5,5,.82); color: var(--text-muted); font: 650 7.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(6px); }
 .lp-template-kind-badge.nodes { border-color: rgba(37,99,235,.4); background: rgba(13,23,44,.88); color: #8bb4ff; }
+.lp-card-cloud-badge { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; background: rgba(5,5,5,.82); backdrop-filter: blur(6px); }
+.lp-card-cloud-badge.synced { border-color: rgba(34,197,94,.4); color: #81dca3; }
+.lp-card-cloud-badge.unsynced { border-color: rgba(245,158,11,.38); color: #f0c56a; }
+.lp-card-visibility-icon { display: grid; padding-left: 3px; border-left: 1px solid currentColor; color: var(--text-muted); }
+.lp-card-visibility-icon.unlisted { color: #f0c56a; }
+.lp-card-visibility-icon.public { color: #81dca3; }
 .lp-card-menu-btn {
   position: absolute;
   right: 6px;
