@@ -1308,7 +1308,7 @@ export class Engine {
     }
   }
 
-  async _restoreRealWorldSource(input) {
+  async _restoreRealWorldSource(input, { onProgress } = {}) {
     const source = normalizeRealWorldSource(input);
     if (!source) return false;
     return this._loadRealWorldHeightmap({
@@ -1316,7 +1316,7 @@ export class Engine {
       name: source.name,
       bbox: { ...source.bbox },
       zoom: source.zoom,
-    }, { persistedSource: source, silent: true });
+    }, { persistedSource: source, silent: true, onProgress });
   }
 
   /**
@@ -5318,7 +5318,7 @@ export class Engine {
     this.cb.onToast('Seed saved as JSON');
   }
 
-  loadSeedJSON(json, { silent = false } = {}) {
+  loadSeedJSON(json, { silent = false, onRealWorldProgress } = {}) {
     const src = json?.params && typeof json.params === 'object' ? json.params : json;
     if (!src || typeof src !== 'object' || !('seed' in src)) {
       this.cb.onToast('Not a valid terrain seed file');
@@ -5400,7 +5400,9 @@ export class Engine {
     this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
     this.terrainAnalysis?.load(json?.creatorTools?.analysis);
     return ready.then(async (result) => {
-      if (realWorldSource) await this._restoreRealWorldSource(realWorldSource);
+      if (realWorldSource) {
+        await this._restoreRealWorldSource(realWorldSource, { onProgress: onRealWorldProgress });
+      }
       if (!silent) this.cb.onToast(`Loaded seed ${loadedSeed}`);
       return result;
     });

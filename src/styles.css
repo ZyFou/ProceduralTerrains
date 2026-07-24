@@ -363,6 +363,35 @@ body {
 }
 .tb-menu.open { display: flex; }
 .tb-menu-with-shortcuts { min-width: 238px; }
+.tb-project-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px 7px;
+}
+.tb-project-name-field span {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tb-project-name-field input {
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-input, var(--bg-panel-soft));
+  color: var(--text-main);
+  padding: 0 8px;
+  font: 12px var(--font);
+  outline: none;
+}
+.tb-project-name-field input:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
 .tb-menu button {
   display: flex;
   align-items: center;

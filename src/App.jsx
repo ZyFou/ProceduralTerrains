@@ -34,6 +34,7 @@ import PaintPanel from './components/paint/PaintPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
 import { classifyToast } from './components/ui/Toast.jsx';
+import { usePopup } from './components/ui/PopupProvider.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
@@ -86,12 +87,14 @@ export default function App() {
   const minimapOverlayRef = useRef(null);
   const engineRef = useRef(null);
   const activeProjectRef = useRef(null);
+  const projectNameRef = useRef('Untitled terrain');
   const templatePreviewQueueRef = useRef(Promise.resolve());
   const landingPreviewActiveRef = useRef(true);
   const landingPreviewSessionRef = useRef(0);
 
   const loading = useLoading();
   const landing = useLanding();
+  const { showPopup } = usePopup();
   const landingRef = useRef(landing);
   landingRef.current = landing;
   const loadingRef = useRef(loading);
@@ -154,6 +157,7 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [webglError, setWebglError] = useState(null);
   const [activeProject, setActiveProject] = useState(null);
+  const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
@@ -391,53 +395,100 @@ export default function App() {
   const setCurrentProject = useCallback((project) => {
     activeProjectRef.current = project;
     setActiveProject(project);
+    const nextName = project?.metadata?.name ?? 'Untitled terrain';
+    projectNameRef.current = nextName;
+    setProjectName(nextName);
+  }, []);
+
+  const updateProjectName = useCallback((value) => {
+    const nextName = String(value ?? '').slice(0, 120);
+    projectNameRef.current = nextName;
+    setProjectName(nextName);
   }, []);
 
   const saveCurrentProject = useCallback(async (metadata = null) => {
     const eng = engineRef.current;
-    if (!eng) return null;
     const current = activeProjectRef.current;
-    let thumbnail = null;
-    try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
-    if (!thumbnail) {
-      try { thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) || null; } catch { /* canvas capture is best effort */ }
+    const name = String(metadata?.name ?? projectNameRef.current ?? current?.metadata?.name ?? 'Untitled terrain').trim() || 'Untitled terrain';
+    if (!eng) {
+      const message = `Could not save ${name}: the terrain editor is not ready.`;
+      showToast(message, 'error');
+      showPopup(message, { type: 'error', title: 'Save failed' });
+      return null;
     }
-    thumbnail ||= current?.metadata?.thumbnail ?? null;
-    const project = normalizeProject({
-      id: current?.id,
-      metadata: {
-        ...current?.metadata,
-        ...(metadata ?? {}),
-        thumbnail,
-      },
-      terrain: eng.createProjectPayload(),
-      exportHistory: current?.exportHistory ?? [],
-    });
-    const saved = await projectStore.save(project);
-    setCurrentProject(saved);
-    showToast(`Saved ${saved.metadata.name}`, 'success');
-    return saved;
-  }, [setCurrentProject, showToast]);
+
+    try {
+      let thumbnail = null;
+      try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
+      if (!thumbnail) {
+        try { thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) || null; } catch { /* canvas capture is best effort */ }
+      }
+      thumbnail ||= current?.metadata?.thumbnail ?? null;
+      const project = normalizeProject({
+        id: current?.id,
+        metadata: {
+          ...current?.metadata,
+          ...(metadata ?? {}),
+          name,
+          thumbnail,
+        },
+        terrain: eng.createProjectPayload(),
+        exportHistory: current?.exportHistory ?? [],
+      });
+      const saved = await projectStore.save(project);
+      setCurrentProject(saved);
+      showToast(`Saved ${saved.metadata.name}`, 'success');
+      showPopup(`${saved.metadata.name} was saved successfully.`, { type: 'success', title: 'Project saved' });
+      return saved;
+    } catch (saveError) {
+      const detail = saveError instanceof Error ? saveError.message.trim() : '';
+      const message = `Could not save ${name}${detail ? `: ${detail}` : '.'}`;
+      showToast(message, 'error');
+      showPopup(message, { type: 'error', title: 'Save failed' });
+      return null;
+    }
+  }, [setCurrentProject, showPopup, showToast]);
 
   const loadProjectJSON = useCallback(async (json) => {
     if (!json) return showToast('Could not parse project file', 'error');
-    if (json.terrain) {
-      const project = normalizeProject(json);
-      if ((project.terrain.editorMode === 'nodes' || project.terrain.realWorldSource)
-          && worldModeRef.current !== 'studio') {
-        await runModeSwitchRef.current('studio', { silent: true });
+    const project = json.terrain ? normalizeProject(json) : null;
+    const terrain = project?.terrain ?? normalizeProject({ terrain: json }).terrain;
+    const name = project?.metadata?.name ?? 'terrain project';
+    if (terrain.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
+
+    return loadingRef.current.run('project-load', {
+      blocking: true,
+      label: `Loading ${name}…`,
+      detail: 'Preparing terrain…',
+    }, async (update) => {
+      blockingUpdateRef.current = update;
+      try {
+        if ((terrain.editorMode === 'nodes' || terrain.realWorldSource)
+            && worldModeRef.current !== 'studio') {
+          await runModeSwitchRef.current('studio', { silent: true });
+          blockingUpdateRef.current = update;
+        }
+        update({
+          detail: terrain.realWorldSource
+            ? 'Downloading elevation and map imagery…'
+            : 'Building terrain…',
+        });
+        await engineRef.current?.loadSeedJSON(terrain, {
+          onRealWorldProgress: terrain.realWorldSource
+            ? (progress) => update({
+              progress,
+              detail: progress >= 1
+                ? 'Building geographic terrain…'
+                : 'Downloading elevation and map imagery…',
+            })
+            : undefined,
+        });
+        setCurrentProject(project);
+        if (project) showToast(`Opened ${name}`, 'success');
+      } finally {
+        if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
       }
-      await engineRef.current?.loadSeedJSON(project.terrain);
-      setCurrentProject(project);
-      return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
-    }
-    const terrain = normalizeProject({ terrain: json }).terrain;
-    if ((terrain.editorMode === 'nodes' || terrain.realWorldSource)
-        && worldModeRef.current !== 'studio') {
-      await runModeSwitchRef.current('studio', { silent: true });
-    }
-    await engineRef.current?.loadSeedJSON(terrain);
-    setCurrentProject(null);
+    });
   }, [setCurrentProject, showToast]);
 
   const loadProjectFile = useCallback((file) => {
@@ -485,13 +536,13 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     const current = activeProjectRef.current;
+    const name = String(projectNameRef.current ?? current?.metadata?.name ?? 'Untitled terrain').trim() || 'Untitled terrain';
     const project = normalizeProject({
       id: current?.id,
-      metadata: { ...current?.metadata },
+      metadata: { ...current?.metadata, name },
       terrain: eng.createProjectPayload(),
       exportHistory: current?.exportHistory ?? [],
     });
-    const name = project.metadata?.name || 'terrain';
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'terrain';
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -509,39 +560,54 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
-    if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
     const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
-    landingPreviewActiveRef.current = false;
-    landingPreviewSessionRef.current += 1;
-    if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
-      await runModeSwitchRef.current('studio', { silent: true });
-    }
-    eng.newProject({ projectMode: nextMode });
-    // A new terrain is a new document. Do not let saveCurrentProject reuse the
-    // id of whichever project was previously open.
-    setCurrentProject(null);
-    // Every launch starts from the Root's session seed; give each chosen
-    // template a stable-but-fresh variant instead of reverting to seed 1337.
-    const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
-    const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
-    const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
-    eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
-    if (nextMode === 'nodes') {
-      const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
-      await graphResult?.ready;
-    } else {
-      if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-      await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
-    }
-    const metadata = nextMode === 'nodes'
-      ? {
-        name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
-        description: template.description,
-        tags: ['nodes', template.id],
+    return loadingRef.current.run('project-create', {
+      blocking: true,
+      label: `Creating ${template.name}…`,
+      detail: 'Building terrain…',
+    }, async (update) => {
+      blockingUpdateRef.current = update;
+      try {
+        if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
+        landingPreviewActiveRef.current = false;
+        landingPreviewSessionRef.current += 1;
+        if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
+          await runModeSwitchRef.current('studio', { silent: true });
+          blockingUpdateRef.current = update;
+        }
+        eng.newProject({ projectMode: nextMode });
+        // A new terrain is a new document. Do not let saveCurrentProject reuse
+        // the id of whichever project was previously open.
+        setCurrentProject(null);
+        // Every launch starts from the Root's session seed; give each chosen
+        // template a stable-but-fresh variant instead of reverting to seed 1337.
+        const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
+        const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+        const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
+        eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
+        if (nextMode === 'nodes') {
+          update({ detail: 'Compiling terrain graph…' });
+          const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
+          await graphResult?.ready;
+        } else {
+          if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
+          await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
+        }
+        const metadata = nextMode === 'nodes'
+          ? {
+            name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
+            description: template.description,
+            tags: ['nodes', template.id],
+          }
+          : { name: template.name, description: template.description, tags: [template.id] };
+        update({ detail: 'Saving project…' });
+        const project = await saveCurrentProject(metadata);
+        if (project) showToast(`${template.name} project created`, 'success');
+        return project;
+      } finally {
+        if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
       }
-      : { name: template.name, description: template.description, tags: [template.id] };
-    const project = await saveCurrentProject(metadata);
-    if (project) showToast(`${template.name} project created`, 'success');
+    });
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
@@ -554,18 +620,9 @@ export default function App() {
     };
     const onOpenProject = async (event) => {
       const project = event.detail?.project;
-      const eng = engineRef.current;
-      if (!project?.terrain || !eng) return;
+      if (!project?.terrain || !engineRef.current) return;
       stopLandingPreviews();
-      const normalized = normalizeProject(project);
-      if (normalized.terrain.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
-      if ((normalized.terrain.editorMode === 'nodes' || normalized.terrain.realWorldSource)
-          && worldModeRef.current !== 'studio') {
-        await runModeSwitchRef.current('studio', { silent: true });
-      }
-      await eng.loadSeedJSON(normalized.terrain);
-      setCurrentProject(normalized);
-      showToast(`Opened ${normalized.metadata?.name ?? 'terrain project'}`, 'success');
+      await loadProjectJSON(project);
     };
     const previewSeed = (templateId, editorMode = 'procedural') => {
       const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
@@ -623,7 +680,7 @@ export default function App() {
       window.removeEventListener('terrain-project:open', onOpenProject);
       window.removeEventListener('terrain-template:preview', onPreviewTemplate);
     };
-  }, [createProjectFromTemplate, setCurrentProject, showToast]);
+  }, [createProjectFromTemplate, loadProjectJSON]);
 
   // Params that rebuild the whole world geometry (planet radius / surface
   // detail, board chunk layout). The rebuild briefly freezes the main thread,
@@ -1473,6 +1530,44 @@ export default function App() {
     engineRef.current?.resetPanelSettings(id);
   }, []);
 
+  const runGeographicLoad = (runner, opts = {}) => loading.run('real-world-load', {
+    blocking: true,
+    label: 'Loading geographic terrain…',
+    detail: 'Downloading elevation and map imagery…',
+  }, async (update) => {
+    blockingUpdateRef.current = update;
+    try {
+      return await runner((progress) => {
+        opts.onProgress?.(progress);
+        update({
+          progress,
+          detail: progress >= 1
+            ? 'Building geographic terrain…'
+            : 'Downloading elevation and map imagery…',
+        });
+      });
+    } finally {
+      if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+    }
+  });
+
+  const changeRealWorldImageryStyle = (style) => {
+    const eng = engine();
+    if (!eng.realWorldSource) return eng.setRealWorldImageryStyle(style);
+    return loading.run('real-world-imagery', {
+      blocking: true,
+      label: 'Loading map imagery…',
+      detail: 'Downloading the selected map style…',
+    }, async (update) => {
+      blockingUpdateRef.current = update;
+      try {
+        return await eng.setRealWorldImageryStyle(style);
+      } finally {
+        if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+      }
+    });
+  };
+
   const ctx = {
     params, worldMode, onParam,
     settingsTarget,
@@ -1524,10 +1619,16 @@ export default function App() {
     onTileDebug: (next) => engine().setTileDebug(next),
     onImportTileMap: (type, file) => engine().importTileMap(type, file),
     onTileMapSetting: (type, key, value) => engine().setTileMapSetting(type, key, value),
-    onLoadRealWorldLocation: (id, opts) => engine().loadRealWorldLocation(id, opts),
-    onLoadRealWorldCustom: (spec, opts) => engine().loadRealWorldCustom(spec, opts),
+    onLoadRealWorldLocation: (id, opts) => runGeographicLoad(
+      (onProgress) => engine().loadRealWorldLocation(id, { ...opts, onProgress }),
+      opts,
+    ),
+    onLoadRealWorldCustom: (spec, opts) => runGeographicLoad(
+      (onProgress) => engine().loadRealWorldCustom(spec, { ...opts, onProgress }),
+      opts,
+    ),
     realWorldImageryStyle,
-    onRealWorldImageryStyle: (style) => engine().setRealWorldImageryStyle(style),
+    onRealWorldImageryStyle: changeRealWorldImageryStyle,
     onSoloLayer: (id) => engine().setSoloLayer(id),
     _soloLayerId: engineRef.current?._soloLayerId ?? null,
     splineState, analysisState,
@@ -1571,6 +1672,8 @@ export default function App() {
       <TopBar
         projectMode={projectMode}
         shortcutsEnabled={!landingMode}
+        projectName={projectName}
+        onProjectNameChange={updateProjectName}
         previewMode={previewMode}
         onNew={() => createProjectFromTemplate('blank', { editorMode: projectMode })}
         onRandomize={() => engine().randomizeSeed()}

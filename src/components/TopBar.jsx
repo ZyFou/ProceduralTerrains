@@ -40,6 +40,8 @@ const Caret = () => (
 export default function TopBar({
   projectMode = 'procedural',
   shortcutsEnabled = true,
+  projectName = 'Untitled terrain',
+  onProjectNameChange,
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onToggleHelp, onResetView,
   nodeToolsVisible = true, onToggleNodeTools,
@@ -176,6 +178,22 @@ export default function TopBar({
             <Caret />
           </button>
           <div className={`tb-menu tb-menu-with-shortcuts${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label="File">
+            <label className="tb-project-name-field">
+              <span>Project name</span>
+              <input
+                type="text"
+                value={projectName}
+                maxLength={120}
+                aria-label="Project name"
+                onChange={(event) => onProjectNameChange?.(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  runMenuAction(setFileMenuOpen, onSave);
+                }}
+              />
+            </label>
+            <div className="tb-menu-divider" role="separator" />
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onNew)}>
               <FileText size={14} strokeWidth={1.75} aria-hidden /> New terrain
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.newTerrain} className="tb-menu-shortcut" />

@@ -179,14 +179,15 @@ describe('real-world project source', () => {
       imageryStyle: 'opentopo',
     });
     engine._loadRealWorldHeightmap = vi.fn(async () => true);
+    const onProgress = vi.fn();
 
-    await engine._restoreRealWorldSource(source);
+    await engine._restoreRealWorldSource(source, { onProgress });
 
     expect(engine._loadRealWorldHeightmap).toHaveBeenCalledWith({
       id: 'custom',
       name: 'Custom Alps area',
       bbox: source.bbox,
       zoom: 12,
-    }, { persistedSource: source, silent: true });
+    }, { persistedSource: source, silent: true, onProgress });
   });
 });
