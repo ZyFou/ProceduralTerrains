@@ -34,12 +34,16 @@ const TRANSFORMS = [
 ];
 
 const SCULPT_TOOLS = [
-  { id: 'raise', label: 'Raise', Icon: Mountain },
-  { id: 'lower', label: 'Lower', Icon: Minus },
-  { id: 'smooth', label: 'Smooth', Icon: Waves },
-  { id: 'flatten', label: 'Flatten', Icon: SlidersHorizontal },
-  { id: 'erode', label: 'Erode', Icon: Droplet },
-  { id: 'erase', label: 'Erase', Icon: Eraser },
+  { id: 'raise', label: 'Raise', Icon: Mountain, description: 'Build broad positive relief.' },
+  { id: 'lower', label: 'Lower', Icon: Minus, description: 'Carve broad depressions into the terrain.' },
+  { id: 'smooth', label: 'Smooth', Icon: Waves, description: 'Relax abrupt height changes without flattening the whole form.' },
+  { id: 'flatten', label: 'Flatten', Icon: SlidersHorizontal, description: 'Move the terrain toward an exact elevation.' },
+  { id: 'erode', label: 'Erode', Icon: Droplet, description: 'Move material downhill and deposit sediment in lower areas.' },
+  { id: 'crease', label: 'Crease', Icon: Minus, description: 'Cut narrow gullies, cracks, and drainage lines.' },
+  { id: 'ridge', label: 'Ridge', Icon: Mountain, description: 'Pinch terrain upward into narrow ridges and spines.' },
+  { id: 'detail', label: 'Detail', Icon: Dices, description: 'Paint seeded multi-scale rocky relief over larger forms.' },
+  { id: 'terrace', label: 'Terrace', Icon: GripVertical, description: 'Quantize elevation into editable steps and shelves.' },
+  { id: 'erase', label: 'Erase', Icon: Eraser, description: 'Remove sculpted detail and reveal the procedural shapes.' },
 ];
 
 const PIXEL_PREVIEWS = {
@@ -170,6 +174,7 @@ export default function ManualTerrainPanel({
 }) {
   const shapes = state?.shapes ?? [];
   const selected = shapes.find((shape) => shape.id === state?.selectedId) ?? null;
+  const activeSculptTool = SCULPT_TOOLS.find((tool) => tool.id === state?.sculpt?.tool) ?? SCULPT_TOOLS[0];
   const categories = useMemo(() => {
     const grouped = new Map();
     for (const shape of MANUAL_SHAPE_CATALOG) {
@@ -200,6 +205,13 @@ export default function ManualTerrainPanel({
   const brushStrength = { label: 'Strength', min: 0.01, max: 1, step: 0.01, digits: 2 };
   const brushFalloff = { label: 'Falloff', min: 0.02, max: 1, step: 0.01, digits: 2 };
   const targetHeight = { label: 'Target Height', min: -1000, max: 1000, step: 2, digits: 0, unit: 'u' };
+  const creaseWidth = { label: 'Profile Width', min: 0.04, max: 0.8, step: 0.01, digits: 2 };
+  const detailScale = { label: 'Detail Scale', min: 2, max: 240, step: 2, digits: 0, unit: 'u' };
+  const detailRoughness = { label: 'Roughness', min: 0, max: 1, step: 0.01, digits: 2 };
+  const terraceStep = { label: 'Step Height', min: 1, max: 400, step: 1, digits: 0, unit: 'u' };
+  const erosionIterations = { label: 'Iterations', min: 1, max: 10, step: 1, digits: 0 };
+  const erosionDeposition = { label: 'Sediment Deposit', min: 0, max: 1, step: 0.01, digits: 2 };
+  const erosionTalus = { label: 'Talus Threshold', min: 0, max: 20, step: 0.1, digits: 1 };
 
   const libraryStyle = {
     left: sideToolOffset('left'),
@@ -374,16 +386,62 @@ export default function ManualTerrainPanel({
                     </button>
                   ))}
                 </div>
+                <p className="manual-sculpt-tool-description">{activeSculptTool.description}</p>
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
                 <h3>Brush</h3>
                 <SliderCtl def={brushSize} value={state.sculpt.brushSize} onChange={(value) => onSculptSetting('brushSize', value)} />
                 <SliderCtl def={brushStrength} value={state.sculpt.strength} onChange={(value) => onSculptSetting('strength', value)} />
                 <SliderCtl def={brushFalloff} value={state.sculpt.falloff} onChange={(value) => onSculptSetting('falloff', value)} />
-                {state.sculpt.tool === 'flatten' ? (
-                  <SliderCtl def={targetHeight} value={state.sculpt.targetHeight} onChange={(value) => onSculptSetting('targetHeight', value)} />
-                ) : null}
               </section>
+              {state.sculpt.tool === 'flatten' ? (
+                <section className="manual-inspector-section manual-inspector-controls">
+                  <h3>Flatten</h3>
+                  <SliderCtl def={targetHeight} value={state.sculpt.targetHeight} onChange={(value) => onSculptSetting('targetHeight', value)} />
+                </section>
+              ) : null}
+              {state.sculpt.tool === 'erode' ? (
+                <section className="manual-inspector-section manual-inspector-controls">
+                  <h3>Hydraulic Erosion</h3>
+                  <SliderCtl def={erosionIterations} value={state.sculpt.erosionIterations} onChange={(value) => onSculptSetting('erosionIterations', value)} />
+                  <SliderCtl def={erosionDeposition} value={state.sculpt.erosionDeposition} onChange={(value) => onSculptSetting('erosionDeposition', value)} />
+                  <SliderCtl def={erosionTalus} value={state.sculpt.erosionTalus} onChange={(value) => onSculptSetting('erosionTalus', value)} />
+                </section>
+              ) : null}
+              {state.sculpt.tool === 'crease' || state.sculpt.tool === 'ridge' ? (
+                <section className="manual-inspector-section manual-inspector-controls">
+                  <h3>{state.sculpt.tool === 'crease' ? 'Crease Profile' : 'Ridge Profile'}</h3>
+                  <SliderCtl def={creaseWidth} value={state.sculpt.creaseWidth} onChange={(value) => onSculptSetting('creaseWidth', value)} />
+                </section>
+              ) : null}
+              {state.sculpt.tool === 'detail' ? (
+                <section className="manual-inspector-section manual-inspector-controls">
+                  <h3>Relief Detail</h3>
+                  <SliderCtl def={detailScale} value={state.sculpt.detailScale} onChange={(value) => onSculptSetting('detailScale', value)} />
+                  <SliderCtl def={detailRoughness} value={state.sculpt.detailRoughness} onChange={(value) => onSculptSetting('detailRoughness', value)} />
+                  <label className="manual-name-field">
+                    <span>Detail Seed</span>
+                    <span className="manual-seed-row">
+                      <input
+                        type="number"
+                        min="0"
+                        max="2147483647"
+                        value={state.sculpt.detailSeed}
+                        onChange={(event) => onSculptSetting('detailSeed', Number(event.target.value) || 0)}
+                      />
+                      <button type="button" onClick={() => onSculptSetting('detailSeed', Math.floor(Math.random() * 0x7fffffff))} title="Randomize detail seed" aria-label="Randomize detail seed">
+                        <Dices size={14} aria-hidden />
+                      </button>
+                    </span>
+                  </label>
+                </section>
+              ) : null}
+              {state.sculpt.tool === 'terrace' ? (
+                <section className="manual-inspector-section manual-inspector-controls">
+                  <h3>Terraces</h3>
+                  <SliderCtl def={terraceStep} value={state.sculpt.terraceStep} onChange={(value) => onSculptSetting('terraceStep', value)} />
+                </section>
+              ) : null}
               <div className="manual-sculpt-help">
                 <span>Left drag: sculpt</span>
                 <span>Alt + left drag: pan</span>

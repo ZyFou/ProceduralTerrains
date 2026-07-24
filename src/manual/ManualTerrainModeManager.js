@@ -11,7 +11,27 @@ import {
 } from './ManualShapeCatalog.js';
 
 const TRANSFORM_MODES = new Set(['translate', 'rotate', 'scale']);
-const SCULPT_TOOLS = new Set(['raise', 'lower', 'smooth', 'flatten', 'erode', 'erase']);
+const SCULPT_TOOLS = new Set([
+  'raise',
+  'lower',
+  'smooth',
+  'flatten',
+  'erode',
+  'crease',
+  'ridge',
+  'detail',
+  'terrace',
+  'erase',
+]);
+const SCULPT_CURSOR_COLORS = Object.freeze({
+  lower: 0xfca5a5,
+  erode: 0xfbbf24,
+  crease: 0xc084fc,
+  ridge: 0x818cf8,
+  detail: 0x34d399,
+  terrace: 0xfb923c,
+  erase: 0xf8fafc,
+});
 const DEFAULT_SCULPT_STATE = Object.freeze({
   enabled: false,
   tool: 'raise',
@@ -19,6 +39,14 @@ const DEFAULT_SCULPT_STATE = Object.freeze({
   strength: 0.32,
   falloff: 0.72,
   targetHeight: 120,
+  creaseWidth: 0.2,
+  detailScale: 32,
+  detailRoughness: 0.55,
+  detailSeed: 1337,
+  terraceStep: 24,
+  erosionIterations: 3,
+  erosionDeposition: 0.65,
+  erosionTalus: 1.5,
 });
 
 function isTypingTarget(target) {
@@ -275,6 +303,7 @@ export class ManualTerrainModeManager {
     this._lastSculptPoint = null;
     if (next) {
       this.selectedId = null;
+      this._syncSculptCursorStyle();
       this._syncVisuals();
     } else {
       this.cursor.setVisible(false);
@@ -289,11 +318,22 @@ export class ManualTerrainModeManager {
   }
 
   setSculptSetting(key, value) {
-    if (key === 'tool') this.sculpt.tool = SCULPT_TOOLS.has(value) ? value : 'raise';
+    if (key === 'tool') {
+      this.sculpt.tool = SCULPT_TOOLS.has(value) ? value : 'raise';
+      this._syncSculptCursorStyle();
+    }
     else if (key === 'brushSize') this.sculpt.brushSize = Math.max(4, Math.min(900, Number(value) || 4));
     else if (key === 'strength') this.sculpt.strength = Math.max(0.01, Math.min(1, Number(value) || 0.01));
     else if (key === 'falloff') this.sculpt.falloff = Math.max(0.02, Math.min(1, Number(value) || 0.02));
     else if (key === 'targetHeight') this.sculpt.targetHeight = Math.max(-3000, Math.min(3000, Number(value) || 0));
+    else if (key === 'creaseWidth') this.sculpt.creaseWidth = Math.max(0.04, Math.min(0.8, Number(value) || 0.04));
+    else if (key === 'detailScale') this.sculpt.detailScale = Math.max(2, Math.min(240, Number(value) || 2));
+    else if (key === 'detailRoughness') this.sculpt.detailRoughness = Math.max(0, Math.min(1, Number(value) || 0));
+    else if (key === 'detailSeed') this.sculpt.detailSeed = Math.max(0, Math.min(2147483647, Math.round(Number(value) || 0)));
+    else if (key === 'terraceStep') this.sculpt.terraceStep = Math.max(1, Math.min(400, Number(value) || 1));
+    else if (key === 'erosionIterations') this.sculpt.erosionIterations = Math.max(1, Math.min(10, Math.round(Number(value) || 1)));
+    else if (key === 'erosionDeposition') this.sculpt.erosionDeposition = Math.max(0, Math.min(1, Number(value) || 0));
+    else if (key === 'erosionTalus') this.sculpt.erosionTalus = Math.max(0, Math.min(20, Number(value) || 0));
     this._emit();
   }
 
@@ -639,10 +679,17 @@ export class ManualTerrainModeManager {
     this.cursor.update(point, this.sculpt.brushSize);
   }
 
+  _syncSculptCursorStyle() {
+    this.cursor.setColor(SCULPT_CURSOR_COLORS[this.sculpt.tool] ?? 0x7dd3fc);
+  }
+
   _stampSculpt(point, force = false) {
     if (!point) return;
     const current = point.clone();
-    const spacing = Math.max(2, this.sculpt.brushSize * 0.22);
+    const spacingFactor = this.sculpt.tool === 'crease' || this.sculpt.tool === 'ridge'
+      ? 0.1
+      : this.sculpt.tool === 'detail' ? 0.16 : 0.22;
+    const spacing = Math.max(2, this.sculpt.brushSize * spacingFactor);
     if (!force && this._lastSculptPoint && this._lastSculptPoint.distanceTo(current) < spacing) return;
     if (!force && this._lastSculptPoint) {
       const start = this._lastSculptPoint.clone();
@@ -666,6 +713,14 @@ export class ManualTerrainModeManager {
       falloff: this.sculpt.falloff,
       tool: this.sculpt.tool,
       targetHeight: this.sculpt.targetHeight,
+      creaseWidth: this.sculpt.creaseWidth,
+      detailScale: this.sculpt.detailScale,
+      detailRoughness: this.sculpt.detailRoughness,
+      detailSeed: this.sculpt.detailSeed,
+      terraceStep: this.sculpt.terraceStep,
+      erosionIterations: this.sculpt.erosionIterations,
+      erosionDeposition: this.sculpt.erosionDeposition,
+      erosionTalus: this.sculpt.erosionTalus,
     });
     this._syncUniforms();
   }

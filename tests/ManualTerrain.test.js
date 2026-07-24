@@ -116,4 +116,120 @@ describe('Manual Terrain shapes', () => {
     field.dispose();
     restored.dispose();
   });
+
+  it('paints narrow crease and ridge relief profiles', () => {
+    const makeUniforms = () => ({
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    });
+    const bounds = () => ({ origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } });
+    const crease = new ManualTerrainField({ uniforms: makeUniforms(), getBounds: bounds, resolution: 64 });
+    crease.rebuild([]);
+    crease.stamp({
+      x: 0,
+      z: 0,
+      radius: 48,
+      strength: 1,
+      falloff: 0.7,
+      tool: 'crease',
+      creaseWidth: 0.2,
+    });
+    expect(crease.sampleHeightOffset(0, 0)).toBeLessThan(-15);
+
+    const ridge = new ManualTerrainField({ uniforms: makeUniforms(), getBounds: bounds, resolution: 64 });
+    ridge.rebuild([]);
+    ridge.stamp({
+      x: 0,
+      z: 0,
+      radius: 48,
+      strength: 1,
+      falloff: 0.7,
+      tool: 'ridge',
+      creaseWidth: 0.2,
+    });
+    expect(ridge.sampleHeightOffset(0, 0)).toBeGreaterThan(15);
+    expect(ridge.sampleHeightOffset(0, 0)).toBeCloseTo(-crease.sampleHeightOffset(0, 0), 5);
+
+    crease.dispose();
+    ridge.dispose();
+  });
+
+  it('paints deterministic multi-scale relief detail', () => {
+    const makeUniforms = () => ({
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    });
+    const bounds = () => ({ origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } });
+    const makeDetailedField = (seed) => {
+      const field = new ManualTerrainField({ uniforms: makeUniforms(), getBounds: bounds, resolution: 64 });
+      field.rebuild([]);
+      field.stamp({
+        x: 17,
+        z: -11,
+        radius: 52,
+        strength: 0.8,
+        falloff: 0.72,
+        tool: 'detail',
+        detailScale: 24,
+        detailRoughness: 0.65,
+        detailSeed: seed,
+      });
+      return field;
+    };
+    const first = makeDetailedField(44);
+    const matching = makeDetailedField(44);
+    const different = makeDetailedField(45);
+    const firstSample = first.sampleHeightOffset(17, -11);
+    expect(firstSample).toBeCloseTo(matching.sampleHeightOffset(17, -11), 6);
+    expect(firstSample).not.toBeCloseTo(different.sampleHeightOffset(17, -11), 2);
+
+    first.dispose();
+    matching.dispose();
+    different.dispose();
+  });
+
+  it('transports material downhill with the erosion brush and paints terraces', () => {
+    const makeUniforms = () => ({
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    });
+    const bounds = () => ({ origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } });
+    const mountain = createManualShape('sharp-peak', { x: 0, z: 0 }, {
+      detail: 0,
+      height: 220,
+      scale: { x: 74, z: 74 },
+    });
+    const field = new ManualTerrainField({ uniforms: makeUniforms(), getBounds: bounds, resolution: 64 });
+    field.rebuild([mountain]);
+    const summitBefore = field.sampleHeightOffset(0, 0);
+    field.stamp({
+      x: 0,
+      z: 0,
+      radius: 62,
+      strength: 0.9,
+      falloff: 0.75,
+      tool: 'erode',
+      erosionIterations: 5,
+      erosionDeposition: 0.75,
+      erosionTalus: 0,
+    });
+    expect(field.sampleHeightOffset(0, 0)).toBeLessThan(summitBefore);
+
+    const terracePoint = { x: 31, z: 0 };
+    field.stamp({
+      ...terracePoint,
+      radius: 28,
+      strength: 1,
+      falloff: 0.7,
+      tool: 'terrace',
+      terraceStep: 25,
+    });
+    const terracedHeight = field.sampleHeightOffset(terracePoint.x, terracePoint.z);
+    expect(Math.abs(terracedHeight / 25 - Math.round(terracedHeight / 25))).toBeLessThan(0.08);
+
+    field.dispose();
+  });
 });

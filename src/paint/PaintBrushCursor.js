@@ -25,6 +25,10 @@ export class PaintBrushCursor {
 
   setVisible(visible) { this.group.visible = !!visible; }
 
+  setColor(color) {
+    this.ring.material.color.set(color);
+  }
+
   update(point, radius, shape = 'round', rotationDeg = 0) {
     if (!point) return this.setVisible(false);
     this.group.position.set(point.x, point.y + 2, point.z);

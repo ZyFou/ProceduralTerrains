@@ -135,7 +135,24 @@ export default function App() {
     selectedId: null,
     transformMode: 'translate',
     placementType: null,
-    sculpt: { enabled: false, tool: 'raise', brushSize: 110, strength: 0.32, falloff: 0.72, targetHeight: 120, revision: 0, hasData: false },
+    sculpt: {
+      enabled: false,
+      tool: 'raise',
+      brushSize: 110,
+      strength: 0.32,
+      falloff: 0.72,
+      targetHeight: 120,
+      creaseWidth: 0.2,
+      detailScale: 32,
+      detailRoughness: 0.55,
+      detailSeed: 1337,
+      terraceStep: 24,
+      erosionIterations: 3,
+      erosionDeposition: 0.65,
+      erosionTalus: 1.5,
+      revision: 0,
+      hasData: false,
+    },
     shapes: [],
   });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
@@ -614,6 +631,24 @@ export default function App() {
           if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
           await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
         }
+        // A freshly-created project owns a fresh undo timeline. Without this
+        // baseline, the first edit could undo into the landing preview/default
+        // procedural document — especially visible when the first Manual edit
+        // is a sculpt stroke on an otherwise empty terrain.
+        try {
+          historyRef.current = {
+            past: [],
+            future: [],
+            present: JSON.stringify(eng.serializeState()),
+          };
+          paintBlobsRef.current.clear();
+          erosionBlobsRef.current.clear();
+          manualSculptBlobsRef.current.clear();
+          nativeHistoryActionsRef.current = [];
+          nativeHistoryCursorRef.current = -1;
+          setNativeHistoryActions([]);
+          setHistState({ canUndo: false, canRedo: false });
+        } catch { /* history is best effort */ }
         const metadata = nextMode === 'nodes'
           ? {
             name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,

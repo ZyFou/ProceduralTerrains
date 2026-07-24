@@ -10,6 +10,45 @@ const smoothstep = (value) => {
   return t * t * (3 - 2 * t);
 };
 
+const hash2 = (x, y, seed) => {
+  let value = Math.imul(Math.floor(x), 374761393)
+    + Math.imul(Math.floor(y), 668265263)
+    + Math.imul(Math.floor(seed), 1442695041);
+  value = Math.imul(value ^ (value >>> 13), 1274126177);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+};
+
+const valueNoise2D = (x, y, seed) => {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const sx = smoothstep(fx);
+  const sy = smoothstep(fy);
+  const a = hash2(ix, iy, seed);
+  const b = hash2(ix + 1, iy, seed);
+  const c = hash2(ix, iy + 1, seed);
+  const d = hash2(ix + 1, iy + 1, seed);
+  const top = a + (b - a) * sx;
+  const bottom = c + (d - c) * sx;
+  return (top + (bottom - top) * sy) * 2 - 1;
+};
+
+const reliefNoise2D = (x, y, seed, roughness) => {
+  let value = 0;
+  let amplitude = 1;
+  let frequency = 1;
+  let weight = 0;
+  const persistence = 0.25 + clamp(roughness, 0, 1) * 0.55;
+  for (let octave = 0; octave < 4; octave++) {
+    value += valueNoise2D(x * frequency, y * frequency, seed + octave * 1013) * amplitude;
+    weight += amplitude;
+    amplitude *= persistence;
+    frequency *= 2.07;
+  }
+  return weight > 0 ? value / weight : 0;
+};
+
 function resolutionForTier(gpuTier) {
   if (gpuTier === 'low') return 384;
   if (gpuTier === 'medium') return 512;
@@ -142,6 +181,102 @@ export class ManualTerrainField {
     return array[iy * this.resolution + ix];
   }
 
+  _brushAlpha(distance, pixelRadius, falloff, strength) {
+    if (distance > pixelRadius) return 0;
+    const radial = 1 - distance / pixelRadius;
+    const softness = Math.max(0.02, falloff);
+    return smoothstep(radial / softness) * clamp(strength, 0.01, 1);
+  }
+
+  _stampErosion({
+    center,
+    pixelRadius,
+    minX,
+    maxX,
+    minY,
+    maxY,
+    strength,
+    falloff,
+    iterations,
+    deposition,
+    talus,
+  }) {
+    const sourceMinX = Math.max(0, minX - 1);
+    const sourceMaxX = Math.min(this.resolution - 1, maxX + 1);
+    const sourceMinY = Math.max(0, minY - 1);
+    const sourceMaxY = Math.min(this.resolution - 1, maxY + 1);
+    const width = sourceMaxX - sourceMinX + 1;
+    const height = sourceMaxY - sourceMinY + 1;
+    let working = new Float32Array(width * height);
+    let next = new Float32Array(width * height);
+
+    for (let localY = 0; localY < height; localY++) {
+      const sourceRow = (sourceMinY + localY) * this.resolution;
+      const targetRow = localY * width;
+      for (let localX = 0; localX < width; localX++) {
+        working[targetRow + localX] = this.heightDelta[sourceRow + sourceMinX + localX];
+      }
+    }
+
+    const passCount = clamp(Math.round(iterations) || 1, 1, 10);
+    const depositRatio = clamp(deposition, 0, 1);
+    const slopeThreshold = Math.max(0, Number(talus) || 0);
+    for (let pass = 0; pass < passCount; pass++) {
+      next.set(working);
+      for (let py = minY; py <= maxY; py++) {
+        const localY = py - sourceMinY;
+        for (let px = minX; px <= maxX; px++) {
+          const distance = Math.hypot(px - center.px, py - center.py);
+          const alpha = this._brushAlpha(distance, pixelRadius, falloff, strength);
+          if (alpha <= 0) continue;
+          const localX = px - sourceMinX;
+          const localIndex = localY * width + localX;
+          const current = working[localIndex];
+          let lowest = current;
+          let lowestIndex = localIndex;
+
+          for (let oy = -1; oy <= 1; oy++) {
+            for (let ox = -1; ox <= 1; ox++) {
+              if (ox === 0 && oy === 0) continue;
+              const neighborX = localX + ox;
+              const neighborY = localY + oy;
+              if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) continue;
+              const neighborIndex = neighborY * width + neighborX;
+              const neighbor = working[neighborIndex];
+              if (neighbor < lowest) {
+                lowest = neighbor;
+                lowestIndex = neighborIndex;
+              }
+            }
+          }
+
+          const mobileSlope = current - lowest - slopeThreshold;
+          if (mobileSlope <= 0 || lowestIndex === localIndex) continue;
+          const transported = Math.min(
+            mobileSlope * 0.42,
+            mobileSlope * alpha * (0.32 / Math.sqrt(passCount)),
+          );
+          next[localIndex] -= transported;
+          next[lowestIndex] += transported * depositRatio;
+        }
+      }
+      [working, next] = [next, working];
+    }
+
+    for (let py = minY; py <= maxY; py++) {
+      const localRow = (py - sourceMinY) * width;
+      const terrainRow = py * this.resolution;
+      for (let px = minX; px <= maxX; px++) {
+        const distance = Math.hypot(px - center.px, py - center.py);
+        if (distance > pixelRadius) continue;
+        const index = terrainRow + px;
+        const erodedHeight = working[localRow + px - sourceMinX];
+        this.sculptDelta[index] = clamp(erodedHeight - this.shapeHeight[index], -3000, 3000);
+        this._composeIndex(index);
+      }
+    }
+  }
+
   stamp({
     x,
     z,
@@ -150,6 +285,14 @@ export class ManualTerrainField {
     falloff,
     tool,
     targetHeight = 0,
+    creaseWidth = 0.2,
+    detailScale = 32,
+    detailRoughness = 0.55,
+    detailSeed = 1337,
+    terraceStep = 24,
+    erosionIterations = 3,
+    erosionDeposition = 0.65,
+    erosionTalus = 1.5,
   }) {
     const center = this.worldToPixel(x, z);
     const pixelRadius = Math.max(1, radius / Math.max(this.span.x, this.span.z) * this.resolution);
@@ -157,16 +300,31 @@ export class ManualTerrainField {
     const maxX = clamp(Math.ceil(center.px + pixelRadius), 0, this.resolution - 1);
     const minY = clamp(Math.floor(center.py - pixelRadius), 0, this.resolution - 1);
     const maxY = clamp(Math.ceil(center.py + pixelRadius), 0, this.resolution - 1);
-    const sourceSculpt = tool === 'smooth' || tool === 'erode' ? this.sculptDelta.slice() : this.sculptDelta;
-    const sourceTotal = tool === 'smooth' || tool === 'erode' ? this.heightDelta.slice() : this.heightDelta;
+    if (tool === 'erode') {
+      this._stampErosion({
+        center,
+        pixelRadius,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        strength,
+        falloff,
+        iterations: erosionIterations,
+        deposition: erosionDeposition,
+        talus: erosionTalus,
+      });
+      this.texture.needsUpdate = true;
+      this.revision++;
+      this.sculptRevision++;
+      return;
+    }
+    const sourceTotal = tool === 'smooth' ? this.heightDelta.slice() : this.heightDelta;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
         const distance = Math.hypot(px - center.px, py - center.py);
-        if (distance > pixelRadius) continue;
-        const radial = 1 - distance / pixelRadius;
-        const softness = Math.max(0.02, falloff);
-        const alpha = smoothstep(radial / softness) * clamp(strength, 0.01, 1);
+        const alpha = this._brushAlpha(distance, pixelRadius, falloff, strength);
         if (alpha <= 0) continue;
         const index = py * this.resolution + px;
         const current = this.sculptDelta[index];
@@ -176,7 +334,7 @@ export class ManualTerrainField {
           next = current - 16 * alpha;
         } else if (tool === 'flatten') {
           next = current + ((targetHeight - this.shapeHeight[index]) - current) * alpha;
-        } else if (tool === 'smooth' || tool === 'erode') {
+        } else if (tool === 'smooth') {
           const step = Math.max(1, Math.round(pixelRadius * 0.07));
           let sum = 0;
           let count = 0;
@@ -190,15 +348,32 @@ export class ManualTerrainField {
           }
           const average = sum / Math.max(1, count);
           const desired = average - this.shapeHeight[index];
-          if (tool === 'smooth') {
-            next = current + (desired - current) * alpha;
-          } else {
-            const currentTotal = this.shapeHeight[index] + sourceSculpt[index];
-            const erodedTotal = currentTotal > average
-              ? average - 2.5 * alpha
-              : currentTotal + (average - currentTotal) * alpha * 0.18;
-            next = current + ((erodedTotal - this.shapeHeight[index]) - current) * alpha;
-          }
+          next = current + (desired - current) * alpha;
+        } else if (tool === 'crease' || tool === 'ridge') {
+          const normalizedDistance = distance / pixelRadius;
+          const width = clamp(creaseWidth, 0.04, 0.8);
+          const core = Math.exp(-4 * (normalizedDistance / width) ** 2);
+          const rimCenter = width * 1.9;
+          const rimWidth = Math.max(0.035, width * 0.62);
+          const rim = Math.exp(-2.5 * ((normalizedDistance - rimCenter) / rimWidth) ** 2);
+          const direction = tool === 'ridge' ? 1 : -1;
+          next = current + direction * (24 * core - 5 * rim) * alpha;
+        } else if (tool === 'detail') {
+          const worldX = this.origin.x + (px / (this.resolution - 1)) * this.span.x;
+          const worldZ = this.origin.z + (py / (this.resolution - 1)) * this.span.z;
+          const frequency = 1 / Math.max(2, detailScale);
+          const relief = reliefNoise2D(
+            worldX * frequency,
+            worldZ * frequency,
+            Math.round(detailSeed),
+            detailRoughness,
+          );
+          next = current + relief * 20 * alpha;
+        } else if (tool === 'terrace') {
+          const stepHeight = Math.max(1, terraceStep);
+          const currentTotal = this.shapeHeight[index] + current;
+          const terracedTotal = Math.round(currentTotal / stepHeight) * stepHeight;
+          next = current + (terracedTotal - currentTotal) * alpha;
         } else if (tool === 'erase') {
           next = current * (1 - alpha);
         } else {
