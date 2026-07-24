@@ -4891,7 +4891,10 @@ input[type="color"].palette-color-input {
 .manual-shape-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .manual-shape-card.placing { border-color: var(--border-active); background: rgba(83, 172, 255, .08); color: #b8ddff; box-shadow: inset 0 0 0 1px rgba(83, 172, 255, .13); }
 .manual-shape-thumb {
-  --terrain-preview-accent: 92, 186, 255;
+  --terrain-preview-highlight: #d9edff;
+  --terrain-preview-light: #8fc8ff;
+  --terrain-preview-mid: #397fc9;
+  --terrain-preview-ground: #172b40;
   position: relative;
   width: 82px;
   height: 52px;
@@ -4903,25 +4906,25 @@ input[type="color"].palette-color-input {
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .28));
   transition: filter .16s ease;
 }
-.manual-shape-preview {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  user-select: none;
+.manual-pixel-preview {
+  width: 76px;
+  height: 48px;
+  overflow: visible;
+  image-rendering: pixelated;
   transition: filter .16s ease, transform .2s ease;
 }
 .manual-shape-card:hover .manual-shape-thumb {
-  filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .32)) drop-shadow(0 0 7px rgba(var(--terrain-preview-accent), .16));
+  filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .32));
 }
-.manual-shape-card:hover .manual-shape-preview { filter: brightness(1.09) saturate(1.04); transform: scale(1.035); }
+.manual-shape-card:hover .manual-pixel-preview { filter: brightness(1.12) saturate(1.08); transform: translateY(-1px) scale(1.04); }
 .manual-shape-card.placing .manual-shape-thumb {
-  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .3)) drop-shadow(0 0 9px rgba(var(--terrain-preview-accent), .28));
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .3)) drop-shadow(0 0 7px rgba(83, 172, 255, .32));
 }
 .manual-shape-card-label { color: inherit; font-size: 9px; font-weight: 650; letter-spacing: .035em; line-height: 1.15; text-transform: uppercase; }
 .manual-shape-thumb.type-valley,
-.manual-shape-thumb.type-canyon { --terrain-preview-accent: 192, 140, 255; }
-.manual-shape-thumb.type-plateau { --terrain-preview-accent: 233, 180, 91; }
-.manual-shape-thumb.type-crater { --terrain-preview-accent: 239, 147, 140; }
+.manual-shape-thumb.type-canyon { --terrain-preview-highlight: #eadcff; --terrain-preview-light: #c08cff; --terrain-preview-mid: #7448b5; --terrain-preview-ground: #241a35; }
+.manual-shape-thumb.type-plateau { --terrain-preview-highlight: #ffe4a9; --terrain-preview-light: #e9b45b; --terrain-preview-mid: #9c6325; --terrain-preview-ground: #2e2115; }
+.manual-shape-thumb.type-crater { --terrain-preview-highlight: #ffd3ce; --terrain-preview-light: #ef938c; --terrain-preview-mid: #ad514f; --terrain-preview-ground: #351b24; }
 .manual-empty-state {
   min-height: 92px;
   display: flex;
