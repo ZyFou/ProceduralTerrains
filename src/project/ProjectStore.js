@@ -96,9 +96,11 @@ export function normalizeProject(input = {}) {
   const legacyTerrain = input.terrain ?? input;
   const editorMode = legacyTerrain?.editorMode === 'nodes'
     ? 'nodes'
-    : legacyTerrain?.editorMode === 'procedural'
-      ? 'procedural'
-      : legacyTerrain?.generationSource === 'graph' ? 'nodes' : 'procedural';
+    : legacyTerrain?.editorMode === 'manual'
+      ? 'manual'
+      : legacyTerrain?.editorMode === 'procedural'
+        ? 'procedural'
+        : legacyTerrain?.generationSource === 'graph' ? 'nodes' : 'procedural';
   const terrain = {
     ...legacyTerrain,
     editorMode,

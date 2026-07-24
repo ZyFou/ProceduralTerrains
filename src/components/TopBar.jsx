@@ -9,8 +9,8 @@ import {
   FolderOpen,
   HelpCircle,
   LayoutTemplate,
+  Mountain,
   Dices,
-  Pencil,
   Redo2,
   RotateCcw,
   Save,
@@ -45,7 +45,7 @@ export default function TopBar({
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
   onTogglePreview, onToggleHelp, onResetView,
   nodeToolsVisible = true, onToggleNodeTools,
-  paintMode, onTogglePaintMode, onOpenPanel, activePanel,
+  onOpenPanel, activePanel,
   loading, onOpenSettingsSearch, settingsSearchOpen,
   onUndo, onRedo, canUndo, canRedo,
   onOpenHistory, onOpenProjects,
@@ -72,7 +72,6 @@ export default function TopBar({
     download: onDownload,
     settings: onOpenUiSettings,
     randomSeed: projectMode === 'procedural' ? onRandomize : null,
-    paintMode: projectMode === 'procedural' ? onTogglePaintMode : null,
   } : {};
 
   const anyMenuOpen = fileMenuOpen || editMenuOpen || viewMenuOpen;
@@ -257,15 +256,6 @@ export default function TopBar({
                 <Dices size={14} strokeWidth={1.75} aria-hidden /> Random seed
                 <ShortcutHint shortcut={EDITOR_SHORTCUTS.randomSeed} className="tb-menu-shortcut" />
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={paintMode ? 'active' : ''}
-                onClick={() => runMenuAction(setEditMenuOpen, onTogglePaintMode)}
-              >
-                <Pencil size={14} strokeWidth={1.75} aria-hidden /> {paintMode ? 'Exit paint' : 'Paint mode'}
-                <ShortcutHint shortcut={EDITOR_SHORTCUTS.paintMode} className="tb-menu-shortcut" />
-              </button>
             </> : null}
           </div>
         </div>
@@ -338,6 +328,8 @@ export default function TopBar({
         )}
         {projectMode === 'nodes' ? (
           <span className="tb-workspace-pill"><Boxes size={13} aria-hidden /> Nodes workspace</span>
+        ) : projectMode === 'manual' ? (
+          <span className="tb-workspace-pill"><Mountain size={13} aria-hidden /> Manual Terrain</span>
         ) : (
           <button
             type="button"

@@ -38,6 +38,10 @@ uniform float uPaintBaseMult; // scales ONLY the procedural base term in heightA
 uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
 uniform sampler2D uPaintPropsTexture;
+uniform float uManualEnabled;
+uniform vec2 uManualOrigin;
+uniform vec2 uManualSpan;
+uniform sampler2D uManualHeightTexture;
 uniform float uSplineEnabled;
 uniform float uSplineResolution;
 uniform vec2 uSplineOrigin;
@@ -485,6 +489,13 @@ vec4 paintBiomeAt(vec2 xz) {
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
 }
 
+float manualHeightOffsetAt(vec2 xz) {
+  if (uManualEnabled < 0.5) return 0.0;
+  vec2 uv = (xz - uManualOrigin) / max(uManualSpan, vec2(1.0));
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  return texture2D(uManualHeightTexture, uv).r;
+}
+
 vec2 splineUvAt(vec2 xz) { return (xz - uSplineOrigin) / max(uSplineSpan, vec2(1.0)); }
 float splineHeightOffsetAt(vec2 xz) {
   if (uSplineEnabled < .5) return 0.0;
@@ -512,7 +523,8 @@ float erosionOffsetAt(vec2 xz) {
 
 float heightAt(vec2 xz) {
   return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) * uPaintBaseMult
-    + paintHeightOffsetAt(xz) + splineHeightOffsetAt(xz) + erosionOffsetAt(xz);
+    + paintHeightOffsetAt(xz) + manualHeightOffsetAt(xz)
+    + splineHeightOffsetAt(xz) + erosionOffsetAt(xz);
 }
 
 // Moisture field for biome blending — now sourced from the climate system.

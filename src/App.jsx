@@ -31,6 +31,7 @@ import PlaneHUD from './components/PlaneHUD.jsx';
 import TouchControls from './components/TouchControls.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
+import ManualTerrainPanel from './components/manual/ManualTerrainPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
 import { classifyToast } from './components/ui/Toast.jsx';
@@ -73,6 +74,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
       || before.tileAssemblyShape !== after.tileAssemblyShape
       || before.diskRadiusCells !== after.diskRadiusCells) return 'Edited terrain tiles';
     if (JSON.stringify(before.creatorTools) !== JSON.stringify(after.creatorTools)) return 'Edited creator tools';
+    if (JSON.stringify(before.manualTerrain) !== JSON.stringify(after.manualTerrain)) return 'Edited manual terrain';
     if (JSON.stringify(before.terrainGraph) !== JSON.stringify(after.terrainGraph)) return 'Edited terrain graph';
     if (before.timeOfDay !== after.timeOfDay) return 'Adjusted time of day';
     if (JSON.stringify(before.perf) !== JSON.stringify(after.perf)) return 'Adjusted performance settings';
@@ -127,6 +129,13 @@ export default function App() {
   const [uiSettingsOpen, setUiSettingsOpen] = useState(false);
   const appShellRef = useRef(null);
   const [paintState, setPaintState] = useState({ enabled: false });
+  const [manualTerrainState, setManualTerrainState] = useState({
+    enabled: false,
+    selectedId: null,
+    transformMode: 'translate',
+    placementType: null,
+    shapes: [],
+  });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
   const [analysisState, setAnalysisState] = useState({ enabled: false, mode: 'elevation', opacity: .72 });
   const [creatorHistory, setCreatorHistory] = useState({ actions: [], snapshots: [] });
@@ -296,6 +305,10 @@ export default function App() {
           onTimeOfDayChange: (v) => { setTimeOfDay(v); scheduleRecordRef.current?.(); },
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
+          onManualTerrainState: (s, meta) => {
+            setManualTerrainState(s);
+            if (meta?.terrainChanged || meta?.documentChanged) scheduleRecordRef.current?.();
+          },
           onSplineState: (s) => { setSplineState(s); scheduleRecordRef.current?.(); },
           onAnalysisState: setAnalysisState,
           onCreatorHistory: setCreatorHistory,
@@ -463,7 +476,7 @@ export default function App() {
     }, async (update) => {
       blockingUpdateRef.current = update;
       try {
-        if ((terrain.editorMode === 'nodes' || terrain.realWorldSource)
+        if ((terrain.editorMode === 'nodes' || terrain.editorMode === 'manual' || terrain.realWorldSource)
             && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
@@ -559,8 +572,12 @@ export default function App() {
   const createProjectFromTemplate = useCallback(async (templateId = 'blank', { editorMode = 'procedural' } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
-    const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
-    const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
+    const nextMode = editorMode === 'nodes' ? 'nodes' : editorMode === 'manual' ? 'manual' : 'procedural';
+    const template = nextMode === 'nodes'
+      ? getNodeProjectTemplate(templateId)
+      : nextMode === 'manual'
+        ? { id: 'manual-blank', name: 'Manual Terrain', description: 'Build a terrain by composing editable procedural landforms.' }
+        : getProjectTemplate(templateId);
     return loadingRef.current.run('project-create', {
       blocking: true,
       label: `Creating ${template.name}…`,
@@ -571,7 +588,7 @@ export default function App() {
         if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
         landingPreviewActiveRef.current = false;
         landingPreviewSessionRef.current += 1;
-        if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
+        if ((nextMode === 'nodes' || nextMode === 'manual') && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
         }
@@ -582,14 +599,14 @@ export default function App() {
         // Every launch starts from the Root's session seed; give each chosen
         // template a stable-but-fresh variant instead of reverting to seed 1337.
         const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
-        const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+        const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
         const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
         eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
           const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
           await graphResult?.ready;
-        } else {
+        } else if (nextMode === 'procedural') {
           if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
           await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
         }
@@ -599,7 +616,9 @@ export default function App() {
             description: template.description,
             tags: ['nodes', template.id],
           }
-          : { name: template.name, description: template.description, tags: [template.id] };
+          : nextMode === 'manual'
+            ? { name: 'Manual Terrain', description: template.description, tags: ['manual', 'terrain-shapes'] }
+            : { name: template.name, description: template.description, tags: [template.id] };
         update({ detail: 'Saving project…' });
         const project = await saveCurrentProject(metadata);
         if (project) showToast(`${template.name} project created`, 'success');
@@ -1056,6 +1075,7 @@ export default function App() {
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
+  const manualMode = projectMode === 'manual';
   const exploring = exploreMode !== 'none' && exploreMode !== 'freecam';
   const planetExploring = isPlanet && exploring;
   const fpsView = isInfinite || planetExploring;
@@ -1063,7 +1083,7 @@ export default function App() {
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
   const nodeToolsVisible = projectMode !== 'nodes' || uiPrefs.nodeToolsVisible !== false;
-  const showToolPanels = !previewMode && !paintMode && !planetExploring && nodeToolsVisible;
+  const showToolPanels = !previewMode && !paintMode && !manualMode && !planetExploring && nodeToolsVisible;
   const searchEnabled = showToolPanels && projectMode === 'procedural';
   const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
 
@@ -1652,7 +1672,7 @@ export default function App() {
   return (
     <div
       id="app"
-      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}`}
+      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}${manualMode ? ' manual-workspace-open' : ''}`}
       onDragEnter={landingMode ? undefined : onFileDragEnter}
       onDragOver={landingMode ? undefined : onFileDragOver}
       onDragLeave={landingMode ? undefined : onFileDragLeave}
@@ -1690,8 +1710,6 @@ export default function App() {
         }}
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onResetView={() => engine().resetView()}
-        paintMode={paintMode}
-        onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
         onOpenPanel={togglePanel}
         activePanel={effectivePanel}
         loading={nonBlock}
@@ -1782,7 +1800,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && (
+          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && !manualMode && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
@@ -1797,6 +1815,21 @@ export default function App() {
               onSetBaseMode={(mode) => engine().setPaintBaseMode(mode)}
               onStartEmpty={() => engine().startEmptyTerrain()}
               onExit={() => engine().setPaintMode(false)}
+            />
+          )}
+
+          {manualMode && isStudio && !previewMode && !landingMode && (
+            <ManualTerrainPanel
+              state={manualTerrainState}
+              boardSize={boardSize}
+              onPlacementType={(type) => engine().setManualPlacementType(type)}
+              onBeginDrag={(type) => engine().beginManualShapeDrag(type)}
+              onEndDrag={() => engine().endManualShapeDrag()}
+              onSelect={(id) => engine().selectManualShape(id)}
+              onTransformMode={(mode) => engine().setManualTransformMode(mode)}
+              onUpdate={(id, patch) => engine().updateManualShape(id, patch)}
+              onDelete={(id) => engine().deleteManualShape(id)}
+              onDuplicate={(id) => engine().duplicateManualShape(id)}
             />
           )}
 
