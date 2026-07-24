@@ -17,6 +17,25 @@ test('project creation uses project metadata and the account default visibility'
   assert.equal(result.value.visibility, 'unlisted');
 });
 
+test('project creation preserves geographic source settings as ordinary project JSON', () => {
+  const realWorldSource = {
+    version: 1,
+    id: 'custom',
+    name: 'Custom terrain',
+    bbox: { minLat: 45.8, maxLat: 46, minLon: 6.7, maxLon: 7 },
+    zoom: 12,
+    imageryStyle: 'satellite',
+    heightSettings: { mode: 'replace', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 },
+    imagerySettings: { mode: 'blend', blend: 0.7 },
+  };
+  const result = validateProjectCreate({
+    project: { metadata: { name: 'Cloud terrain' }, terrain: { realWorldSource } },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(result.value.projectData).terrain.realWorldSource, realWorldSource);
+});
+
 test('project updates validate visibility and require a field', () => {
   assert.equal(validateProjectUpdate({}).ok, false);
   assert.equal(validateProjectUpdate({ visibility: 'friends' }).ok, false);

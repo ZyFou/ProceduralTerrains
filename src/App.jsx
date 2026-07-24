@@ -423,7 +423,8 @@ export default function App() {
     if (!json) return showToast('Could not parse project file', 'error');
     if (json.terrain) {
       const project = normalizeProject(json);
-      if (project.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+      if ((project.terrain.editorMode === 'nodes' || project.terrain.realWorldSource)
+          && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
       }
       await engineRef.current?.loadSeedJSON(project.terrain);
@@ -431,7 +432,8 @@ export default function App() {
       return showToast(`Opened ${json.metadata?.name ?? 'terrain project'}`, 'success');
     }
     const terrain = normalizeProject({ terrain: json }).terrain;
-    if (terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+    if ((terrain.editorMode === 'nodes' || terrain.realWorldSource)
+        && worldModeRef.current !== 'studio') {
       await runModeSwitchRef.current('studio', { silent: true });
     }
     await engineRef.current?.loadSeedJSON(terrain);
@@ -557,7 +559,8 @@ export default function App() {
       stopLandingPreviews();
       const normalized = normalizeProject(project);
       if (normalized.terrain.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
-      if (normalized.terrain.editorMode === 'nodes' && worldModeRef.current !== 'studio') {
+      if ((normalized.terrain.editorMode === 'nodes' || normalized.terrain.realWorldSource)
+          && worldModeRef.current !== 'studio') {
         await runModeSwitchRef.current('studio', { silent: true });
       }
       await eng.loadSeedJSON(normalized.terrain);

@@ -11,6 +11,13 @@ import {
   fetchBboxImagery, offsetBbox, compositeCellPatches, compositeCellImagery,
   ELEVATION_SOURCE, DEFAULT_IMAGERY_STYLE, resolveImageryStyle,
 } from './terrain/RealWorldHeightmap.js';
+import {
+  DEFAULT_IMPORT_SETTINGS,
+  createRealWorldSource,
+  normalizeRealWorldSource,
+  updateRealWorldSourceImageryStyle,
+  updateRealWorldSourceSettings,
+} from './terrain/RealWorldSource.js';
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
@@ -82,7 +89,6 @@ import { createProductionFiles } from '../export/ExportPresetManager.js';
 import { hasExportErrors, validateExport } from '../export/ExportValidator.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
-const DEFAULT_IMPORT_SETTINGS = { mode: 'disabled', blend: 1, invert: false, normalize: false, heightStrength: 1, heightOffset: 0 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
   key,
   key === 'deep' || key === 'shallow' || key === 'foam' ? [...EARTH_PALETTE[key]]
@@ -308,6 +314,7 @@ export class Engine {
     this.importedMaps = { noise: null, height: null, biome: null, imagery: null };
     this.importedMapState = { noise: null, height: null, biome: null, imagery: null };
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
+    this.realWorldSource = null;
 
     // Erosion: additive world-space height-offset field applied in heightAt.
     // Slice 1 ships the offset pipeline + a no-op identity bake; the simulation
@@ -1119,6 +1126,20 @@ export class Engine {
     this.cb.onTileDebug?.({ ...this.tileDebug });
   }
 
+  _clearImportedMaps() {
+    this._rwClearTileLoadOverlay();
+    this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1;
+    for (const type of ['noise', 'height', 'biome', 'imagery']) {
+      this.importedMaps[type]?.texture?.dispose();
+      this.importedMaps[type] = null;
+      this._setImportState(type);
+    }
+    this.realWorldSource = null;
+    this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
+    this.cb.onRealWorldImageryStyle?.(DEFAULT_IMAGERY_STYLE);
+    this._syncImportedMapUniforms();
+  }
+
   async importTileMap(type, file) {
     const okTypes = ['image/png', 'image/jpeg', 'image/webp'];
     if (!file || !okTypes.includes(file.type)) {
@@ -1148,11 +1169,15 @@ export class Engine {
       if (previous?.texture) previous.texture.dispose();
       this.importedMaps[type] = { fileName: file.name, width: w, height: h, originalWidth: img.width, originalHeight: img.height, imageData, preview, settings: { ...DEFAULT_IMPORT_SETTINGS } };
       // File height imports are not geo-referenced — drop any OpenTopoMap layer
-      // that was tied to a previous real-world load so UV regions don't desync.
-      if (type === 'height' && this.importedMaps.imagery) {
-        this.importedMaps.imagery.texture?.dispose();
-        this.importedMaps.imagery = null;
-        this._setImportState('imagery');
+      // and the saved geographic source tied to a previous real-world load so
+      // neither can silently return when this project is reopened.
+      if (type === 'height') {
+        this.realWorldSource = null;
+        if (this.importedMaps.imagery) {
+          this.importedMaps.imagery.texture?.dispose();
+          this.importedMaps.imagery = null;
+          this._setImportState('imagery');
+        }
       }
       this._rebuildImportedTexture(type);
       this.cb.onToast(`${type[0].toUpperCase() + type.slice(1)} map imported`);
@@ -1185,12 +1210,31 @@ export class Engine {
     return this._loadRealWorldHeightmap(makeCustomLocation(spec), { onProgress });
   }
 
-  async _loadRealWorldHeightmap(loc, { onProgress } = {}) {
+  async _loadRealWorldHeightmap(loc, { onProgress, persistedSource = null, silent = false } = {}) {
     if (this.worldMode !== 'studio') {
       this.cb.onToast('Real-world heightmaps load in Tile (Studio) mode.');
       return false;
     }
-    const imageryStyle = resolveImageryStyle(this.realWorldImageryStyle);
+    const restoredSource = normalizeRealWorldSource(persistedSource);
+    const imageryStyle = resolveImageryStyle(restoredSource?.imageryStyle ?? this.realWorldImageryStyle);
+    const zoom = restoredSource?.zoom ?? effectiveZoomFor(loc);
+    const source = restoredSource ?? createRealWorldSource({
+      id: loc.id,
+      name: loc.name,
+      bbox: loc.bbox,
+      zoom,
+      imageryStyle: imageryStyle.id,
+    });
+    if (!source) {
+      this.cb.onToast('The geographic terrain settings are invalid.');
+      return false;
+    }
+    // This descriptor intentionally outlives the fetched textures. Set it
+    // before network work begins so a failed restore remains retryable and the
+    // next local/cloud save does not lose the geographic source.
+    this.realWorldSource = source;
+    this.realWorldImageryStyle = imageryStyle.id;
+    this.cb.onRealWorldImageryStyle?.(imageryStyle.id);
     this._setImportState('height', { loading: true, error: '' });
     this._setImportState('imagery', { loading: true, error: '' });
     try {
@@ -1198,14 +1242,13 @@ export class Engine {
       // expansion fetch the geographically ADJACENT area for each new cell.
       // Imagery RGB is fetched in parallel at the same zoom/bbox so albedo
       // lines up with elevation without a second geo lookup.
-      const zoom = effectiveZoomFor(loc);
       let elevDone = 0, imgDone = 0;
       const report = () => onProgress?.((elevDone + imgDone) * 0.5);
       const [anchor, imageryAnchor] = await Promise.all([
-        fetchBboxElevation(loc.bbox, zoom, {
+        fetchBboxElevation(source.bbox, zoom, {
           onProgress: (p) => { elevDone = p; report(); },
         }),
-        fetchBboxImagery(loc.bbox, zoom, {
+        fetchBboxImagery(source.bbox, zoom, {
           style: imageryStyle.id,
           onProgress: (p) => { imgDone = p; report(); },
         }).catch((e) => {
@@ -1219,14 +1262,13 @@ export class Engine {
         fileName: `${loc.name} (real-world)`,
         meta: { name: loc.name, zoom, source: ELEVATION_SOURCE },
         geoRef: {
-          bbox0: { ...loc.bbox },
+          bbox0: { ...source.bbox },
           zoom,
           imageryStyle: imageryStyle.id,
           cells: { '0,0': anchor },
           imageryCells: imageryAnchor ? { '0,0': imageryAnchor } : {},
         },
-        // default to replacing the procedural shape so the location reads clearly
-        settings: { ...DEFAULT_IMPORT_SETTINGS, mode: 'replace', heightStrength: 1 },
+        settings: { ...source.heightSettings },
       };
       const prevImg = this.importedMaps.imagery;
       if (prevImg?.texture) prevImg.texture.dispose();
@@ -1234,7 +1276,7 @@ export class Engine {
         this.importedMaps.imagery = {
           fileName: `${loc.name} (${imageryStyle.shortLabel})`,
           meta: { name: loc.name, zoom, source: imageryStyle.attribution, style: imageryStyle.id },
-          settings: { ...DEFAULT_IMPORT_SETTINGS, mode: 'replace', blend: 1 },
+          settings: { ...source.imagerySettings },
         };
       } else {
         this.importedMaps.imagery = null;
@@ -1248,9 +1290,11 @@ export class Engine {
       await this._syncRealWorldNeighborTiles({ silent: true });
       this._setImportState('height', { loading: false });
       if (this.importedMaps.imagery) this._setImportState('imagery', { loading: false });
-      this.cb.onToast(imageryAnchor
-        ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}`
-        : `Loaded ${loc.name} (height only — map texture failed)`);
+      if (!silent) {
+        this.cb.onToast(imageryAnchor
+          ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}`
+          : `Loaded ${loc.name} (height only — map texture failed)`);
+      }
       return true;
     } catch (e) {
       console.error(e);
@@ -1264,12 +1308,26 @@ export class Engine {
     }
   }
 
+  async _restoreRealWorldSource(input) {
+    const source = normalizeRealWorldSource(input);
+    if (!source) return false;
+    return this._loadRealWorldHeightmap({
+      id: source.id,
+      name: source.name,
+      bbox: { ...source.bbox },
+      zoom: source.zoom,
+    }, { persistedSource: source, silent: true });
+  }
+
   /**
    * Switch satellite vs topo map texture. Reloads imagery for the active
    * real-world geoRef without refetching elevation.
    */
   async setRealWorldImageryStyle(styleId) {
     const style = resolveImageryStyle(styleId);
+    if (this.realWorldSource) {
+      this.realWorldSource = updateRealWorldSourceImageryStyle(this.realWorldSource, style.id);
+    }
     if (style.id === this.realWorldImageryStyle && this.importedMaps.height?.geoRef?.imageryStyle === style.id) {
       this.realWorldImageryStyle = style.id;
       this.cb.onRealWorldImageryStyle?.(style.id);
@@ -1288,10 +1346,15 @@ export class Engine {
 
     const prevImg = this.importedMaps.imagery;
     if (prevImg?.texture) prevImg.texture.dispose();
+    const savedImagerySettings = this.realWorldSource?.imagerySettings;
     this.importedMaps.imagery = {
       fileName: `${entry.meta?.name || 'Real-world'} (${style.shortLabel})`,
       meta: { name: entry.meta?.name, zoom: geo.zoom, source: style.attribution, style: style.id },
-      settings: { ...(prevImg?.settings || DEFAULT_IMPORT_SETTINGS), mode: prevImg?.settings?.mode || 'replace', blend: prevImg?.settings?.blend ?? 1 },
+      settings: {
+        ...(prevImg?.settings || savedImagerySettings || DEFAULT_IMPORT_SETTINGS),
+        mode: prevImg?.settings?.mode || savedImagerySettings?.mode || 'replace',
+        blend: prevImg?.settings?.blend ?? savedImagerySettings?.blend ?? 1,
+      },
     };
     this._setImportState('imagery', { loading: true, error: '' });
     await this._syncRealWorldNeighborTiles({ silent: false });
@@ -1453,6 +1516,9 @@ export class Engine {
     const entry = this.importedMaps[type];
     if (!entry) { this._setImportState(type, { error: 'Import a map before enabling this mode.' }); return; }
     entry.settings[key] = value;
+    if (this.realWorldSource && (type === 'height' || type === 'imagery')) {
+      this.realWorldSource = updateRealWorldSourceSettings(this.realWorldSource, type, entry.settings);
+    }
     if (key === 'invert' || key === 'normalize') this._rebuildImportedTexture(type);
     this._syncImportedMapUniforms();
     this._setImportState(type);
@@ -1766,16 +1832,9 @@ export class Engine {
     this.circleRadiusCells = 0;
     this.tiles = [{ cx: 0, cz: 0 }];   // collapse any multi-tile assembly
     this._tileGhostCell = null;
-    // Drop any imported height map (incl. real-world) — a fresh project starts
-    // procedural; keeping it would apply the old elevation over the new board.
-    this._rwClearTileLoadOverlay();
-    this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1;
-    for (const type of ['noise', 'height', 'biome', 'imagery']) {
-      this.importedMaps[type]?.texture?.dispose();
-      this.importedMaps[type] = null;
-      this._setImportState(type);
-    }
-    this._syncImportedMapUniforms();
+    // Drop imported maps and their lightweight geographic source descriptor —
+    // a fresh project always starts procedural.
+    this._clearImportedMaps();
     // Drop any baked erosion: its delta is anchored to the OLD board region, so
     // keeping it would smear the previous (possibly larger / multi-tile) carve
     // over the fresh small default board. params already reset erosion* knobs.
@@ -5242,6 +5301,8 @@ export class Engine {
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
     };
+    const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
+    if (realWorldSource) data.realWorldSource = realWorldSource;
     // Only embed paint pixel data when something was actually painted —
     // serialize() returns null for an untouched canvas, which would otherwise
     // bloat the file with ~3M neutral values.
@@ -5264,6 +5325,16 @@ export class Engine {
       return Promise.resolve({ swapped: false, error: new Error('Invalid terrain seed') });
     }
     if (!silent) this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
+    const realWorldSource = normalizeRealWorldSource(json?.realWorldSource);
+    // Imported pixel data is deliberately not part of project documents.
+    // Always clear the previous project's maps, then retain only the validated
+    // geographic descriptor so it can be refetched after base terrain setup.
+    this._clearImportedMaps();
+    if (realWorldSource) {
+      this.realWorldSource = realWorldSource;
+      this.realWorldImageryStyle = realWorldSource.imageryStyle;
+      this.cb.onRealWorldImageryStyle?.(realWorldSource.imageryStyle);
+    }
     const next = { ...DEFAULT_PARAMS };
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
@@ -5328,7 +5399,8 @@ export class Engine {
     if (json?.paint) this.paintMode?.load(json.paint);
     this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
     this.terrainAnalysis?.load(json?.creatorTools?.analysis);
-    return ready.then((result) => {
+    return ready.then(async (result) => {
+      if (realWorldSource) await this._restoreRealWorldSource(realWorldSource);
       if (!silent) this.cb.onToast(`Loaded seed ${loadedSeed}`);
       return result;
     });

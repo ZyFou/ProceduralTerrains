@@ -35,4 +35,21 @@ describe('project document migration', () => {
     expect(project.metadata.thumbnail).toBe('data:image/webp;base64,thumb');
     expect(projectStats(project)).toMatchObject({ seed: 7, tiles: 2, worldSize: 4096 });
   });
+
+  it('preserves the geographic source descriptor through project normalization', () => {
+    const realWorldSource = {
+      version: 1,
+      id: 'custom',
+      name: 'Custom Alps area',
+      bbox: { minLat: 45.8, maxLat: 46, minLon: 6.7, maxLon: 7 },
+      zoom: 12,
+      imageryStyle: 'opentopo',
+      heightSettings: { mode: 'blend', blend: 0.5, invert: false, normalize: true, heightStrength: 1.2, heightOffset: 20 },
+      imagerySettings: { mode: 'replace', blend: 0.8 },
+    };
+    const project = normalizeProject({ terrain: { params: { seed: 12 }, realWorldSource } });
+
+    expect(project.terrain.realWorldSource).toEqual(realWorldSource);
+    expect(normalizeProject(JSON.parse(JSON.stringify(project))).terrain.realWorldSource).toEqual(realWorldSource);
+  });
 });
