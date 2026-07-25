@@ -226,7 +226,7 @@ export class Engine {
     this.paintMode = null;
     this.paintState = null;
     this.manualTerrain = null;
-    this.manualTerrainState = { enabled: false, selectedId: null, transformMode: 'translate', placementType: null, shapes: [] };
+    this.manualTerrainState = { enabled: false, selectedId: null, transformMode: 'translate', placementType: null, texturePaint: { enabled: false, tool: 'paint', material: 'grass' }, shapes: [] };
     this.splineManager = null;
     this.splineState = { enabled: false, selectedId: null, splines: [] };
     this.terrainAnalysis = null;
@@ -575,6 +575,10 @@ export class Engine {
       gpuTier: this.gpuTier,
       onChange: (state, meta = {}) => {
         this.manualTerrainState = state;
+        if (meta.surfaceChanged) {
+          this._needsRender = true;
+          this.minimap.requestRedraw();
+        }
         if (meta.terrainChanged) {
           this._terrainGen++;
           this._bakedStudioGen = -1;
@@ -589,6 +593,21 @@ export class Engine {
       onStableAction: (label) => this.projectHistory?.record('manual-terrain', label),
       onToast: (message) => this.cb.onToast(message),
     });
+    this._bindAuthoringMaskTextures();
+  }
+
+  _bindAuthoringMaskTextures() {
+    const uniforms = this.uniforms;
+    if (!uniforms || !this.paintMode?.layers) return;
+    const manual = this.projectMode === 'manual' && this.manualTerrain?.surfaceField;
+    if (manual) {
+      this.manualTerrain.surfaceField.bind(uniforms);
+      uniforms.uManualSurfaceMode.value = 1;
+    } else {
+      uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
+      uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
+      uniforms.uManualSurfaceMode.value = 0;
+    }
   }
 
   _initProps() {
@@ -1838,6 +1857,16 @@ export class Engine {
         visualsWetShoreStrength: 0,
       });
     }
+    if (this.projectMode === 'manual') {
+      Object.assign(this.params, {
+        surfaceTextureSource: SURFACE_TEXTURE_SOURCE.BUILT_IN,
+        surfaceTextureMode: true,
+        surfaceTextureAmount: 1,
+        surfaceTexturePaletteInfluence: 0,
+        surfaceTextureBreakup: 0,
+        surfaceTextureTriplanar: true,
+      });
+    }
     if (this.projectMode === 'nodes') {
       this.planetStyle.setStyle({
         planetPreset: 'custom',
@@ -1862,6 +1891,7 @@ export class Engine {
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.clear({ emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
+    this._bindAuthoringMaskTextures();
     this.terrainAnalysis?.load();
     this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
     this.terrainGraph = this.projectMode === 'nodes' ? createBlankGraph() : null;
@@ -2769,15 +2799,15 @@ export class Engine {
     const surfaceTextureSource = normalizeSurfaceTextureSource(p);
     p.surfaceTextureSource = surfaceTextureSource;
     p.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
-    u.uSurfMode.value = p.surfaceTextureMode ? 1.0 : 0.0;
+    u.uSurfMode.value = (this.projectMode === 'manual' || p.surfaceTextureMode) ? 1.0 : 0.0;
     u.uSurfAmount.value = 1.0;
     u.uSurfTint.value = 0.0;
     if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
-    u.uSurfPaletteInfluence.value = p.surfaceTexturePaletteInfluence ?? 0.6;
+    u.uSurfPaletteInfluence.value = this.projectMode === 'manual' ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
     u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
     if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
-    u.uSurfBreakup.value = p.surfaceTextureBreakup ?? 0.5;
+    u.uSurfBreakup.value = this.projectMode === 'manual' ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
     if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };
     u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
@@ -2789,18 +2819,14 @@ export class Engine {
 
   _disposeSurfaceAtlas(atlas) {
     atlas?.diffuse?.dispose?.();
-    atlas?.normal?.dispose?.();
-    atlas?.rough?.dispose?.();
-    atlas?.ao?.dispose?.();
+    atlas?.props?.dispose?.();
   }
 
   _installSurfaceAtlas(atlas) {
     const u = this.uniforms;
     if (!u?.uSurfDiffuse || !atlas) return false;
     u.uSurfDiffuse.value = atlas.diffuse;
-    u.uSurfNormal.value = atlas.normal;
-    u.uSurfRough.value = atlas.rough;
-    u.uSurfAO.value = atlas.ao;
+    u.uSurfProps.value = atlas.props;
     u.uSurfPresent.value = atlas.present.map((v) => (v ? 1.0 : 0.0));
     if (u.uSurfRolePresent) {
       u.uSurfRolePresent.value = (atlas.rolePresent ?? atlas.layers?.map((layer) => (layer.hasDiffuse ? 1 : 0)) ?? [])
@@ -4257,6 +4283,9 @@ export class Engine {
   setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
   setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
   clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
+  setManualTexturePaintEnabled(enabled) { this.manualTerrain?.setTexturePaintEnabled(enabled); }
+  setManualTexturePaintSetting(key, value) { this.manualTerrain?.setTexturePaintSetting(key, value); }
+  clearManualTexturePaint() { return this.manualTerrain?.clearTexturePaint(); }
 
   // ---------------------------------------------------------- creator tools
 
@@ -5378,7 +5407,7 @@ export class Engine {
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
     };
-    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 2, shapes: [], sculpt: null };
+    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 3, shapes: [], sculpt: null, surfacePaint: null };
     const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
     if (realWorldSource) data.realWorldSource = realWorldSource;
     // Only embed paint pixel data when something was actually painted —
@@ -5438,6 +5467,12 @@ export class Engine {
         : json?.editorMode === 'procedural'
           ? 'procedural'
           : json?.generationSource === 'graph' ? 'nodes' : 'procedural';
+    if (this.projectMode === 'manual') {
+      this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.BUILT_IN;
+      this.params.surfaceTextureMode = true;
+      this.params.surfaceTexturePaletteInfluence = 0;
+      this.params.surfaceTextureBreakup = 0;
+    }
     this.terrainGraph = this.projectMode === 'nodes'
       ? (json?.graph ? migrateGraphDocument(json.graph, this.noiseStack) : createBlankGraph())
       : null;
@@ -5466,6 +5501,7 @@ export class Engine {
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual' ? json?.manualTerrain : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
+    this._bindAuthoringMaskTextures();
     this.cb.onParams({ ...this.params });
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
@@ -5525,8 +5561,9 @@ export class Engine {
       generationSource: this.generationSource,
       terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
-      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false }) ?? { version: 2, shapes: [] },
+      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 3, shapes: [] },
       manualSculptRev: this.manualTerrain?.field?.sculptRevision ?? 0,
+      manualSurfaceRev: this.manualTerrain?.surfaceField?.revision ?? 0,
     };
   }
 
@@ -5543,6 +5580,11 @@ export class Engine {
   /** Heavy Manual Sculpt delta blob, deduplicated by sculpt revision in App history. */
   serializeManualSculpt() {
     return this.manualTerrain?.serializeSculpt() ?? null;
+  }
+
+  /** Heavy Manual Texture Paint weight maps, deduplicated by revision in App history. */
+  serializeManualSurface() {
+    return this.manualTerrain?.serializeSurfacePaint() ?? null;
   }
 
   /**
@@ -5647,9 +5689,10 @@ export class Engine {
     }
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual'
-      ? { ...(snap.manualTerrain || {}), sculpt: snap.manualSculpt ?? null }
+      ? { ...(snap.manualTerrain || {}), sculpt: snap.manualSculpt ?? null, surfacePaint: snap.manualSurface ?? null }
       : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
+    this._bindAuthoringMaskTextures();
 
     // Creator sources are serialised, not their generated render targets. A
     // restore therefore re-bakes deterministic masks against the restored map.

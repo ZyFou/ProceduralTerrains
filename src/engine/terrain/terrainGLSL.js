@@ -38,6 +38,9 @@ uniform float uPaintBaseMult; // scales ONLY the procedural base term in heightA
 uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
 uniform sampler2D uPaintPropsTexture;
+uniform float uManualSurfaceMode;
+uniform vec2 uManualSurfaceOrigin;
+uniform vec2 uManualSurfaceSpan;
 uniform float uManualEnabled;
 uniform vec2 uManualOrigin;
 uniform vec2 uManualSpan;
@@ -487,6 +490,22 @@ vec4 paintBiomeAt(vec2 xz) {
   vec2 uv = paintUvAt(xz);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+}
+
+vec2 manualSurfaceUvAt(vec2 xz) {
+  return (xz - uManualSurfaceOrigin) / max(uManualSurfaceSpan, vec2(1.0));
+}
+
+vec4 manualSurfaceWeightsAAt(vec2 xz) {
+  vec2 uv = manualSurfaceUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture2D(uPaintBiomeTexture, uv);
+}
+
+vec4 manualSurfaceWeightsBAt(vec2 xz) {
+  vec2 uv = manualSurfaceUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture2D(uPaintPropsTexture, uv);
 }
 
 float manualHeightOffsetAt(vec2 xz) {

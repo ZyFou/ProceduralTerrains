@@ -45,6 +45,24 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('INFINITE_MODE');
   });
 
+  it('exposes manual surface weight maps and blends painted material roles', () => {
+    const uniforms = createTerrainUniforms();
+    const tile = createTerrainMaterial(uniforms, 5);
+    materials.push(tile);
+
+    expect(uniforms.uManualSurfaceMode.value).toBe(0);
+    expect(uniforms.uManualSurfaceOrigin.value.toArray()).toEqual([-512, -512]);
+    expect(uniforms.uManualSurfaceSpan.value.toArray()).toEqual([1024, 1024]);
+    expect(tile.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
+    expect(tile.fragmentShader).toContain('manualSurfaceWeightsBAt(wpos.xz)');
+    const fragmentSamplers = [...tile.fragmentShader.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g)];
+    expect(fragmentSamplers).toHaveLength(16);
+    expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
+    expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
+    expect(tile.fragmentShader).toContain('manualCoverage');
+    expect(tile.fragmentShader).toContain('(manualMode ? 1.0 : roleBlend)');
+  });
+
   it('keeps the minimal material Tile-only even if legacy callers pass an Infinite option', () => {
     const uniforms = createTerrainUniforms();
     const boot = createBootTerrainMaterial(uniforms, 6, undefined, { infinite: true });

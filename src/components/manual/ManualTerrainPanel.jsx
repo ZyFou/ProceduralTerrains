@@ -13,6 +13,7 @@ import {
   Minus,
   MousePointer2,
   Move3D,
+  Palette,
   RotateCw,
   Scaling,
   SlidersHorizontal,
@@ -26,6 +27,10 @@ import {
   MANUAL_SHAPE_CATALOG,
   getManualShapeDefinition,
 } from '../../manual/ManualShapeCatalog.js';
+import {
+  MANUAL_SURFACE_MATERIALS,
+  manualSurfaceDiffuseUrl,
+} from '../../manual/ManualSurfaceCatalog.js';
 
 const TRANSFORMS = [
   { id: 'translate', label: 'Move', Icon: Move3D, shortcut: 'M' },
@@ -44,6 +49,12 @@ const SCULPT_TOOLS = [
   { id: 'detail', label: 'Detail', Icon: Dices, description: 'Paint seeded multi-scale rocky relief over larger forms.' },
   { id: 'terrace', label: 'Terrace', Icon: GripVertical, description: 'Quantize elevation into editable steps and shelves.' },
   { id: 'erase', label: 'Erase', Icon: Eraser, description: 'Remove sculpted detail and reveal the procedural shapes.' },
+];
+
+const TEXTURE_TOOLS = [
+  { id: 'paint', label: 'Paint', Icon: Palette },
+  { id: 'blend', label: 'Blend', Icon: Waves },
+  { id: 'erase', label: 'Erase', Icon: Eraser },
 ];
 
 const MIN_LIBRARY_HEIGHT = 150;
@@ -176,6 +187,9 @@ export default function ManualTerrainPanel({
   onSculptEnabled,
   onSculptSetting,
   onClearSculpt,
+  onTexturePaintEnabled,
+  onTexturePaintSetting,
+  onClearTexturePaint,
 }) {
   const shapes = state?.shapes ?? [];
   const selected = shapes.find((shape) => shape.id === state?.selectedId) ?? null;
@@ -281,6 +295,9 @@ export default function ManualTerrainPanel({
   const erosionIterations = { label: 'Iterations', min: 1, max: 10, step: 1, digits: 0 };
   const erosionDeposition = { label: 'Sediment Deposit', min: 0, max: 1, step: 0.01, digits: 2 };
   const erosionTalus = { label: 'Talus Threshold', min: 0, max: 20, step: 0.1, digits: 1 };
+  const textureBrushSize = { label: 'Brush Size', min: 4, max: 900, step: 2, digits: 0, unit: 'u' };
+  const textureStrength = { label: 'Strength', min: 0.01, max: 1, step: 0.01, digits: 2 };
+  const textureFalloff = { label: 'Edge Blend', min: 0.02, max: 1, step: 0.01, digits: 2 };
 
   const libraryStyle = {
     left: sideToolOffset('left'),
@@ -307,7 +324,7 @@ export default function ManualTerrainPanel({
             title={`${label} (${shortcut})`}
             aria-label={`${label} selected shape (${shortcut})`}
             aria-pressed={state?.transformMode === id}
-            disabled={!selected || state?.sculpt?.enabled}
+            disabled={!selected || state?.sculpt?.enabled || state?.texturePaint?.enabled}
           >
             <Icon size={18} aria-hidden />
             <kbd>{shortcut}</kbd>
@@ -324,6 +341,18 @@ export default function ManualTerrainPanel({
         >
           <SlidersHorizontal size={18} aria-hidden />
           <kbd>B</kbd>
+        </button>
+        <span className="manual-tool-separator" aria-hidden />
+        <button
+          type="button"
+          className={state?.texturePaint?.enabled ? 'active texture-active' : ''}
+          onClick={() => onTexturePaintEnabled(!state?.texturePaint?.enabled)}
+          title="Texture Paint (T)"
+          aria-label="Toggle Texture Paint (T)"
+          aria-pressed={!!state?.texturePaint?.enabled}
+        >
+          <Palette size={18} aria-hidden />
+          <kbd>T</kbd>
         </button>
       </div>
 
@@ -439,9 +468,9 @@ export default function ManualTerrainPanel({
           <header className="node-dock-header manual-inspector-header">
             <div className="node-dock-heading">
               <span className="node-dock-kicker">Manual terrain</span>
-              <strong>{state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector'}</strong>
+              <strong>{state?.texturePaint?.enabled ? 'Texture Paint' : state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector'}</strong>
             </div>
-            {selected && !state?.sculpt?.enabled ? (
+            {selected && !state?.sculpt?.enabled && !state?.texturePaint?.enabled ? (
               <div className="manual-shape-actions">
                 <button type="button" onClick={() => onDuplicate(selected.id)} title="Duplicate (Ctrl/Cmd+D)" aria-label="Duplicate selected shape">
                   <Copy size={14} aria-hidden />
@@ -453,7 +482,70 @@ export default function ManualTerrainPanel({
             ) : null}
           </header>
 
-          {state?.sculpt?.enabled ? (
+          {state?.texturePaint?.enabled ? (
+            <div className="manual-inspector-body">
+              <p className="manual-inspector-description">Paint the shipped terrain materials directly onto the final surface. Soft weights and triplanar projection keep transitions continuous.</p>
+              <section className="manual-inspector-section">
+                <h3>Texture Tool</h3>
+                <div className="manual-sculpt-tool-grid manual-texture-tool-grid" role="toolbar" aria-label="Texture paint tools">
+                  {TEXTURE_TOOLS.map(({ id, label, Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={state.texturePaint.tool === id ? 'active' : ''}
+                      onClick={() => onTexturePaintSetting('tool', id)}
+                      aria-pressed={state.texturePaint.tool === id}
+                    >
+                      <Icon size={14} aria-hidden />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="manual-sculpt-tool-description">
+                  {state.texturePaint.tool === 'paint'
+                    ? 'Crossfade the selected material over existing terrain textures.'
+                    : state.texturePaint.tool === 'blend'
+                      ? 'Smooth neighboring material weights without flattening the terrain.'
+                      : 'Fade painted materials back to the original manual terrain surface.'}
+                </p>
+              </section>
+              {state.texturePaint.tool === 'paint' ? (
+                <section className="manual-inspector-section">
+                  <h3>Material</h3>
+                  <div className="manual-material-grid" role="listbox" aria-label="Terrain material">
+                    {MANUAL_SURFACE_MATERIALS.map((material) => (
+                      <button
+                        key={material.id}
+                        type="button"
+                        className={state.texturePaint.material === material.id ? 'active' : ''}
+                        onClick={() => onTexturePaintSetting('material', material.id)}
+                        aria-selected={state.texturePaint.material === material.id}
+                        role="option"
+                      >
+                        <img src={manualSurfaceDiffuseUrl(material)} alt="" draggable="false" />
+                        <span>{material.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              <section className="manual-inspector-section manual-inspector-controls">
+                <h3>Brush</h3>
+                <SliderCtl def={textureBrushSize} value={state.texturePaint.brushSize} onChange={(value) => onTexturePaintSetting('brushSize', value)} />
+                <SliderCtl def={textureStrength} value={state.texturePaint.strength} onChange={(value) => onTexturePaintSetting('strength', value)} />
+                <SliderCtl def={textureFalloff} value={state.texturePaint.falloff} onChange={(value) => onTexturePaintSetting('falloff', value)} />
+              </section>
+              <div className="manual-sculpt-help">
+                <span>Left drag: apply tool</span>
+                <span>Alt + left drag: pan</span>
+                <span>Shift + wheel: brush size</span>
+                <span>Right drag: orbit</span>
+              </div>
+              <button type="button" className="manual-clear-sculpt" onClick={onClearTexturePaint} disabled={!state.texturePaint.hasData}>
+                <Trash2 size={14} aria-hidden /> Clear texture layer
+              </button>
+            </div>
+          ) : state?.sculpt?.enabled ? (
             <div className="manual-inspector-body">
               <p className="manual-inspector-description">Paint non-destructive terrain detail over the procedural shape stack.</p>
               <section className="manual-inspector-section">

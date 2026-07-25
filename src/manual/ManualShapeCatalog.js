@@ -175,9 +175,10 @@ export function normalizeManualTerrainDocument(input) {
     ? source.shapes.slice(0, 256).map(normalizeManualShape)
     : [];
   return {
-    version: 2,
+    version: 3,
     shapes,
     sculpt: source.sculpt && typeof source.sculpt === 'object' ? source.sculpt : null,
+    surfacePaint: source.surfacePaint && typeof source.surfacePaint === 'object' ? source.surfacePaint : null,
   };
 }
 

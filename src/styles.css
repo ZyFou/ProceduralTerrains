@@ -4754,6 +4754,11 @@ input[type="color"].palette-color-input {
   background: rgba(192, 132, 252, .12);
   color: #c998ff;
 }
+.manual-viewport-tools button.texture-active {
+  border-color: rgba(74, 222, 128, .42);
+  background: rgba(74, 222, 128, .11);
+  color: #7ee2a8;
+}
 
 .manual-library-dock {
   position: absolute;
@@ -5164,6 +5169,48 @@ input[type="color"].palette-color-input {
   border-color: rgba(192, 132, 252, .38);
   background: rgba(192, 132, 252, .1);
 }
+.manual-texture-tool-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.manual-texture-tool-grid button.active {
+  color: #7ee2a8;
+  border-color: rgba(74, 222, 128, .38);
+  background: rgba(74, 222, 128, .1);
+}
+.manual-material-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.manual-material-grid button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-control);
+  color: var(--text-muted);
+  font: 9px var(--font);
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.manual-material-grid button:hover { border-color: var(--border-strong); color: var(--text-main); }
+.manual-material-grid button.active {
+  border-color: rgba(74, 222, 128, .44);
+  background: rgba(74, 222, 128, .09);
+  color: #a8edc2;
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, .08);
+}
+.manual-material-grid img {
+  width: 34px;
+  height: 34px;
+  display: block;
+  border-radius: 3px;
+  object-fit: cover;
+  image-rendering: auto;
+}
+.manual-material-grid span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manual-sculpt-tool-description {
   min-height: 28px;
   margin: 8px 1px 0;

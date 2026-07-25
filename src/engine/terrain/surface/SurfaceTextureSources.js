@@ -2,6 +2,7 @@ export const SURFACE_TEXTURE_SOURCE = Object.freeze({
   PROCEDURAL: 'procedural',
   DEFAULT: 'defaultTextures',
   CUSTOM: 'customTextures',
+  BUILT_IN: 'builtInTextures',
 });
 
 const SOURCE_VALUES = new Set(Object.values(SURFACE_TEXTURE_SOURCE));
@@ -13,6 +14,7 @@ export function isSurfaceTextureSource(value) {
 export function normalizeSurfaceTextureSource(params = {}) {
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PROCEDURAL) return SURFACE_TEXTURE_SOURCE.PROCEDURAL;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.CUSTOM) return SURFACE_TEXTURE_SOURCE.CUSTOM;
+  if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.BUILT_IN) return SURFACE_TEXTURE_SOURCE.BUILT_IN;
   // defaultTextures is kept only as a save-compatibility value. The active
   // product surface now has two modes: procedural shader or custom materials.
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.DEFAULT) return SURFACE_TEXTURE_SOURCE.CUSTOM;
@@ -29,5 +31,5 @@ export function normalizeSurfaceTextureParams(params = {}, source = params) {
 }
 
 export function sourceUsesTextureAtlas(source) {
-  return normalizeSurfaceTextureSource({ surfaceTextureSource: source }) === SURFACE_TEXTURE_SOURCE.CUSTOM;
+  return normalizeSurfaceTextureSource({ surfaceTextureSource: source }) !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
 }

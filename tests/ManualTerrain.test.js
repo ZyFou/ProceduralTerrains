@@ -69,7 +69,8 @@ describe('Manual Terrain shapes', () => {
         seed: -5,
       }],
     });
-    expect(document.version).toBe(2);
+    expect(document.version).toBe(3);
+    expect(document.surfacePaint).toBeNull();
     expect(document.shapes).toHaveLength(1);
     expect(document.shapes[0]).toMatchObject({
       type: 'plateau',
