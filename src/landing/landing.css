@@ -873,6 +873,7 @@ body:has(.landing-overlay) {
 .lp-project-kind.nodes { border-color: rgba(37,99,235,.35); background: rgba(37,99,235,.12); color: #8bb4ff; }
 .lp-template-kind-badge { position: absolute; top: 12px; right: 12px; padding: 3px 6px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; background: rgba(5,5,5,.82); color: var(--text-muted); font: 650 7.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(6px); }
 .lp-template-kind-badge.nodes { border-color: rgba(37,99,235,.4); background: rgba(13,23,44,.88); color: #8bb4ff; }
+.lp-template-kind-badge.manual { border-color: rgba(139,92,246,.42); background: rgba(31,18,52,.9); color: #c4b5fd; }
 .lp-card-cloud-badge { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; background: rgba(5,5,5,.82); backdrop-filter: blur(6px); }
 .lp-card-cloud-badge.synced { border-color: rgba(34,197,94,.4); color: #81dca3; }
 .lp-card-cloud-badge.unsynced { border-color: rgba(245,158,11,.38); color: #f0c56a; }
@@ -1108,7 +1109,7 @@ body:has(.landing-overlay) {
 .landing-confirm-actions button.danger:hover { background: rgba(239, 68, 68, .2); border-color: var(--danger); }
 .landing-confirm-actions button:disabled { opacity: .55; cursor: default; }
 .landing-create-backdrop { background: rgba(0,0,0,.78); backdrop-filter: blur(7px); }
-.landing-create-dialog { width: min(650px, 100%); padding: 22px; border: 1px solid var(--border-strong); border-radius: 12px; background: #0a0a0a; box-shadow: 0 28px 100px rgba(0,0,0,.78); }
+.landing-create-dialog { width: min(910px, 100%); padding: 22px; border: 1px solid var(--border-strong); border-radius: 12px; background: #0a0a0a; box-shadow: 0 28px 100px rgba(0,0,0,.78); }
 .landing-create-dialog > header { display: flex; align-items: flex-start; gap: 18px; }
 .landing-create-dialog > header > div { flex: 1; }
 .landing-create-dialog > header span { color: var(--accent); font: 650 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
@@ -1116,12 +1117,13 @@ body:has(.landing-overlay) {
 .landing-create-dialog p { margin: 7px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
 .landing-create-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; flex: none; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: var(--cursor-pointer); }
 .landing-create-dialog > header > button:hover { border-color: var(--border-subtle); background: var(--bg-control); color: var(--text-main); }
-.landing-create-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.landing-create-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
 .landing-create-options > button { min-height: 210px; display: flex; flex-direction: column; align-items: flex-start; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); color: var(--text-main); text-align: left; cursor: var(--cursor-pointer); transition: border-color .15s ease, background .15s ease, transform .15s ease; }
 .landing-create-options > button:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--border-active); background: #101010; }
 .landing-create-options > button:disabled { opacity: .55; cursor: default; }
 .landing-create-icon { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 18px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--bg-control); color: var(--text-muted); }
 .landing-create-icon.nodes { border-color: rgba(37,99,235,.45); background: rgba(37,99,235,.14); color: #7aa7ff; }
+.landing-create-icon.manual { border-color: rgba(139,92,246,.45); background: rgba(139,92,246,.13); color: #c4b5fd; }
 .landing-create-options strong { color: var(--text-bright); font-size: 16px; }
 .landing-create-options small { margin-top: 7px; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
 .landing-create-action { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 20px; color: var(--accent); font-size: 11px; font-weight: 650; }

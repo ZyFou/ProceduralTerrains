@@ -314,7 +314,7 @@ export default function ProjectLibrary({
                   <span className="project-library-thumb">
                     {localProject?.metadata.thumbnail ? <img src={localProject.metadata.thumbnail} alt="" /> : localProject ? <LayoutTemplate size={28} /> : <Cloud size={28} />}
                   </span>
-                  {localProject && <span className={`lp-template-kind-badge ${localProject.terrain.editorMode}`}>{localProject.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}</span>}
+                  {localProject && <span className={`lp-template-kind-badge ${localProject.terrain.editorMode}`}>{localProject.terrain.editorMode === 'nodes' ? 'Nodes' : localProject.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural'}</span>}
                   {cloudProject && <span className={`project-library-cloud-badge ${cloudProject.visibility}`} title={`In the cloud · ${cloudProject.visibility}`} aria-label={`In the cloud · ${cloudProject.visibility}`}><Cloud size={12} /><VisibilityIcon size={12} /></span>}
                   <span className="project-library-copy">
                     <strong>{name}</strong>

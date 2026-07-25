@@ -31,6 +31,7 @@ import PlaneHUD from './components/PlaneHUD.jsx';
 import TouchControls from './components/TouchControls.jsx';
 import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
+import ManualTerrainPanel from './components/manual/ManualTerrainPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
 import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
 import { classifyToast } from './components/ui/Toast.jsx';
@@ -51,6 +52,19 @@ const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverl
 const SideDrawer = lazy(() => import('./components/ui/SideDrawer.jsx'));
 const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
 const NodeWorkspace = lazy(loadNodeWorkspace);
+const MANUAL_LIBRARY_HEIGHT_KEY = 'terrain-studio:manual-library-height';
+const DEFAULT_MANUAL_LIBRARY_HEIGHT = 214;
+
+const loadManualLibraryHeight = () => {
+  try {
+    const stored = Number(window.localStorage.getItem(MANUAL_LIBRARY_HEIGHT_KEY));
+    return Number.isFinite(stored)
+      ? Math.min(520, Math.max(150, stored))
+      : DEFAULT_MANUAL_LIBRARY_HEIGHT;
+  } catch {
+    return DEFAULT_MANUAL_LIBRARY_HEIGHT;
+  }
+};
 
 const hex = (rgb) => colorToHex(Array.isArray(rgb) ? rgb : [0.5, 0.5, 0.5]);
 const yesNo = (value) => (value ? 'On' : 'Off');
@@ -69,10 +83,12 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     if (before.worldMode !== after.worldMode) return 'Changed world mode';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
+    if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
     if (JSON.stringify(before.tiles) !== JSON.stringify(after.tiles)
       || before.tileAssemblyShape !== after.tileAssemblyShape
       || before.diskRadiusCells !== after.diskRadiusCells) return 'Edited terrain tiles';
     if (JSON.stringify(before.creatorTools) !== JSON.stringify(after.creatorTools)) return 'Edited creator tools';
+    if (JSON.stringify(before.manualTerrain) !== JSON.stringify(after.manualTerrain)) return 'Edited manual terrain';
     if (JSON.stringify(before.terrainGraph) !== JSON.stringify(after.terrainGraph)) return 'Edited terrain graph';
     if (before.timeOfDay !== after.timeOfDay) return 'Adjusted time of day';
     if (JSON.stringify(before.perf) !== JSON.stringify(after.perf)) return 'Adjusted performance settings';
@@ -127,6 +143,31 @@ export default function App() {
   const [uiSettingsOpen, setUiSettingsOpen] = useState(false);
   const appShellRef = useRef(null);
   const [paintState, setPaintState] = useState({ enabled: false });
+  const [manualTerrainState, setManualTerrainState] = useState({
+    enabled: false,
+    selectedId: null,
+    transformMode: 'translate',
+    placementType: null,
+    sculpt: {
+      enabled: false,
+      tool: 'raise',
+      brushSize: 110,
+      strength: 0.32,
+      falloff: 0.72,
+      targetHeight: 120,
+      creaseWidth: 0.2,
+      detailScale: 32,
+      detailRoughness: 0.55,
+      detailSeed: 1337,
+      terraceStep: 24,
+      erosionIterations: 3,
+      erosionDeposition: 0.65,
+      erosionTalus: 1.5,
+      revision: 0,
+      hasData: false,
+    },
+    shapes: [],
+  });
   const [splineState, setSplineState] = useState({ enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] });
   const [analysisState, setAnalysisState] = useState({ enabled: false, mode: 'elevation', opacity: .72 });
   const [creatorHistory, setCreatorHistory] = useState({ actions: [], snapshots: [] });
@@ -159,6 +200,7 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
+  const [manualLibraryHeight, setManualLibraryHeight] = useState(loadManualLibraryHeight);
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
   const [graphState, setGraphState] = useState({ valid: true, compiling: false, diagnostics: [], slotCount: 0, colorSlotCount: 0 });
@@ -212,6 +254,7 @@ export default function App() {
   const historyRef = useRef({ past: [], future: [], present: null });
   const paintBlobsRef = useRef(new Map());     // paintRev → heavy paint blob
   const erosionBlobsRef = useRef(new Map());   // erosionRev → heavy erosion blob
+  const manualSculptBlobsRef = useRef(new Map()); // manualSculptRev → heavy sculpt delta
   const histSuppressRef = useRef(false);       // true while applying a restore
   const histTimerRef = useRef(null);           // pending debounced record
   const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
@@ -296,6 +339,11 @@ export default function App() {
           onTimeOfDayChange: (v) => { setTimeOfDay(v); scheduleRecordRef.current?.(); },
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
           onPaintState: (s) => { setPaintState(s); scheduleRecordRef.current?.(); },
+          onManualTerrainState: (s, meta) => {
+            setManualTerrainState(s);
+            if (meta?.inspectorRequested) setActivePanel(null);
+            if (meta?.terrainChanged || meta?.documentChanged) scheduleRecordRef.current?.();
+          },
           onSplineState: (s) => { setSplineState(s); scheduleRecordRef.current?.(); },
           onAnalysisState: setAnalysisState,
           onCreatorHistory: setCreatorHistory,
@@ -463,7 +511,7 @@ export default function App() {
     }, async (update) => {
       blockingUpdateRef.current = update;
       try {
-        if ((terrain.editorMode === 'nodes' || terrain.realWorldSource)
+        if ((terrain.editorMode === 'nodes' || terrain.editorMode === 'manual' || terrain.realWorldSource)
             && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
@@ -559,8 +607,12 @@ export default function App() {
   const createProjectFromTemplate = useCallback(async (templateId = 'blank', { editorMode = 'procedural' } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
-    const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
-    const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
+    const nextMode = editorMode === 'nodes' ? 'nodes' : editorMode === 'manual' ? 'manual' : 'procedural';
+    const template = nextMode === 'nodes'
+      ? getNodeProjectTemplate(templateId)
+      : nextMode === 'manual'
+        ? { id: 'manual-blank', name: 'Manual Terrain', description: 'Build a terrain by composing editable procedural landforms.' }
+        : getProjectTemplate(templateId);
     return loadingRef.current.run('project-create', {
       blocking: true,
       label: `Creating ${template.name}…`,
@@ -571,7 +623,7 @@ export default function App() {
         if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
         landingPreviewActiveRef.current = false;
         landingPreviewSessionRef.current += 1;
-        if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
+        if ((nextMode === 'nodes' || nextMode === 'manual') && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
         }
@@ -582,24 +634,44 @@ export default function App() {
         // Every launch starts from the Root's session seed; give each chosen
         // template a stable-but-fresh variant instead of reverting to seed 1337.
         const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
-        const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
+        const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
         const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
         eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
           const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
           await graphResult?.ready;
-        } else {
+        } else if (nextMode === 'procedural') {
           if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
           await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
         }
+        // A freshly-created project owns a fresh undo timeline. Without this
+        // baseline, the first edit could undo into the landing preview/default
+        // procedural document — especially visible when the first Manual edit
+        // is a sculpt stroke on an otherwise empty terrain.
+        try {
+          historyRef.current = {
+            past: [],
+            future: [],
+            present: JSON.stringify(eng.serializeState()),
+          };
+          paintBlobsRef.current.clear();
+          erosionBlobsRef.current.clear();
+          manualSculptBlobsRef.current.clear();
+          nativeHistoryActionsRef.current = [];
+          nativeHistoryCursorRef.current = -1;
+          setNativeHistoryActions([]);
+          setHistState({ canUndo: false, canRedo: false });
+        } catch { /* history is best effort */ }
         const metadata = nextMode === 'nodes'
           ? {
             name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
             description: template.description,
             tags: ['nodes', template.id],
           }
-          : { name: template.name, description: template.description, tags: [template.id] };
+          : nextMode === 'manual'
+            ? { name: 'Manual Terrain', description: template.description, tags: ['manual', 'terrain-shapes'] }
+            : { name: template.name, description: template.description, tags: [template.id] };
         update({ detail: 'Saving project…' });
         const project = await saveCurrentProject(metadata);
         if (project) showToast(`${template.name} project created`, 'success');
@@ -844,6 +916,11 @@ export default function App() {
         const blob = eng.serializeErosion();
         if (blob) erosionBlobsRef.current.set(erev, blob);
       }
+      const srev = state.manualSculptRev ?? 0;
+      if (srev > 0 && !manualSculptBlobsRef.current.has(srev)) {
+        const blob = eng.serializeManualSculpt();
+        if (blob) manualSculptBlobsRef.current.set(srev, blob);
+      }
       return JSON.stringify(state);
     } catch (err) {
       console.warn('History snapshot failed', err);
@@ -856,15 +933,18 @@ export default function App() {
   const prunePaintBlobs = useCallback(() => {
     const paintMap = paintBlobsRef.current;
     const erosionMap = erosionBlobsRef.current;
-    if (paintMap.size <= 4 && erosionMap.size <= 4) return;
+    const sculptMap = manualSculptBlobsRef.current;
+    if (paintMap.size <= 4 && erosionMap.size <= 4 && sculptMap.size <= 4) return;
     const h = historyRef.current;
     const livePaint = new Set();
     const liveErosion = new Set();
+    const liveSculpt = new Set();
     const collect = (s) => {
       try {
         const snap = JSON.parse(s);
         if (snap.paintRev) livePaint.add(snap.paintRev);
         if (snap.erosionRev) liveErosion.add(snap.erosionRev);
+        if (snap.manualSculptRev) liveSculpt.add(snap.manualSculptRev);
       } catch { /* ignore */ }
     };
     h.past.forEach(collect);
@@ -872,6 +952,7 @@ export default function App() {
     if (h.present) collect(h.present);
     for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
     for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
+    for (const key of sculptMap.keys()) if (!liveSculpt.has(key)) sculptMap.delete(key);
   }, []);
 
   const recordHistory = useCallback(() => {
@@ -933,6 +1014,9 @@ export default function App() {
       // and the heavy baked-erosion blob (delta grid + masks)
       snap.erosion = (snap.erosionRev ?? 0) > 0
         ? (erosionBlobsRef.current.get(snap.erosionRev) ?? null)
+        : null;
+      snap.manualSculpt = (snap.manualSculptRev ?? 0) > 0
+        ? (manualSculptBlobsRef.current.get(snap.manualSculptRev) ?? null)
         : null;
       // a different world mode is a heavy, async rebuild — do it first (and
       // quietly) through the same blocking-overlay path as the mode bar.
@@ -1056,13 +1140,14 @@ export default function App() {
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
+  const manualMode = projectMode === 'manual';
   const exploring = exploreMode !== 'none' && exploreMode !== 'freecam';
   const planetExploring = isPlanet && exploring;
   const fpsView = isInfinite || planetExploring;
   const touchExplore = isInfinite || exploring;
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
-  const nodeToolsVisible = projectMode !== 'nodes' || uiPrefs.nodeToolsVisible !== false;
+  const nodeToolsVisible = !['nodes', 'manual'].includes(projectMode) || uiPrefs.nodeToolsVisible !== false;
   const showToolPanels = !previewMode && !paintMode && !planetExploring && nodeToolsVisible;
   const searchEnabled = showToolPanels && projectMode === 'procedural';
   const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
@@ -1402,7 +1487,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [uiSettingsOpen]);
 
-  const projectPanelAvailable = (id) => projectMode !== 'nodes' || NODE_PANEL_IDS.includes(id);
+  const projectPanelAvailable = (id) => !['nodes', 'manual'].includes(projectMode) || NODE_PANEL_IDS.includes(id);
   const togglePanel = (id) => {
     if (!projectPanelAvailable(id)) return;
     setActivePanel((cur) => (cur === id ? null : id));
@@ -1411,6 +1496,12 @@ export default function App() {
   const drawerOpen = !!effectivePanel;
   const toolsRailAttr = toolsRailLayout.edge ?? 'left';
   const drawerSideAttr = drawerLayout.side ?? 'right';
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MANUAL_LIBRARY_HEIGHT_KEY, String(Math.round(manualLibraryHeight)));
+    } catch { /* The layout still works when storage is unavailable. */ }
+  }, [manualLibraryHeight]);
 
   const handleToolsRailLayout = useCallback((next) => {
     setToolsRailLayout(next);
@@ -1652,7 +1743,7 @@ export default function App() {
   return (
     <div
       id="app"
-      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}`}
+      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}${manualMode ? ' manual-workspace-open' : ''}`}
       onDragEnter={landingMode ? undefined : onFileDragEnter}
       onDragOver={landingMode ? undefined : onFileDragOver}
       onDragLeave={landingMode ? undefined : onFileDragLeave}
@@ -1690,8 +1781,6 @@ export default function App() {
         }}
         onToggleHelp={() => setHelpVisible((v) => !v)}
         onResetView={() => engine().resetView()}
-        paintMode={paintMode}
-        onTogglePaintMode={() => engine().setPaintMode(!paintMode)}
         onOpenPanel={togglePanel}
         activePanel={effectivePanel}
         loading={nonBlock}
@@ -1716,7 +1805,11 @@ export default function App() {
         data-tools-rail={toolsRailAttr}
         data-drawer-side={drawerSideAttr}
         data-node-palette-side={nodesWorkspaceActive && nodePaletteDock.detached ? nodePaletteDock.side : 'attached'}
-        style={{ '--node-palette-shell-width': `${nodePaletteDock.width || 208}px` }}
+        style={{
+          '--node-palette-shell-width': `${nodePaletteDock.width || 208}px`,
+          '--manual-library-height': `${manualLibraryHeight}px`,
+          '--manual-library-bottom-offset': toolsRailAttr === 'bottom' ? '58px' : '0px',
+        }}
       >
         {showToolPanels && (
           <LeftToolbar
@@ -1727,7 +1820,7 @@ export default function App() {
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
             showLabels={uiPrefs.toolbarLabels}
-            panelIds={projectMode === 'nodes' ? NODE_PANEL_IDS : undefined}
+            panelIds={['nodes', 'manual'].includes(projectMode) ? NODE_PANEL_IDS : undefined}
           />
         )}
 
@@ -1782,7 +1875,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && (
+          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && !manualMode && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
@@ -1797,6 +1890,33 @@ export default function App() {
               onSetBaseMode={(mode) => engine().setPaintBaseMode(mode)}
               onStartEmpty={() => engine().startEmptyTerrain()}
               onExit={() => engine().setPaintMode(false)}
+            />
+          )}
+
+          {manualMode && isStudio && !previewMode && !landingMode && (
+            <ManualTerrainPanel
+              state={manualTerrainState}
+              boardSize={boardSize}
+              libraryHeight={manualLibraryHeight}
+              onLibraryHeightChange={setManualLibraryHeight}
+              inspectorReplaced={!!effectivePanel}
+              toolsRailVisible={showToolPanels}
+              toolsRailEdge={toolsRailAttr}
+              onPlacementType={(type) => engine().setManualPlacementType(type)}
+              onBeginDrag={(type) => engine().beginManualShapeDrag(type)}
+              onEndDrag={() => engine().endManualShapeDrag()}
+              onSelect={(id) => engine().selectManualShape(id)}
+              onTransformMode={(mode) => engine().setManualTransformMode(mode)}
+              onUpdate={(id, patch) => engine().updateManualShape(id, patch)}
+              onDelete={(id) => engine().deleteManualShape(id)}
+              onDuplicate={(id) => engine().duplicateManualShape(id)}
+              onReorder={(id, direction) => engine().moveManualShape(id, direction)}
+              onSculptEnabled={(enabled) => {
+                setActivePanel(null);
+                engine().setManualSculptEnabled(enabled);
+              }}
+              onSculptSetting={(key, value) => engine().setManualSculptSetting(key, value)}
+              onClearSculpt={() => engine().clearManualSculpt()}
             />
           )}
 

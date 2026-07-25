@@ -276,7 +276,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           {cloudProject && <span className={`lp-card-visibility-icon ${cloudProject.visibility}`}><VisibilityIcon size={12} aria-hidden /></span>}
         </span>
         <span className={`lp-template-kind-badge ${project.terrain.editorMode}`}>
-          {project.terrain.editorMode === 'nodes' ? 'Nodes' : 'Procedural'}
+          {project.terrain.editorMode === 'nodes' ? 'Nodes' : project.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural'}
         </span>
         <span className="lp-card-info">
           <strong>{project.metadata.name}</strong>
@@ -513,7 +513,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>
-            <div><span>New project</span><h2 id="create-terrain-title">Choose how to build your terrain</h2><p>Each project uses one authoring workflow. You can export from either.</p></div>
+            <div><span>New project</span><h2 id="create-terrain-title">Choose how to build your terrain</h2><p>Each project uses one authoring workflow. All three can be saved and exported.</p></div>
             <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={16} /></button>
           </header>
           <div className="landing-create-options">
@@ -528,6 +528,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <strong>Nodes</strong>
               <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
               <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
+            </button>
+            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!bootReady || exiting}>
+              <span className="landing-create-icon manual"><Mountain size={22} /></span>
+              <strong>Manual Terrain</strong>
+              <small>Drag mountains, valleys, ridges, plateaus, and craters onto a clean terrain and transform them directly.</small>
+              <span className="landing-create-action">Create Manual Terrain <ArrowRight size={13} /></span>
             </button>
           </div>
         </section>

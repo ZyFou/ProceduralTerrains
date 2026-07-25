@@ -29,6 +29,22 @@ describe('project document migration', () => {
     expect(nodes.terrain).toMatchObject({ editorMode: 'nodes', generationSource: 'graph' });
   });
 
+  it('preserves Manual Terrain as a third editor mode', () => {
+    const project = normalizeProject({
+      terrain: {
+        editorMode: 'manual',
+        generationSource: 'graph',
+        params: { seed: 12 },
+        manualTerrain: { version: 1, shapes: [] },
+      },
+    });
+    expect(project.terrain).toMatchObject({
+      editorMode: 'manual',
+      generationSource: 'classic',
+      manualTerrain: { version: 1, shapes: [] },
+    });
+  });
+
   it('preserves supplied metadata and reports terrain size', () => {
     const project = normalizeProject({ metadata: { name: 'Ridge', tags: ['alpine'], thumbnail: 'data:image/webp;base64,thumb' }, terrain: { params: { seed: 7, chunkCount: 32, chunkSize: 128 }, tiles: [{}, {}] } });
     expect(project.metadata.name).toBe('Ridge');
