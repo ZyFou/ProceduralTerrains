@@ -71,6 +71,9 @@ export class PlanetCloudLayer {
     // directional occupancy grid (empty-space-skip acceleration; rebuilt on a
     // throttle since wind/rotation drift the field slowly)
     this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occScratch = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occupancyRatio = 0;
+    this._occupancyUseful = true;
     this._occTex = new THREE.DataTexture(this._occData, OCC_SIZE, OCC_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
     this._occTex.minFilter = THREE.LinearFilter;
     this._occTex.magFilter = THREE.LinearFilter;
@@ -237,7 +240,7 @@ export class PlanetCloudLayer {
     const u = this.material.uniforms;
     const inner = u.uCloudInner.value, outer = u.uCloudOuter.value;
     const w = u.uCloudWind.value;
-    buildOccupancyOctahedral(this._occData, OCC_SIZE, inner, outer, {
+    const occupancyRatio = buildOccupancyOctahedral(this._occData, OCC_SIZE, inner, outer, {
       scale: u.uCloudScale.value,
       windX: w.x, windY: w.y, windZ: w.z,
       time: u.uCloudTime.value,
@@ -247,10 +250,12 @@ export class PlanetCloudLayer {
       octaves: this._octaves,
       evolve: u.uCloudEvolve.value,
       // conservative upper-bound margin for the detail noise the GPU adds
-      boost: (u.uCloudDetailStrength.value || 0) + 0.12,
-    });
+      boost: (u.uCloudDetailStrength.value || 0) * 0.5 + 0.03,
+    }, 2, this._occScratch);
     this._occTex.needsUpdate = true;
-    u.uUseOccupancy.value = 1.0;
+    this._occupancyRatio = occupancyRatio;
+    this._occupancyUseful = occupancyRatio > 0 && occupancyRatio < 0.78;
+    u.uUseOccupancy.value = this._occupancyUseful ? 1.0 : 0.0;
   }
 
   /** Swap the cloud material for a new step count (compile-time #define). */
@@ -316,10 +321,29 @@ export class PlanetCloudLayer {
     // refresh the empty-space-skip occupancy grid on a throttle (the field drifts
     // slowly with wind/rotation; the dilation margin absorbs the lag)
     const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    if (now - this._occBuiltAt > 150) {
+    const occupancyInterval = this._occupancyUseful ? 250 : 1000;
+    if (now - this._occBuiltAt > occupancyInterval) {
       this._occBuiltAt = now;
       this._rebuildOccupancy();
     }
+  }
+
+  /** Bind depth produced by the real scene render (no duplicate scene pass). */
+  useSceneDepth(depthTexture, camera, baseSize = null) {
+    const u = this.material.uniforms;
+    if (!this.active || !depthTexture) {
+      u.uUseDepth.value = 0.0;
+      return false;
+    }
+    const size = baseSize || depthTexture.image || {};
+    const width = size.x ?? size.width ?? 1;
+    const height = size.y ?? size.height ?? 1;
+    u.tSceneDepth.value = depthTexture;
+    u.uDepthResolution.value.set(width, height);
+    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    u.uUseDepth.value = 1.0;
+    return true;
   }
 
   /** Render the opaque scene depth (clouds hidden) so the cloud march can clamp
@@ -349,13 +373,7 @@ export class PlanetCloudLayer {
       renderer.setClearColor(this._prevClearColor, prevClearAlpha);
     }
 
-    const u = this.material.uniforms;
-    u.tSceneDepth.value = this._depthTexture;
-    u.uDepthResolution.value.set(this._depthTarget.width, this._depthTarget.height);
-    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
-    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
-    u.uUseDepth.value = 1.0;
-    return true;
+    return this.useSceneDepth(this._depthTexture, camera, this._depthTarget);
   }
 
   /** True while low-res cloud mode is active (mesh drawn offscreen + composited). */
@@ -372,9 +390,9 @@ export class PlanetCloudLayer {
   }
 
   /** Composite the low-res clouds over the current target (after the main render). */
-  compositeLowRes(renderer) {
+  compositeLowRes(renderer, sceneDepthTexture = this._depthTexture) {
     if (!this.usesLowRes) return;
-    this._lowResPass.composite(renderer, this._depthTexture);
+    this._lowResPass.composite(renderer, sceneDepthTexture);
   }
 
   _ensureDepthTarget(renderer, baseSize = null) {
@@ -385,12 +403,12 @@ export class PlanetCloudLayer {
 
     if (this._depthTarget) this._depthTarget.dispose();
     this._depthTexture = new THREE.DepthTexture(w, h);
-    this._depthTexture.type = THREE.UnsignedInt248Type;
-    this._depthTexture.format = THREE.DepthStencilFormat;
+    this._depthTexture.type = THREE.UnsignedIntType;
+    this._depthTexture.format = THREE.DepthFormat;
     this._depthTarget = new THREE.WebGLRenderTarget(w, h, {
       depthTexture: this._depthTexture,
       depthBuffer: true,
-      stencilBuffer: true,
+      stencilBuffer: false,
     });
     this._depthTarget.texture.minFilter = THREE.NearestFilter;
     this._depthTarget.texture.magFilter = THREE.NearestFilter;

@@ -76,6 +76,9 @@ export class CloudSlabLayer {
 
     // planar occupancy grid (empty-space-skip acceleration), rebuilt on a throttle
     this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occScratch = new Uint8Array(OCC_SIZE * OCC_SIZE);
+    this._occupancyRatio = 0;
+    this._occupancyUseful = true;
     this._occTex = new THREE.DataTexture(this._occData, OCC_SIZE, OCC_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
     this._occTex.minFilter = THREE.LinearFilter;
     this._occTex.magFilter = THREE.LinearFilter;
@@ -328,7 +331,7 @@ export class CloudSlabLayer {
   _rebuildOccupancy() {
     const u = this.material.uniforms;
     const w = u.uCloudWind.value;
-    buildOccupancyPlanar(
+    const occupancyRatio = buildOccupancyPlanar(
       this._occData, OCC_SIZE,
       u.uOccCenter.value.x, u.uOccCenter.value.y, u.uOccExtent.value,
       u.uCloudBottom.value, u.uCloudTop.value,
@@ -342,11 +345,13 @@ export class CloudSlabLayer {
         octaves: this._octaves,
         evolve: u.uCloudEvolve.value,
         // conservative upper-bound margin for the detail noise the GPU adds
-        boost: (u.uCloudDetailStrength.value || 0) + 0.12,
-      }
+        boost: (u.uCloudDetailStrength.value || 0) * 0.5 + 0.03,
+      }, 2, this._occScratch
     );
     this._occTex.needsUpdate = true;
-    u.uUseOccupancy.value = 1.0;
+    this._occupancyRatio = occupancyRatio;
+    this._occupancyUseful = occupancyRatio > 0 && occupancyRatio < 0.78;
+    u.uUseOccupancy.value = this._occupancyUseful ? 1.0 : 0.0;
   }
 
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
@@ -430,14 +435,36 @@ export class CloudSlabLayer {
 
     // refresh the empty-space-skip occupancy grid on a throttle
     const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    if (now - this._occBuiltAt > 150) {
+    const occupancyInterval = this._occupancyUseful ? 250 : 1000;
+    if (now - this._occBuiltAt > occupancyInterval) {
       this._occBuiltAt = now;
       this._rebuildOccupancy();
     }
   }
 
+  /** Bind depth produced by the real scene render (no duplicate scene pass). */
+  useSceneDepth(depthTexture, camera, baseSize = null) {
+    const u = this.material.uniforms;
+    if (!this.active || !depthTexture) {
+      u.uUseDepth.value = 0.0;
+      return false;
+    }
+    const size = baseSize || depthTexture.image || {};
+    const width = size.x ?? size.width ?? 1;
+    const height = size.y ?? size.height ?? 1;
+    u.tSceneDepth.value = depthTexture;
+    u.uDepthResolution.value.set(width, height);
+    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    u.uUseDepth.value = 1.0;
+    return true;
+  }
+
   renderDepthPrepass(renderer, camera, baseSize = null) {
-    if (!this.active) return false;
+    if (!this.active) {
+      this.material.uniforms.uUseDepth.value = 0.0;
+      return false;
+    }
 
     this._ensureDepthTarget(renderer, baseSize);
 
@@ -458,12 +485,7 @@ export class CloudSlabLayer {
       renderer.setClearColor(this._prevClearColor, prevClearAlpha);
     }
 
-    const u = this.material.uniforms;
-    u.tSceneDepth.value = this._depthTexture;
-    u.uDepthResolution.value.set(this._depthTarget.width, this._depthTarget.height);
-    u.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
-    u.uViewMatrixInverse.value.copy(camera.matrixWorld);
-    return true;
+    return this.useSceneDepth(this._depthTexture, camera, this._depthTarget);
   }
 
   /** True while low-res cloud mode is active (mesh lives on the offscreen layer
@@ -483,9 +505,9 @@ export class CloudSlabLayer {
 
   /** Composite the low-res clouds over the current target (call after the main
    *  scene render). */
-  compositeLowRes(renderer) {
+  compositeLowRes(renderer, sceneDepthTexture = this._depthTexture) {
     if (!this.usesLowRes) return;
-    this._lowResPass.composite(renderer, this._depthTexture);
+    this._lowResPass.composite(renderer, sceneDepthTexture);
   }
 
   _ensureDepthTarget(renderer, baseSize = null) {
@@ -496,12 +518,12 @@ export class CloudSlabLayer {
 
     if (this._depthTarget) this._depthTarget.dispose();
     this._depthTexture = new THREE.DepthTexture(w, h);
-    this._depthTexture.type = THREE.UnsignedInt248Type;
-    this._depthTexture.format = THREE.DepthStencilFormat;
+    this._depthTexture.type = THREE.UnsignedIntType;
+    this._depthTexture.format = THREE.DepthFormat;
     this._depthTarget = new THREE.WebGLRenderTarget(w, h, {
       depthTexture: this._depthTexture,
       depthBuffer: true,
-      stencilBuffer: true,
+      stencilBuffer: false,
     });
     this._depthTarget.texture.minFilter = THREE.NearestFilter;
     this._depthTarget.texture.magFilter = THREE.NearestFilter;

@@ -53,13 +53,14 @@ function rotMul(px, py, pz, out) {
 function fbmBase(px, py, pz, octaves) {
   let amp = 0.5, sum = 0, norm = 0;
   let x = px, y = py, z = pz;
-  const r = [0, 0, 0];
   for (let i = 0; i < octaves; i++) {
     sum += amp * vnoise(x, y, z);
     norm += amp;
     amp *= 0.5;
-    rotMul(x, y, z, r);
-    x = r[0] * 2.02; y = r[1] * 2.02; z = r[2] * 2.02;
+    const nx = -0.80 * y - 0.60 * z;
+    const ny = 0.80 * x + 0.36 * y - 0.48 * z;
+    const nz = 0.60 * x - 0.48 * y + 0.64 * z;
+    x = nx * 2.02; y = ny * 2.02; z = nz * 2.02;
   }
   return sum / Math.max(norm, 1e-4);
 }
@@ -79,7 +80,8 @@ const smoothstep = (e0, e1, x) => {
  */
 export function cloudCoverageAt(x, y, z, f) {
   // cl_domain: rotate about Y by f.rotation
-  const c = Math.cos(f.rotation), s = Math.sin(f.rotation);
+  const c = f.rotationCos ?? Math.cos(f.rotation);
+  const s = f.rotationSin ?? Math.sin(f.rotation);
   const qx = c * x + s * z;
   const qy = y;
   const qz = -s * x + c * z;
@@ -123,7 +125,9 @@ function octDecode(u, v, out) {
  * @param {object} field  cloud field params (see cloudCoverageAt)
  * @param {number} [dilate] dilation passes (default 2)
  */
-export function buildOccupancyOctahedral(out, size, inner, outer, field, dilate = 2) {
+export function buildOccupancyOctahedral(out, size, inner, outer, field, dilate = 2, scratch = null) {
+  field.rotationCos = Math.cos(field.rotation);
+  field.rotationSin = Math.sin(field.rotation);
   const d = [0, 0, 0];
   // sample a few radii up the column (the shape field varies with radius) and
   // take the max so a column with cloud only near the inner/outer edge is kept.
@@ -141,15 +145,14 @@ export function buildOccupancyOctahedral(out, size, inner, outer, field, dilate 
       out[j * size + i] = cov > 0.003 ? 255 : 0;
     }
   }
-  dilateMax(out, size, dilate);
+  return dilateMax(out, size, dilate, scratch);
 }
 
 // 3×3 max dilation, `passes` times, in place (grows the occupied region so
 // edges/wisps and the rebuild lag never clip a real cloud).
-function dilateMax(out, size, passes) {
-  if (passes <= 0) return;
+function dilateMax(out, size, passes, scratch = null) {
   let src = out;
-  let tmp = new Uint8Array(size * size);
+  let tmp = scratch && scratch.length === out.length ? scratch : new Uint8Array(size * size);
   for (let p = 0; p < passes; p++) {
     for (let j = 0; j < size; j++) {
       for (let i = 0; i < size; i++) {
@@ -167,6 +170,9 @@ function dilateMax(out, size, passes) {
     const swap = src; src = tmp; tmp = swap;
   }
   if (src !== out) out.set(src);
+  let occupied = 0;
+  for (let i = 0; i < out.length; i++) occupied += out[i] > 0 ? 1 : 0;
+  return occupied / Math.max(out.length, 1);
 }
 
 /**
@@ -181,7 +187,9 @@ function dilateMax(out, size, passes) {
  * @param {object} field  cloud field params (see cloudCoverageAt)
  * @param {number} [dilate]
  */
-export function buildOccupancyPlanar(out, size, cx, cz, extent, bottom, top, field, dilate = 2) {
+export function buildOccupancyPlanar(out, size, cx, cz, extent, bottom, top, field, dilate = 2, scratch = null) {
+  field.rotationCos = Math.cos(field.rotation);
+  field.rotationSin = Math.sin(field.rotation);
   const ys = [bottom + (top - bottom) * 0.25, 0.5 * (bottom + top), top - (top - bottom) * 0.25];
   for (let j = 0; j < size; j++) {
     const z = cz + (((j + 0.5) / size) * 2 - 1) * extent;
@@ -194,5 +202,5 @@ export function buildOccupancyPlanar(out, size, cx, cz, extent, bottom, top, fie
       out[j * size + i] = cov > 0.003 ? 255 : 0;
     }
   }
-  dilateMax(out, size, dilate);
+  return dilateMax(out, size, dilate, scratch);
 }

@@ -279,6 +279,7 @@ export class VisualPostProcess {
   }
 
   get inputTarget() { return this._sceneRT; }
+  get inputDepthTexture() { return this._sceneRT?.depthTexture || null; }
   get plan() { return this._plan; }
 
   lookEnabled(params, worldMode) {
@@ -300,7 +301,15 @@ export class VisualPostProcess {
       || Math.abs(renderScale - 1) > 0.001;
   }
 
-  prepare(renderer, { params, perf, worldMode, renderScale = 1, time = 0, sunScreen = null } = {}) {
+  prepare(renderer, {
+    params,
+    perf,
+    worldMode,
+    renderScale = 1,
+    time = 0,
+    sunScreen = null,
+    requireSceneDepth = false,
+  } = {}) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const plan = resolveCameraRenderPlan({
       outputWidth: size.x,
@@ -313,13 +322,22 @@ export class VisualPostProcess {
       ditheringEnabled: params?.visualsDitheringEnabled,
       crtEnabled: params?.visualsCrtEnabled,
       chromaticAberrationEnabled: params?.visualsChromaticAberrationEnabled,
+      requireSceneTarget: requireSceneDepth,
     });
     this._plan = plan;
     this._params = params || {};
     this._perf = perf || {};
     this._worldMode = worldMode;
 
-    if (plan.usesSceneTarget) this._sceneRT = this._ensureTarget(this._sceneRT, plan.sceneWidth, plan.sceneHeight, true);
+    if (plan.usesSceneTarget) {
+      this._sceneRT = this._ensureTarget(
+        this._sceneRT,
+        plan.sceneWidth,
+        plan.sceneHeight,
+        true,
+        requireSceneDepth
+      );
+    }
     if (plan.lookEnabled && plan.needsFinalPass) {
       this._lookRT = this._ensureTarget(this._lookRT, plan.sceneWidth, plan.sceneHeight, false);
     }
@@ -420,12 +438,25 @@ export class VisualPostProcess {
     if (target) renderer.setRenderTarget(null);
   }
 
-  _ensureTarget(target, width, height, depthBuffer) {
-    if (target && target.width === width && target.height === height) return target;
+  _ensureTarget(target, width, height, depthBuffer, sampleDepth = false) {
+    if (target && target.width === width && target.height === height &&
+        !!target.depthTexture === !!sampleDepth) return target;
     target?.dispose();
+    let depthTexture;
+    if (sampleDepth) {
+      // Plain depth is more widely supported on mobile GPUs than packed
+      // depth-stencil and we do not use stencil in the camera pipeline.
+      depthTexture = new THREE.DepthTexture(width, height);
+      depthTexture.format = THREE.DepthFormat;
+      depthTexture.type = THREE.UnsignedIntType;
+      depthTexture.minFilter = THREE.NearestFilter;
+      depthTexture.magFilter = THREE.NearestFilter;
+      depthTexture.generateMipmaps = false;
+    }
     const next = new THREE.WebGLRenderTarget(width, height, {
       depthBuffer,
       stencilBuffer: false,
+      depthTexture,
     });
     next.texture.minFilter = THREE.LinearFilter;
     next.texture.magFilter = THREE.LinearFilter;

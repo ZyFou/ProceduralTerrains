@@ -41,6 +41,7 @@ uniform vec2 uDepthResolution;
 uniform mat4 uProjectionMatrixInverse;
 uniform mat4 uViewMatrixInverse;
 uniform float uDepthBias;
+uniform float uUseDepth;
 
 // Planar occupancy grid (XZ): a small map (built on the CPU from the coverage
 // field, conservative + dilated) telling whether a column over the board holds
@@ -105,7 +106,8 @@ void main() {
   }
 
   vec2 depthUv = gl_FragCoord.xy / max(uDepthResolution, vec2(1.0));
-  if (depthUv.x >= 0.0 && depthUv.x <= 1.0 && depthUv.y >= 0.0 && depthUv.y <= 1.0) {
+  if (uUseDepth > 0.5 && depthUv.x >= 0.0 && depthUv.x <= 1.0 &&
+      depthUv.y >= 0.0 && depthUv.y <= 1.0) {
     float sceneDepth = texture2D(tSceneDepth, depthUv).x;
     if (sceneDepth < 0.99999) {
       vec3 sceneHit = reconstructWorldPosition(depthUv, sceneDepth);
@@ -213,6 +215,7 @@ export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5,
       uProjectionMatrixInverse: { value: new THREE.Matrix4() },
       uViewMatrixInverse:    { value: new THREE.Matrix4() },
       uDepthBias:            { value: 2.0 },
+      uUseDepth:             { value: 0.0 },
       uCloudOccupancy:       { value: null },
       uUseOccupancy:         { value: 0.0 },
       uOccCenter:            { value: new THREE.Vector2() },

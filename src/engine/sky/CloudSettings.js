@@ -81,7 +81,7 @@ export function resolveCloudNoiseVariant(value) {
 export const CLOUD_QUALITY_PRESETS = {
   low:    { steps: 12, lightSteps: 2, octaves: 3, detailOctaves: 0, useErosion: false },
   medium: { steps: 24, lightSteps: 4, octaves: 4, detailOctaves: 2, useErosion: true },
-  high:   { steps: 40, lightSteps: 6, octaves: 5, detailOctaves: 4, useErosion: true },
+  high:   { steps: 28, lightSteps: 2, octaves: 5, detailOctaves: 4, useErosion: true },
   ultra:  { steps: 72, lightSteps: 8, octaves: 5, detailOctaves: 5, useErosion: true },
 };
 

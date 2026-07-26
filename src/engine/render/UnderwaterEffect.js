@@ -236,6 +236,7 @@ export class UnderwaterEffect {
   }
 
   get active() { return this.strength > 0.002; }
+  get sceneDepthTexture() { return this.active ? this._rt?.depthTexture || null : null; }
 
   /**
    * Sync the pass from the centralized controller + live palette. Call once per
@@ -320,8 +321,8 @@ export class UnderwaterEffect {
     let depthTexture = null;
     try {
       depthTexture = new THREE.DepthTexture(w, h);
-      depthTexture.type = THREE.UnsignedInt248Type;
-      depthTexture.format = THREE.DepthStencilFormat;
+      depthTexture.type = THREE.UnsignedIntType;
+      depthTexture.format = THREE.DepthFormat;
       this._depthSupported = true;
     } catch (e) {
       // No depth-texture support → fall back to a tint/fog-only look (uDepthValid
@@ -336,7 +337,7 @@ export class UnderwaterEffect {
     this._rt = new THREE.WebGLRenderTarget(w, h, {
       depthTexture: depthTexture || undefined,
       depthBuffer: true,
-      stencilBuffer: !!depthTexture,
+      stencilBuffer: false,
     });
   }
 

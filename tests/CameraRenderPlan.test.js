@@ -27,6 +27,20 @@ describe('camera render plan', () => {
     expect(plan.usesSceneTarget).toBe(true);
   });
 
+  it('forces a scene target and final blit when an effect needs scene depth', () => {
+    const plan = resolveCameraRenderPlan({
+      outputWidth: 1280,
+      outputHeight: 720,
+      worldMode: 'planet',
+      visualsPostEnabled: false,
+      requireSceneTarget: true,
+    });
+    expect(plan.usesSceneTarget).toBe(true);
+    expect(plan.needsFinalPass).toBe(true);
+    expect(plan.sceneWidth).toBe(1280);
+    expect(plan.sceneHeight).toBe(720);
+  });
+
   it('scales the scene buffer independently from native output resolution', () => {
     const plan = resolveCameraRenderPlan({
       outputWidth: 1920,

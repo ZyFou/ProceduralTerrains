@@ -80,6 +80,19 @@ float cl_fbm_base(vec3 p) {
   return sum / max(norm, 1e-4);
 }
 
+// Lighting probes do not affect the visible silhouette. Keep them deliberately
+// smooth and cheap: three base octaves, no detail FBM, and no Worley erosion.
+float cl_fbm_light(vec3 p) {
+  float amp = 0.5, sum = 0.0, norm = 0.0;
+  for (int i = 0; i < 3; i++) {
+    sum += amp * cl_vnoise(p);
+    norm += amp;
+    amp *= 0.5;
+    p = CL_ROT * p * 2.02;
+  }
+  return sum / max(norm, 1e-4);
+}
+
 // Detail FBM value noise (compiled out if detail octaves is 0)
 #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
 float cl_fbm_detail(vec3 p) {
@@ -209,6 +222,17 @@ float cloudShape(vec3 q) {
   // final soft ease so density ramps in gently — never a binary threshold
   return dens * dens * (3.0 - 2.0 * dens);
 }
+
+float cloudShapeForLight(vec3 q) {
+  vec3 drift = uCloudWind * uCloudTime;
+  float evoT = uCloudTime * uCloudEvolve;
+  vec3 baseP = q * uCloudScale + drift + vec3(0.0, evoT, 0.0);
+  float base = cl_fbm_light(baseP);
+  float threshold = 1.0 - uCloudCoverage;
+  float soft = max(uCloudSoftness, 0.08);
+  float cov = smoothstep(threshold, threshold + soft, base);
+  return cov * cov * (3.0 - 2.0 * cov);
+}
 `;
 
 // Spherical shell specifics (planet mode).
@@ -223,6 +247,14 @@ float cloudDensity(vec3 P) {
   if (hf <= 0.0 || hf >= 1.0) return 0.0;
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
   return cloudShape(cl_domain(P)) * fall;
+}
+
+float cloudDensityForLight(vec3 P) {
+  float r = length(P);
+  float hf = (r - uCloudInner) / max(uCloudOuter - uCloudInner, 1e-3);
+  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
+  return cloudShapeForLight(cl_domain(P)) * fall;
 }
 
 // ray vs sphere centered at the origin; returns (tNear, tFar), tNear > tFar
@@ -244,8 +276,8 @@ float cl_lightTransmittance(vec3 P) {
   // offsets and fold into a single Beer term (no secondary march loop). The
   // 0.65 span factor matches the marched path's effective optical depth so
   // cloud brightness stays consistent with the full-march mode.
-  float d0 = cloudDensity(P + uCloudSunDir * span * 0.12);
-  float d1 = cloudDensity(P + uCloudSunDir * span * 0.40);
+  float d0 = cloudDensityForLight(P + uCloudSunDir * span * 0.12);
+  float d1 = cloudDensityForLight(P + uCloudSunDir * span * 0.40);
   float dsum = d0 * 0.65 + d1 * 0.35;
   return exp(-dsum * span * 0.65 * uCloudExtinction * uCloudLightAbsorption);
 #else
@@ -254,7 +286,7 @@ float cl_lightTransmittance(vec3 P) {
   vec3 sp = P;
   for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
     sp += uCloudSunDir * stepLen;
-    dsum += cloudDensity(sp);
+    dsum += cloudDensityForLight(sp);
   }
   return exp(-dsum * stepLen * uCloudExtinction * uCloudLightAbsorption);
 #endif
@@ -280,13 +312,23 @@ float cloudDensity(vec3 P) {
   if (edge <= 0.0) return 0.0;
   return cloudShape(cl_domain(P)) * fall * edge;
 }
+float cloudDensityForLight(vec3 P) {
+  float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);
+  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
+  float rad = length(P.xz - uCloudCenter.xz);
+  float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
+  return cloudShapeForLight(cl_domain(P)) * fall * max(edge, 0.0);
+}
+
+
 
 float cl_lightTransmittance(vec3 P) {
   float span = uCloudTop - uCloudBottom;
 #if defined(CLOUD_LIGHT_MODE) && CLOUD_LIGHT_MODE == 1
   // cheap 2-tap analytic shadow (see the spherical shader for rationale)
-  float d0 = cloudDensity(P + uCloudSunDir * span * 0.12);
-  float d1 = cloudDensity(P + uCloudSunDir * span * 0.40);
+  float d0 = cloudDensityForLight(P + uCloudSunDir * span * 0.12);
+  float d1 = cloudDensityForLight(P + uCloudSunDir * span * 0.40);
   float dsum = d0 * 0.65 + d1 * 0.35;
   return exp(-dsum * span * 0.65 * uCloudExtinction * uCloudLightAbsorption);
 #else
@@ -295,7 +337,7 @@ float cl_lightTransmittance(vec3 P) {
   vec3 sp = P;
   for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
     sp += uCloudSunDir * stepLen;
-    dsum += cloudDensity(sp);
+    dsum += cloudDensityForLight(sp);
   }
   return exp(-dsum * stepLen * uCloudExtinction * uCloudLightAbsorption);
 #endif

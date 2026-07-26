@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
 import { Engine } from '../src/engine/Engine.js';
 import { createTerrainUniforms } from '../src/engine/terrain/TerrainMaterial.js';
 import {
@@ -90,8 +91,45 @@ describe('water startup shaders', () => {
     warn.mockRestore();
   });
 
-  it('releases boot without starting water compilation', async () => {
+  it('compiles a one-pass warmup for the requested render target', async () => {
     const engine = Object.create(Engine.prototype);
+    const previousTarget = {};
+    const sceneTarget = {};
+    const material = new THREE.ShaderMaterial();
+    let activeTarget = previousTarget;
+
+    Object.assign(engine, {
+      _warmGeo: new THREE.PlaneGeometry(1, 1),
+      camera: new THREE.PerspectiveCamera(),
+      scene: new THREE.Scene(),
+      renderer: {
+        getRenderTarget: vi.fn(() => activeTarget),
+        setRenderTarget: vi.fn((target) => { activeTarget = target; }),
+        compile: vi.fn(() => {
+          expect(activeTarget).toBe(sceneTarget);
+          return new Set([material]);
+        }),
+        properties: {
+          get: () => ({ currentProgram: { isReady: () => true } }),
+        },
+        getContext: () => ({ getExtension: () => null }),
+      },
+    });
+
+    await expect(engine._compileMaterialVariants([material], {
+      canvasOnly: true,
+      renderTarget: sceneTarget,
+    })).resolves.toMatchObject({ ready: true });
+    expect(engine.renderer.setRenderTarget.mock.calls).toEqual([[sceneTarget], [previousTarget]]);
+
+    material.dispose();
+    engine._warmGeo.dispose();
+  });
+
+  it('renders and releases boot only after target terrain and water are ready', async () => {
+    const engine = Object.create(Engine.prototype);
+    const sceneTarget = {};
+    const order = [];
     Object.assign(engine, {
       _compiling: 0,
       _disposed: false,
@@ -99,25 +137,41 @@ describe('water startup shaders', () => {
       _bootStart: performance.now(),
       _waterDeferred: true,
       _tierNotice: null,
+      params: { waterEnabled: true },
       terrainMaterial: { userData: { minimalFragment: false } },
+      visualPost: { inputTarget: sceneTarget },
       cb: {
         onStatus: vi.fn(),
         onBootComplete: vi.fn(),
       },
+      _prepareCameraPipeline: vi.fn(() => ({ usesSceneTarget: true })),
       _upgradeMinimalTerrain: vi.fn(async () => ({ ready: true, swapped: true })),
       _ensureTerrainHeightTex: vi.fn(),
       _withBootDeferredObjectsDetached: vi.fn(async (task) => task()),
       _compileSceneStaggered: vi.fn(async () => ({ ready: true })),
       _compileMaterialVariants: vi.fn(async () => ({ ready: true })),
-      _renderInitialStudioFrame: vi.fn(() => 1),
-      _warmDeferredWater: vi.fn(),
+      _renderInitialStudioFrame: vi.fn(() => {
+        order.push('render');
+        expect(engine._waterDeferred).toBe(false);
+        return 1;
+      }),
+      _warmDeferredWater: vi.fn(async () => {
+        order.push('water');
+        engine._waterDeferred = false;
+      }),
       _scheduleErosionGPUWarmImport: vi.fn(),
       _schedulePostFirstPaintWarmups: vi.fn(),
     });
 
     await engine._warmupInitialShaders();
 
-    expect(engine._warmDeferredWater).not.toHaveBeenCalled();
+    expect(engine._upgradeMinimalTerrain).toHaveBeenCalledWith(sceneTarget);
+    expect(engine._compileSceneStaggered).toHaveBeenCalledWith(
+      sceneTarget,
+      expect.objectContaining({ skipWaterMaterial: true }),
+    );
+    expect(engine._warmDeferredWater).toHaveBeenCalledWith(sceneTarget);
+    expect(order).toEqual(['water', 'render']);
     expect(engine._bootPending).toBe(false);
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
     expect(engine._schedulePostFirstPaintWarmups).toHaveBeenCalledTimes(1);
