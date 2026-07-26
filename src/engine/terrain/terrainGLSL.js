@@ -247,6 +247,28 @@ float bakedHeightAt(vec2 xz) {
 }
 `;
 
+// Surface-texture painting helpers are shared by the flat terrain height
+// source and the planet fragment source. Keep them independent from the 2D
+// height field so shaders that consume SURFACE_TEXTURE_FUNCTIONS_GLSL can
+// include the required functions without pulling in the studio height stack.
+export const MANUAL_SURFACE_WEIGHTS_GLSL = /* glsl */ `
+vec2 manualSurfaceUvAt(vec2 xz) {
+  return (xz - uManualSurfaceOrigin) / max(uManualSurfaceSpan, vec2(1.0));
+}
+
+vec4 manualSurfaceWeightsAAt(vec2 xz) {
+  vec2 uv = manualSurfaceUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture2D(uPaintBiomeTexture, uv);
+}
+
+vec4 manualSurfaceWeightsBAt(vec2 xz) {
+  vec2 uv = manualSurfaceUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture2D(uPaintPropsTexture, uv);
+}
+`;
+
 export const NOISE_GLSL = /* glsl */ `
 // --- hash without sine precision issues (Dave Hoskins) -----------------------
 float hash12(vec2 p) {
@@ -492,21 +514,7 @@ vec4 paintBiomeAt(vec2 xz) {
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
 }
 
-vec2 manualSurfaceUvAt(vec2 xz) {
-  return (xz - uManualSurfaceOrigin) / max(uManualSurfaceSpan, vec2(1.0));
-}
-
-vec4 manualSurfaceWeightsAAt(vec2 xz) {
-  vec2 uv = manualSurfaceUvAt(xz);
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uPaintBiomeTexture, uv);
-}
-
-vec4 manualSurfaceWeightsBAt(vec2 xz) {
-  vec2 uv = manualSurfaceUvAt(xz);
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uPaintPropsTexture, uv);
-}
+${MANUAL_SURFACE_WEIGHTS_GLSL}
 
 float manualHeightOffsetAt(vec2 xz) {
   if (uManualEnabled < 0.5) return 0.0;

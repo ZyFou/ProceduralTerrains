@@ -5,6 +5,7 @@ import {
   createTerrainMaterial,
   createTerrainUniforms,
 } from '../src/engine/terrain/TerrainMaterial.js';
+import { createPlanetMaterial } from '../src/engine/terrain/PlanetMaterial.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
 
@@ -61,6 +62,22 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');
     expect(tile.fragmentShader).toContain('(manualMode ? 1.0 : roleBlend)');
+  });
+
+  it('defines manual surface samplers before the planet surface material uses them', () => {
+    const uniforms = createTerrainUniforms();
+    const planet = createPlanetMaterial(uniforms, 5);
+    materials.push(planet);
+
+    const definitionA = planet.fragmentShader.indexOf('vec4 manualSurfaceWeightsAAt(vec2 xz)');
+    const definitionB = planet.fragmentShader.indexOf('vec4 manualSurfaceWeightsBAt(vec2 xz)');
+    const callA = planet.fragmentShader.indexOf('vec4 manualA = manualSurfaceWeightsAAt(wpos.xz)');
+    const callB = planet.fragmentShader.indexOf('vec4 manualB = manualSurfaceWeightsBAt(wpos.xz)');
+
+    expect(definitionA).toBeGreaterThan(-1);
+    expect(definitionB).toBeGreaterThan(-1);
+    expect(definitionA).toBeLessThan(callA);
+    expect(definitionB).toBeLessThan(callB);
   });
 
   it('keeps the minimal material Tile-only even if legacy callers pass an Infinite option', () => {
