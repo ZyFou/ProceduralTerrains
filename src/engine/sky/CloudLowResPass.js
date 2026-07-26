@@ -31,6 +31,7 @@ uniform sampler2D tCloud;        // low-res clouds, PREMULTIPLIED (rgb = col*a)
 uniform sampler2D tSceneDepth;   // full-res opaque scene depth (terrain)
 uniform vec2  uLowTexel;         // 1 / lowResSize
 uniform float uDepthSharpness;   // bilateral falloff on raw depth difference
+uniform float uAlphaSharpness;   // preserve cloud/sky silhouettes
 uniform float uUseDepth;         // 1 = depth-aware, 0 = plain bilinear
 
 // Depth-aware 2x2 bilateral upsample: weight each low-res neighbour by its
@@ -39,11 +40,17 @@ uniform float uUseDepth;         // 1 = depth-aware, 0 = plain bilinear
 // neighbours on the "wrong" side (sky vs surface) are rejected, so the cloud
 // edge stays crisp instead of bleeding across the ridge.
 void main() {
-  float dC = texture2D(tSceneDepth, vUv).x;
+  float dC = 1.0;
+  if (uUseDepth > 0.5) {
+    dC = texture2D(tSceneDepth, vUv).x;
+  }
 
   vec2 p = vUv / uLowTexel - 0.5;
   vec2 f = fract(p);
   vec2 base = (floor(p) + 0.5) * uLowTexel;
+
+  vec2 guideUv = (floor(vUv / uLowTexel) + 0.5) * uLowTexel;
+  float guideA = texture2D(tCloud, clamp(guideUv, vec2(0.0), vec2(1.0))).a;
 
   vec4 acc = vec4(0.0);
   float wsum = 0.0;
@@ -52,11 +59,17 @@ void main() {
       vec2 off = vec2(float(i), float(j)) * uLowTexel;
       vec2 uv = base + off;
       float bw = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
-      float dN = texture2D(tSceneDepth, uv).x;
-      float dd = abs(dN - dC) * uDepthSharpness;
-      float dw = mix(1.0, 1.0 / (1.0 + dd * dd), uUseDepth);
-      float w = bw * dw + 1e-5;
-      acc += texture2D(tCloud, uv) * w;
+      float dw = 1.0;
+      if (uUseDepth > 0.5) {
+        float dN = texture2D(tSceneDepth, uv).x;
+        float dd = abs(dN - dC) * uDepthSharpness;
+        dw = 1.0 / (1.0 + dd * dd);
+      }
+      vec4 cloud = texture2D(tCloud, uv);
+      float ad = abs(cloud.a - guideA) * uAlphaSharpness;
+      float aw = 1.0 / (1.0 + ad * ad);
+      float w = bw * dw * aw + 1e-5;
+      acc += cloud * w;
       wsum += w;
     }
   }
@@ -87,6 +100,7 @@ export class CloudLowResPass {
         tSceneDepth:     { value: null },
         uLowTexel:       { value: new THREE.Vector2(1, 1) },
         uDepthSharpness: { value: 1800.0 },
+        uAlphaSharpness: { value: 10.0 },
         uUseDepth:       { value: 1.0 },
       },
       vertexShader: COMPOSITE_VERT,

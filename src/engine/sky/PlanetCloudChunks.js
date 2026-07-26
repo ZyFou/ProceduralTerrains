@@ -459,10 +459,10 @@ export class PlanetCloudChunks {
     if (this._depthTarget && this._depthTarget.width === w && this._depthTarget.height === h) return;
     if (this._depthTarget) this._depthTarget.dispose();
     this._depthTexture = new THREE.DepthTexture(w, h);
-    this._depthTexture.type = THREE.UnsignedInt248Type;
-    this._depthTexture.format = THREE.DepthStencilFormat;
+    this._depthTexture.type = THREE.UnsignedIntType;
+    this._depthTexture.format = THREE.DepthFormat;
     this._depthTarget = new THREE.WebGLRenderTarget(w, h, {
-      depthTexture: this._depthTexture, depthBuffer: true, stencilBuffer: true,
+      depthTexture: this._depthTexture, depthBuffer: true, stencilBuffer: false,
     });
     this._depthTarget.texture.minFilter = THREE.NearestFilter;
     this._depthTarget.texture.magFilter = THREE.NearestFilter;

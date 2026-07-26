@@ -2900,6 +2900,9 @@ export class Engine {
   }
 
   _prepareCameraPipeline() {
+    const requireSceneDepth = this.worldMode === 'studio'
+      ? !!this.studioCloud?.usesLowRes
+      : (this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes);
     return this.visualPost.prepare(this.renderer, {
       params: this.params,
       perf: this.perf,
@@ -2907,11 +2910,25 @@ export class Engine {
       renderScale: this._effectiveRenderScale(),
       time: this.uniforms.uTime.value,
       sunScreen: this._underwaterSunScreen(),
+      requireSceneDepth,
     });
   }
 
   _cameraSceneSize(plan) {
     return { x: plan.sceneWidth, y: plan.sceneHeight };
+  }
+
+  _renderLowResCloudAfterScene(layer, target, sceneSize) {
+    if (!layer?.usesLowRes) return false;
+    const sceneDepth = this.underwater?.sceneDepthTexture || target?.depthTexture || null;
+    if (!layer.useSceneDepth(sceneDepth, this.camera, sceneSize)) return false;
+    layer.renderLowRes(this.renderer, this.camera, sceneSize);
+    this.renderer.setRenderTarget(target);
+    // The scene depth is attached to `target`; do not sample that same texture
+    // while writing the composite back into the framebuffer. The march itself
+    // already used depth, and alpha-guided upscaling preserves its silhouette.
+    layer.compositeLowRes(this.renderer, null);
+    return true;
   }
 
   // -------------------------------------------------- async shader compiling
@@ -2920,7 +2937,13 @@ export class Engine {
   // keep running. Avoids Three.js compileAsync crashing when currentProgram is
   // still undefined during transparent DoubleSide prepare.
 
-  async _compileMaterialVariants(mats, { canvasOnly = false, timeoutMs, stagger = false, onProgress } = {}) {
+  async _compileMaterialVariants(mats, {
+    canvasOnly = false,
+    timeoutMs,
+    stagger = false,
+    onProgress,
+    renderTarget = null,
+  } = {}) {
     const list = mats.filter(Boolean);
     if (!list.length) {
       return {
@@ -2943,6 +2966,7 @@ export class Engine {
           canvasOnly,
           timeoutMs,
           onProgress: (stepDone) => onProgress?.(done + stepDone, total),
+          renderTarget,
         }));
         done += passesPerMaterial;
         await yieldTask();
@@ -2962,7 +2986,14 @@ export class Engine {
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
-    const pending = this.renderer.compile(group, this.camera, this.scene);
+    const previousTarget = this.renderer.getRenderTarget();
+    let pending;
+    try {
+      this.renderer.setRenderTarget(renderTarget);
+      pending = this.renderer.compile(group, this.camera, this.scene);
+    } finally {
+      this.renderer.setRenderTarget(previousTarget);
+    }
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
     const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
@@ -2972,7 +3003,7 @@ export class Engine {
     );
     console.info('[shader compile]', {
       materials: list.length,
-      pass: 'canvas',
+      pass: renderTarget ? 'scene-target' : 'canvas',
       syncCompileMs: syncCompileMs.toFixed(0),
       asyncWaitMs: asyncWaitMs.toFixed(0),
       ready: canvasResult.ready,
@@ -3217,15 +3248,26 @@ export class Engine {
     this.cb.onStatus('Compiling terrain…', true);
     const _tCompile0 = performance.now();
     let fullTerrainResult = null;
+    let waterJob = null;
     let bakeMs = 0;
     try {
+      // Studio's default visual pipeline renders the scene into a linear
+      // post-processing target, not directly to the canvas. Program cache keys
+      // include the target colour-space variant, so warming the canvas variant
+      // here would still make the first real frame compile the full terrain
+      // shader a second time.
+      const initialPlan = this._prepareCameraPipeline();
+      const initialRenderTarget = initialPlan.usesSceneTarget
+        ? this.visualPost.inputTarget
+        : null;
+
       // Start the full terrain program first. renderer.compile() performs its
       // synchronous translation immediately, then the driver can link it while
       // the remaining small scene programs and height texture are prepared.
       // The minimal terrain shader is deliberately skipped: because boot now
       // waits for the textured material, compiling both would be pure duplicate
       // work with the same generated height vertex source.
-      const fullTerrainJob = this._upgradeMinimalTerrain();
+      const fullTerrainJob = this._upgradeMinimalTerrain(initialRenderTarget);
 
       const bakeStartedAt = performance.now();
       try {
@@ -3237,7 +3279,14 @@ export class Engine {
       }
       bakeMs = performance.now() - bakeStartedAt;
 
-      // Boot compiles ONLY the canvas-variant programs. The underwater
+      // Start the lightweight baked-height water program while the full terrain
+      // program is linking. Boot awaits it below so the first revealed frame
+      // already contains water.
+      if (this.params.waterEnabled !== false && this._waterDeferred) {
+        waterJob = this._warmDeferredWater(initialRenderTarget);
+      }
+
+      // Boot compiles ONLY the first-frame scene-target programs. The underwater
       // render-target variants (a second distinct program — linear output color
       // space — for every heavy terrain/water/sky material) are deferred and
       // warmed lazily when the camera first approaches water. Most sessions
@@ -3252,12 +3301,10 @@ export class Engine {
       // visibleOnly: the first burst only translates the on-screen set (the
       // hidden water / disk wall / ghost / disabled sky compile lazily later).
       await this._withBootDeferredObjectsDetached(
-        () => this._compileSceneStaggered(null, {
+        () => this._compileSceneStaggered(initialRenderTarget, {
           visibleOnly: true,
           skipMinimalTerrain: true,
-          // Water is deliberately deferred until after the first textured
-          // frame. renderer.compile() performs synchronous ANGLE translation,
-          // so merely starting its promise here would still block boot.
+          // Water owns its dedicated concurrent warmup above.
           skipWaterMaterial: true,
         })
       );
@@ -3267,10 +3314,21 @@ export class Engine {
         console.warn('Boot terrain warmup failed', error);
       }
 
+      if (waterJob) {
+        try {
+          await waterJob;
+        } catch (error) {
+          console.warn('Boot water warmup failed', error);
+        }
+      }
+
       // If the full program failed or timed out, warm the minimal fallback now
       // so the first frame still cannot trigger a surprise synchronous compile.
       if (!fullTerrainResult?.swapped && this.terrainMaterial?.userData?.minimalFragment) {
-        await this._compileMaterialVariants([this.terrainMaterial], { canvasOnly: true });
+        await this._compileMaterialVariants([this.terrainMaterial], {
+          canvasOnly: true,
+          renderTarget: initialRenderTarget,
+        });
       }
     } catch (e) {
       console.warn('Shader warmup failed (falling back to sync compile)', e);
@@ -3357,7 +3415,7 @@ export class Engine {
    * The landing page is opaque, so the colour pop from the swap is invisible
    * on a normal boot.
    */
-  async _upgradeMinimalTerrain() {
+  async _upgradeMinimalTerrain(renderTarget = null) {
     if (!this.terrainMaterial?.userData?.minimalFragment) return;
     if (this._terrainUpgradePromise) return this._terrainUpgradePromise;
     this._terrainUpgradePromise = (async () => {
@@ -3372,7 +3430,11 @@ export class Engine {
       let swapMs = 0;
       try {
         const tCompile = performance.now();
-        await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
+        await this._compileMaterialVariants([warm], {
+          canvasOnly: true,
+          timeoutMs: 120000,
+          renderTarget,
+        });
         ready = await this._pollProgramReady(warm);
         compileWaitMs = performance.now() - tCompile;
         console.info(`[boot] full terrain compile wait ${compileWaitMs.toFixed(0)}ms (ready=${ready})`);
@@ -3444,10 +3506,10 @@ export class Engine {
     this._postFirstPaintWarmTimer = setTimeout(run, delayMs);
   }
 
-  _warmDeferredWater() {
+  _warmDeferredWater(renderTarget = null) {
     if (this._disposed || !this._waterDeferred || !this.waterMaterial) return;
     if (this._waterWarmPromise) return this._waterWarmPromise;
-    const job = this._warmDeferredWaterImpl();
+    const job = this._warmDeferredWaterImpl(renderTarget);
     const pending = job.finally(() => {
       if (this._waterWarmPromise === pending) this._waterWarmPromise = null;
     });
@@ -3455,7 +3517,7 @@ export class Engine {
     return this._waterWarmPromise;
   }
 
-  async _warmDeferredWaterImpl() {
+  async _warmDeferredWaterImpl(renderTarget = null) {
     const t0 = performance.now();
     if (!this._bootPending) this.cb.onStatus('Preparing water...', false);
 
@@ -3483,6 +3545,7 @@ export class Engine {
           canvasOnly: true,
           stagger: materials.length > 1,
           timeoutMs: 20000,
+          renderTarget,
         });
         this._waterMaterialWarmed = result?.ready === true;
         if (!this._waterMaterialWarmed) {
@@ -6007,13 +6070,16 @@ export class Engine {
     const sceneSize = this._cameraSceneSize(plan);
     const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
-    if (this.worldMode === 'studio' && this.studioCloud) {
+    const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
+    const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
+
+    if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
       this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      this.studioCloud.renderLowRes(this.renderer, this.camera, sceneSize);
     } else if (this.worldMode === 'planet') {
       this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      this.planetCloudLayer?.renderLowRes(this.renderer, this.camera, sceneSize);
+      if (!planetLowRes) {
+        this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      }
     }
 
     if (this.worldMode === 'planet') {
@@ -6028,8 +6094,11 @@ export class Engine {
       drawCalls: this.renderer.info.render.calls,
     };
 
-    if (this.worldMode === 'studio') this.studioCloud?.compositeLowRes(this.renderer);
-    else if (this.worldMode === 'planet') this.planetCloudLayer?.compositeLowRes(this.renderer);
+    if (studioLowRes) {
+      this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
+    } else if (planetLowRes) {
+      this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
+    }
     if (target) this.renderer.setRenderTarget(null);
     this.visualPost.finish(this.renderer);
     return stats;
@@ -6510,12 +6579,11 @@ export class Engine {
       const cameraSceneSize = this._cameraSceneSize(cameraPlan);
       const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
-      if (this.studioCloud) {
+      const studioLowRes = !!this.studioCloud?.usesLowRes;
+      this.profiler.begin('render');
+      this.profiler.gpu?.frameBegin();
+      if (this.studioCloud && !studioLowRes) {
         this.studioCloud.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
-        // low-res cloud mode: march the clouds into an offscreen half/quarter-res
-        // target now. The main scene render below skips them (the mesh lives on a
-        // dedicated camera layer) and compositeLowRes blends them back afterwards.
-        this.studioCloud.renderLowRes(this.renderer, this.camera, cameraSceneSize);
       }
 
       // refresh the baked height/normal texture if the field changed (no-op on a
@@ -6524,19 +6592,16 @@ export class Engine {
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
-      this.profiler.begin('render');
-      this.profiler.gpu?.frameBegin();
       this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
       // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
       this._lastTris = this.renderer.info.render.triangles;
       this._lastDraws = this.renderer.info.render.calls;
-      if (this.studioCloud) {
-        if (cameraTarget) this.renderer.setRenderTarget(cameraTarget);
-        this.studioCloud.compositeLowRes(this.renderer);
-        if (cameraTarget) this.renderer.setRenderTarget(null);
+      if (studioLowRes) {
+        this._renderLowResCloudAfterScene(this.studioCloud, cameraTarget, cameraSceneSize);
       }
+      if (cameraTarget) this.renderer.setRenderTarget(null);
       this.visualPost.finish(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
@@ -6682,28 +6747,29 @@ export class Engine {
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
+    const planetLowRes = !!this.planetCloudLayer?.usesLowRes;
+    this.profiler.begin('render');
+    this.profiler.gpu?.frameBegin();
+
     // depth prepass so the cloud march is occluded by the terrain relief
     // (otherwise clouds show through the surface up close)
     if (this.planetCloudChunks) {
       this.planetCloudChunks.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
     }
-    if (this.planetCloudLayer) {
+    if (this.planetCloudLayer && !planetLowRes) {
       this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
-      // low-res cloud mode: march clouds into the offscreen target; the main
-      // render skips them (offscreen layer) and we composite them back below.
-      this.planetCloudLayer.renderLowRes(this.renderer, this.camera, cameraSceneSize);
     }
 
     // planet renders straight to the canvas — no underwater render-target pass
-    this.profiler.begin('render');
-    this.profiler.gpu?.frameBegin();
     this.renderer.setRenderTarget(cameraTarget);
     this.renderer.render(this.scene, this.camera);
     // capture scene tri/draw counts BEFORE the low-res cloud composite (its
     // fullscreen quad would otherwise reset renderer.info to ~2 triangles).
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
-    if (this.planetCloudLayer) this.planetCloudLayer.compositeLowRes(this.renderer);
+    if (planetLowRes) {
+      this._renderLowResCloudAfterScene(this.planetCloudLayer, cameraTarget, cameraSceneSize);
+    }
     if (cameraTarget) this.renderer.setRenderTarget(null);
     this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();

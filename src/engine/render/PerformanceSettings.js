@@ -120,10 +120,10 @@ export const PERF_PRESETS = {
     terrainRockSlope: 0.28, terrainRockSharpness: 0.14, terrainTriplanar: true,
     terrainShoreRange: 18, terrainShoreWetness: 0.35,
     terrainDetailOpacity: 1.0, terrainMicroDetail: 0.6, terrainMacroVariation: 0.55,
-    cloudSteps: 40, cloudLightSteps: 6, cloudSelfShadow: true,
+    cloudSteps: 28, cloudLightSteps: 2, cloudSelfShadow: true,
     cloudOctaves: 5, cloudDetailOctaves: 4, cloudUseErosion: true,
     cloudMaxDistance: 6.0, cloudFallback: 'none',
-    cloudLightMode: 0, cloudStepLOD: false, cloudRenderScale: 1.0,
+    cloudLightMode: 1, cloudStepLOD: true, cloudRenderScale: 0.67,
   },
   ultra: {
     label: 'Ultra',

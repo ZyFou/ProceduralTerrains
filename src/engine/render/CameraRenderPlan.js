@@ -16,6 +16,7 @@ export function resolveCameraRenderPlan({
   ditheringEnabled = false,
   crtEnabled = false,
   chromaticAberrationEnabled = false,
+  requireSceneTarget = false,
 } = {}) {
   const outW = clampInt(Number(outputWidth) || 1, 1, 16384);
   const outH = clampInt(Number(outputHeight) || 1, 1, 16384);
@@ -36,7 +37,10 @@ export function resolveCameraRenderPlan({
     pixelatedEnabled || ditheringEnabled || crtEnabled || chromaticAberrationEnabled
   );
   const needsReconstruction = sceneW !== outW || sceneH !== outH;
-  const needsFinalPass = needsReconstruction || cameraEffectsEnabled;
+  // Some effects (volumetric clouds) need to sample the depth produced by the
+  // real scene render. In that case the scene must use a target even when no
+  // artistic post effect is enabled, and a final blit is required.
+  const needsFinalPass = needsReconstruction || cameraEffectsEnabled || requireSceneTarget;
 
   return {
     outputWidth: outW,

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Cog, Dices, Eye, RefreshCw } from 'lucide-react';
 import SidePanel, { PanelTabs } from './SidePanel.jsx';
+import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
 export { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
