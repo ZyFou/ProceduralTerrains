@@ -204,6 +204,7 @@ export class Engine {
     this._bootPending = true;
     this._waterDeferred = true;
     this._waterMaterialWarmed = false;
+    this._waterWarmPromise = null;
     this._terrainHeightBakeDeferred = true;
     this._postFirstPaintWarmupsStarted = false;
     this._postFirstPaintWarmTimer = null;
@@ -2382,9 +2383,7 @@ export class Engine {
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
         : createTerrainMaterial(this.uniforms, oct, sg)];
       const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
-      if (heightSourceChanged && waterActive && this.worldMode === 'studio') {
-        warm.push(createWaterMaterial(this.uniforms, oct, sg));
-      } else if (heightSourceChanged && waterActive && this.worldMode === 'infinite') {
+      if (heightSourceChanged && waterActive && this.worldMode === 'infinite') {
         warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
       }
 
@@ -2424,13 +2423,12 @@ export class Engine {
         // same transaction. The earlier octave warmup is intentionally cancelled
         // by this newer token, so carry the matching define across here too.
         for (const mat of [this.terrainMaterial, this.waterMaterial, this._infiniteTerrainMat, this._infiniteWaterMat]) {
-          if (!mat) continue;
+          if (!mat || mat.userData?.bakedHeightOnly) continue;
           mat.defines ||= {};
           if (mat.defines.OCTAVES !== oct) mat.defines.OCTAVES = oct;
         }
         if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
         else rebuildTerrainShaderSource(this.terrainMaterial, sg);
-        if (heightSourceChanged) rebuildWaterShaderSource(this.waterMaterial, sg);
         if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
         if (heightSourceChanged && this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
           rebuildWaterShaderSource(this._infiniteWaterMat, sg);
@@ -2924,40 +2922,100 @@ export class Engine {
 
   async _compileMaterialVariants(mats, { canvasOnly = false, timeoutMs, stagger = false, onProgress } = {}) {
     const list = mats.filter(Boolean);
-    if (!list.length) return;
+    if (!list.length) {
+      return {
+        ready: true,
+        timedOut: false,
+        pendingCount: 0,
+        waitMs: 0,
+        syncCompileMs: 0,
+        asyncWaitMs: 0,
+      };
+    }
     const passesPerMaterial = canvasOnly ? 1 : 2;
     const total = list.length * passesPerMaterial;
 
     if (stagger && list.length > 1) {
       let done = 0;
+      const results = [];
       for (const m of list) {
-        await this._compileMaterialVariants([m], {
+        results.push(await this._compileMaterialVariants([m], {
           canvasOnly,
           timeoutMs,
           onProgress: (stepDone) => onProgress?.(done + stepDone, total),
-        });
+        }));
         done += passesPerMaterial;
         await yieldTask();
       }
-      return;
+      return {
+        ready: results.every((result) => result.ready),
+        timedOut: results.some((result) => result.timedOut),
+        pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
+        waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
+        syncCompileMs: results.reduce((sum, result) => sum + result.syncCompileMs, 0),
+        asyncWaitMs: results.reduce((sum, result) => sum + result.asyncWaitMs, 0),
+      };
     }
 
     const group = new THREE.Group();
     for (const m of list) group.add(new THREE.Mesh(this._warmGeo, m));
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
+    const compileStartedAt = performance.now();
     const pending = this.renderer.compile(group, this.camera, this.scene);
-    await this._waitForMaterialsReady(pending, waitOpts);
+    const syncCompileMs = performance.now() - compileStartedAt;
+    const waitStartedAt = performance.now();
+    const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
+    const asyncWaitMs = performance.now() - waitStartedAt;
+    const parallelCompile = Boolean(
+      this.renderer.getContext().getExtension('KHR_parallel_shader_compile')
+    );
+    console.info('[shader compile]', {
+      materials: list.length,
+      pass: 'canvas',
+      syncCompileMs: syncCompileMs.toFixed(0),
+      asyncWaitMs: asyncWaitMs.toFixed(0),
+      ready: canvasResult.ready,
+      timedOut: canvasResult.timedOut,
+      pending: canvasResult.pendingCount,
+      parallelCompile,
+      fragmentChars: list.map((material) => material.fragmentShader?.length ?? 0),
+    });
     onProgress?.(list.length, total);
 
-    if (canvasOnly) return;
+    if (canvasOnly) {
+      return { ...canvasResult, syncCompileMs, asyncWaitMs };
+    }
 
     this.underwater._ensureTarget(this.renderer);
     this.renderer.setRenderTarget(this.underwater._rt);
+    const rtCompileStartedAt = performance.now();
     const pendingRt = this.renderer.compile(group, this.camera, this.scene);
+    const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
     this.renderer.setRenderTarget(null);
-    await this._waitForMaterialsReady(pendingRt, waitOpts);
+    const rtWaitStartedAt = performance.now();
+    const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
+    const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
+    console.info('[shader compile]', {
+      materials: list.length,
+      pass: 'underwater',
+      syncCompileMs: rtSyncCompileMs.toFixed(0),
+      asyncWaitMs: rtAsyncWaitMs.toFixed(0),
+      ready: rtResult.ready,
+      timedOut: rtResult.timedOut,
+      pending: rtResult.pendingCount,
+      parallelCompile,
+      fragmentChars: list.map((material) => material.fragmentShader?.length ?? 0),
+    });
     onProgress?.(total, total);
+    return {
+      ready: canvasResult.ready && rtResult.ready,
+      timedOut: canvasResult.timedOut || rtResult.timedOut,
+      pendingCount: canvasResult.pendingCount + rtResult.pendingCount,
+      waitMs: canvasResult.waitMs + rtResult.waitMs,
+      syncCompileMs: syncCompileMs + rtSyncCompileMs,
+      asyncWaitMs: asyncWaitMs + rtAsyncWaitMs,
+    };
   }
 
   /**
@@ -2966,12 +3024,17 @@ export class Engine {
    * transparent DoubleSide materials mid-prepare).
    */
   _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
-    const pending = materials instanceof Set ? materials : new Set(materials);
+    const pending = new Set(materials);
     const props = this.renderer.properties;
 
     return new Promise((resolve) => {
       if (!pending.size) {
-        resolve();
+        resolve({
+          ready: true,
+          timedOut: false,
+          pendingCount: 0,
+          waitMs: 0,
+        });
         return;
       }
       const start = performance.now();
@@ -2982,13 +3045,24 @@ export class Engine {
           if (program?.isReady?.()) pending.delete(material);
         });
 
+        const waitMs = performance.now() - start;
         if (!pending.size) {
-          resolve();
+          resolve({
+            ready: true,
+            timedOut: false,
+            pendingCount: 0,
+            waitMs,
+          });
           return;
         }
-        if (performance.now() - start > timeoutMs) {
+        if (waitMs >= timeoutMs) {
           console.warn(`Shader compile wait timed out (${pending.size} material(s) still pending)`);
-          resolve();
+          resolve({
+            ready: false,
+            timedOut: true,
+            pendingCount: pending.size,
+            waitMs,
+          });
           return;
         }
         yieldTask().then(check);
@@ -3079,7 +3153,7 @@ export class Engine {
       pending.forEach((m) => allPending.add(m));
       await yieldTask();
     }
-    await this._waitForMaterialsReady(allPending);
+    return this._waitForMaterialsReady(allPending);
   }
 
   /** True when the object (and its whole parent chain) is visible. */
@@ -3098,34 +3172,49 @@ export class Engine {
     const mats = materials.filter(Boolean);
     if (!mats.length) {
       onSwap?.();
-      return;
+      return Promise.resolve(true);
     }
 
     this.cb.onStatus('Compiling water shaders…', false);
 
-    const run = () => {
-      this._compileMaterialVariants(mats, {
-        canvasOnly: true,
-        timeoutMs: 20000,
-        stagger: mats.length > 1,
-      })
-        .catch((e) => console.warn('Water shader compile failed', e))
-        .finally(() => {
-          if (!this._disposed) {
-            onSwap?.();
-            this.cb.onStatus('Ready', false);
+    return new Promise((resolve) => {
+      const run = async () => {
+        let ready = false;
+        try {
+          const result = await this._compileMaterialVariants(mats, {
+            canvasOnly: true,
+            timeoutMs: 20000,
+            stagger: mats.length > 1,
+          });
+          ready = result?.ready === true;
+          if (!ready) {
+            console.warn(
+              `Water shader compile still pending after ${result?.waitMs?.toFixed?.(0) ?? 0}ms; keeping the current material`
+            );
+            const states = await Promise.all(
+              mats.map((mat) => this._pollProgramReady(mat, { tries: 240, intervalMs: 250 }))
+            );
+            ready = states.every(Boolean);
           }
-        });
-    };
+          if (ready && !this._disposed) onSwap?.();
+          else if (!ready) console.warn('Water shader did not become ready; material swap skipped');
+        } catch (e) {
+          console.warn('Water shader compile failed', e);
+        } finally {
+          if (!this._disposed) this.cb.onStatus('Ready', false);
+          resolve(ready);
+        }
+      };
 
-    // Yield twice so the UI can paint before kicking off GPU work.
-    yieldTask().then(() => yieldTask().then(run));
+      // Yield twice so the UI can paint before kicking off GPU work.
+      yieldTask().then(() => yieldTask().then(run));
+    });
   }
 
-  /** Compile and instantiate the textured terrain and water before releasing boot. */
+  /** Compile and instantiate the textured terrain before releasing boot. */
   async _warmupInitialShaders() {
     this._compiling++;
-    this.cb.onStatus('Compiling terrain & water…', true);
+    this.cb.onStatus('Compiling terrain…', true);
     const _tCompile0 = performance.now();
     let fullTerrainResult = null;
     let bakeMs = 0;
@@ -3137,13 +3226,6 @@ export class Engine {
       // waits for the textured material, compiling both would be pure duplicate
       // work with the same generated height vertex source.
       const fullTerrainJob = this._upgradeMinimalTerrain();
-      // Kick off water immediately after terrain translation. Both programs can
-      // link on the driver's worker threads while the height map is baked.
-      // _warmDeferredWater also instantiates WaterSystem before this boot job
-      // resolves, so there is no post-loading water swap.
-      const waterJob = this.params.waterEnabled !== false
-        ? this._warmDeferredWater()
-        : Promise.resolve();
 
       const bakeStartedAt = performance.now();
       try {
@@ -3173,16 +3255,16 @@ export class Engine {
         () => this._compileSceneStaggered(null, {
           visibleOnly: true,
           skipMinimalTerrain: true,
-          // Water owns a dedicated concurrent warmup above. If its link and
-          // init finish during the height bake, do not enqueue it a second time.
+          // Water is deliberately deferred until after the first textured
+          // frame. renderer.compile() performs synchronous ANGLE translation,
+          // so merely starting its promise here would still block boot.
           skipWaterMaterial: true,
         })
       );
-      const [terrainOutcome, waterOutcome] = await Promise.allSettled([fullTerrainJob, waterJob]);
-      if (terrainOutcome.status === 'fulfilled') fullTerrainResult = terrainOutcome.value;
-      else console.warn('Boot terrain warmup failed', terrainOutcome.reason);
-      if (waterOutcome.status === 'rejected') {
-        console.warn('Boot water initialization failed', waterOutcome.reason);
+      try {
+        fullTerrainResult = await fullTerrainJob;
+      } catch (error) {
+        console.warn('Boot terrain warmup failed', error);
       }
 
       // If the full program failed or timed out, warm the minimal fallback now
@@ -3205,6 +3287,7 @@ export class Engine {
         if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
         this.cb.onBootComplete?.();
         this._scheduleErosionGPUWarmImport();
+        this._schedulePostFirstPaintWarmups();
       }
     } finally {
       this._compiling--;
@@ -3361,36 +3444,71 @@ export class Engine {
     this._postFirstPaintWarmTimer = setTimeout(run, delayMs);
   }
 
-  async _warmDeferredWater() {
+  _warmDeferredWater() {
     if (this._disposed || !this._waterDeferred || !this.waterMaterial) return;
+    if (this._waterWarmPromise) return this._waterWarmPromise;
+    const job = this._warmDeferredWaterImpl();
+    const pending = job.finally(() => {
+      if (this._waterWarmPromise === pending) this._waterWarmPromise = null;
+    });
+    this._waterWarmPromise = pending;
+    return this._waterWarmPromise;
+  }
+
+  async _warmDeferredWaterImpl() {
     const t0 = performance.now();
-    // During boot the blocking 'Loading terrain & water…' status owns the
-    // overlay — don't downgrade it (or flip it to Ready) from here.
     if (!this._bootPending) this.cb.onStatus('Preparing water...', false);
-    const target = Math.round(this.params.octaves);
-    if (this.waterMaterial.defines.OCTAVES !== target) {
-      this.waterMaterial.defines.OCTAVES = target;
-      this.waterMaterial.needsUpdate = true;
-      this._waterMaterialWarmed = false;
+
+    try {
+      this._terrainHeightBakeDeferred = false;
+      this._ensureTerrainHeightTex();
+    } catch (e) {
+      this._terrainHeightBakeDeferred = true;
+      console.warn('Water height bake failed', e);
     }
+
+    if (this.worldMode === 'studio' && this.uniforms.uUseTerrainHeightTex.value < 0.5) {
+      console.warn('Studio water remains deferred because its baked terrain height is unavailable');
+      if (!this._bootPending) this.cb.onStatus('Ready', false);
+      return;
+    }
+
+    const materials = this.waterSystem?.prepareInitialMaterials(
+      this.params,
+      this.worldMode
+    ) ?? [this.waterMaterial];
     if (!this._waterMaterialWarmed) {
       try {
-        await this._compileMaterialVariants([this.waterMaterial], {
+        const result = await this._compileMaterialVariants(materials, {
           canvasOnly: true,
-          stagger: true,
+          stagger: materials.length > 1,
           timeoutMs: 20000,
         });
-        this._waterMaterialWarmed = true;
+        this._waterMaterialWarmed = result?.ready === true;
+        if (!this._waterMaterialWarmed) {
+          console.warn(
+            `Water compile still pending after ${result?.waitMs?.toFixed?.(0) ?? 0}ms; waiting in the background`
+          );
+          const states = await Promise.all(
+            materials.map((mat) => this._pollProgramReady(mat, { tries: 240, intervalMs: 250 }))
+          );
+          this._waterMaterialWarmed = states.every(Boolean);
+        }
       } catch (e) {
         console.warn('Deferred water warmup failed', e);
       }
     }
-    if (this._disposed) return;
+    if (this._disposed || !this._waterMaterialWarmed) {
+      if (!this._disposed) {
+        console.warn('Water material was not activated because its shader is not ready');
+        if (!this._bootPending) this.cb.onStatus('Ready', false);
+      }
+      return;
+    }
     this._waterDeferred = false;
-    this.waterSystem?.init();
-    this._applyWaterPerf();
+    this.waterSystem?.activateInitialMaterials(this.params, this.worldMode);
     this._needsRender = true;
-    console.info(`[boot] water init ${(performance.now() - t0).toFixed(0)}ms${this._waterMaterialWarmed ? ' (precompiled)' : ''}`);
+    console.info(`[boot] water init ${(performance.now() - t0).toFixed(0)}ms (precompiled)`);
     if (!this._bootPending) this.cb.onStatus('Ready', false);
   }
 
@@ -3480,7 +3598,6 @@ export class Engine {
         : createTerrainMaterial(this.uniforms, oct, studioProgram),
     ];
     const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
-    if (waterActive && this.worldMode === 'studio') warm.push(createWaterMaterial(this.uniforms, oct, studioProgram));
     if (waterActive && this.worldMode === 'infinite') {
       warm.push(createInfiniteWaterMaterial(this.uniforms, oct, this._stackGLSL));
     }
@@ -3507,13 +3624,13 @@ export class Engine {
         this._infiniteWaterMat,
       ];
       for (const m of live) {
-        if (m && m.defines.OCTAVES !== oct) {
+        if (m && !m.userData?.bakedHeightOnly && m.defines.OCTAVES !== oct) {
           m.defines.OCTAVES = oct;
           // a minimal boot fragment + the new define is NOT in the program
           // cache — upgrade the source to the full fragment (which the warm
           // clone above just compiled) so the relink stays a cache hit
           if (m.userData?.minimalFragment) {
-            const source = m === this.terrainMaterial || m === this.waterMaterial ? studioProgram : this._stackGLSL;
+            const source = m === this.terrainMaterial ? studioProgram : this._stackGLSL;
             if (nodePreviewMaterial && m === this.terrainMaterial) rebuildTerrainPreviewShaderSource(m, source);
             else rebuildTerrainShaderSource(m, source);
           }

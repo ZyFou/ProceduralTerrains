@@ -29,7 +29,11 @@ function heightTransitionHarness() {
     params: { octaves: 6 },
     uniforms: {},
     terrainMaterial: liveMaterial(),
-    waterMaterial: liveMaterial(),
+    waterMaterial: {
+      ...liveMaterial(),
+      defines: {},
+      userData: { bakedHeightOnly: true },
+    },
     _infiniteTerrainMat: null,
     _infiniteWaterMat: null,
     waterSystem: { onStackRebuilt: vi.fn() },
@@ -120,9 +124,9 @@ describe('atomic terrain height transitions', () => {
     expect(engine._compiling).toBe(0);
     expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
     expect(engine.terrainMaterial.defines.OCTAVES).toBe(6);
-    expect(engine.waterMaterial.defines.OCTAVES).toBe(6);
+    expect(engine.waterMaterial.defines.OCTAVES).toBeUndefined();
     expect(engine.terrainMaterial.vertexShader).toContain('graph_template_alpine_ridges');
-    expect(engine.waterMaterial.fragmentShader).toContain('graph_template_alpine_ridges');
+    expect(engine.waterMaterial.fragmentShader).toBe('old water source');
     expect(engine.terrainMaterial.vertexShader).not.toContain('graph_template_dunes_dunes');
     expect(engine.waterSystem.onStackRebuilt).toHaveBeenCalledWith(nodesProgram, 6);
   });
@@ -144,7 +148,7 @@ describe('atomic terrain height transitions', () => {
     expect(result.swapped).toBe(true);
     expect(engine._compiling).toBe(0);
     expect(engine.terrainMaterial.vertexShader).toContain('// 0: legacy (Classic Terrain)');
-    expect(engine.waterMaterial.fragmentShader).toContain('// 0: legacy (Classic Terrain)');
+    expect(engine.waterMaterial.fragmentShader).toBe('old water source');
     expect(engine.terrainMaterial.vertexShader).not.toContain('float graph_terrain_output');
     expect(engine._syncCpuHeightProgram).toHaveBeenCalledTimes(1);
   });

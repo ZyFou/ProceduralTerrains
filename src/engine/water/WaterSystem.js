@@ -38,7 +38,64 @@ export class WaterSystem {
 
   /** Call once after engine scene + water meshes exist. */
   init() {
-    this._syncFromParams();
+    this.prepareInitialMaterials(this.engine.params, this.engine.worldMode);
+    this.activateInitialMaterials(this.engine.params, this.engine.worldMode);
+  }
+
+  /**
+   * Create only the material needed by the current effective mode. Boot calls
+   * this before compiling so a saved realistic preset never pays to compile
+   * the legacy shader first merely as a temporary fallback.
+   */
+  prepareInitialMaterials(params = this.engine.params, worldMode = this.engine.worldMode) {
+    const eng = this.engine;
+    const octaves = Math.round(eng.params.octaves);
+    this._effectiveMode = resolveEffectiveWaterMode(params, worldMode);
+    this._usingRealistic = isRealisticWaterMode(this._effectiveMode);
+
+    if (this._usingRealistic) {
+      if (worldMode === 'infinite') {
+        this._ensureRealisticInfinite(octaves);
+        return [this._realisticInfinite];
+      }
+      this._ensureRealisticStudio(octaves);
+      return [this._realisticStudio];
+    }
+
+    if (worldMode === 'infinite') {
+      this._ensureLegacyInfiniteMaterial(octaves);
+      return [eng._infiniteWaterMat];
+    }
+    if (worldMode === 'planet') return [eng.planetWaterMat].filter(Boolean);
+    return [eng.waterMaterial];
+  }
+
+  /** Attach a material only after its program has reported genuinely ready. */
+  activateInitialMaterials(params = this.engine.params, worldMode = this.engine.worldMode) {
+    const eng = this.engine;
+    const p = params ?? eng.params;
+    const debug = p.waterDebugView ?? 'off';
+
+    this._waterCompilePending = false;
+    this._waterCompileGen++;
+    if (this._usingRealistic) {
+      this._attachRealisticMaterials(p, debug);
+    } else {
+      if (eng.water && eng.waterMaterial) eng.water.material = eng.waterMaterial;
+      if (eng.infiniteWorld?.waterPlane && eng._infiniteWaterMat) {
+        eng.infiniteWorld.waterPlane.material = eng._infiniteWaterMat;
+        eng.infiniteWorld.waterMaterial = eng._infiniteWaterMat;
+      }
+      applyWaterMaterialSettings(eng.waterMaterial, p, 'legacy', 'off');
+      applyWaterMaterialSettings(eng._infiniteWaterMat, p, 'legacy', 'off');
+      applyWaterMaterialSettings(eng.planetWaterMat, p, 'legacy', 'off');
+    }
+
+    this._applyVisibility(p, worldMode);
+    this._applyUniforms(p);
+    this._applyDebug(p);
+    this._updateBoundsHelper(p);
+    this.applyPerf(eng.perf);
   }
 
   migrateParams(params) {
@@ -113,20 +170,10 @@ export class WaterSystem {
 
   onStackRebuilt(stackGLSL, octaves) {
     const eng = this.engine;
-    if (this._realisticStudio) {
-      rebuildRealisticWaterShaderSource(this._realisticStudio, stackGLSL);
-      this._realisticStudio.defines.OCTAVES = octaves;
-      this._realisticStudio.needsUpdate = true;
-    }
     if (this._realisticInfinite) {
       rebuildRealisticWaterShaderSource(this._realisticInfinite, stackGLSL);
       this._realisticInfinite.defines.OCTAVES = octaves;
       this._realisticInfinite.needsUpdate = true;
-    }
-    if (eng.waterMaterial) {
-      rebuildWaterShaderSource(eng.waterMaterial, stackGLSL);
-      eng.waterMaterial.defines.OCTAVES = octaves;
-      eng.waterMaterial.needsUpdate = true;
     }
     if (eng._infiniteWaterMat) {
       rebuildWaterShaderSource(eng._infiniteWaterMat, stackGLSL);

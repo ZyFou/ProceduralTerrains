@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
-import { BIOME_GLSL } from './biomeGLSL.js';
+import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
+import { buildWaterHeightShaderParts } from '../water/waterShaderGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -23,15 +23,16 @@ void main() {
 }
 `;
 
-const buildFragment = (heightGLSL) => /* glsl */ `
+const buildFragment = (stackGLSL, infinite = false) => {
+  const { dependencies, terrainHeightFunction } = buildWaterHeightShaderParts(stackGLSL, infinite);
+  return /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
-${NOISE_GLSL}
-${BIOME_GLSL}
-${heightGLSL}
+${dependencies}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
+${terrainHeightFunction}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;   // distance from camera where fade begins
@@ -68,12 +69,7 @@ void main() {
 #endif
 
   // depth of the sea floor below this fragment (same height field as terrain)
-  float floorH;
-#ifndef INFINITE_MODE
-  if (uUseTerrainHeightTex > 0.5) floorH = bakedHeightAt(xz);
-  else
-#endif
-  floorH = heightAt(xz);
+  float floorH = waterTerrainHeightAt(xz);
   float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
 
@@ -133,6 +129,7 @@ void main() {
   gl_FragColor = vec4(col, alpha);
 }
 `;
+};
 
 // Per-material quality uniforms (NOT shared with terrain, so water quality
 // can never affect terrain rendering). Defaults match the original shader.
@@ -155,19 +152,22 @@ export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEF
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
-    defines: { OCTAVES: octaves },
+    defines: {},
     vertexShader: VERTEX,
-    fragmentShader: buildFragment(buildHeightGLSL(stackGLSL.body2d)),
+    fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
+  mat.userData.bakedHeightOnly = true;
   return mat;
 }
 
 // Update a live water material's height shader source in place to a new stack.
 export function rebuildWaterShaderSource(mat, stackGLSL) {
-  mat.fragmentShader = buildFragment(buildHeightGLSL(stackGLSL.body2d));
+  const infinite = Object.hasOwn(mat.defines ?? {}, 'INFINITE_MODE');
+  mat.fragmentShader = buildFragment(stackGLSL, infinite);
   mat.needsUpdate = true;
 }
 
@@ -184,10 +184,11 @@ export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7, stackGL
     uniforms,
     defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
     vertexShader: VERTEX,
-    fragmentShader: buildFragment(buildHeightGLSL(stackGLSL.body2d)),
+    fragmentShader: buildFragment(stackGLSL, true),
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
   return mat;
 }
