@@ -7,7 +7,8 @@ import {
   surfaceAtlasRow,
 } from './SurfaceTextureRoles.js';
 
-// Builds the four terrain surface ATLAS textures (diffuse/normal/rough/ao).
+// Builds two terrain surface atlas textures: sRGB diffuse plus packed linear
+// properties (normal XY, roughness, AO). Packing stays within 16 texture units.
 // The atlas is a vertical strip of role variants:
 //   row = roleIndex * SURFACE_TEXTURE_VARIANT_COUNT + variantIndex.
 // Missing diffuse rows are diagnostic checker rows so Custom Materials never
@@ -122,10 +123,32 @@ function makeAtlasTexture(canvas, { srgb }) {
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;
+  // Atlas row zero is addressed at v=0 in GLSL and is the canvas top row.
+  // Disable Three's default source flip so painted role indices stay aligned.
+  tex.flipY = false;
   tex.generateMipmaps = false;
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+
+function packPropertiesCanvas(canvases) {
+  const packed = document.createElement('canvas');
+  packed.width = canvases.normalDX.width;
+  packed.height = canvases.normalDX.height;
+  const packedCtx = packed.getContext('2d');
+  const normal = canvases.normalDX.getContext('2d').getImageData(0, 0, packed.width, packed.height).data;
+  const roughness = canvases.roughness.getContext('2d').getImageData(0, 0, packed.width, packed.height).data;
+  const ao = canvases.ao.getContext('2d').getImageData(0, 0, packed.width, packed.height).data;
+  const output = packedCtx.createImageData(packed.width, packed.height);
+  for (let index = 0; index < output.data.length; index += 4) {
+    output.data[index] = normal[index];
+    output.data[index + 1] = normal[index + 1];
+    output.data[index + 2] = roughness[index];
+    output.data[index + 3] = ao[index];
+  }
+  packedCtx.putImageData(output, 0, 0);
+  return packed;
 }
 
 // resolveUrl(materialId, slot, variantIndex) -> string|null
@@ -245,13 +268,12 @@ export async function buildSurfaceAtlas({ source, resolveUrl, tilingFor, labelFo
   const fullyReady = layers.filter((layer) => layer.status === 'ready').length;
   const missingDiffuse = layers.filter((layer) => layer.status === 'missingDiffuse').length;
   const missingOptional = layers.filter((layer) => layer.status === 'missingOptional').length;
+  const properties = packPropertiesCanvas(canvases);
 
   return {
     source,
     diffuse: makeAtlasTexture(canvases.diffuse, { srgb: true }),
-    normal: makeAtlasTexture(canvases.normalDX, { srgb: false }),
-    rough: makeAtlasTexture(canvases.roughness, { srgb: false }),
-    ao: makeAtlasTexture(canvases.ao, { srgb: false }),
+    props: makeAtlasTexture(properties, { srgb: false }),
     present,
     rolePresent: layers.map((layer) => (layer.hasDiffuse ? 1 : 0)),
     tile,

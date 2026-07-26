@@ -3,6 +3,11 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { TerrainPicker } from '../engine/terrain/TerrainPicker.js';
 import { PaintBrushCursor } from '../paint/PaintBrushCursor.js';
 import { ManualTerrainField } from './ManualTerrainField.js';
+import { ManualSurfacePaintField } from './ManualSurfacePaintField.js';
+import {
+  MANUAL_SURFACE_MATERIAL_IDS,
+  getManualSurfaceMaterial,
+} from './ManualSurfaceCatalog.js';
 import {
   createManualShape,
   getManualShapeDefinition,
@@ -32,6 +37,7 @@ const SCULPT_CURSOR_COLORS = Object.freeze({
   terrace: 0xfb923c,
   erase: 0xf8fafc,
 });
+const SURFACE_TOOLS = new Set(['paint', 'blend', 'erase']);
 const DEFAULT_SCULPT_STATE = Object.freeze({
   enabled: false,
   tool: 'raise',
@@ -47,6 +53,14 @@ const DEFAULT_SCULPT_STATE = Object.freeze({
   erosionIterations: 3,
   erosionDeposition: 0.65,
   erosionTalus: 1.5,
+});
+const DEFAULT_TEXTURE_PAINT_STATE = Object.freeze({
+  enabled: false,
+  tool: 'paint',
+  material: 'grass',
+  brushSize: 110,
+  strength: 0.45,
+  falloff: 0.72,
 });
 
 function isTypingTarget(target) {
@@ -94,12 +108,16 @@ export class ManualTerrainModeManager {
     this.placementType = null;
     this.dragType = null;
     this.sculpt = { ...DEFAULT_SCULPT_STATE };
+    this.texturePaint = { ...DEFAULT_TEXTURE_PAINT_STATE };
     this._sculpting = false;
+    this._surfacePainting = false;
     this._lastSculptPoint = null;
+    this._lastSurfacePoint = null;
     this._draggingTransform = false;
     this._visuals = new Map();
 
     this.field = new ManualTerrainField({ uniforms, getBounds, gpuTier });
+    this.surfaceField = new ManualSurfacePaintField({ getBounds, gpuTier });
     this.cursor = new PaintBrushCursor(scene);
     this.picker = new TerrainPicker({
       camera,
@@ -206,6 +224,11 @@ export class ManualTerrainModeManager {
         revision: this.field.sculptRevision,
         hasData: !this.field.isSculptEmpty(),
       },
+      texturePaint: {
+        ...this.texturePaint,
+        revision: this.surfaceField.revision,
+        hasData: !this.surfaceField.isEmpty(),
+      },
       shapes: cloneShapes(this.shapes),
     };
   }
@@ -223,7 +246,7 @@ export class ManualTerrainModeManager {
     this._previousWheelFilter = this.controls.wheelFilter ?? null;
     this.controls.inputMode = 'all';
     this.controls.primaryPointerFilter = (event) => this._canCameraPan(event);
-    this.controls.wheelFilter = (event) => !(this.sculpt.enabled && event.shiftKey);
+    this.controls.wheelFilter = (event) => !((this.sculpt.enabled || this.texturePaint.enabled) && event.shiftKey);
     this.group.visible = true;
     this._syncVisuals();
     this._emit();
@@ -236,8 +259,11 @@ export class ManualTerrainModeManager {
     this.placementType = null;
     this.dragType = null;
     this.sculpt.enabled = false;
+    this.texturePaint.enabled = false;
     this._sculpting = false;
+    this._surfacePainting = false;
     this._lastSculptPoint = null;
+    this._lastSurfacePoint = null;
     this.controls.inputMode = this._previousControlInputMode ?? 'all';
     this.controls.primaryPointerFilter = this._previousPrimaryPointerFilter ?? null;
     this.controls.wheelFilter = this._previousWheelFilter ?? null;
@@ -258,6 +284,7 @@ export class ManualTerrainModeManager {
 
   setTransformMode(mode) {
     if (this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
+    if (this.texturePaint.enabled) this.setTexturePaintEnabled(false, { silent: true });
     this.transformMode = TRANSFORM_MODES.has(mode) ? mode : 'translate';
     this.transform.setMode(this.transformMode);
     this.transform.space = this.transformMode === 'translate' ? 'world' : 'local';
@@ -270,6 +297,7 @@ export class ManualTerrainModeManager {
 
   setPlacementType(type) {
     if (type && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
+    if (type && this.texturePaint.enabled) this.setTexturePaintEnabled(false, { silent: true });
     this.placementType = type ? getManualShapeDefinition(type).id : null;
     this.dragType = null;
     this.preview.visible = false;
@@ -278,6 +306,7 @@ export class ManualTerrainModeManager {
 
   beginDrag(type) {
     if (this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
+    if (this.texturePaint.enabled) this.setTexturePaintEnabled(false, { silent: true });
     this.dragType = getManualShapeDefinition(type).id;
     this.placementType = null;
     this._emit();
@@ -296,6 +325,7 @@ export class ManualTerrainModeManager {
       return;
     }
     this.sculpt.enabled = next;
+    if (next && this.texturePaint.enabled) this.setTexturePaintEnabled(false, { silent: true });
     this.placementType = null;
     this.dragType = null;
     this.preview.visible = false;
@@ -335,6 +365,54 @@ export class ManualTerrainModeManager {
     else if (key === 'erosionDeposition') this.sculpt.erosionDeposition = Math.max(0, Math.min(1, Number(value) || 0));
     else if (key === 'erosionTalus') this.sculpt.erosionTalus = Math.max(0, Math.min(20, Number(value) || 0));
     this._emit();
+  }
+
+  setTexturePaintEnabled(enabled, { silent = false } = {}) {
+    const next = !!enabled;
+    if (next === this.texturePaint.enabled) {
+      if (next) this._emit({ inspectorRequested: true });
+      return;
+    }
+    this.texturePaint.enabled = next;
+    if (next && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
+    this.placementType = null;
+    this.dragType = null;
+    this.preview.visible = false;
+    this._surfacePainting = false;
+    this._lastSurfacePoint = null;
+    if (next) {
+      this.selectedId = null;
+      this._syncSurfaceCursorStyle();
+      this._syncVisuals();
+    } else {
+      this.cursor.setVisible(false);
+    }
+    this._syncAnchor();
+    this._emit({ inspectorRequested: next });
+    if (!silent) {
+      this.onToast?.(next
+        ? 'Texture Paint ? left drag paints ? Alt + left drag pans ? right drag orbits'
+        : 'Exited Texture Paint');
+    }
+  }
+
+  setTexturePaintSetting(key, value) {
+    if (key === 'tool') this.texturePaint.tool = SURFACE_TOOLS.has(value) ? value : 'paint';
+    else if (key === 'material') this.texturePaint.material = MANUAL_SURFACE_MATERIAL_IDS.has(value) ? value : 'grass';
+    else if (key === 'brushSize') this.texturePaint.brushSize = Math.max(4, Math.min(900, Number(value) || 4));
+    else if (key === 'strength') this.texturePaint.strength = Math.max(0.01, Math.min(1, Number(value) || 0.01));
+    else if (key === 'falloff') this.texturePaint.falloff = Math.max(0.02, Math.min(1, Number(value) || 0.02));
+    this._syncSurfaceCursorStyle();
+    this._emit();
+  }
+
+  clearTexturePaint() {
+    if (this.surfaceField.isEmpty()) return false;
+    this.surfaceField.clear();
+    this.cursor.setVisible(false);
+    this._emit({ documentChanged: true, surfaceChanged: true, label: 'Cleared terrain textures' });
+    this.onStableAction?.('Cleared terrain textures');
+    return true;
   }
 
   clearSculpt() {
@@ -383,6 +461,7 @@ export class ManualTerrainModeManager {
   selectShape(id, { requestInspector = false } = {}) {
     const nextId = this.shapes.some((shape) => shape.id === id) ? id : null;
     if (nextId && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
+    if (nextId && this.texturePaint.enabled) this.setTexturePaintEnabled(false, { silent: true });
     if (nextId === this.selectedId) {
       if (requestInspector && nextId) this._emit({ inspectorRequested: true });
       return;
@@ -438,25 +517,33 @@ export class ManualTerrainModeManager {
     this.placementType = null;
     this.dragType = null;
     this.sculpt.enabled = false;
+    this.texturePaint.enabled = false;
     this._sculpting = false;
+    this._surfacePainting = false;
     this.preview.visible = false;
     this.cursor.setVisible(false);
     this.field.clearSculpt();
+    this.surfaceField.clear();
     this._rebuildTerrain();
     this._syncVisuals();
     if (emit) this._emit({ terrainChanged: true, label: 'Cleared manual terrain' });
   }
 
-  serialize({ includeSculpt = true } = {}) {
+  serialize({ includeSculpt = true, includeSurface = true } = {}) {
     return {
-      version: 2,
+      version: 3,
       shapes: cloneShapes(this.shapes),
       ...(includeSculpt ? { sculpt: this.field.serializeSculpt() } : {}),
+      ...(includeSurface ? { surfacePaint: this.surfaceField.serialize() } : {}),
     };
   }
 
   serializeSculpt() {
     return this.field.serializeSculpt();
+  }
+
+  serializeSurfacePaint() {
+    return this.surfaceField.serialize();
   }
 
   load(input, { emit = true } = {}) {
@@ -466,10 +553,13 @@ export class ManualTerrainModeManager {
     this.placementType = null;
     this.dragType = null;
     this.sculpt = { ...DEFAULT_SCULPT_STATE };
+    this.texturePaint = { ...DEFAULT_TEXTURE_PAINT_STATE };
     this._sculpting = false;
+    this._surfacePainting = false;
     this.preview.visible = false;
     this.cursor.setVisible(false);
     this.field.loadSculpt(document.sculpt);
+    this.surfaceField.load(document.surfacePaint);
     this._rebuildTerrain();
     this._syncVisuals();
     if (emit) this._emit({ terrainChanged: true, label: 'Loaded manual terrain' });
@@ -523,7 +613,7 @@ export class ManualTerrainModeManager {
 
   _syncAnchor() {
     const shape = this.selectedShape;
-    if (!this.enabled || !shape || this.sculpt.enabled) {
+    if (!this.enabled || !shape || this.sculpt.enabled || this.texturePaint.enabled) {
       this.transform.detach();
       this.transform.visible = false;
       this.marker.visible = false;
@@ -583,7 +673,7 @@ export class ManualTerrainModeManager {
   }
 
   _canCameraPan(event) {
-    if (this.sculpt.enabled) return !!event.altKey;
+    if (this.sculpt.enabled || this.texturePaint.enabled) return !!event.altKey;
     if (!this.enabled || this.placementType || this.dragType || this._draggingTransform || this.transform.axis) return false;
     const point = this.picker.pickEvent(event);
     return !point || !this._pickShapeAt(point);
@@ -591,6 +681,18 @@ export class ManualTerrainModeManager {
 
   _handlePointerDown(event) {
     if (!this.enabled || event.button !== 0 || this._draggingTransform || this.transform.axis) return;
+    if (this.texturePaint.enabled) {
+      if (event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = this.picker.pickEvent(event);
+      if (!point) return;
+      this._surfacePainting = true;
+      this._lastSurfacePoint = null;
+      this._updateSurfaceHit(point);
+      this._stampSurface(point, true);
+      return;
+    }
     if (this.sculpt.enabled) {
       if (event.altKey) return;
       event.preventDefault();
@@ -622,6 +724,12 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerMove(event) {
+    if (this.enabled && this.texturePaint.enabled) {
+      const point = this.picker.pickEvent(event, { quality: this._surfacePainting ? 'preview' : 'final' });
+      this._updateSurfaceHit(point);
+      if (this._surfacePainting && point) this._stampSurface(point);
+      return;
+    }
     if (this.enabled && this.sculpt.enabled) {
       const point = this.picker.pickEvent(event, { quality: this._sculpting ? 'preview' : 'final' });
       this._updateSculptHit(point);
@@ -655,6 +763,17 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerUp() {
+    if (this._surfacePainting) {
+      this._surfacePainting = false;
+      this._lastSurfacePoint = null;
+      this._emit({
+        documentChanged: true,
+        surfaceChanged: true,
+        label: `Painted terrain texture (${this.texturePaint.tool})`,
+      });
+      this.onStableAction?.(`Painted terrain texture (${this.texturePaint.tool})`);
+      return;
+    }
     if (!this._sculpting) return;
     this._sculpting = false;
     this._lastSculptPoint = null;
@@ -668,11 +787,15 @@ export class ManualTerrainModeManager {
   }
 
   _handleWheel(event) {
-    if (!this.enabled || !this.sculpt.enabled || !event.shiftKey) return;
+    if (!this.enabled || (!this.sculpt.enabled && !this.texturePaint.enabled) || !event.shiftKey) return;
     event.preventDefault();
     event.stopPropagation();
     const factor = event.deltaY > 0 ? 0.9 : 1.1;
-    this.setSculptSetting('brushSize', Math.round(this.sculpt.brushSize * factor));
+    if (this.texturePaint.enabled) {
+      this.setTexturePaintSetting('brushSize', Math.round(this.texturePaint.brushSize * factor));
+    } else {
+      this.setSculptSetting('brushSize', Math.round(this.sculpt.brushSize * factor));
+    }
   }
 
   _updateSculptHit(point) {
@@ -725,6 +848,51 @@ export class ManualTerrainModeManager {
     this._syncUniforms();
   }
 
+  _updateSurfaceHit(point) {
+    this.cursor.update(point, this.texturePaint.brushSize);
+  }
+
+  _syncSurfaceCursorStyle() {
+    const material = getManualSurfaceMaterial(this.texturePaint.material);
+    const color = this.texturePaint.tool === 'erase'
+      ? 0xf8fafc
+      : this.texturePaint.tool === 'blend'
+        ? 0x60a5fa
+        : material.color;
+    this.cursor.setColor(color);
+  }
+
+  _stampSurface(point, force = false) {
+    if (!point) return;
+    const current = point.clone();
+    const spacing = Math.max(2, this.texturePaint.brushSize * 0.18);
+    if (!force && this._lastSurfacePoint && this._lastSurfacePoint.distanceTo(current) < spacing) return;
+    if (!force && this._lastSurfacePoint) {
+      const start = this._lastSurfacePoint.clone();
+      const distance = start.distanceTo(current);
+      const steps = Math.min(48, Math.max(1, Math.floor(distance / spacing)));
+      for (let index = 1; index <= steps; index++) {
+        this._stampSurfaceAt(start.clone().lerp(current, index / steps));
+      }
+    } else {
+      this._stampSurfaceAt(current);
+    }
+    this._lastSurfacePoint = current;
+  }
+
+  _stampSurfaceAt(point) {
+    const material = getManualSurfaceMaterial(this.texturePaint.material);
+    this.surfaceField.stamp({
+      x: point.x,
+      z: point.z,
+      radius: this.texturePaint.brushSize,
+      strength: this.texturePaint.strength,
+      falloff: this.texturePaint.falloff,
+      tool: this.texturePaint.tool,
+      materialChannel: material.channel,
+    });
+  }
+
   _updatePreview(type, point) {
     const definition = getManualShapeDefinition(type);
     this.preview.position.set(point.x, point.y + 8, point.z);
@@ -736,6 +904,11 @@ export class ManualTerrainModeManager {
   _handleKeyDown(event) {
     if (!this.enabled || isTypingTarget(event.target)) return;
     if (event.key === 'Escape') {
+      if (this.texturePaint.enabled) {
+        event.preventDefault();
+        this.setTexturePaintEnabled(false);
+        return;
+      }
       if (this.sculpt.enabled) {
         event.preventDefault();
         this.setSculptEnabled(false);
@@ -760,6 +933,11 @@ export class ManualTerrainModeManager {
     if (key === 'b') {
       event.preventDefault();
       this.setSculptEnabled(!this.sculpt.enabled);
+      return;
+    }
+    if (key === 't') {
+      event.preventDefault();
+      this.setTexturePaintEnabled(!this.texturePaint.enabled);
       return;
     }
     if (key === 'm' || key === 'r' || key === 's') {
@@ -812,5 +990,6 @@ export class ManualTerrainModeManager {
     this.marker.material.dispose();
     this.cursor.dispose();
     this.field.dispose();
+    this.surfaceField.dispose();
   }
 }

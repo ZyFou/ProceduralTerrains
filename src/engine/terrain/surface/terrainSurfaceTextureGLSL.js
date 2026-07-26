@@ -25,9 +25,7 @@ export {
 
 export const SURFACE_TEXTURE_UNIFORMS_GLSL = /* glsl */ `
 uniform sampler2D uSurfDiffuse;
-uniform sampler2D uSurfNormal;
-uniform sampler2D uSurfRough;
-uniform sampler2D uSurfAO;
+uniform sampler2D uSurfProps; // RG normal XY, B roughness, A ambient occlusion
 uniform float uSurfMode;        // 0 = procedural colours, 1 = custom texture atlas
 uniform float uSurfAmount;      // master blend of textures over colour (0..1)
 uniform float uSurfTint;        // legacy, unused by the palette-role path
@@ -180,9 +178,9 @@ vec3 surfTriNormalRole(int roleIndex, vec3 wp, vec3 blend, float tile, vec3 nGeo
   vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, 4.0);
   vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 5.0);
   vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, 6.0);
-  vec3 tx = texture2D(uSurfNormal, surfAtlasUV(rowFi, uvX)).rgb * 2.0 - 1.0;
-  vec3 ty = texture2D(uSurfNormal, surfAtlasUV(rowFi, uvY)).rgb * 2.0 - 1.0;
-  vec3 tz = texture2D(uSurfNormal, surfAtlasUV(rowFi, uvZ)).rgb * 2.0 - 1.0;
+  vec2 tx = texture2D(uSurfProps, surfAtlasUV(rowFi, uvX)).rg * 2.0 - 1.0;
+  vec2 ty = texture2D(uSurfProps, surfAtlasUV(rowFi, uvY)).rg * 2.0 - 1.0;
+  vec2 tz = texture2D(uSurfProps, surfAtlasUV(rowFi, uvZ)).rg * 2.0 - 1.0;
   tx.y = -tx.y;
   ty.y = -ty.y;
   tz.y = -tz.y;
@@ -192,16 +190,16 @@ vec3 surfTriNormalRole(int roleIndex, vec3 wp, vec3 blend, float tile, vec3 nGeo
   return normalize(wX * blend.x + wY * blend.y + wZ * blend.z);
 }
 
-float surfTriScalarRole(sampler2D atlas, int roleIndex, vec3 wp, vec3 blend, float tile, float salt) {
+vec2 surfTriPropertiesRole(int roleIndex, vec3 wp, vec3 blend, float tile) {
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
   float rowFi = surfRenderRowFi(roleIndex);
-  vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, salt + 1.0);
-  vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, salt + 2.0);
-  vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, salt + 3.0);
-  float cx = texture2D(atlas, surfAtlasUV(rowFi, uvX)).r;
-  float cy = texture2D(atlas, surfAtlasUV(rowFi, uvY)).r;
-  float cz = texture2D(atlas, surfAtlasUV(rowFi, uvZ)).r;
+  vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, 8.0);
+  vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 9.0);
+  vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, 10.0);
+  vec2 cx = texture2D(uSurfProps, surfAtlasUV(rowFi, uvX)).ba;
+  vec2 cy = texture2D(uSurfProps, surfAtlasUV(rowFi, uvY)).ba;
+  vec2 cz = texture2D(uSurfProps, surfAtlasUV(rowFi, uvZ)).ba;
   return cx * blend.x + cy * blend.y + cz * blend.z;
 }
 
@@ -239,8 +237,9 @@ SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo)
   if (uSurfNormalAmt > 0.001) {
     s.normal = surfTriNormalRole(roleIndex, wp, blend, tile, nGeo);
   }
-  s.rough = surfTriScalarRole(uSurfRough, roleIndex, wp, blend, tile, 7.0);
-  s.ao = surfTriScalarRole(uSurfAO, roleIndex, wp, blend, tile, 11.0);
+  vec2 properties = surfTriPropertiesRole(roleIndex, wp, blend, tile);
+  s.rough = properties.x;
+  s.ao = properties.y;
   s.missing = 1.0 - step(0.5, surfRoleReady(roleIndex));
 
   float tintAmt = clamp(uSurfPaletteInfluence, 0.0, 1.0) * (1.0 - step(0.5, s.missing));
@@ -354,7 +353,35 @@ SurfaceTexResult applySurfaceMaterials(
     triBlend = vec3(0.0, 1.0, 0.0);
   }
 
-  SurfRoleWeights w = surfMaterialWeights(tc, cl, bw, slope, hRel, h01, detail, jitter);
+  bool manualMode = uManualSurfaceMode > 0.5;
+  float manualCoverage = 1.0;
+  SurfRoleWeights w;
+  if (manualMode) {
+    vec4 manualA = manualSurfaceWeightsAAt(wpos.xz);
+    vec4 manualB = manualSurfaceWeightsBAt(wpos.xz);
+    w.sand = manualA.b;
+    w.dune = 0.0;
+    w.dryGrass = 0.0;
+    w.grass = manualA.r;
+    w.forest = 0.0;
+    w.jungle = 0.0;
+    w.swamp = manualB.r;
+    w.tundra = 0.0;
+    w.redRock = manualB.g;
+    w.redRock2 = manualB.b;
+    w.rock = manualA.g;
+    w.rockHi = 0.0;
+    w.snow = manualA.a;
+    manualCoverage = clamp(
+      manualA.r + manualA.g + manualA.b + manualA.a
+      + manualB.r + manualB.g + manualB.b,
+      0.0,
+      1.0
+    );
+    if (manualCoverage < 0.002) return res;
+  } else {
+    w = surfMaterialWeights(tc, cl, bw, slope, hRel, h01, detail, jitter);
+  }
   int bestI = 0;
   int secondI = 0;
   float bestW = 0.0;
@@ -379,11 +406,11 @@ SurfaceTexResult applySurfaceMaterials(
   float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
   if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
     SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
-    float kRole = roleBlend * secondW / max(bestW + secondW, 1e-4);
+    float kRole = (manualMode ? 1.0 : roleBlend) * secondW / max(bestW + secondW, 1e-4);
     tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
   }
 
-  float k = amount;
+  float k = amount * manualCoverage;
   res.albedo = mix(baseAlbedo, tex.albedo, k);
   vec3 normalBase = normalize(baseNormal);
   if (uSurfNormalAmt > 0.001) {

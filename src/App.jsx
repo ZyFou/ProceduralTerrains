@@ -81,6 +81,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     const before = JSON.parse(beforeSnapshot);
     const after = JSON.parse(afterSnapshot);
     if (before.worldMode !== after.worldMode) return 'Changed world mode';
+    if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain texture';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
     if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
@@ -163,6 +164,16 @@ export default function App() {
       erosionIterations: 3,
       erosionDeposition: 0.65,
       erosionTalus: 1.5,
+      revision: 0,
+      hasData: false,
+    },
+    texturePaint: {
+      enabled: false,
+      tool: 'paint',
+      material: 'grass',
+      brushSize: 110,
+      strength: 0.45,
+      falloff: 0.72,
       revision: 0,
       hasData: false,
     },
@@ -255,6 +266,7 @@ export default function App() {
   const paintBlobsRef = useRef(new Map());     // paintRev → heavy paint blob
   const erosionBlobsRef = useRef(new Map());   // erosionRev → heavy erosion blob
   const manualSculptBlobsRef = useRef(new Map()); // manualSculptRev → heavy sculpt delta
+  const manualSurfaceBlobsRef = useRef(new Map()); // manualSurfaceRev: heavy material weights
   const histSuppressRef = useRef(false);       // true while applying a restore
   const histTimerRef = useRef(null);           // pending debounced record
   const scheduleRecordRef = useRef(null);      // late-bound for engine callbacks
@@ -658,6 +670,7 @@ export default function App() {
           paintBlobsRef.current.clear();
           erosionBlobsRef.current.clear();
           manualSculptBlobsRef.current.clear();
+          manualSurfaceBlobsRef.current.clear();
           nativeHistoryActionsRef.current = [];
           nativeHistoryCursorRef.current = -1;
           setNativeHistoryActions([]);
@@ -921,6 +934,11 @@ export default function App() {
         const blob = eng.serializeManualSculpt();
         if (blob) manualSculptBlobsRef.current.set(srev, blob);
       }
+      const surfaceRev = state.manualSurfaceRev ?? 0;
+      if (surfaceRev > 0 && !manualSurfaceBlobsRef.current.has(surfaceRev)) {
+        const blob = eng.serializeManualSurface();
+        if (blob) manualSurfaceBlobsRef.current.set(surfaceRev, blob);
+      }
       return JSON.stringify(state);
     } catch (err) {
       console.warn('History snapshot failed', err);
@@ -934,17 +952,20 @@ export default function App() {
     const paintMap = paintBlobsRef.current;
     const erosionMap = erosionBlobsRef.current;
     const sculptMap = manualSculptBlobsRef.current;
-    if (paintMap.size <= 4 && erosionMap.size <= 4 && sculptMap.size <= 4) return;
+    const surfaceMap = manualSurfaceBlobsRef.current;
+    if (paintMap.size <= 4 && erosionMap.size <= 4 && sculptMap.size <= 4 && surfaceMap.size <= 4) return;
     const h = historyRef.current;
     const livePaint = new Set();
     const liveErosion = new Set();
     const liveSculpt = new Set();
+    const liveSurface = new Set();
     const collect = (s) => {
       try {
         const snap = JSON.parse(s);
         if (snap.paintRev) livePaint.add(snap.paintRev);
         if (snap.erosionRev) liveErosion.add(snap.erosionRev);
         if (snap.manualSculptRev) liveSculpt.add(snap.manualSculptRev);
+        if (snap.manualSurfaceRev) liveSurface.add(snap.manualSurfaceRev);
       } catch { /* ignore */ }
     };
     h.past.forEach(collect);
@@ -953,6 +974,7 @@ export default function App() {
     for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
     for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
     for (const key of sculptMap.keys()) if (!liveSculpt.has(key)) sculptMap.delete(key);
+    for (const key of surfaceMap.keys()) if (!liveSurface.has(key)) surfaceMap.delete(key);
   }, []);
 
   const recordHistory = useCallback(() => {
@@ -1017,6 +1039,9 @@ export default function App() {
         : null;
       snap.manualSculpt = (snap.manualSculptRev ?? 0) > 0
         ? (manualSculptBlobsRef.current.get(snap.manualSculptRev) ?? null)
+        : null;
+      snap.manualSurface = (snap.manualSurfaceRev ?? 0) > 0
+        ? (manualSurfaceBlobsRef.current.get(snap.manualSurfaceRev) ?? null)
         : null;
       // a different world mode is a heavy, async rebuild — do it first (and
       // quietly) through the same blocking-overlay path as the mode bar.
@@ -1917,6 +1942,12 @@ export default function App() {
               }}
               onSculptSetting={(key, value) => engine().setManualSculptSetting(key, value)}
               onClearSculpt={() => engine().clearManualSculpt()}
+              onTexturePaintEnabled={(enabled) => {
+                setActivePanel(null);
+                engine().setManualTexturePaintEnabled(enabled);
+              }}
+              onTexturePaintSetting={(key, value) => engine().setManualTexturePaintSetting(key, value)}
+              onClearTexturePaint={() => engine().clearManualTexturePaint()}
             />
           )}
 

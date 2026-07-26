@@ -343,7 +343,7 @@ void main() {
 
   Climate cl = climateAt(xz * uFrequency + uSeedOffset);
   BiomeWeights bw = biomeWeightsAt(cl);
-  vec4 paintedBiome = paintBiomeAt(xz);
+  vec4 paintedBiome = uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz);
   vec4 splineMask = splineMaskAt(xz);
   bw.desert = clamp(max(bw.desert, paintedBiome.r), 0.0, 1.0);
   bw.canyon = clamp(max(bw.canyon, max(paintedBiome.g, splineMask.r * (1.0 - splineMask.b))), 0.0, 1.0);
@@ -786,6 +786,9 @@ export function createTerrainUniforms() {
     uPaintHeightTexture: { value: null },
     uPaintBiomeTexture: { value: null },
     uPaintPropsTexture: { value: null },
+    uManualSurfaceMode: { value: 0 },
+    uManualSurfaceOrigin: { value: new THREE.Vector2(-512, -512) },
+    uManualSurfaceSpan: { value: new THREE.Vector2(1024, 1024) },
     uManualEnabled: { value: 0 },
     uManualOrigin: { value: new THREE.Vector2(-512, -512) },
     uManualSpan: { value: new THREE.Vector2(1024, 1024) },
@@ -888,9 +891,7 @@ export function createTerrainUniforms() {
     // whole feature a no-op (procedural colours), so the shader is unchanged until
     // the user switches to texture mode.
     uSurfDiffuse:    { value: surfFallbackTexture() },
-    uSurfNormal:     { value: surfFallbackTexture() },
-    uSurfRough:      { value: surfFallbackTexture() },
-    uSurfAO:         { value: surfFallbackTexture() },
+    uSurfProps:      { value: surfFallbackTexture() },
     uSurfMode:       { value: 0.0 },
     uSurfAmount:     { value: 1.0 },
     uSurfTint:       { value: 0.0 },
