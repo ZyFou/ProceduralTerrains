@@ -36,10 +36,13 @@ All in `src/engine/Engine.js` unless noted.
   were removed. Terrain and water compile once at the requested octave count.
   `_setOctavesAsync` / `_rebuildStackMaterialsAsync` still stagger edits, so
   changing octaves / the noise stack does not freeze the app.
-- **Deferred terrain bake + fast water init** — the first compile keeps the water
-  material in the scene's warmup set, then paints with water still hidden. After
-  first paint, `_warmDeferredWater()` initializes the plane in parallel with
-  `_warmDeferredTerrainBake()` instead of waiting for the bake to finish.
+- **Water removed from the boot critical path** — boot compiles and paints the
+  textured terrain without starting `renderer.compile()` for water. After the
+  first textured frame, `_warmDeferredWater()` compiles only the effective saved
+  water mode and activates it only after the program reports genuinely ready.
+- **Baked-only Studio water** — Studio legacy and realistic water shaders sample
+  the terrain height bake and include only a tiny value-noise helper for ripples.
+  The procedural noise/biome/height program remains exclusive to Infinite water.
 - **Tier-scaled bake** — `_bakeBaseSize()`: low 1024² / medium 1536² / high 2048²
   (the bake re-evaluates the field 3× per texel for the normal — brutal on weak GPUs).
 - **GPU tier detection narrowed** — `src/engine/render/GpuTier.js`: generic GTX /
@@ -49,8 +52,9 @@ All in `src/engine/Engine.js` unless noted.
   now, when resolution is floored and a *rendered* frame still exceeds ~45 ms
   (`profiler.frame.avg`, on-demand-safe), drops Ultra→High→Balanced→Performance and
   toasts the user. Default `autoPerf: true` in `render/PerformanceSettings.js`.
-- **Boot timing logs** — `console.info('[boot] …')` lines for sync init, terrain
-  warmup / first paint, and deferred terrain bake.
+- **Boot and shader timing logs** — `[boot]` covers sync init, terrain first paint,
+  and deferred water; `[shader compile]` separates synchronous ANGLE translation
+  from the readiness wait and reports timeout/pending state.
 
 > ⚠️ Stored settings keep `autoPerf:false` and the old preset for returning users —
 > the detection/default changes only help fresh installs or after a perf reset.
@@ -86,7 +90,9 @@ Implementation notes:
 - Studio cloud slabs compile a tiny bootstrap program first (8 steps, 1 light step, reduced octaves), then warm and swap to the selected quality in the background.
 - `Engine`, Planet mode, 3D exporters, water-mask ZIP support, and the Performance overlay are now dynamic chunks.
 - Studio terrain chunks now build center-first in a small initial batch, then stream remaining chunks across frames using GPU-tier-aware budgets.
-- Studio first paint now skips the height bake but precompiles water. Full octaves are used from the start, then terrain bake and water init run in parallel after first paint.
+- Studio first paint bakes the shared height texture but does not start water
+  compilation. Water initializes after paint from a compact baked-height shader,
+  so it cannot hold the loading overlay open.
 - WebGL2 still does not expose portable program binaries. Chrome's own shader disk cache remains the only practical persisted GPU program cache.
 
 ---

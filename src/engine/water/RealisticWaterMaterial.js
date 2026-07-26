@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL, TERRAIN_HEIGHT_TEX_GLSL } from '../terrain/terrainGLSL.js';
-import { BIOME_GLSL } from '../terrain/biomeGLSL.js';
+import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from '../terrain/noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from '../terrain/noise/NoiseStack.js';
+import { buildWaterHeightShaderParts } from './waterShaderGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -22,15 +22,16 @@ void main() {
 }
 `;
 
-const buildFragment = (heightGLSL) => /* glsl */ `
+const buildFragment = (stackGLSL, infinite = false) => {
+  const { dependencies, terrainHeightFunction } = buildWaterHeightShaderParts(stackGLSL, infinite);
+  return /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
-${NOISE_GLSL}
-${BIOME_GLSL}
-${heightGLSL}
+${dependencies}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
+${terrainHeightFunction}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;
@@ -107,10 +108,7 @@ vec3 rippleNormal(vec2 xz, float t) {
 }
 
 float terrainHeightAt(vec2 xz) {
-#ifndef INFINITE_MODE
-  if (uUseTerrainHeightTex > 0.5) return bakedHeightAt(xz);
-#endif
-  return heightAt(xz);
+  return waterTerrainHeightAt(xz);
 }
 
 // Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
@@ -248,6 +246,7 @@ void main() {
   gl_FragColor = vec4(col, alpha);
 }
 `;
+};
 
 function realisticUniforms(sharedUniforms) {
   return {
@@ -295,29 +294,39 @@ function realisticUniforms(sharedUniforms) {
 }
 
 export function createRealisticWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
-  return new THREE.ShaderMaterial({
+  const mat = new THREE.ShaderMaterial({
     uniforms: realisticUniforms(sharedUniforms),
-    defines: { OCTAVES: octaves },
+    defines: {},
     vertexShader: VERTEX,
-    fragmentShader: buildFragment(buildHeightGLSL(stackGLSL.body2d)),
+    fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
+  mat.userData.bakedHeightOnly = true;
+  return mat;
 }
 
 export function createInfiniteRealisticWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
-  const mat = createRealisticWaterMaterial(sharedUniforms, octaves, stackGLSL);
-  mat.defines.INFINITE_MODE = 1;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: realisticUniforms(sharedUniforms),
+    defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
+    vertexShader: VERTEX,
+    fragmentShader: buildFragment(stackGLSL, true),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    forceSinglePass: true,
+  });
   mat.uniforms.uWaterFadeStart.value = 2000.0;
   mat.uniforms.uWaterFadeEnd.value = 2500.0;
-  mat.needsUpdate = true;
   return mat;
 }
 
 export function rebuildRealisticWaterShaderSource(mat, stackGLSL) {
-  mat.fragmentShader = buildFragment(buildHeightGLSL(stackGLSL.body2d));
+  const infinite = Object.hasOwn(mat.defines ?? {}, 'INFINITE_MODE');
+  mat.fragmentShader = buildFragment(stackGLSL, infinite);
   mat.needsUpdate = true;
 }
 
