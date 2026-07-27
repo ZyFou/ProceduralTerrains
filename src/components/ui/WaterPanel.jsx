@@ -31,16 +31,16 @@ const SEA_LEVEL_DEF = TERRAIN_SLIDERS.find((s) => s.key === 'seaLevel');
 const MODE_HINTS = {
   off: 'Water disabled — no mesh, no underwater effect.',
   legacy: 'Fast original water shader. Best for performance and Infinite World.',
-  realistic: 'Depth-based color, fresnel, shoreline foam, underwater fog.',
-  volumetric: 'Stronger absorption, caustics, and refraction distortion.',
+  realistic: 'RGB absorption, live sky reflection, directional waves, and shoreline foam.',
+  volumetric: 'Realistic surface plus higher-tier caustics and underwater effects.',
   cinematic: 'Highest quality — expensive. Best for screenshots in Tile mode.',
 };
 
 const MATERIAL_SLIDERS = [
-  { key: 'waterOpacity', label: 'Opacity', min: 0.2, max: 1, step: 0.01, digits: 2 },
-  { key: 'waterRoughness', label: 'Roughness', min: 0, max: 1, step: 0.02, digits: 2 },
+  { key: 'waterOpacity', label: 'Density / Opacity', min: 0.2, max: 1, step: 0.01, digits: 2, info: 'Optical density in Realistic modes; traditional transparency in Legacy mode.' },
+  { key: 'waterRoughness', label: 'Roughness', min: 0, max: 1, step: 0.02, digits: 2, info: 'Broadens the reflected sky and sun highlight, and softens micro ripples.' },
   { key: 'waterFresnelStrength', label: 'Fresnel Strength', min: 0, max: 2, step: 0.05, digits: 2 },
-  { key: 'waterRefractionStrength', label: 'Refraction Strength', min: 0, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterRefractionStrength', label: 'Transmission Strength', min: 0.05, max: 1.5, step: 0.05, digits: 2, info: 'Controls clarity through the single-pass surface. Distorted scene refraction is reserved for Volumetric mode.' },
   { key: 'waterSpecularStrength', label: 'Specular Strength', min: 0, max: 2, step: 0.05, digits: 2 },
 ];
 
@@ -89,12 +89,10 @@ const CAUSTIC_SLIDERS = [
 ];
 
 const REALISTIC_PERF_SLIDERS = [
-  { key: 'waterReflectionQuality', label: 'Reflection Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
-  { key: 'waterRefractionQuality', label: 'Refraction Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
+  { key: 'waterReflectionQuality', label: 'Sky Reflection Detail', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Controls analytical sky reflection clarity. Values above 1 are reserved for future planar reflections.' },
   { key: 'waterFoamQuality', label: 'Foam Quality', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterCausticsQuality', label: 'Caustics Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
-  { key: 'waterNormalResolution', label: 'Normal Map Resolution', min: 0.25, max: 1.5, step: 0.05, digits: 2 },
-  { key: 'waterRenderScale', label: 'Water Render Scale', min: 0.4, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterNormalResolution', label: 'Micro Wave Detail', min: 0.25, max: 1.5, step: 0.05, digits: 2, info: 'Scales only the fine procedural ripples; it does not change the main wave size.' },
   { key: 'waterDisableExpensiveBelowFps', label: 'FPS Downgrade Threshold', min: 24, max: 60, step: 1, digits: 0 },
 ];
 
@@ -518,7 +516,7 @@ export default function WaterPanelInner({
           title="Performance"
           defaultOpen={false}
           settingId="water.section.performance"
-          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterRefractionQuality', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterRender', 'water.waterDisable'])}
+          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
         >
           {mode === 'cinematic' && isStudio && (
             <p className="section-hint warning">Cinematic mode is expensive — best for Tile mode screenshots.</p>
@@ -526,7 +524,12 @@ export default function WaterPanelInner({
           {REALISTIC_PERF_SLIDERS.map((def) => (
             <SliderCtl
               key={def.key}
-              def={{ ...def, info: def.expensive ? `${def.label} — may impact FPS.` : undefined }}
+              def={{
+                ...def,
+                info: def.expensive
+                  ? `${def.info ? `${def.info} ` : ''}May impact FPS.`
+                  : def.info,
+              }}
               value={val(params, def.key)}
               onChange={(v) => onParam(def.key, v)}
               settingId={`water.${def.key}`}

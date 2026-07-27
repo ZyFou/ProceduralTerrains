@@ -14,8 +14,8 @@ export const WATER_DEBUG_VIEWS = [
   { value: 'opticalDepth', label: 'Optical Depth' },
   { value: 'transmittance', label: 'Transmittance' },
   { value: 'fresnel', label: 'Fresnel' },
-  { value: 'reflection', label: 'Reflection Term' },
-  { value: 'refraction', label: 'Refraction Term' },
+  { value: 'reflection', label: 'Sky Reflection' },
+  { value: 'refraction', label: 'Transmission / Refraction' },
   { value: 'opacity', label: 'Final Opacity' },
 ];
 

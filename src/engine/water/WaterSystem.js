@@ -153,8 +153,7 @@ export class WaterSystem {
       if (mat.uniforms.uWaterQuality) mat.uniforms.uWaterQuality.value = perf.waterQuality;
       if (mat.uniforms.uWaterDetail) mat.uniforms.uWaterDetail.value = perf.waterDetail;
       if (mat.uniforms.uWaterReflection) {
-        const scale = this.engine.params.waterReflectionQuality ?? 1;
-        mat.uniforms.uWaterReflection.value = perf.waterReflection * scale;
+        mat.uniforms.uWaterReflection.value = perf.waterReflection;
       }
       if (mat.uniforms.uWaveComplexity) mat.uniforms.uWaveComplexity.value = perf.waterWaves;
     }
@@ -364,6 +363,7 @@ export class WaterSystem {
     this._realisticStudio = createWaterMaterialForMode({
       mode: this._effectiveMode,
       sharedUniforms: eng.uniforms,
+      environmentUniforms: eng.proceduralSky?.uniforms,
       octaves,
       stackGLSL: eng._stackGLSL,
       infinite: false,
@@ -376,6 +376,7 @@ export class WaterSystem {
     this._realisticInfinite = createWaterMaterialForMode({
       mode: this._effectiveMode,
       sharedUniforms: eng.uniforms,
+      environmentUniforms: eng.proceduralSky?.uniforms,
       octaves,
       stackGLSL: eng._stackGLSL,
       infinite: true,

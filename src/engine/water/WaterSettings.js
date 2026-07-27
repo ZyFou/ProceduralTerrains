@@ -91,10 +91,13 @@ export const WATER_DEFAULT_PARAMS = {
   waterAutoDowngradeInfinite: true,
   waterLegacyOnLowFps: true,
 
-  // material
+  // material — Realistic V2 interprets the legacy-compatible waterOpacity key
+  // as optical density; Legacy mode retains its original transparency meaning.
   waterOpacity: 0.72,
   waterRoughness: 0.35,
   waterFresnelStrength: 1.0,
+  // Serialized name retained for compatibility; V2 uses it as single-pass
+  // transmission clarity until scene-color refraction is available.
   waterRefractionStrength: 0.45,
   waterSpecularStrength: 1.0,
 
@@ -143,13 +146,15 @@ export const WATER_DEFAULT_PARAMS = {
   waterSurfaceTransition: 0.8,
 
   // performance (quality knobs — heavy ones also in perf)
-  waterReflectionQuality: 1.0,
-  waterRefractionQuality: 0.6,
+  waterReflectionQuality: 1.0, // analytical sky detail; >1 reserved for planar reflection
+  waterRefractionQuality: 0.6, // reserved for the Volumetric scene-color pass
   waterFoamQuality: 1.0,
   waterCausticsQuality: 0.5,
+  // Serialized name retained for compatibility; procedural V2 has no normal
+  // texture, so this controls micro-wave detail instead.
   waterNormalResolution: 1.0,
-  waterRenderScale: 1.0,
-  waterUpdateFrequency: 1.0,
+  waterRenderScale: 1.0,       // reserved for water render targets
+  waterUpdateFrequency: 1.0,   // reserved for planar-reflection cadence
   waterDisableExpensiveBelowFps: 42,
 
   // debug

@@ -103,7 +103,7 @@ describe('water optical debug views', () => {
 
     expect(modes).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(material.fragmentShader).toContain('float opticalDepth');
-    expect(material.fragmentShader).toContain('float transmittanceV1');
+    expect(material.fragmentShader).toContain('vec3 transmittance');
     expect(material.fragmentShader).toContain('vec3 reflectionTerm');
     expect(material.fragmentShader).toContain('vec3 refractionTerm');
     material.dispose();

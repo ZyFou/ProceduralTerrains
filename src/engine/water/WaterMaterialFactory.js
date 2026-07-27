@@ -15,6 +15,7 @@ import { isRealisticWaterMode } from './WaterSettings.js';
 export function createWaterMaterialForMode({
   mode,
   sharedUniforms,
+  environmentUniforms,
   octaves,
   stackGLSL,
   infinite = false,
@@ -25,8 +26,18 @@ export function createWaterMaterialForMode({
   }
   if (isRealisticWaterMode(mode)) {
     return infinite
-      ? createInfiniteRealisticWaterMaterial(sharedUniforms, octaves, stackGLSL)
-      : createRealisticWaterMaterial(sharedUniforms, octaves, stackGLSL);
+      ? createInfiniteRealisticWaterMaterial(
+        sharedUniforms,
+        octaves,
+        stackGLSL,
+        environmentUniforms,
+      )
+      : createRealisticWaterMaterial(
+        sharedUniforms,
+        octaves,
+        stackGLSL,
+        environmentUniforms,
+      );
   }
   return infinite
     ? createInfiniteWaterMaterial(sharedUniforms, octaves, stackGLSL)

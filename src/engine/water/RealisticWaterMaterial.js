@@ -1,16 +1,23 @@
 import * as THREE from 'three';
 import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
+import {
+  PROCEDURAL_SKY_UNIFORMS_GLSL,
+  PROCEDURAL_SKY_EVALUATION_GLSL,
+  createProceduralSkyUniforms,
+} from '../sky/proceduralSkyGLSL.js';
 import { generateStackGLSL } from '../terrain/noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from '../terrain/noise/NoiseStack.js';
 import { buildWaterHeightShaderParts } from './waterShaderGLSL.js';
+import { WATER_OPTICS_GLSL } from './waterOpticsGLSL.js';
+import { WATER_WAVES_GLSL } from './waterWavesGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
-// Realistic volumetric water — depth tint, layered normals, shoreline foam,
-// fresnel, optional caustics/refraction. Quality tier is a uniform so mode
-// switches never recompile; only octave/stack changes recompile.
+// Realistic Water Surface V2 — physical depth absorption, coherent directional
+// normals, live procedural-sky reflection, roughness-aware sunlight and foam.
+// This remains a single transparent pass with no scene/reflection render target.
 // ============================================================================
 
 const VERTEX = /* glsl */ `
@@ -32,6 +39,7 @@ ${dependencies}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${terrainHeightFunction}
+${PROCEDURAL_SKY_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;
@@ -41,6 +49,10 @@ uniform float uWaterQuality;
 uniform float uWaterDetail;
 uniform float uWaterReflection;
 uniform float uWaveComplexity;
+uniform float uRoughness;
+uniform float uReflectionQuality;
+uniform float uMicroWaveDetail;
+uniform float uSkyReflectionEnabled;
 
 // realistic water controls
 uniform float uWaterTier;          // 1=realistic, 2=volumetric, 3=cinematic
@@ -81,31 +93,9 @@ uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
 
-float rippleLayer(vec2 p, float t, float scale, float speed) {
-  vec2 drift = uWaveDir * t * speed;
-  float h = vnoise(p * scale + drift);
-  if (uWaterQuality > 0.5) {
-    h += 0.45 * uWaterDetail * vnoise(p * scale * 2.4 - drift * 1.3);
-  }
-  if (uWaterTier > 2.5) {
-    h += 0.25 * vnoise(p * scale * 5.1 + drift * 0.7);
-  }
-  return h;
-}
-
-vec3 rippleNormal(vec2 xz, float t) {
-  float e = 1.4 / max(uWaveScale, 0.2);
-  vec2 rp = xz * 0.055 * uWaveScale;
-  float ws = uWaveStrength * uWaveComplexity;
-  float r0 = rippleLayer(rp, t, 1.0, uWaveSpeed) * uLargeWaveStr
-           + rippleLayer(rp, t, 2.6, uWaveSpeed * 1.3) * uSmallWaveStr;
-  float rX = rippleLayer(rp + vec2(e * 0.055, 0.0), t, 1.0, uWaveSpeed) * uLargeWaveStr
-           + rippleLayer(rp + vec2(e * 0.055, 0.0), t, 2.6, uWaveSpeed * 1.3) * uSmallWaveStr;
-  float rZ = rippleLayer(rp + vec2(0.0, e * 0.055), t, 1.0, uWaveSpeed) * uLargeWaveStr
-           + rippleLayer(rp + vec2(0.0, e * 0.055), t, 2.6, uWaveSpeed * 1.3) * uSmallWaveStr;
-  float nStr = 1.8 * uNormalIntensity * ws;
-  return normalize(vec3(-(rX - r0) * nStr, 1.0, -(rZ - r0) * nStr));
-}
+${PROCEDURAL_SKY_EVALUATION_GLSL}
+${WATER_OPTICS_GLSL}
+${WATER_WAVES_GLSL}
 
 float terrainHeightAt(vec2 xz) {
   return waterTerrainHeightAt(xz);
@@ -146,9 +136,13 @@ void main() {
   }
   visualDepth = max(visualDepth, 0.0);
 
+  float camDist = length(cameraPosition - vWorldPos);
+  float farWater = smoothstep(700.0, 2400.0, camDist);
+  float roughness = clamp(uRoughness + farWater * 0.18, 0.04, 1.0);
   float t = uTime * uWaterAnim * uAnimSpeed;
-  vec3 n = rippleNormal(xz, t);
+  vec3 n = waterDirectionalNormal(xz, t, camDist, roughness);
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  if (dot(n, viewDir) < 0.0) n = -n;
 
   // depth grading — smoothed bathymetry only (not raw relief)
   float shoreSoft = clamp(uVisualShallowWaterSoftness, 0.0, 1.0);
@@ -157,26 +151,111 @@ void main() {
   float dGrade = pow(clamp(visualDepth / max(uMaxVisibleDepth, 1.0), 0.0, 1.0), max(uDepthFalloff, 0.1));
   dGrade = mix(shallowT * 0.35, deepT, dGrade) * uDepthColorStr;
 
-  vec3 col = mix(uColShallow, uColDeep, clamp(dGrade, 0.0, 1.0));
-  col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
-  col *= uPaletteTint;
+  vec3 shallowColor = mix(
+    vec3(dot(uColShallow, vec3(0.299, 0.587, 0.114))),
+    uColShallow,
+    uPaletteSaturation
+  ) * uPaletteTint;
+  vec3 deepColor = mix(
+    vec3(dot(uColDeep, vec3(0.299, 0.587, 0.114))),
+    uColDeep,
+    uPaletteSaturation
+  ) * uPaletteTint;
+  vec3 scatteringColor = mix(shallowColor, deepColor, clamp(dGrade, 0.0, 1.0));
 
-  // Current V1 absorption and its diagnostic equivalent. The optical-depth and
-  // transmittance values are exposed now so Phase 1 can be compared against the
-  // exact same views when this scalar approximation becomes Beer–Lambert RGB.
+  // Beer–Lambert absorption. Looking across the surface increases the path
+  // length, so shallow grazing views naturally become denser than top-down ones.
   float opticalDepth = visualDepth / max(abs(viewDir.y), 0.15);
-  float transmittanceV1 = clamp(1.0 - uAbsorptionStr * deepT * 0.35, 0.0, 1.0);
-  col *= transmittanceV1;
+  vec3 absorptionRGB = waterAbsorptionCoefficients(
+    deepColor,
+    uAbsorptionStr,
+    uWaterOpacity,
+    uDepthOpacityStr
+  );
+  vec3 transmittance = waterBeerLambert(absorptionRGB, opticalDepth);
+  float transmissionExponent = pow(
+    0.45 / max(uRefractionStrength, 0.05),
+    0.18
+  );
+  transmittance = pow(
+    transmittance,
+    vec3(clamp(transmissionExponent, 0.72, 1.45))
+  );
+  float volumeAlpha = waterVolumeOpacity(transmittance);
 
-  // lighting
+  // Schlick Fresnel now follows the animated wave normal.
+  float fres = waterSchlickFresnel(n, viewDir, uFresnelStrength);
+
+  // Evaluate the same live procedural sky as the sky dome. Rough water blends
+  // toward a broad reflection direction; distant water trends toward horizon
+  // radiance and suppresses micro detail through waterDirectionalNormal().
+  vec3 reflectedDirection = reflect(-viewDir, n);
+  float reflectionDetail = clamp(uReflectionQuality, 0.0, 1.0);
+  float reflectionBlur = clamp(
+    roughness * roughness + (1.0 - reflectionDetail) * 0.32,
+    0.0,
+    1.0
+  );
+  vec3 broadDirection = normalize(vec3(
+    reflectedDirection.x * 0.42,
+    max(reflectedDirection.y, 0.08),
+    reflectedDirection.z * 0.42
+  ));
+  vec3 reflectedSkySharp = evaluateProceduralSkyLinear(
+    reflectedDirection,
+    mix(1.0, 0.12, reflectionBlur),
+    mix(0.35, 0.0, reflectionBlur)
+  );
+  vec3 reflectedSkyBroad = evaluateProceduralSkyLinear(broadDirection, 0.0, 0.0);
+  vec3 reflectedSky = mix(
+    reflectedSkySharp,
+    reflectedSkyBroad,
+    reflectionBlur * 0.82
+  );
+  vec3 horizonDirection = normalize(vec3(
+    reflectedDirection.x,
+    0.06,
+    reflectedDirection.z
+  ));
+  reflectedSky = mix(
+    reflectedSky,
+    evaluateProceduralSkyLinear(horizonDirection, 0.0, 0.0),
+    farWater * 0.42
+  );
+  vec3 fallbackReflection = mix(
+    uSkyFogColor,
+    vec3(0.12, 0.24, 0.38),
+    clamp(reflectedDirection.y, 0.0, 1.0)
+  );
+  float liveSkyAmount = uSkyReflectionEnabled
+    * mix(0.35, 1.0, reflectionDetail);
+  reflectedSky = mix(fallbackReflection, reflectedSky, liveSkyAmount);
+
+  float reflectionScale = clamp(uWaterReflection, 0.0, 1.5);
+  vec3 reflectionTerm = reflectedSky * fres * reflectionScale;
+
+  // Roughness-aware GGX sunlight uses the current sky sun color/intensity.
+  vec3 skySunDir = normalize(uSkySunDir);
+  float sunSpecular = min(
+    waterGgxSunSpecular(n, viewDir, skySunDir, roughness),
+    8.0
+  );
+  vec3 sunSpecularTerm = uSkySunColor
+    * uSkyLightIntensity
+    * sunSpecular
+    * uSpecularStrength
+    * reflectionScale;
+
+  // The transparent blend supplies background transmission until Phase 3 adds
+  // an opaque-scene color buffer. The emitted body color is premultiplied.
   float diff = max(dot(n, uSunDir), 0.0);
-  col *= 0.52 + 0.68 * diff;
-  float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 80.0 + 20.0 * uWaterTier);
-  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection * uSpecularStrength;
-
-  float fres = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
-  vec3 reflectionTerm = vec3(0.30, 0.42, 0.55) * fres * 0.28 * uWaterReflection * uFresnelStrength;
-  col += reflectionTerm;
+  vec3 bodyPremultiplied = scatteringColor
+    * (vec3(1.0) - transmittance)
+    * (0.62 + 0.38 * diff)
+    * (1.0 - fres);
+  vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
+  float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
+  float alpha = 1.0 - (1.0 - volumeAlpha) * (1.0 - reflectionAlpha);
 
   // shoreline foam — depth-based only; slope foam restricted to very shallow water
   float shoreDist = depth;
@@ -197,16 +276,12 @@ void main() {
     cliffFoam = smoothstep(0.85, 1.8, slope) * uCliffFoam * nearShore;
   }
   float foam = clamp((shoreFoam * foamPatch + slopeFoam * 0.2 + cliffFoam * 0.15) * uFoamStrength, 0.0, 1.0);
-  col = mix(col, uColFoam, foam);
+  premultipliedColor = mix(premultipliedColor, uColFoam, foam);
+  alpha = mix(alpha, 1.0, foam);
 
-  // fake refraction tint (screen-space-ish color shift)
-  float refr = 0.0;
-  vec3 refractionTerm = vec3(0.0);
-  if (uRefractionQual > 0.05 && uWaterTier > 0.5) {
-    refr = fres * uRefractionStrength * uRefractionQual * 0.12;
-    refractionTerm = (uColShallow * 1.1 - col) * refr;
-    col = mix(col, uColShallow * 1.1, refr);
-  }
+  // Actual distorted scene-color refraction arrives with the Volumetric pass.
+  // This transmission term keeps the existing debug view physically meaningful.
+  vec3 refractionTerm = transmittance * (1.0 - fres);
 
   // fake caustics in shallow water (smoothed depth, coarse noise)
   if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
@@ -214,16 +289,12 @@ void main() {
     float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
     float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));
     float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;
-    col += vec3(0.9, 0.95, 1.0) * caust * uCausticsStr * uCausticsQual * 0.28;
+    premultipliedColor += vec3(0.9, 0.95, 1.0)
+      * caust * uCausticsStr * uCausticsQual * 0.28 * alpha;
   }
 
-  float alpha = clamp(
-    uWaterOpacity * (0.45 + deepT * 0.42 * uDepthOpacityStr + fres * 0.12 + foam * 0.25),
-    0.0, 0.96
-  );
-
-  float camDist = length(cameraPosition.xz - vWorldPos.xz);
   float edgeFade = 1.0 - smoothstep(uWaterFadeStart, uWaterFadeEnd, camDist);
+  premultipliedColor *= edgeFade;
   alpha *= edgeFade;
   if (alpha < 0.01) discard;
 
@@ -257,7 +328,7 @@ void main() {
       return;
     }
     if (uDebugMode < 7.5) {
-      gl_FragColor = vec4(vec3(transmittanceV1), 1.0);
+      gl_FragColor = vec4(transmittance, 1.0);
       return;
     }
     if (uDebugMode < 8.5) {
@@ -265,11 +336,11 @@ void main() {
       return;
     }
     if (uDebugMode < 9.5) {
-      gl_FragColor = vec4(max(reflectionTerm, vec3(0.0)), 1.0);
+      gl_FragColor = vec4(min(reflectedSky, vec3(1.0)), 1.0);
       return;
     }
     if (uDebugMode < 10.5) {
-      gl_FragColor = vec4(clamp(refractionTerm * 4.0 + 0.5, 0.0, 1.0), 1.0);
+      gl_FragColor = vec4(clamp(refractionTerm, 0.0, 1.0), 1.0);
       return;
     }
     if (uDebugMode < 11.5) {
@@ -280,22 +351,29 @@ void main() {
     return;
   }
 
-  float dist = length(cameraPosition - vWorldPos);
-  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
-  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
-  col = pow(col, vec3(1.0 / 2.2));
-  gl_FragColor = vec4(col, alpha);
+  vec3 straightColor = premultipliedColor / max(alpha, 0.001);
+  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * camDist * camDist);
+  fogF *= mix(0.82, 0.68, farWater);
+  straightColor = mix(straightColor, uFogColor, clamp(fogF, 0.0, 1.0));
+  straightColor = pow(max(straightColor, vec3(0.0)), vec3(1.0 / 2.2));
+  gl_FragColor = vec4(straightColor * alpha, alpha);
 }
 `;
 };
 
-function realisticUniforms(sharedUniforms) {
+function realisticUniforms(sharedUniforms, environmentUniforms) {
+  const skyUniforms = environmentUniforms ?? createProceduralSkyUniforms();
   return {
     ...sharedUniforms,
+    ...skyUniforms,
     uWaterQuality: { value: 2.0 },
     uWaterDetail: { value: 1.0 },
     uWaterReflection: { value: 1.0 },
     uWaveComplexity: { value: 1.0 },
+    uRoughness: { value: 0.35 },
+    uReflectionQuality: { value: 1.0 },
+    uMicroWaveDetail: { value: 1.0 },
+    uSkyReflectionEnabled: { value: 1.0 },
     uWaterAnim: { value: 1.0 },
     uWaterFadeStart: { value: 99999.0 },
     uWaterFadeEnd: { value: 100000.0 },
@@ -334,13 +412,19 @@ function realisticUniforms(sharedUniforms) {
   };
 }
 
-export function createRealisticWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createRealisticWaterMaterial(
+  sharedUniforms,
+  octaves = 7,
+  stackGLSL = DEFAULT_STACK_GLSL,
+  environmentUniforms = null,
+) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: realisticUniforms(sharedUniforms),
+    uniforms: realisticUniforms(sharedUniforms, environmentUniforms),
     defines: {},
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,
+    premultipliedAlpha: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,
@@ -349,13 +433,19 @@ export function createRealisticWaterMaterial(sharedUniforms, octaves = 7, stackG
   return mat;
 }
 
-export function createInfiniteRealisticWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createInfiniteRealisticWaterMaterial(
+  sharedUniforms,
+  octaves = 7,
+  stackGLSL = DEFAULT_STACK_GLSL,
+  environmentUniforms = null,
+) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: realisticUniforms(sharedUniforms),
+    uniforms: realisticUniforms(sharedUniforms, environmentUniforms),
     defines: { OCTAVES: octaves, INFINITE_MODE: 1 },
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, true),
     transparent: true,
+    premultipliedAlpha: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,
@@ -378,6 +468,10 @@ export function applyRealisticWaterUniforms(mat, params, mode) {
   const dirRad = (params.waterWaveDirection ?? 0) * Math.PI / 180;
   u.uWaterTier.value = tier;
   u.uWaterOpacity.value = params.waterOpacity ?? 0.72;
+  u.uRoughness.value = params.waterRoughness ?? 0.35;
+  u.uReflectionQuality.value = params.waterReflectionQuality ?? 1;
+  u.uMicroWaveDetail.value = params.waterNormalResolution ?? 1;
+  u.uSkyReflectionEnabled.value = params.skyboxEnabled !== false ? 1 : 0;
   u.uFresnelStrength.value = params.waterFresnelStrength ?? 1;
   u.uRefractionStrength.value = params.waterRefractionStrength ?? 0.45;
   u.uSpecularStrength.value = params.waterSpecularStrength ?? 1;
