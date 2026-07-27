@@ -64,6 +64,33 @@ vec3 reconstructWorldPosition(vec2 uv, float depth) {
   return (uViewMatrixInverse * vec4(view.xyz, 1.0)).xyz;
 }
 
+vec3 cl_resolveLighting(vec3 P, vec3 rd, float light, float cloudHeight) {
+  vec3 legacyAmbient = uCloudShadowColor * uCloudShadowStrength;
+  vec3 legacy = mix(legacyAmbient, uCloudColor, light)
+    * (0.55 + 0.45 * uCloudScattering * light);
+
+  float height01 = clamp(cloudHeight, 0.0, 1.0);
+  float sunVisibility = cl_sunVisibility(P, height01);
+  float shadowAmount = (1.0 - light) * uCloudShadowStrength;
+  float shadowedSun = mix(1.0, light, uCloudShadowStrength);
+  vec3 shadowTint = mix(vec3(1.0), uCloudShadowColor, shadowAmount);
+
+  vec3 skyAmbient = mix(uCloudAmbientBottom, uCloudAmbientTop, height01);
+  skyAmbient += uCloudGroundBounce * (1.0 - height01);
+
+  float sunView = max(dot(rd, normalize(uCloudSunDir)), 0.0);
+  float silverLining = pow(sunView, 12.0) * uCloudSilverLining * sunVisibility;
+  float phase = 0.65 + 0.35 * uCloudScattering + silverLining;
+
+  vec3 direct = uCloudDirectLight * sunVisibility * shadowedSun
+    * uCloudSunResponse * phase;
+  vec3 atmospheric = uCloudColor
+    * (skyAmbient * uCloudAmbientResponse + direct)
+    * shadowTint;
+
+  return mix(legacy, atmospheric, clamp(uCloudAtmosphereInfluence, 0.0, 1.0));
+}
+
 // Directional occupancy grid: a small octahedral map (built on the CPU from the
 // coverage field, conservative + dilated) telling whether a column/direction
 // holds any cloud. A cheap texture lookup lets the march skip the expensive
@@ -169,7 +196,6 @@ void main() {
 
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
-  vec3 ambient = uCloudShadowColor * uCloudShadowStrength;
 
 #if defined(CLOUD_CHUNK) && CLOUD_CHUNK > 0
   // chunk mode (experimental): uniform global lattice so adjacent chunks share
@@ -179,10 +205,11 @@ void main() {
   for (int i = 0; i < CLOUD_STEPS; i++) {
     if (t < tEnd && transmittance > 0.01) {
       vec3 P = ro + rd * t;
-      float dens = cloudDensity(P);
+      vec2 sampleData = cloudSample(P);
+      float dens = sampleData.x;
       if (dens > 0.001) {
         float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
-        vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
+        vec3 lit = cl_resolveLighting(P, rd, light, sampleData.y);
         float dT = exp(-dens * stepLen * uCloudExtinction);
         scatter += transmittance * (1.0 - dT) * lit;
         transmittance *= dT;
@@ -213,10 +240,11 @@ void main() {
       if (occ < 0.5) {
         t += coarse;                 // empty column — skip cheaply, no density eval
       } else {
-        float dens = cloudDensity(P);
+        vec2 sampleData = cloudSample(P);
+        float dens = sampleData.x;
         if (dens > 0.001) {
           float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
-          vec3 lit = mix(ambient, uCloudColor, light) * (0.55 + 0.45 * uCloudScattering * light);
+          vec3 lit = cl_resolveLighting(P, rd, light, sampleData.y);
           float dT = exp(-dens * stepLen * uCloudExtinction);
           scatter += transmittance * (1.0 - dT) * lit;
           transmittance *= dT;
@@ -263,6 +291,14 @@ export function createCloudMaterial(steps = 24, lightSteps = 6, octaves = 5, det
       uCloudScattering:      { value: 1.0 },
       uCloudColor:           { value: new THREE.Color(1, 1, 1) },
       uCloudShadowColor:     { value: new THREE.Color(0.42, 0.47, 0.60) },
+      uCloudDirectLight:     { value: new THREE.Color(1.0, 0.94, 0.82) },
+      uCloudAmbientTop:      { value: new THREE.Color(0.18, 0.23, 0.31) },
+      uCloudAmbientBottom:   { value: new THREE.Color(0.13, 0.16, 0.22) },
+      uCloudGroundBounce:    { value: new THREE.Color(0.05, 0.04, 0.03) },
+      uCloudAtmosphereInfluence: { value: 1.0 },
+      uCloudSunResponse:     { value: 1.0 },
+      uCloudAmbientResponse: { value: 1.0 },
+      uCloudSilverLining:    { value: 0.25 },
       uCloudWind:            { value: new THREE.Vector3() },
       uCloudRotation:        { value: 0.0 },
       uCloudTime:            { value: 0.0 },

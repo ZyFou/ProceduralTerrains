@@ -1399,6 +1399,10 @@ export default function App() {
       case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 0, 2);
       case 'clouds.cloudShadowStrength': return num(params.cloudShadowStrength ?? 0, 2);
       case 'clouds.cloudScatteringStrength': return num(params.cloudScatteringStrength ?? 0, 2);
+      case 'clouds.cloudAtmosphereInfluence': return num(params.cloudAtmosphereInfluence ?? 1, 2);
+      case 'clouds.cloudSunResponse': return num(params.cloudSunResponse ?? 1, 2);
+      case 'clouds.cloudAmbientResponse': return num(params.cloudAmbientResponse ?? 1, 2);
+      case 'clouds.cloudSilverLining': return num(params.cloudSilverLining ?? 0.25, 2);
       case 'clouds.cloudNoiseVariant': return String(params.cloudNoiseVariant ?? 'default');
       case 'clouds.cloudColor': return hex(params.cloudColor);
       case 'clouds.cloudShadowColor': return hex(params.cloudShadowColor);

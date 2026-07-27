@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 import { cloudCoverageAt } from './cloudFieldCPU.js';
+import { applyCloudLightingState } from './CloudLightingState.js';
 
 // ============================================================================
 // PlanetCloudChunks: the chunked replacement for PlanetCloudLayer's single
@@ -40,7 +41,10 @@ const SHARED_KEYS = [
   'uCloudInner', 'uCloudOuter', 'uCloudCoverage', 'uCloudSoftness', 'uCloudScale',
   'uCloudDetailScale', 'uCloudDetailStrength', 'uCloudErosionScale', 'uCloudErosionStrength',
   'uCloudExtinction', 'uCloudLightAbsorption', 'uCloudShadowStrength', 'uCloudScattering',
-  'uCloudColor', 'uCloudShadowColor', 'uCloudWind', 'uCloudRotation', 'uCloudTime',
+  'uCloudColor', 'uCloudShadowColor', 'uCloudDirectLight', 'uCloudAmbientTop',
+  'uCloudAmbientBottom', 'uCloudGroundBounce', 'uCloudAtmosphereInfluence',
+  'uCloudSunResponse', 'uCloudAmbientResponse', 'uCloudSilverLining',
+  'uCloudWind', 'uCloudRotation', 'uCloudTime', 'uCloudEvolve',
   'uCloudSelfShadow', 'uCloudSunDir', 'uCloudNoiseVariant', 'uCloudStepScale',
   'tSceneDepth', 'uDepthResolution', 'uProjectionMatrixInverse', 'uViewMatrixInverse',
   'uDepthBias', 'uUseDepth',
@@ -251,6 +255,10 @@ export class PlanetCloudChunks {
     u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
+    u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;
+    u.uCloudSunResponse.value = params.cloudSunResponse ?? 1.0;
+    u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
+    u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
@@ -264,12 +272,17 @@ export class PlanetCloudChunks {
     u.uCloudWind.value.copy(this._wind);
 
     this._rotSpeed = (params.cloudRotationSpeed ?? 0.35) * 0.01;
+    u.uCloudEvolve.value = (params.cloudEvolveSpeed ?? 1.0) * 0.03;
 
     if (q.steps !== this._steps || q.lightSteps !== this._lightSteps ||
         q.octaves !== this._octaves || q.detailOctaves !== this._detailOctaves ||
         q.useErosion !== this._useErosion || q.lightMode !== this._lightMode) {
       this._rebuildMaterials(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
     }
+  }
+
+  setLighting(lightingState) {
+    applyCloudLightingState(this.shared, lightingState);
   }
 
   // ---- background compile (warm the shared program, swap all chunks when ready)

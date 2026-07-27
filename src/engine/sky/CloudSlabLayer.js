@@ -3,6 +3,7 @@ import { createCloudSlabMaterial } from './CloudSlabShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
+import { applyCloudLightingState } from './CloudLightingState.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
@@ -187,6 +188,10 @@ export class CloudSlabLayer {
     u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
+    u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;
+    u.uCloudSunResponse.value = params.cloudSunResponse ?? 1.0;
+    u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
+    u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
@@ -244,6 +249,10 @@ export class CloudSlabLayer {
     if (this._enabled && !this._ready && !this._warming && this._compile) {
       this._compileCurrentMaterial();
     }
+  }
+
+  setLighting(lightingState) {
+    applyCloudLightingState(this.material?.uniforms, lightingState);
   }
 
   _configMatches(config) {

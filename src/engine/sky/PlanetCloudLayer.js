@@ -3,6 +3,7 @@ import { createCloudMaterial } from './CloudVolumeShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyOctahedral } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
+import { applyCloudLightingState } from './CloudLightingState.js';
 
 // Resolution of the directional occupancy grid (octahedral). Low-res + dilated
 // is enough: it only needs to say "this column has some cloud" so the shader can
@@ -145,6 +146,10 @@ export class PlanetCloudLayer {
     u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
+    u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;
+    u.uCloudSunResponse.value = params.cloudSunResponse ?? 1.0;
+    u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
+    u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
@@ -186,6 +191,10 @@ export class PlanetCloudLayer {
         q.lightMode !== this._lightMode) {
       this._rebuildMaterial(q.steps, q.lightSteps, q.octaves, q.detailOctaves, q.useErosion, q.lightMode);
     }
+  }
+
+  setLighting(lightingState) {
+    applyCloudLightingState(this.material?.uniforms, lightingState);
   }
 
   _compileMaterial(material) {

@@ -54,6 +54,10 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudLightAbsorption: 1.1,  // sun light extinction through the cloud
   cloudShadowStrength: 0.60,  // how dark self-shadowed regions get
   cloudScatteringStrength: 1.0,
+  cloudAtmosphereInfluence: 1.0,
+  cloudSunResponse: 1.0,
+  cloudAmbientResponse: 1.0,
+  cloudSilverLining: 0.25,
   cloudColor: [1.0, 1.0, 1.0],
   cloudShadowColor: [0.42, 0.47, 0.60],
 };

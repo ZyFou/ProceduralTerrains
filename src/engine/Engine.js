@@ -24,6 +24,7 @@ import { Minimap } from './Minimap.js';
 import { DEFAULT_PARAMS, applyPreset, PRESETS } from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
+import { resolveCloudLightingState } from './sky/CloudLightingState.js';
 import { FogManager } from './render/FogManager.js';
 import { UnderwaterEffect } from './render/UnderwaterEffect.js';
 import { UnderwaterController } from './render/UnderwaterController.js';
@@ -1994,6 +1995,7 @@ export class Engine {
     this._syncPlanetStyleToParams();
     this.cb.onParams(this._paramsSnapshot());
     this.planetStyle.applyToUniforms(this.uniforms);
+    this._syncCloudLighting();
     this._applyStudioFogFromStyle();
     this._applyStudioSunFromStyle();
     this._minimapDirtyAt = performance.now();
@@ -5055,6 +5057,7 @@ export class Engine {
         center: this._unionCenter(),
       });
     }
+    this._syncCloudLighting();
   }
 
   /** Rebuild the planet for a radius / face-grid change (settings panel). */
@@ -5592,6 +5595,36 @@ export class Engine {
     return this.worldMode !== 'planet' && this.params.skyboxEnabled !== false;
   }
 
+  _resolveCloudLighting(tod = null) {
+    const u = this.uniforms || {};
+    const toRgb = (value, fallback) => {
+      if (value?.toArray) return value.toArray([]).slice(0, 3);
+      if (Array.isArray(value)) return value.slice(0, 3);
+      return fallback;
+    };
+    const skyActive = this._skyActive();
+    const evaluated = skyActive ? (tod || evaluateTimeOfDay(this.timeOfDay)) : null;
+
+    return resolveCloudLightingState({
+      proceduralSkyActive: skyActive,
+      timeOfDay: evaluated,
+      params: this.params,
+      sunDirection: u.uSunDir?.value,
+      terrainSunColor: toRgb(u.uTerrainSunCol?.value, [1.0, 0.94, 0.82]),
+      terrainSunIntensity: u.uTerrainSunIntensity?.value ?? 1.25,
+      terrainSkyAmbient: toRgb(u.uTerrainSkyAmb?.value, [0.36, 0.46, 0.62]),
+      terrainGroundBounce: toRgb(u.uTerrainBounce?.value, [0.20, 0.16, 0.11]),
+    });
+  }
+
+  _syncCloudLighting(tod = null) {
+    const state = this._resolveCloudLighting(tod);
+    this.studioCloud?.setLighting(state);
+    this.planetCloudLayer?.setLighting(state);
+    this.planetCloudChunks?.setLighting(state);
+    this._needsRender = true;
+  }
+
   /**
    * Sync the skybox appearance params + dome visibility for the current mode.
    * Pure uniform/visibility updates — never rebuilds or recompiles.
@@ -5602,6 +5635,7 @@ export class Engine {
     }
     this.proceduralSky.applyParams(this.params);
     this.proceduralSky.setVisible(this._skyActive());
+    this._syncCloudLighting();
     this._needsRender = true;
   }
 
@@ -5641,6 +5675,7 @@ export class Engine {
     // Update directional sun light intensity and color
     this.sunLight.intensity = tod.lightIntensity;
     this.sunLight.color.setRGB(tod.sunColor[0], tod.sunColor[1], tod.sunColor[2]);
+    this._syncCloudLighting(tod);
     this._needsRender = true;
   }
 
