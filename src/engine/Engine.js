@@ -68,6 +68,12 @@ import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { FlatPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
+import {
+  createWaterBaselineReport,
+  getWaterBaselineScene,
+  resolveWaterBaselineCamera,
+  waterBaselineParams,
+} from './water/WaterBaseline.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 import {
   SURFACE_TEXTURE_SOURCE,
@@ -2984,6 +2990,7 @@ export class Engine {
       return {
         ready: true,
         timedOut: false,
+        materialCount: 0,
         pendingCount: 0,
         waitMs: 0,
         syncCompileMs: 0,
@@ -3009,6 +3016,7 @@ export class Engine {
       return {
         ready: results.every((result) => result.ready),
         timedOut: results.some((result) => result.timedOut),
+        materialCount: list.length,
         pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
         waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
         syncCompileMs: results.reduce((sum, result) => sum + result.syncCompileMs, 0),
@@ -3050,7 +3058,7 @@ export class Engine {
     onProgress?.(list.length, total);
 
     if (canvasOnly) {
-      return { ...canvasResult, syncCompileMs, asyncWaitMs };
+      return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
     }
 
     this.underwater._ensureTarget(this.renderer);
@@ -3077,6 +3085,7 @@ export class Engine {
     return {
       ready: canvasResult.ready && rtResult.ready,
       timedOut: canvasResult.timedOut || rtResult.timedOut,
+      materialCount: list.length,
       pendingCount: canvasResult.pendingCount + rtResult.pendingCount,
       waitMs: canvasResult.waitMs + rtResult.waitMs,
       syncCompileMs: syncCompileMs + rtSyncCompileMs,
@@ -3265,6 +3274,7 @@ export class Engine {
             timeoutMs: 20000,
             stagger: mats.length > 1,
           });
+          this._recordWaterShaderCompile('mode-switch', result);
           ready = result?.ready === true;
           if (!ready) {
             console.warn(
@@ -3288,6 +3298,23 @@ export class Engine {
       // Yield twice so the UI can paint before kicking off GPU work.
       yieldTask().then(() => yieldTask().then(run));
     });
+  }
+
+  _recordWaterShaderCompile(reason, result) {
+    if (!result) return;
+    this._lastWaterShaderCompile = {
+      reason,
+      ready: result.ready === true,
+      timedOut: result.timedOut === true,
+      materialCount: result.materialCount ?? null,
+      syncCompileMs: Number.isFinite(result.syncCompileMs) ? Math.round(result.syncCompileMs * 100) / 100 : null,
+      asyncWaitMs: Number.isFinite(result.asyncWaitMs) ? Math.round(result.asyncWaitMs * 100) / 100 : null,
+      totalMs: Number.isFinite(result.syncCompileMs) && Number.isFinite(result.asyncWaitMs)
+        ? Math.round((result.syncCompileMs + result.asyncWaitMs) * 100) / 100
+        : null,
+      capturedAt: new Date().toISOString(),
+    };
+    this.profiler.setMetric('waterShaderCompile', this._lastWaterShaderCompile);
   }
 
   /**
@@ -3618,6 +3645,7 @@ export class Engine {
           timeoutMs: 20000,
           renderTarget,
         });
+        this._recordWaterShaderCompile('deferred-startup', result);
         this._waterMaterialWarmed = result?.ready === true;
         if (!this._waterMaterialWarmed) {
           console.warn(
@@ -6228,6 +6256,144 @@ export class Engine {
     this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
   }
 
+  applyWaterBaselineScene(sceneId) {
+    const scene = getWaterBaselineScene(sceneId);
+    if (!scene) throw new Error(`Unknown water baseline scene: ${sceneId}`);
+    if (scene.worldMode !== this.worldMode) {
+      throw new Error(`Water baseline "${sceneId}" requires ${scene.worldMode} mode`);
+    }
+    if (this.generationSource !== 'classic') {
+      throw new Error('Water baselines require the Procedural terrain editor');
+    }
+
+    // Baselines deliberately use the classic deterministic field. Keeping the
+    // seed, terrain preset and water preset fixed makes captures comparable
+    // across shader revisions and across machines.
+    this.params = applyPreset(this.params, scene.terrainPreset);
+    this.params = this.waterSystem.applyPreset(scene.waterPreset);
+    this.params = waterBaselineParams(scene, this.params);
+    this.params.autoUpdate = true;
+    this.setNoiseStack(migrateStack(undefined));
+
+    this._terrainGen++;
+    this._bakedStudioGen = -1;
+    this._bakedTerrainGen = -1;
+    this._activeWaterBaseline = scene.value;
+    this.profiler.setMetric('waterBaselineScene', scene.value);
+    this.cb.onParams({ ...this.params });
+    this.setTimeOfDay(scene.timeOfDay);
+    this.applyAll({ force: true });
+    this._applyWaterBaselineCamera(scene);
+    this._needsRender = true;
+    this.cb.onToast(`Water baseline loaded: ${scene.label}`);
+    return scene;
+  }
+
+  _applyWaterBaselineCamera(scene) {
+    const resolved = resolveWaterBaselineCamera(scene, {
+      seaLevel: this.params.seaLevel,
+      boardSize: this.boardSize,
+    });
+    if (!resolved) return;
+
+    if (resolved.kind === 'first-person') {
+      this.camera.position.fromArray(resolved.position);
+      if (this.fpsControls) {
+        this.fpsControls.yaw = resolved.yaw;
+        this.fpsControls.pitch = resolved.pitch;
+        this.fpsControls.update(0);
+      }
+      this.camera.updateMatrixWorld(true);
+      return;
+    }
+
+    const controls = this.controls;
+    if (!controls) return;
+    controls.mode = 'orbit';
+    controls.target.fromArray(resolved.target);
+    controls.goalTarget.copy(controls.target);
+    controls.radius = resolved.radius;
+    controls.goalRadius = resolved.radius;
+    controls.phi = resolved.phi;
+    controls.goalPhi = resolved.phi;
+    controls.theta = resolved.theta;
+    controls.goalTheta = resolved.theta;
+    controls._smoothRate = null;
+    controls.update(0);
+    this.camera.updateMatrixWorld(true);
+  }
+
+  async captureWaterBaseline(sceneId = this._activeWaterBaseline) {
+    const scene = getWaterBaselineScene(sceneId);
+    if (!scene) throw new Error('Load a water baseline scene before capturing');
+    if (this._activeWaterBaseline !== sceneId) {
+      throw new Error(`Load "${scene.label}" before capturing it`);
+    }
+    if (scene.worldMode !== this.worldMode) {
+      throw new Error(`Water baseline "${sceneId}" requires ${scene.worldMode} mode`);
+    }
+
+    this.cb.onStatus('Capturing water baseline…', true);
+    const profilerWasActive = this.profiler.active;
+    this.profiler.setActive(true);
+    try {
+      const ready = await this._waitForWaterBaselineReady();
+      if (!ready) throw new Error('Water baseline did not become ready before capture');
+      // Give asynchronous GPU timing queries enough rendered frames to resolve.
+      for (let frame = 0; frame < 12; frame++) {
+        this._needsRender = true;
+        await yieldFrame();
+      }
+
+      const captureStats = this._renderCameraCapture();
+      this.profiler.captureRenderer(this.renderer);
+      const performanceSnapshot = this.profiler.snapshot();
+      const diagnostics = this.getPerfDiagnostics();
+      const png = await new Promise((resolve) => {
+        this.renderer.domElement.toBlob(resolve, 'image/png');
+      });
+      if (!png) throw new Error('Water baseline screenshot could not be encoded');
+
+      const report = createWaterBaselineReport({
+        scene,
+        params: this.params,
+        diagnostics,
+        performance: performanceSnapshot,
+        captureStats,
+        shaderCompile: this._lastWaterShaderCompile ?? null,
+      });
+      const { strToU8, zipSync } = await import('fflate');
+      const pngBytes = new Uint8Array(await png.arrayBuffer());
+      const reportBytes = strToU8(JSON.stringify(report, null, 2));
+      const archive = zipSync({
+        [`${scene.value}.png`]: pngBytes,
+        [`${scene.value}.json`]: reportBytes,
+      });
+      this._download(
+        URL.createObjectURL(new Blob([archive], { type: 'application/zip' })),
+        `water-baseline-${scene.value}.zip`,
+      );
+      this.cb.onToast(`Water baseline captured: ${scene.label}`);
+      return report;
+    } finally {
+      if (!profilerWasActive) this.profiler.setActive(false);
+      this.cb.onStatus('Ready', false);
+    }
+  }
+
+  async _waitForWaterBaselineReady(timeoutMs = 30000) {
+    const startedAt = performance.now();
+    while (
+      this._compiling
+      || this.board?.isBuilding
+      || this.waterSystem?._waterCompilePending
+    ) {
+      if (performance.now() - startedAt >= timeoutMs) return false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return true;
+  }
+
   // --------------------------------------------------------------- exports
 
   _download(url, filename) {
@@ -7086,6 +7252,8 @@ export class Engine {
         waves: perf.waterWaves,
         seaLevel: p.seaLevel,
         underwater: !!this.underwater?.active,
+        baselineScene: this._activeWaterBaseline ?? null,
+        shaderCompile: this._lastWaterShaderCompile ?? null,
       },
       underwater: this._underwaterDiagnostics(),
     };

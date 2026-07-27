@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
@@ -19,6 +19,7 @@ import {
   WORLD_MODE_WATER_HINTS,
 } from '../../engine/water/WaterSettings.js';
 import { WATER_DEBUG_VIEWS } from '../../engine/water/WaterDebugViews.js';
+import { WATER_BASELINE_SCENES } from '../../engine/water/WaterBaseline.js';
 import PanelResetButton from './PanelResetButton.jsx';
 
 function val(params, key) {
@@ -138,6 +139,8 @@ export default function WaterPanelInner({
   planetStyleProps,
   onResetWaterSettings,
   onExportWaterMasks,
+  onApplyWaterBaselineScene,
+  onCaptureWaterBaseline,
   settingsTarget,
   id = 'inspector-water',
 }) {
@@ -160,6 +163,17 @@ export default function WaterPanelInner({
   const modeLabel = WATER_MODES.find((m) => m.value === mode)?.label ?? mode;
   const effectiveLabel = WATER_MODES.find((m) => m.value === effectiveMode)?.label ?? effectiveMode;
   const p = perf ?? {};
+  const [baselineScene, setBaselineScene] = useState(WATER_BASELINE_SCENES[0].value);
+  const [baselineBusy, setBaselineBusy] = useState('');
+
+  const runBaselineAction = async (action, busyLabel) => {
+    setBaselineBusy(busyLabel);
+    try {
+      await action?.(baselineScene);
+    } finally {
+      setBaselineBusy('');
+    }
+  };
 
   const setEnabled = (v) => {
     onParam('waterEnabled', v);
@@ -529,12 +543,40 @@ export default function WaterPanelInner({
         forceOpen={forceSection('water.section.debug', 'Debug', ['water.waterDebug', 'water.waterShow'])}
       >
         <SelectRow
+          label="Visual Baseline Scene"
+          value={baselineScene}
+          options={WATER_BASELINE_SCENES}
+          onChange={setBaselineScene}
+          settingId="water.waterBaselineScene"
+          info="Load a fixed terrain, camera, water preset, and time of day for before/after comparisons."
+        />
+        <button
+          type="button"
+          className="action-btn"
+          disabled={!!baselineBusy}
+          onClick={() => runBaselineAction(onApplyWaterBaselineScene, 'load')}
+        >
+          {baselineBusy === 'load' ? 'Loading Baseline…' : 'Load Baseline Scene'}
+        </button>
+        <button
+          type="button"
+          className="action-btn"
+          disabled={!!baselineBusy}
+          onClick={() => runBaselineAction(onCaptureWaterBaseline, 'capture')}
+        >
+          {baselineBusy === 'capture' ? 'Capturing Baseline…' : 'Capture PNG + Metrics (.zip)'}
+        </button>
+        <p className="section-hint">
+          Capture the same scene on each target GPU. The ZIP records FPS, frame time,
+          whole-frame GPU time when available, draw calls, triangles, and water shader compile time.
+        </p>
+        <SelectRow
           label="Water Debug View"
           value={val(params, 'waterDebugView')}
           options={WATER_DEBUG_VIEWS}
           onChange={(v) => onParam('waterDebugView', v)}
           settingId="water.waterDebugView"
-          info="Overlay water masks on the surface (requires effective Realistic mode)."
+          info="Inspect water inputs and terms on the surface (requires effective Realistic mode)."
         />
         <ToggleRow
           label="Show Water Mesh Bounds"

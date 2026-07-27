@@ -74,7 +74,7 @@ uniform float uCausticsStr;
 uniform float uRefractionQual;
 uniform float uFoamQual;
 uniform float uCausticsQual;
-uniform float uDebugMode;          // 0=off, 1=depth, 2=shore, 3=foam, 4=water mask
+uniform float uDebugMode;          // see WaterDebugViews / setWaterDebugMode
 uniform float uVisualFoamBreakup;
 uniform float uVisualWetSandRange;
 uniform float uVisualShallowWaterSoftness;
@@ -161,8 +161,12 @@ void main() {
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
   col *= uPaletteTint;
 
-  // absorption darkens deep water
-  col *= 1.0 - uAbsorptionStr * deepT * 0.35;
+  // Current V1 absorption and its diagnostic equivalent. The optical-depth and
+  // transmittance values are exposed now so Phase 1 can be compared against the
+  // exact same views when this scalar approximation becomes Beer–Lambert RGB.
+  float opticalDepth = visualDepth / max(abs(viewDir.y), 0.15);
+  float transmittanceV1 = clamp(1.0 - uAbsorptionStr * deepT * 0.35, 0.0, 1.0);
+  col *= transmittanceV1;
 
   // lighting
   float diff = max(dot(n, uSunDir), 0.0);
@@ -171,7 +175,8 @@ void main() {
   col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection * uSpecularStrength;
 
   float fres = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
-  col += vec3(0.30, 0.42, 0.55) * fres * 0.28 * uWaterReflection * uFresnelStrength;
+  vec3 reflectionTerm = vec3(0.30, 0.42, 0.55) * fres * 0.28 * uWaterReflection * uFresnelStrength;
+  col += reflectionTerm;
 
   // shoreline foam — depth-based only; slope foam restricted to very shallow water
   float shoreDist = depth;
@@ -195,8 +200,11 @@ void main() {
   col = mix(col, uColFoam, foam);
 
   // fake refraction tint (screen-space-ish color shift)
+  float refr = 0.0;
+  vec3 refractionTerm = vec3(0.0);
   if (uRefractionQual > 0.05 && uWaterTier > 0.5) {
-    float refr = fres * uRefractionStrength * uRefractionQual * 0.12;
+    refr = fres * uRefractionStrength * uRefractionQual * 0.12;
+    refractionTerm = (uColShallow * 1.1 - col) * refr;
     col = mix(col, uColShallow * 1.1, refr);
   }
 
@@ -235,7 +243,40 @@ void main() {
       gl_FragColor = vec4(vec3(foam), 1.0);
       return;
     }
-    gl_FragColor = vec4(0.1, 0.45, 0.95, 1.0);
+    if (uDebugMode < 4.5) {
+      gl_FragColor = vec4(0.1, 0.45, 0.95, 1.0);
+      return;
+    }
+    if (uDebugMode < 5.5) {
+      gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
+      return;
+    }
+    if (uDebugMode < 6.5) {
+      float od = 1.0 - exp(-opticalDepth / max(uMaxVisibleDepth, 1.0));
+      gl_FragColor = vec4(vec3(od), 1.0);
+      return;
+    }
+    if (uDebugMode < 7.5) {
+      gl_FragColor = vec4(vec3(transmittanceV1), 1.0);
+      return;
+    }
+    if (uDebugMode < 8.5) {
+      gl_FragColor = vec4(vec3(fres), 1.0);
+      return;
+    }
+    if (uDebugMode < 9.5) {
+      gl_FragColor = vec4(max(reflectionTerm, vec3(0.0)), 1.0);
+      return;
+    }
+    if (uDebugMode < 10.5) {
+      gl_FragColor = vec4(clamp(refractionTerm * 4.0 + 0.5, 0.0, 1.0), 1.0);
+      return;
+    }
+    if (uDebugMode < 11.5) {
+      gl_FragColor = vec4(vec3(alpha), 1.0);
+      return;
+    }
+    gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
     return;
   }
 
@@ -370,6 +411,19 @@ export function applyRealisticWaterUniforms(mat, params, mode) {
 
 export function setWaterDebugMode(mat, debugView) {
   if (!mat?.uniforms?.uDebugMode) return;
-  const map = { off: 0, depth: 1, shoreline: 2, foam: 3, mask: 4 };
+  const map = {
+    off: 0,
+    depth: 1,
+    shoreline: 2,
+    foam: 3,
+    mask: 4,
+    normal: 5,
+    opticalDepth: 6,
+    transmittance: 7,
+    fresnel: 8,
+    reflection: 9,
+    refraction: 10,
+    opacity: 11,
+  };
   mat.uniforms.uDebugMode.value = map[debugView] ?? 0;
 }

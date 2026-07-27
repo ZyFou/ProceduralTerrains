@@ -330,6 +330,8 @@ function WaterPanel({ ctx }) {
         planetStyleProps={ctx.planetStyleProps}
         onResetWaterSettings={() => ctx.onResetPanel?.('water')}
         onExportWaterMasks={ctx.onExportWaterMasks}
+        onApplyWaterBaselineScene={ctx.onApplyWaterBaselineScene}
+        onCaptureWaterBaseline={ctx.onCaptureWaterBaseline}
         settingsTarget={ctx.settingsTarget}
       />
     </SidePanel>

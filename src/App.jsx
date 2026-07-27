@@ -45,6 +45,7 @@ import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
 } from './project/NodeProjectTemplates.js';
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
+import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
@@ -1722,6 +1723,31 @@ export default function App() {
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
     onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
+    onApplyWaterBaselineScene: async (sceneId) => {
+      const scene = getWaterBaselineScene(sceneId);
+      if (!scene) return;
+      try {
+        if (engine().worldMode !== scene.worldMode) {
+          await runModeSwitch(scene.worldMode, { silent: true });
+        }
+        if (engine().worldMode !== scene.worldMode) {
+          throw new Error(`Could not switch to ${scene.worldMode} mode`);
+        }
+        engine().applyWaterBaselineScene(sceneId);
+        setTimeOfDay(engine().timeOfDay);
+      } catch (error) {
+        console.error(error);
+        showToast(error?.message || 'Water baseline could not be loaded', 'error');
+      }
+    },
+    onCaptureWaterBaseline: async (sceneId) => {
+      try {
+        await engine().captureWaterBaseline(sceneId);
+      } catch (error) {
+        console.error(error);
+        showToast(error?.message || 'Water baseline capture failed', 'error');
+      }
+    },
     // bake / clear change the baked delta (a heavy, non-param edit) — record a
     // history entry afterwards so the whole bake is a single Ctrl+Z away.
     onErosionBake: async (onProgress) => {
