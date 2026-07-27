@@ -6065,43 +6065,69 @@ export class Engine {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  _captureOverlayRoots() {
+    return [
+      this._tileGhost,
+      this.paintMode?.cursor?.group,
+      this.manualTerrain?.group,
+      this.manualTerrain?.anchor,
+      this.manualTerrain?.transform,
+      this.manualTerrain?.cursor?.group,
+      this.splineManager?.group,
+      this._rwLoadGroup,
+    ].filter(Boolean);
+  }
+
+  _withCaptureOverlaysHidden(capture) {
+    const visibility = [...new Set(this._captureOverlayRoots())]
+      .map((object) => [object, object.visible]);
+    for (const [object] of visibility) object.visible = false;
+    try {
+      return capture();
+    } finally {
+      for (const [object, visible] of visibility) object.visible = visible;
+    }
+  }
+
   _renderCameraCapture() {
-    const plan = this._prepareCameraPipeline();
-    const sceneSize = this._cameraSceneSize(plan);
-    const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    return this._withCaptureOverlaysHidden(() => {
+      const plan = this._prepareCameraPipeline();
+      const sceneSize = this._cameraSceneSize(plan);
+      const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
-    const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
-    const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
+      const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
+      const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
-    if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
-      this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-    } else if (this.worldMode === 'planet') {
-      this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      if (!planetLowRes) {
-        this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
+        this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      } else if (this.worldMode === 'planet') {
+        this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+        if (!planetLowRes) {
+          this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+        }
       }
-    }
 
-    if (this.worldMode === 'planet') {
-      this.renderer.setRenderTarget(target);
-      this.renderer.render(this.scene, this.camera);
-    } else {
-      this.underwater.render(this.renderer, this.scene, this.camera, target);
-      if (target) this.renderer.setRenderTarget(target);
-    }
-    const stats = {
-      triangles: this.renderer.info.render.triangles,
-      drawCalls: this.renderer.info.render.calls,
-    };
+      if (this.worldMode === 'planet') {
+        this.renderer.setRenderTarget(target);
+        this.renderer.render(this.scene, this.camera);
+      } else {
+        this.underwater.render(this.renderer, this.scene, this.camera, target);
+        if (target) this.renderer.setRenderTarget(target);
+      }
+      const stats = {
+        triangles: this.renderer.info.render.triangles,
+        drawCalls: this.renderer.info.render.calls,
+      };
 
-    if (studioLowRes) {
-      this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
-    } else if (planetLowRes) {
-      this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
-    }
-    if (target) this.renderer.setRenderTarget(null);
-    this.visualPost.finish(this.renderer);
-    return stats;
+      if (studioLowRes) {
+        this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
+      } else if (planetLowRes) {
+        this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
+      }
+      if (target) this.renderer.setRenderTarget(null);
+      this.visualPost.finish(this.renderer);
+      return stats;
+    });
   }
 
   exportScreenshot() {
