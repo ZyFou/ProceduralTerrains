@@ -27,6 +27,20 @@ describe('camera render plan', () => {
     expect(plan.usesSceneTarget).toBe(true);
   });
 
+  it('runs God Rays independently from Post Processing and world mode', () => {
+    const plan = resolveCameraRenderPlan({
+      outputWidth: 1280,
+      outputHeight: 720,
+      worldMode: 'infinite',
+      visualsPostEnabled: false,
+      sunRaysStrength: 0.8,
+    });
+
+    expect(plan.sunRaysEnabled).toBe(true);
+    expect(plan.lookEnabled).toBe(true);
+    expect(plan.usesSceneTarget).toBe(true);
+  });
+
   it('forces a scene target and final blit when an effect needs scene depth', () => {
     const plan = resolveCameraRenderPlan({
       outputWidth: 1280,

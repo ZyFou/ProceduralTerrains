@@ -11,6 +11,7 @@ export function resolveCameraRenderPlan({
   renderScale = 1,
   worldMode = 'studio',
   visualsPostEnabled = true,
+  sunRaysStrength = 0,
   pixelatedEnabled = false,
   pixelResolution = 240,
   ditheringEnabled = false,
@@ -32,7 +33,9 @@ export function resolveCameraRenderPlan({
     }
   }
 
-  const lookEnabled = worldMode === 'studio' && visualsPostEnabled !== false;
+  const sunRaysEnabled = Number(sunRaysStrength) > 0.001;
+  const lookEnabled = (worldMode === 'studio' && visualsPostEnabled !== false)
+    || sunRaysEnabled;
   const cameraEffectsEnabled = !!(
     pixelatedEnabled || ditheringEnabled || crtEnabled || chromaticAberrationEnabled
   );
@@ -49,6 +52,7 @@ export function resolveCameraRenderPlan({
     sceneHeight: sceneH,
     renderScale: scale,
     lookEnabled,
+    sunRaysEnabled,
     cameraEffectsEnabled,
     needsReconstruction,
     needsFinalPass,

@@ -6690,7 +6690,7 @@ export class Engine {
     const v = this._uwSunScratch || (this._uwSunScratch = new THREE.Vector3());
     v.copy(cam.position).addScaledVector(sunDir, 1e6);
     v.project(cam);
-    const visible = v.z > -1 && v.z < 1;
+    const visible = sunDir.y > -0.02 && v.z > -1 && v.z < 1;
     return { x: v.x * 0.5 + 0.5, y: v.y * 0.5 + 0.5, visible };
   }
 
