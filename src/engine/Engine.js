@@ -2987,6 +2987,21 @@ export class Engine {
     }
   }
 
+  _captureWaterPlanarReflection(sceneSize) {
+    if (!this.waterSystem) return false;
+    this.profiler.begin('water-reflection');
+    try {
+      return this.waterSystem.capturePlanarReflection(
+        this.renderer,
+        this.scene,
+        this.camera,
+        sceneSize,
+      );
+    } finally {
+      this.profiler.end('water-reflection');
+    }
+  }
+
   // -------------------------------------------------- async shader compiling
   // Heavy shaders are compiled via renderer.compile + _waitForMaterialsReady so
   // the GPU driver can link off-thread (KHR_parallel_shader_compile) while ticks
@@ -6973,6 +6988,7 @@ export class Engine {
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
+      this._captureWaterPlanarReflection(cameraSceneSize);
       this._captureWaterSceneRefraction(cameraSceneSize);
       this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
@@ -7053,6 +7069,7 @@ export class Engine {
     const cameraPlan = this._prepareCameraPipeline();
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    this._captureWaterPlanarReflection(cameraSceneSize);
     this._captureWaterSceneRefraction(cameraSceneSize);
     this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
     const triangles = this.renderer.info.render.triangles;
@@ -7273,6 +7290,8 @@ export class Engine {
         baselineScene: this._activeWaterBaseline ?? null,
         shaderCompile: this._lastWaterShaderCompile ?? null,
         refractionPass: this.waterSystem?.getRefractionDiagnostics?.() ?? null,
+        planarReflectionPass:
+          this.waterSystem?.getPlanarReflectionDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
     };

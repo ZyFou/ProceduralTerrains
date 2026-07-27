@@ -62,6 +62,31 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
+  it('contains Cinematic planar reflection with analytical-sky fallback', () => {
+    const material = createRealisticWaterMaterial(createTerrainUniforms());
+
+    expect(material.uniforms.uPlanarReflectionEnabled.value).toBe(0);
+    expect(material.fragmentShader).toContain(
+      'uPlanarReflectionMatrix * vec4(vWorldPos, 1.0)',
+    );
+    expect(material.fragmentShader).toContain(
+      'texture2D(uPlanarReflection',
+    );
+    expect(material.fragmentShader).toContain(
+      'reflectedSurface = mix(reflectedSky, planarLinear, planarBlend)',
+    );
+    expect(material.fragmentShader).toContain(
+      'step(2.5, uWaterTier)',
+    );
+
+    applyRealisticWaterUniforms(material, {
+      waterReflectionQuality: 1.4,
+    }, 'cinematic');
+    expect(material.uniforms.uWaterTier.value).toBe(3);
+    expect(material.uniforms.uReflectionQuality.value).toBe(1.4);
+    material.dispose();
+  });
+
   it('applies roughness and sky-reflection settings without recompiling', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
     const fragmentShader = material.fragmentShader;

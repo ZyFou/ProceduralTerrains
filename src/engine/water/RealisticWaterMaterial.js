@@ -95,6 +95,10 @@ uniform vec2 uSceneTexelSize;
 uniform float uSceneNear;
 uniform float uSceneFar;
 uniform float uSceneRefractionEnabled;
+uniform sampler2D uPlanarReflection;
+uniform mat4 uPlanarReflectionMatrix;
+uniform vec2 uPlanarReflectionTexelSize;
+uniform float uPlanarReflectionEnabled;
 uniform float uDebugMode;          // see WaterDebugViews / setWaterDebugMode
 uniform float uVisualFoamBreakup;
 uniform float uVisualWetSandRange;
@@ -292,8 +296,64 @@ void main() {
     * mix(0.35, 1.0, reflectionDetail);
   reflectedSky = mix(fallbackReflection, reflectedSky, liveSkyAmount);
 
+  // Cinematic planar reflection captures terrain, props, clouds, and the live
+  // sky from a sea-level mirrored camera. Roughness broadens the four-tap
+  // sample, while invalid projected coordinates retain analytical sky.
+  vec3 reflectedSurface = reflectedSky;
+  float planarReflectionWeight = uPlanarReflectionEnabled
+    * step(2.5, uWaterTier);
+  if (planarReflectionWeight > 0.5) {
+    vec4 planarProjected = uPlanarReflectionMatrix * vec4(vWorldPos, 1.0);
+    vec2 planarUv = planarProjected.xy
+      / max(planarProjected.w, 0.0001)
+      * 0.5 + 0.5;
+    float planarValid = step(0.0001, planarProjected.w)
+      * step(0.0, planarUv.x)
+      * step(planarUv.x, 1.0)
+      * step(0.0, planarUv.y)
+      * step(planarUv.y, 1.0);
+    float planarDistortion = mix(0.012, 0.045, reflectionDetail)
+      * (1.0 - roughness * 0.45);
+    vec2 planarMargin = uPlanarReflectionTexelSize * 4.0;
+    planarUv = clamp(
+      planarUv + n.xz * planarDistortion,
+      planarMargin,
+      vec2(1.0) - planarMargin
+    );
+    vec2 blurOffset = uPlanarReflectionTexelSize
+      * mix(1.0, 8.0, roughness * roughness);
+    vec3 planarEncoded = texture2D(uPlanarReflection, planarUv).rgb * 0.40;
+    planarEncoded += texture2D(
+      uPlanarReflection,
+      planarUv + vec2(blurOffset.x, 0.0)
+    ).rgb * 0.15;
+    planarEncoded += texture2D(
+      uPlanarReflection,
+      planarUv - vec2(blurOffset.x, 0.0)
+    ).rgb * 0.15;
+    planarEncoded += texture2D(
+      uPlanarReflection,
+      planarUv + vec2(0.0, blurOffset.y)
+    ).rgb * 0.15;
+    planarEncoded += texture2D(
+      uPlanarReflection,
+      planarUv - vec2(0.0, blurOffset.y)
+    ).rgb * 0.15;
+    vec3 planarLinear = pow(max(planarEncoded, vec3(0.0)), vec3(2.2));
+    float planarQuality = clamp(
+      (uReflectionQuality - 1.0) * 2.0,
+      0.0,
+      1.0
+    );
+    float planarBlend = planarReflectionWeight
+      * planarValid
+      * planarQuality
+      * (1.0 - roughness * 0.38);
+    reflectedSurface = mix(reflectedSky, planarLinear, planarBlend);
+  }
+
   float reflectionScale = clamp(uWaterReflection, 0.0, 1.5);
-  vec3 reflectionTerm = reflectedSky * fres * reflectionScale;
+  vec3 reflectionTerm = reflectedSurface * fres * reflectionScale;
 
   // Roughness-aware GGX sunlight uses the current sky sun color/intensity.
   vec3 skySunDir = normalize(uSkySunDir);
@@ -413,7 +473,7 @@ void main() {
       return;
     }
     if (uDebugMode < 9.5) {
-      gl_FragColor = vec4(min(reflectedSky, vec3(1.0)), 1.0);
+      gl_FragColor = vec4(min(reflectedSurface, vec3(1.0)), 1.0);
       return;
     }
     if (uDebugMode < 10.5) {
@@ -491,6 +551,10 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSceneNear: { value: 1.0 },
     uSceneFar: { value: 50000.0 },
     uSceneRefractionEnabled: { value: 0.0 },
+    uPlanarReflection: { value: null },
+    uPlanarReflectionMatrix: { value: new THREE.Matrix4() },
+    uPlanarReflectionTexelSize: { value: new THREE.Vector2(1, 1) },
+    uPlanarReflectionEnabled: { value: 0.0 },
     uDebugMode: { value: 0.0 },
   };
 }

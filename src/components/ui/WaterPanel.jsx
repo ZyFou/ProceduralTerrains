@@ -33,7 +33,7 @@ const MODE_HINTS = {
   legacy: 'Fast original water shader. Best for performance and Infinite World.',
   realistic: 'RGB absorption, live sky reflection, directional waves, and shoreline foam.',
   volumetric: 'Realistic surface plus half-resolution scene refraction, depth rejection, and higher-tier underwater effects.',
-  cinematic: 'Highest-quality scene refraction and water effects. Expensive; best for Tile screenshots.',
+  cinematic: 'Volumetric water plus planar reflections of terrain, props, clouds, and sky. Best for Tile screenshots.',
 };
 
 const MATERIAL_SLIDERS = [
@@ -89,7 +89,7 @@ const CAUSTIC_SLIDERS = [
 ];
 
 const REALISTIC_PERF_SLIDERS = [
-  { key: 'waterReflectionQuality', label: 'Sky Reflection Detail', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Controls analytical sky reflection clarity. Values above 1 are reserved for future planar reflections.' },
+  { key: 'waterReflectionQuality', label: 'Reflection Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Up to 1× controls analytical sky clarity. Above 1× enables planar scene reflection in Cinematic Tile mode.' },
   { key: 'waterFoamQuality', label: 'Foam Quality', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterCausticsQuality', label: 'Caustics Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
   { key: 'waterNormalResolution', label: 'Micro Wave Detail', min: 0.25, max: 1.5, step: 0.05, digits: 2, info: 'Scales only the fine procedural ripples; it does not change the main wave size.' },
@@ -98,7 +98,13 @@ const REALISTIC_PERF_SLIDERS = [
 
 const REFRACTION_PERF_SLIDERS = [
   { key: 'waterRefractionQuality', label: 'Refraction Detail', min: 0.1, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Controls distortion detail and terrain-silhouette rejection.' },
-  { key: 'waterRenderScale', label: 'Refraction Resolution', min: 0.5, max: 2, step: 0.25, digits: 2, expensive: true, info: '1× renders refraction at half scene resolution; 2× renders at full scene resolution.' },
+  { key: 'waterRenderScale', label: 'Water Pass Resolution', min: 0.5, max: 2, step: 0.25, digits: 2, expensive: true, info: '1× renders refraction at half resolution; 2× reaches full resolution and also raises Cinematic reflection resolution.' },
+];
+
+const REFLECTION_UPDATE_OPTIONS = [
+  { value: '1', label: 'Every frame' },
+  { value: '2', label: 'Every 2 frames' },
+  { value: '4', label: 'Every 4 frames' },
 ];
 
 const WATER_QUALITY_OPTIONS = [
@@ -160,6 +166,7 @@ export default function WaterPanelInner({
   const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
+  const selectedPlanarReflection = mode === 'cinematic' && isStudio;
   const worldLabel = WORLD_MODE_WATER_LABELS[worldMode] ?? worldMode;
   const effectiveMode = resolveEffectiveWaterMode(params, worldMode);
   const effectiveRealistic = isRealisticWaterMode(effectiveMode);
@@ -522,10 +529,10 @@ export default function WaterPanelInner({
           title="Performance"
           defaultOpen={false}
           settingId="water.section.performance"
-          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterRefractionQuality', 'water.waterRenderScale', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
+          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterUpdateFrequency', 'water.waterRefractionQuality', 'water.waterRenderScale', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
         >
           {mode === 'cinematic' && isStudio && (
-            <p className="section-hint warning">Cinematic mode is expensive — best for Tile mode screenshots.</p>
+            <p className="section-hint warning">Cinematic adds a mirrored scene render for planar reflection — best for Tile mode screenshots.</p>
           )}
           {REALISTIC_PERF_SLIDERS.map((def) => (
             <SliderCtl
@@ -553,6 +560,16 @@ export default function WaterPanelInner({
               settingId={`water.${def.key}`}
             />
           ))}
+          {selectedPlanarReflection && (
+            <SelectRow
+              label="Reflection Updates"
+              value={String(val(params, 'waterUpdateFrequency'))}
+              options={REFLECTION_UPDATE_OPTIONS}
+              onChange={(v) => onParam('waterUpdateFrequency', Number(v))}
+              settingId="water.waterUpdateFrequency"
+              info="Reuse the planar reflection between updates to reduce its scene-render cost."
+            />
+          )}
         </ControlSection>
       )}
 

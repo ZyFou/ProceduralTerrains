@@ -15,6 +15,10 @@ import {
 import { applyWaterDebugToMaterials } from './WaterDebugViews.js';
 import { buildWaterMaskFiles, buildWaterMetadata } from './WaterExport.js';
 import { isSceneRefractionMode, WaterSurfacePass } from './WaterSurfacePass.js';
+import {
+  isPlanarReflectionMode,
+  WaterPlanarReflectionPass,
+} from './WaterPlanarReflectionPass.js';
 
 // ============================================================================
 // WaterSystem — central controller for the scalable water pipeline.
@@ -32,6 +36,7 @@ export class WaterSystem {
     this._waterCompileGen = 0;
     this._waterCompilePending = false;
     this._surfacePass = new WaterSurfacePass();
+    this._planarReflectionPass = new WaterPlanarReflectionPass();
 
     // owned realistic materials (legacy materials stay on engine)
     this._realisticStudio = null;
@@ -199,6 +204,36 @@ export class WaterSystem {
     return this._surfacePass.diagnostics();
   }
 
+  /**
+   * Capture the mirrored above-water scene for Cinematic mode. Infinite World
+   * never reaches this path while its automatic quality safeguard is enabled.
+   */
+  capturePlanarReflection(renderer, scene, camera, sceneSize) {
+    const eng = this.engine;
+    const materials = [
+      this._realisticStudio,
+      this._realisticInfinite,
+    ].filter(Boolean);
+    return this._planarReflectionPass.capture(renderer, scene, camera, {
+      params: eng.params,
+      mode: this._effectiveMode,
+      worldMode: eng.worldMode,
+      sceneSize,
+      hiddenObjects: [
+        eng.water,
+        eng.infiniteWorld?.waterPlane,
+        eng.planetWater,
+        this._boundsHelper,
+      ],
+      materials,
+      enabled: !this._fpsDowngraded,
+    });
+  }
+
+  getPlanarReflectionDiagnostics() {
+    return this._planarReflectionPass.diagnostics();
+  }
+
   onStackRebuilt(stackGLSL, octaves) {
     const eng = this.engine;
     if (this._realisticInfinite) {
@@ -287,6 +322,7 @@ export class WaterSystem {
     this._waterCompileGen++;
     this._waterCompilePending = false;
     this._surfacePass.dispose();
+    this._planarReflectionPass.dispose();
     this._disposeRealistic();
     if (this._boundsHelper) {
       this.engine.scene.remove(this._boundsHelper);
@@ -477,6 +513,12 @@ export class WaterSystem {
         this._realisticInfinite,
       ].filter(Boolean));
     }
+    if (!isPlanarReflectionMode(this._effectiveMode)) {
+      this._planarReflectionPass.deactivate([
+        this._realisticStudio,
+        this._realisticInfinite,
+      ].filter(Boolean));
+    }
 
     // The underwater pass + caustics are driven centrally each frame by
     // Engine._updateUnderwater (UnderwaterController is the single source of
@@ -520,6 +562,9 @@ export class WaterSystem {
     const shouldDowngrade = fps < threshold && isRealisticWaterMode(this._effectiveMode);
     if (shouldDowngrade && !this._fpsDowngraded) {
       this._fpsDowngraded = true;
+      this._planarReflectionPass.deactivate(
+        [this._realisticStudio, this._realisticInfinite].filter(Boolean),
+      );
       // temporary visual downgrade via quality uniforms only
       for (const mat of this._allActiveMaterials()) {
         if (mat.uniforms.uWaterTier) mat.uniforms.uWaterTier.value = 1;
