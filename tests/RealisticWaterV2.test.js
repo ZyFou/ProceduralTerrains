@@ -53,12 +53,48 @@ describe('Realistic Water Surface V2', () => {
     expect(material.fragmentShader).toContain('texture2D(uSceneDepth');
     expect(material.fragmentShader).toContain('float silhouetteReject');
     expect(material.fragmentShader).toContain('refractedVolume');
+    expect(material.fragmentShader).toContain(
+      'float sceneRefractionWeight = sceneCaptureEnabled * visibleFloor',
+    );
+    expect(material.fragmentShader).toContain(
+      'vec3 sceneTransmittance = mix',
+    );
 
     applyRealisticWaterUniforms(material, {
       waterRefractionQuality: 0.8,
     }, 'volumetric');
     expect(material.uniforms.uWaterTier.value).toBe(2);
     expect(material.uniforms.uRefractionQual.value).toBe(0.8);
+    material.dispose();
+  });
+
+  it('varies palette water colors smoothly from local biome climate', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createRealisticWaterMaterial(uniforms);
+
+    expect(uniforms.uTerrainBiomeTex.value).toBeNull();
+    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(material.fragmentShader).toContain(
+      'texture2D(uTerrainBiomeTex, bakedUvAt(xz))',
+    );
+    expect(material.fragmentShader).toContain(
+      'vec3 waterBiomeColorMultiplier(vec2 xz)',
+    );
+    expect(material.fragmentShader).toContain(
+      'shallowColor *= biomeColorMultiplier',
+    );
+
+    applyRealisticWaterUniforms(material, {
+      waterBiomeColorEnabled: true,
+      waterBiomeColorStrength: 0.85,
+    }, 'realistic');
+    expect(material.uniforms.uBiomeColorEnabled.value).toBe(1);
+    expect(material.uniforms.uBiomeColorStrength.value).toBe(0.85);
+
+    applyRealisticWaterUniforms(material, {
+      waterBiomeColorEnabled: false,
+    }, 'volumetric');
+    expect(material.uniforms.uBiomeColorEnabled.value).toBe(0);
     material.dispose();
   });
 

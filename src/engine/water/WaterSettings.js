@@ -100,6 +100,8 @@ export const WATER_DEFAULT_PARAMS = {
   // transmission clarity; Volumetric/Cinematic also use it for distortion.
   waterRefractionStrength: 0.45,
   waterSpecularStrength: 1.0,
+  waterBiomeColorEnabled: true,
+  waterBiomeColorStrength: 0.55,
 
   // depth
   waterDepthColorStrength: 1.0,

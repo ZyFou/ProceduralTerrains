@@ -92,6 +92,26 @@ void main() {
 
 const buildFragment = (stackGLSL, infinite = false) => {
   const { dependencies, terrainHeightFunction } = buildWaterHeightShaderParts(stackGLSL, infinite);
+  const biomeClimateFunction = infinite
+    ? /* glsl */ `
+vec4 waterBiomeClimateAt(vec2 xz) {
+  Climate climate = climateAt(xz * uFrequency + uSeedOffset);
+  return vec4(climate.temp, climate.moist, climate.cont, climate.region);
+}
+
+float waterBiomeClimateAvailable() {
+  return 1.0;
+}
+`
+    : /* glsl */ `
+vec4 waterBiomeClimateAt(vec2 xz) {
+  return texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+}
+
+float waterBiomeClimateAvailable() {
+  return uUseTerrainBiomeTex;
+}
+`;
   return /* glsl */ `
 precision highp float;
 
@@ -114,6 +134,10 @@ uniform float uRoughness;
 uniform float uReflectionQuality;
 uniform float uMicroWaveDetail;
 uniform float uSkyReflectionEnabled;
+uniform sampler2D uTerrainBiomeTex;
+uniform float uUseTerrainBiomeTex;
+uniform float uBiomeColorEnabled;
+uniform float uBiomeColorStrength;
 
 // realistic water controls
 uniform float uWaterTier;          // 1=realistic, 2=volumetric, 3=cinematic
@@ -173,9 +197,58 @@ ${PROCEDURAL_SKY_EVALUATION_GLSL}
 ${WATER_OPTICS_GLSL}
 ${WATER_GEOMETRY_WAVES_GLSL}
 ${WATER_WAVES_GLSL}
+${biomeClimateFunction}
 
 float terrainHeightAt(vec2 xz) {
   return waterTerrainHeightAt(xz);
+}
+
+vec4 waterPaintedBiomeAt(vec2 xz) {
+  if (uPaintEnabled < 0.5 || uManualSurfaceMode > 0.5) return vec4(0.0);
+  vec2 uv = xz / max(uPaintBoardSize, 1.0) + vec2(0.5);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+    return vec4(0.0);
+  }
+  return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+}
+
+// Return a relative tint rather than an absolute color so custom palettes and
+// water presets remain authoritative. The broad climate fields and filtered
+// Studio bake make transitions gradual across biome borders.
+vec3 waterBiomeColorMultiplier(vec2 xz) {
+  vec4 climate = waterBiomeClimateAt(xz);
+  float borderJitter = (climate.a - 0.5) * 0.16;
+  float hot = smoothstep(0.52, 0.76, climate.r + borderJitter);
+  float cold = smoothstep(0.34, 0.12, climate.r + borderJitter);
+  float dry = smoothstep(0.56, 0.28, climate.g - borderJitter);
+  float wet = smoothstep(0.54, 0.80, climate.g + borderJitter);
+  float coastal = smoothstep(0.58, 0.30, climate.b);
+  float inland = smoothstep(0.42, 0.72, climate.b);
+
+  float desert = hot * dry;
+  float tropical = hot * wet;
+  float wetland = wet * coastal * (1.0 - hot * 0.35);
+  float alpine = cold * inland;
+
+  vec4 painted = waterPaintedBiomeAt(xz);
+  desert = max(desert, painted.r);
+  wetland = max(wetland, painted.b);
+  alpine = max(alpine, painted.a);
+  float canyon = painted.g;
+
+  vec3 tint = vec3(1.0);
+  tint = mix(tint, vec3(0.88, 1.07, 1.12), desert * 0.70);
+  tint = mix(tint, vec3(0.76, 1.12, 1.01), tropical * 0.78);
+  tint = mix(tint, vec3(0.72, 0.99, 0.76), wetland * 0.82);
+  tint = mix(tint, vec3(0.82, 0.94, 1.11), alpine * 0.72);
+  tint = mix(tint, vec3(0.94, 1.03, 0.92), canyon * 0.55);
+
+  float paintedAvailable = max(max(painted.r, painted.g), max(painted.b, painted.a));
+  float available = max(waterBiomeClimateAvailable(), paintedAvailable);
+  float strength = uBiomeColorEnabled
+    * uBiomeColorStrength
+    * clamp(available, 0.0, 1.0);
+  return mix(vec3(1.0), tint, clamp(strength, 0.0, 1.5));
 }
 
 // Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
@@ -248,6 +321,9 @@ void main() {
     uColDeep,
     uPaletteSaturation
   ) * uPaletteTint;
+  vec3 biomeColorMultiplier = waterBiomeColorMultiplier(xz);
+  shallowColor *= biomeColorMultiplier;
+  deepColor *= mix(vec3(1.0), biomeColorMultiplier, 0.68);
   vec3 scatteringColor = mix(shallowColor, deepColor, clamp(dGrade, 0.0, 1.0));
 
   // Beer–Lambert absorption. Looking across the surface increases the path
@@ -275,13 +351,22 @@ void main() {
 
   // Screen-space refraction for Volumetric/Cinematic modes. The water-free
   // capture is decoded back to linear space before optical composition.
-  float sceneRefractionWeight = uSceneRefractionEnabled
+  float sceneCaptureEnabled = uSceneRefractionEnabled
     * step(1.5, uWaterTier);
+  // Once the floor is no longer visible, refraction should not replace the
+  // palette-defined water body. This keeps Medium and High optically matched
+  // while retaining true refraction in shallow and medium-depth water.
+  float visibleFloor = 1.0 - smoothstep(
+    max(uShallowDist * 1.15, 2.0),
+    max(uDeepDist * 0.82, uShallowDist * 1.5),
+    visualDepth
+  );
+  float sceneRefractionWeight = sceneCaptureEnabled * visibleFloor;
   vec2 screenUv = vClipPosition.xy / max(vClipPosition.w, 0.0001);
   screenUv = screenUv * 0.5 + 0.5;
   vec2 refractedUv = screenUv;
   vec3 refractedSceneLinear = vec3(0.0);
-  if (sceneRefractionWeight > 0.5) {
+  if (sceneCaptureEnabled > 0.5) {
     float refractionDetail = clamp(uRefractionQual, 0.0, 1.5) / 1.5;
     float distortionScale = mix(0.018, 0.065, refractionDetail)
       * uRefractionStrength
@@ -445,7 +530,19 @@ void main() {
   vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
   float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
   float alpha = 1.0 - (1.0 - volumeAlpha) * (1.0 - reflectionAlpha);
-  vec3 refractedVolume = refractedSceneLinear * transmittance
+  // Preserve only a restrained amount of wavelength separation in the scene
+  // sample. Full RGB transmission made the High tier turn electric blue while
+  // the otherwise identical Medium tier remained teal.
+  float neutralTransmission = dot(
+    transmittance,
+    vec3(0.2126, 0.7152, 0.0722)
+  );
+  vec3 sceneTransmittance = mix(
+    vec3(neutralTransmission),
+    transmittance,
+    0.30
+  );
+  vec3 refractedVolume = refractedSceneLinear * sceneTransmittance
     + scatteringColor
       * (vec3(1.0) - transmittance)
       * (0.62 + 0.38 * diff);
@@ -541,7 +638,7 @@ void main() {
 
   vec3 refractionTerm = mix(
     transmittance,
-    refractedSceneLinear * transmittance,
+    refractedSceneLinear * sceneTransmittance,
     sceneRefractionWeight
   ) * (1.0 - fres);
 
@@ -642,6 +739,8 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uReflectionQuality: { value: 1.0 },
     uMicroWaveDetail: { value: 1.0 },
     uSkyReflectionEnabled: { value: 1.0 },
+    uBiomeColorEnabled: { value: 1.0 },
+    uBiomeColorStrength: { value: 0.55 },
     uWaterAnim: { value: 1.0 },
     uWaterFadeStart: { value: 99999.0 },
     uWaterFadeEnd: { value: 100000.0 },
@@ -754,6 +853,10 @@ export function applyRealisticWaterUniforms(mat, params, mode) {
   u.uReflectionQuality.value = params.waterReflectionQuality ?? 1;
   u.uMicroWaveDetail.value = params.waterNormalResolution ?? 1;
   u.uSkyReflectionEnabled.value = params.skyboxEnabled !== false ? 1 : 0;
+  u.uBiomeColorEnabled.value =
+    params.waterBiomeColorEnabled !== false ? 1 : 0;
+  u.uBiomeColorStrength.value =
+    params.waterBiomeColorStrength ?? 0.55;
   u.uFresnelStrength.value = params.waterFresnelStrength ?? 1;
   u.uRefractionStrength.value = params.waterRefractionStrength ?? 0.45;
   u.uSpecularStrength.value = params.waterSpecularStrength ?? 1;

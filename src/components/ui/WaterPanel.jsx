@@ -369,6 +369,32 @@ export default function WaterPanelInner({
           settingId="water.section.waterColors"
           forceOpen={forceSection('water.section.waterColors', 'Water Colors', ['planet.water'])}
         >
+          {selectedRealistic && (
+            <>
+              <ToggleRow
+                label="Biome Color Variation"
+                value={val(params, 'waterBiomeColorEnabled')}
+                onChange={(v) => onParam('waterBiomeColorEnabled', v)}
+                settingId="water.waterBiomeColorEnabled"
+                info="Smoothly adapts water tint to the local procedural biome while preserving the selected base colors."
+              />
+              {val(params, 'waterBiomeColorEnabled') && (
+                <SliderCtl
+                  def={{
+                    key: 'waterBiomeColorStrength',
+                    label: 'Biome Color Strength',
+                    min: 0,
+                    max: 1.5,
+                    step: 0.05,
+                    digits: 2,
+                  }}
+                  value={val(params, 'waterBiomeColorStrength')}
+                  onChange={(v) => onParam('waterBiomeColorStrength', v)}
+                  settingId="water.waterBiomeColorStrength"
+                />
+              )}
+            </>
+          )}
           {WATER_COLORS.map(({ key, label, icon, info }) => (
             <ColorField
               key={key}

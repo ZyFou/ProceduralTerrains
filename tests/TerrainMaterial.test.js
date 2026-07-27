@@ -75,6 +75,13 @@ describe('shared Tile and Infinite terrain program', () => {
     );
   });
 
+  it('shares an optional baked climate texture with realistic Studio water', () => {
+    const uniforms = createTerrainUniforms();
+
+    expect(uniforms.uTerrainBiomeTex.value).toBeNull();
+    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+  });
+
   it('exposes manual surface weight maps and blends painted material roles', () => {
     const uniforms = createTerrainUniforms();
     const tile = createTerrainMaterial(uniforms, 5);

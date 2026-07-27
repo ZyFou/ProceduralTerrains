@@ -4979,6 +4979,8 @@ export class Engine {
     this.profiler.setMetric('lastBakeMs', performance.now() - _t0);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
+    this.uniforms.uTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
+    this.uniforms.uUseTerrainBiomeTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
     this._bakedStudioLayout = layoutKey;
   }

@@ -934,6 +934,10 @@ export function createTerrainUniforms() {
     // terrain on the procedural path.
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
+    // Low-resolution procedural climate bake used by Studio water tinting.
+    // RGBA = temperature, moisture, continentalness, region jitter.
+    uTerrainBiomeTex:     { value: null },
+    uUseTerrainBiomeTex:  { value: 0.0 },
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
     uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
 

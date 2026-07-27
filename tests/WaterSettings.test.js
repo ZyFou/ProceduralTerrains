@@ -77,6 +77,8 @@ describe('water settings compatibility and safeguards', () => {
       waterShowPerfCost: false,
       waterUnderwaterCausticMinDepth: 1,
       waterUnderwaterCausticMinDepthFalloff: 1,
+      waterBiomeColorEnabled: true,
+      waterBiomeColorStrength: 0.55,
     });
     expect(WATER_DEFAULT_PARAMS.waterRenderScale).toBeGreaterThan(0);
     expect([1, 2, 4]).toContain(WATER_DEFAULT_PARAMS.waterUpdateFrequency);
