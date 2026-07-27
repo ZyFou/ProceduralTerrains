@@ -1376,6 +1376,9 @@ export default function App() {
 
       case 'lighting.sunAzimuth': return `${Math.round(params.sunAzimuth ?? 0)}°`;
       case 'lighting.sunElevation': return `${Math.round(params.sunElevation ?? 0)}°`;
+      case 'lighting.cloudShadowsEnabled': return yesNo(!!params.cloudShadowsEnabled);
+      case 'lighting.cloudShadowOpacity': return num(params.cloudShadowOpacity ?? 0.45, 2);
+      case 'lighting.godRays': return num(params.visualsSunRaysStrength ?? 0.22, 2);
       case 'lighting.sunColor': return hex(paramsStyle.sunColor);
       case 'lighting.sunIntensity': return num(paramsStyle.sunIntensity ?? 1.25, 2);
       case 'lighting.fogDensity': return num(params.fogDensity, 2);

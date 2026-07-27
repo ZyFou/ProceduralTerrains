@@ -141,19 +141,19 @@ const SETTINGS_INDEX = [
   { panelId: 'skybox', settingId: 'skybox.skyboxStars', label: 'Night Stars', keywords: 'sky stars night' },
   { panelId: 'skybox', settingId: 'skybox.skyboxDayNightCycle', label: 'Day/Night Cycle', keywords: 'sky day night cycle animate time sun' },
   { panelId: 'skybox', settingId: 'skybox.skyboxCycleSpeed', label: 'Cycle Speed', keywords: 'sky day night cycle speed animation time sun' },
-  { panelId: 'lighting', settingId: 'lighting.sunAzimuth', label: 'Sun Azimuth', keywords: 'sun lighting direction' },
-  { panelId: 'lighting', settingId: 'lighting.sunElevation', label: 'Sun Elevation', keywords: 'sun lighting direction' },
   { panelId: 'lighting', settingId: 'lighting.sunColor', label: 'Sun Color', keywords: 'sun lighting color' },
   { panelId: 'lighting', settingId: 'lighting.sunIntensity', label: 'Sun Intensity', keywords: 'sun lighting brightness' },
   { panelId: 'lighting', settingId: 'lighting.fogDensity', label: 'Fog Density', keywords: 'fog atmosphere density' },
   { panelId: 'lighting', settingId: 'lighting.skyAmbient', label: 'Sky Ambient', keywords: 'ambient sky bounce lighting' },
   { panelId: 'lighting', settingId: 'lighting.groundBounce', label: 'Ground Bounce', keywords: 'bounce lighting shadow' },
+  { panelId: 'lighting', settingId: 'lighting.cloudShadowsEnabled', label: 'Cloud Shadows', keywords: 'cloud real time terrain cast projected shadow lighting' },
+  { panelId: 'lighting', settingId: 'lighting.cloudShadowOpacity', label: 'Cloud Shadow Strength', keywords: 'cloud terrain shadow darkness opacity lighting' },
+  { panelId: 'lighting', settingId: 'lighting.godRays', label: 'God Rays', keywords: 'sun rays light shafts atmosphere clouds lighting' },
 
   // Visuals
   { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsPostEnabled', label: 'Post Processing', keywords: 'visuals post processing effects bloom vignette exposure contrast saturation' },
   { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsExposure', label: 'Exposure', keywords: 'visuals post exposure brightness hdr' },
   { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsBloomStrength', label: 'Bloom Strength', keywords: 'visuals bloom glow post bright highlights' },
-  { panelId: 'visuals', tabId: 'post', settingId: 'visuals.visualsSunRaysStrength', label: 'Sun Rays', keywords: 'visuals sun rays god rays shafts post' },
   { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsSkyIntensity', label: 'HDR Sky Intensity', keywords: 'visuals hdri hdr sky environment intensity' },
   { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsSunGlow', label: 'Sun Glow', keywords: 'visuals sky sun glow hdr' },
   { panelId: 'visuals', tabId: 'sky', settingId: 'visuals.visualsAtmosphereTint', label: 'Atmosphere Tint', keywords: 'visuals sky atmosphere tint hdr color' },
@@ -225,6 +225,7 @@ const SECTION_INDEX = [
   // Lighting
   { panelId: 'lighting', sectionLabel: 'Sun', settingId: 'lighting.section.sun', label: 'Sun', keywords: 'sun lighting azimuth elevation color intensity', isSection: true },
   { panelId: 'lighting', sectionLabel: 'Atmosphere', settingId: 'lighting.section.atmosphere', label: 'Atmosphere', keywords: 'atmosphere fog ambient bounce lighting', isSection: true },
+  { panelId: 'lighting', sectionLabel: 'Clouds & Rays', settingId: 'lighting.section.clouds', label: 'Clouds & Rays', keywords: 'cloud shadows god rays sun shafts lighting', isSection: true },
 
   // Skybox
   { panelId: 'skybox', sectionLabel: 'Time of Day', settingId: 'skybox.section.time', label: 'Time of Day', keywords: 'sky time day night sun', isSection: true },

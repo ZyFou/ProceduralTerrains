@@ -17,7 +17,6 @@ const POST_SLIDERS = [
   slider('visualsVignette', 'Vignette', 0, 0.65, 0.01, { digits: 2 }),
   slider('visualsBloomStrength', 'Bloom Strength', 0, 0.9, 0.02, { digits: 2 }),
   slider('visualsBloomThreshold', 'Bloom Threshold', 0.35, 1.2, 0.02, { digits: 2 }),
-  slider('visualsSunRaysStrength', 'Sun Rays', 0, 0.8, 0.02, { digits: 2 }),
 ];
 
 const SKY_SLIDERS = [

@@ -2,40 +2,8 @@ import React, { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
-import { SliderCtl, ColorInput } from '../controls.jsx';
+import { SliderCtl, ToggleRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
-
-const SUN_SLIDERS = [
-  {
-    key: 'sunAzimuth',
-    label: 'Sun Azimuth',
-    min: 0,
-    max: 360,
-    step: 1,
-    unit: '°',
-    info: 'Angle of the sun around the horizon (0-360°)',
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M8 2v6l3 3" stroke="currentColor" strokeWidth="1.2" />
-      </svg>
-    )
-  },
-  {
-    key: 'sunElevation',
-    label: 'Sun Elevation',
-    min: 8,
-    max: 85,
-    step: 1,
-    unit: '°',
-    info: 'Angle of the sun above the horizon (8-85°)',
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none">
-        <path d="M2 13h12M8 13V3M5 6l3-3 3 3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-      </svg>
-    )
-  },
-];
 
 const FOG_SLIDER = {
   key: 'fogDensity',
@@ -66,6 +34,26 @@ const SUN_INTENSITY = {
       <path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   )
+};
+
+const CLOUD_SHADOW_OPACITY = {
+  key: 'cloudShadowOpacity',
+  label: 'Shadow Strength',
+  min: 0,
+  max: 0.85,
+  step: 0.01,
+  digits: 2,
+  info: 'Darkness of the soft real-time shadows projected by volumetric clouds onto the terrain.',
+};
+
+const GOD_RAYS = {
+  key: 'visualsSunRaysStrength',
+  label: 'God Rays',
+  min: 0,
+  max: 0.8,
+  step: 0.02,
+  digits: 2,
+  info: 'Screen-space atmospheric light shafts aligned with the active skybox sun.',
 };
 
 const ATMOSPHERE_COLORS = [
@@ -107,15 +95,6 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         settingId="lighting.section.sun"
         forceOpen={forceSection('lighting.section.sun', 'Sun', ['lighting.sun'])}
       >
-        {SUN_SLIDERS.map((def) => (
-          <SliderCtl
-            key={def.key}
-            def={def}
-            value={params[def.key]}
-            onChange={(v) => onParam(def.key, v)}
-            settingId={`lighting.${def.key}`}
-          />
-        ))}
         <div className="color-field" data-setting-id="lighting.sunColor">
           <div className="label-with-icon" data-tooltip="Color tint of the direct sunlight">
             <span className="setting-icon">
@@ -141,6 +120,40 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
           value={style.sunIntensity ?? 1.25}
           onChange={(v) => onTuning('sunIntensity', v)}
           settingId="lighting.sunIntensity"
+        />
+      </ControlSection>
+
+      <ControlSection
+        id="inspector-environment-cloud-light"
+        title="Clouds & Rays"
+        defaultOpen={false}
+        settingId="lighting.section.clouds"
+        forceOpen={forceSection(
+          'lighting.section.clouds',
+          'Clouds & Rays',
+          ['lighting.cloudShadows', 'lighting.cloudShadowOpacity', 'lighting.godRays']
+        )}
+      >
+        <ToggleRow
+          label="Cloud Shadows"
+          value={!!params.cloudShadowsEnabled}
+          onChange={(v) => onParam('cloudShadowsEnabled', v)}
+          info="Project the animated cloud field onto the terrain in real time. Tile mode only."
+          settingId="lighting.cloudShadowsEnabled"
+        />
+        {params.cloudShadowsEnabled && (
+          <SliderCtl
+            def={CLOUD_SHADOW_OPACITY}
+            value={params.cloudShadowOpacity ?? 0.45}
+            onChange={(v) => onParam('cloudShadowOpacity', v)}
+            settingId="lighting.cloudShadowOpacity"
+          />
+        )}
+        <SliderCtl
+          def={GOD_RAYS}
+          value={params.visualsSunRaysStrength ?? 0.22}
+          onChange={(v) => onParam('visualsSunRaysStrength', v)}
+          settingId="lighting.godRays"
         />
       </ControlSection>
 

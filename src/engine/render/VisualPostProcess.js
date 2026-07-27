@@ -25,6 +25,7 @@ uniform float uBloomThreshold;
 uniform float uSunRaysStrength;
 uniform vec2 uSunScreen;
 uniform float uSunVisible;
+uniform vec3 uSunRaysColor;
 uniform float uTime;
 
 varying vec2 vUv;
@@ -71,7 +72,7 @@ void main() {
       decay *= 0.88;
     }
     float streak = 0.65 + 0.35 * hash21(floor(vec2(atan(dir.y, dir.x) * 20.0, dist * 18.0 - uTime)));
-    col += vec3(1.0, 0.92, 0.72) * shaft * streak * smoothstep(1.15, 0.0, dist) * uSunRaysStrength * 0.035;
+    col += uSunRaysColor * shaft * streak * smoothstep(1.15, 0.0, dist) * uSunRaysStrength * 0.035;
   }
 
   col *= max(uExposure, 0.0);
@@ -245,6 +246,7 @@ export class VisualPostProcess {
         uSunRaysStrength: { value: 0 },
         uSunScreen: { value: new THREE.Vector2(0.5, 0.8) },
         uSunVisible: { value: 0 },
+        uSunRaysColor: { value: new THREE.Color(1.0, 0.92, 0.72) },
         uTime: { value: 0 },
       },
       depthTest: false,
@@ -308,6 +310,7 @@ export class VisualPostProcess {
     renderScale = 1,
     time = 0,
     sunScreen = null,
+    sunColor = null,
     requireSceneDepth = false,
   } = {}) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -341,11 +344,11 @@ export class VisualPostProcess {
     if (plan.lookEnabled && plan.needsFinalPass) {
       this._lookRT = this._ensureTarget(this._lookRT, plan.sceneWidth, plan.sceneHeight, false);
     }
-    this.update(params || {}, time, sunScreen);
+    this.update(params || {}, time, sunScreen, sunColor);
     return plan;
   }
 
-  update(params, time, sunScreen) {
+  update(params, time, sunScreen, sunColor = null) {
     const u = this._lookMaterial.uniforms;
     u.uExposure.value = params.visualsExposure ?? 1;
     u.uContrast.value = params.visualsContrast ?? 1;
@@ -359,6 +362,7 @@ export class VisualPostProcess {
       u.uSunScreen.value.set(sunScreen.x, sunScreen.y);
       u.uSunVisible.value = sunScreen.visible ? 1 : 0;
     }
+    if (sunColor) u.uSunRaysColor.value.copy(sunColor);
 
     const c = this._cameraMaterial.uniforms;
     c.uDithering.value = params.visualsDitheringEnabled ? 1 : 0;

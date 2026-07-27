@@ -45,6 +45,21 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('INFINITE_MODE');
   });
 
+  it('projects the live cloud mask into both Tile terrain shader variants', () => {
+    const uniforms = createTerrainUniforms();
+    const full = createTerrainMaterial(uniforms, 5);
+    const boot = createBootTerrainMaterial(uniforms, 5);
+    materials.push(full, boot);
+
+    expect(uniforms.uTerrainCloudShadowEnabled.value).toBe(0);
+    expect(uniforms.uTerrainCloudShadowStrength.value).toBeCloseTo(0.45);
+    expect(uniforms.uTerrainCloudShadowTex).toBeUndefined();
+    expect(full.fragmentShader).toContain('float terrainCloudShadow(vec3 worldPos)');
+    expect(full.fragmentShader).toContain('float terrainCloudFbm(vec3 p)');
+    expect(full.fragmentShader).toContain('float cloudShadow = terrainCloudShadow(vWorldPos)');
+    expect(boot.fragmentShader).toContain('diff *= 1.0 - terrainCloudShadow(vWorldPos)');
+  });
+
   it('exposes manual surface weight maps and blends painted material roles', () => {
     const uniforms = createTerrainUniforms();
     const tile = createTerrainMaterial(uniforms, 5);

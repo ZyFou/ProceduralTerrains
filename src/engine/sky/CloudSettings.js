@@ -58,6 +58,8 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudSunResponse: 1.0,
   cloudAmbientResponse: 1.0,
   cloudSilverLining: 0.25,
+  cloudShadowsEnabled: false,
+  cloudShadowOpacity: 0.45,
   cloudColor: [1.0, 1.0, 1.0],
   cloudShadowColor: [0.42, 0.47, 0.60],
 };

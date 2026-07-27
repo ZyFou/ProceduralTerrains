@@ -2003,7 +2003,7 @@ export class Engine {
   }
 
   _applyStudioSunFromStyle() {
-    if (this.worldMode === 'infinite') return;
+    if (this.worldMode === 'infinite' || this._skyActive()) return;
     const style = this.planetStyle.getStyle();
     const sunI = style.sunIntensity ?? 1.25;
     if (style.sunColor) {
@@ -2944,6 +2944,7 @@ export class Engine {
       renderScale: this._effectiveRenderScale(),
       time: this.uniforms.uTime.value,
       sunScreen: this._underwaterSunScreen(),
+      sunColor: this.sunLight?.color,
       requireSceneDepth,
     });
   }
@@ -3707,6 +3708,7 @@ export class Engine {
 
     if (this.studioCloud) {
       this.studioCloud.update(0.016, this.camera.position, this.uniforms.uSunDir.value);
+      this._syncTerrainCloudShadows();
     }
 
     const renderStats = this._renderCameraCapture();
@@ -5622,7 +5624,67 @@ export class Engine {
     this.studioCloud?.setLighting(state);
     this.planetCloudLayer?.setLighting(state);
     this.planetCloudChunks?.setLighting(state);
+    this._syncTerrainLighting(state, tod);
+    this._syncTerrainCloudShadows();
     this._needsRender = true;
+  }
+
+  _syncTerrainLighting(state = null, tod = null) {
+    if (!this._skyActive() || !this.uniforms) return;
+    const lighting = state || this._resolveCloudLighting(tod);
+    const evaluated = tod || evaluateTimeOfDay(this.timeOfDay);
+    const u = this.uniforms;
+
+    // Terrain shaders keep direct color/intensity separate, while the resolved
+    // cloud state already contains physical ambient radiance. Convert the
+    // latter back through the terrain shader's historical 0.5 / 0.25 scales.
+    u.uTerrainSunCol.value.set(
+      evaluated.sunColor[0],
+      evaluated.sunColor[1],
+      evaluated.sunColor[2]
+    );
+    u.uTerrainSunIntensity.value = Math.max(0, evaluated.lightIntensity);
+
+    const top = lighting.ambientTopColor;
+    const bottom = lighting.ambientBottomColor;
+    u.uTerrainSkyAmb.value.set(
+      (top[0] * 0.7 + bottom[0] * 0.3) * 2.0,
+      (top[1] * 0.7 + bottom[1] * 0.3) * 2.0,
+      (top[2] * 0.7 + bottom[2] * 0.3) * 2.0
+    );
+    u.uTerrainBounce.value.set(
+      lighting.groundBounceColor[0] * 4.0,
+      lighting.groundBounceColor[1] * 4.0,
+      lighting.groundBounceColor[2] * 4.0
+    );
+  }
+
+  _syncTerrainCloudShadows() {
+    const u = this.uniforms;
+    if (!u?.uTerrainCloudShadowEnabled) return;
+    const state = this.studioCloud?.getTerrainShadowState?.();
+    const enabled = this.worldMode === 'studio'
+      && this.params.cloudsEnabled
+      && this.params.cloudShadowsEnabled
+      && !!state;
+
+    u.uTerrainCloudShadowEnabled.value = enabled ? 1.0 : 0.0;
+    u.uTerrainCloudShadowStrength.value = Math.min(
+      0.85,
+      Math.max(0, this.params.cloudShadowOpacity ?? 0.45)
+    );
+    if (state) {
+      u.uTerrainCloudShadowCenter.value.copy(state.center);
+      u.uTerrainCloudShadowExtent.value = state.extent;
+      u.uTerrainCloudShadowAltitude.value = state.altitude;
+      u.uTerrainCloudShadowScale.value = state.scale;
+      u.uTerrainCloudShadowCoverage.value = state.coverage;
+      u.uTerrainCloudShadowSoftness.value = state.softness;
+      u.uTerrainCloudShadowWind.value.copy(state.wind);
+      u.uTerrainCloudShadowTime.value = state.time;
+      u.uTerrainCloudShadowRotation.value = state.rotation;
+      u.uTerrainCloudShadowEvolve.value = state.evolve;
+    }
   }
 
   /**
@@ -6687,6 +6749,7 @@ export class Engine {
       if (this.studioCloud) {
         this.profiler.begin('clouds');
         this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+        this._syncTerrainCloudShadows();
         this.profiler.end('clouds');
       }
 

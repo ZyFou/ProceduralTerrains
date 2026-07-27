@@ -145,12 +145,12 @@ vec3 terrainBiomeDebugColor(BiomeWeights bw, float h01) {
 
 vec3 terrainLighting(vec3 albedo, vec3 n, vec3 sunDir, float ao,
   float snow, float sandBand, float hRel, float flatness, float bwWetland,
-  vec3 viewDir) {
+  vec3 viewDir, float cloudShadow) {
   float diff = max(dot(n, sunDir), 0.0);
   vec3 sunCol = uTerrainSunCol * uTerrainSunIntensity;
   vec3 skyAmb = uTerrainSkyAmb * 0.50 * (n.y * 0.5 + 0.5);
   vec3 bounce = uTerrainBounce * 0.25 * (1.0 - n.y * 0.5);
-  vec3 col = albedo * (sunCol * diff + skyAmb + bounce) * ao;
+  vec3 col = albedo * (sunCol * diff * (1.0 - clamp(cloudShadow, 0.0, 1.0)) + skyAmb + bounce) * ao;
 
   float spec = pow(max(dot(reflect(-sunDir, n), viewDir), 0.0), 32.0);
   float shoreSheen = 1.0 - smoothstep(0.0, max(sandBand, 0.5), abs(hRel));

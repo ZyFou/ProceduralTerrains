@@ -363,6 +363,23 @@ export class CloudSlabLayer {
     u.uUseOccupancy.value = this._occupancyUseful ? 1.0 : 0.0;
   }
 
+  getTerrainShadowState() {
+    const u = this.material?.uniforms;
+    if (!u) return null;
+    return {
+      center: u.uOccCenter.value,
+      extent: u.uOccExtent.value,
+      altitude: (u.uCloudBottom.value + u.uCloudTop.value) * 0.5,
+      scale: u.uCloudScale.value,
+      coverage: u.uCloudCoverage.value,
+      softness: u.uCloudSoftness.value,
+      wind: u.uCloudWind.value,
+      time: u.uCloudTime.value,
+      rotation: u.uCloudRotation.value,
+      evolve: u.uCloudEvolve.value,
+    };
+  }
+
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {
     this._steps = steps;
     this._lightSteps = lightSteps;
