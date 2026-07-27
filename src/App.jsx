@@ -1399,7 +1399,7 @@ export default function App() {
       case 'clouds.cloudWindDir': return `${Math.round(params.cloudWindDir ?? 0)}°`;
       case 'clouds.cloudWindSpeed': return num(params.cloudWindSpeed ?? 0, 2);
       case 'clouds.cloudRotationSpeed': return num(params.cloudRotationSpeed ?? 0, 2);
-      case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 0, 2);
+      case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 3, 2);
       case 'clouds.cloudShadowStrength': return num(params.cloudShadowStrength ?? 0, 2);
       case 'clouds.cloudScatteringStrength': return num(params.cloudScatteringStrength ?? 0, 2);
       case 'clouds.cloudAtmosphereInfluence': return num(params.cloudAtmosphereInfluence ?? 1, 2);

@@ -51,7 +51,7 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudEvolveSpeed: 1.0,      // how fast clouds form / morph / dissipate in place
 
   // lighting
-  cloudLightAbsorption: 1.1,  // sun light extinction through the cloud
+  cloudLightAbsorption: 3.0,  // sun light extinction through the cloud
   cloudShadowStrength: 0.60,  // how dark self-shadowed regions get
   cloudScatteringStrength: 1.0,
   cloudAtmosphereInfluence: 1.0,

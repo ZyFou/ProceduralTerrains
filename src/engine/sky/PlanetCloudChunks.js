@@ -252,7 +252,7 @@ export class PlanetCloudChunks {
 
     const thickness = outer - inner;
     u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0 / Math.max(thickness, 1);
-    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
+    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 3.0;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;

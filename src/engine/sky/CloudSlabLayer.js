@@ -185,7 +185,7 @@ export class CloudSlabLayer {
     u.uCloudSoftness.value = Math.max(0.01, params.cloudSoftness ?? 0.16);
 
     u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0 / thickness;
-    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
+    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 3.0;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
     u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;
