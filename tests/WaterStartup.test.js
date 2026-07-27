@@ -126,7 +126,7 @@ describe('water startup shaders', () => {
     engine._warmGeo.dispose();
   });
 
-  it('renders and releases boot only after target terrain and water are ready', async () => {
+  it('keeps boot covered after the lightweight frame and starts quality upgrades', async () => {
     const engine = Object.create(Engine.prototype);
     const sceneTarget = {};
     const order = [];
@@ -145,19 +145,13 @@ describe('water startup shaders', () => {
         onBootComplete: vi.fn(),
       },
       _prepareCameraPipeline: vi.fn(() => ({ usesSceneTarget: true })),
-      _upgradeMinimalTerrain: vi.fn(async () => ({ ready: true, swapped: true })),
       _ensureTerrainHeightTex: vi.fn(),
       _withBootDeferredObjectsDetached: vi.fn(async (task) => task()),
       _compileSceneStaggered: vi.fn(async () => ({ ready: true })),
-      _compileMaterialVariants: vi.fn(async () => ({ ready: true })),
       _renderInitialStudioFrame: vi.fn(() => {
         order.push('render');
-        expect(engine._waterDeferred).toBe(false);
+        expect(engine._waterDeferred).toBe(true);
         return 1;
-      }),
-      _warmDeferredWater: vi.fn(async () => {
-        order.push('water');
-        engine._waterDeferred = false;
       }),
       _scheduleErosionGPUWarmImport: vi.fn(),
       _schedulePostFirstPaintWarmups: vi.fn(),
@@ -165,15 +159,64 @@ describe('water startup shaders', () => {
 
     await engine._warmupInitialShaders();
 
-    expect(engine._upgradeMinimalTerrain).toHaveBeenCalledWith(sceneTarget);
     expect(engine._compileSceneStaggered).toHaveBeenCalledWith(
       sceneTarget,
-      expect.objectContaining({ skipWaterMaterial: true }),
+      expect.objectContaining({ skipMinimalTerrain: false, skipWaterMaterial: true }),
     );
-    expect(engine._warmDeferredWater).toHaveBeenCalledWith(sceneTarget);
-    expect(order).toEqual(['water', 'render']);
+    expect(order).toEqual(['render']);
+    expect(engine._bootPending).toBe(true);
+    expect(engine.cb.onStatus).toHaveBeenLastCalledWith('Loading terrain detail…', true);
+    expect(engine.cb.onBootComplete).not.toHaveBeenCalled();
+    expect(engine._schedulePostFirstPaintWarmups).toHaveBeenCalledWith(850, sceneTarget);
+  });
+
+  it('releases boot only after terrain, water and board are ready', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _bootPending: true,
+      _disposed: false,
+      _contextLost: false,
+      _bootStart: performance.now(),
+      _tierNotice: null,
+      _waterDeferred: false,
+      projectMode: 'procedural',
+      params: { waterEnabled: true },
+      terrainMaterial: { userData: { minimalFragment: false } },
+      waterMaterial: {},
+      board: { isBuilding: false },
+      cb: {
+        onStatus: vi.fn(),
+        onBootComplete: vi.fn(),
+      },
+      _renderInitialStudioFrame: vi.fn(() => 2),
+      _releaseBootFallback: Engine.prototype._releaseBootFallback,
+      _scheduleErosionGPUWarmImport: vi.fn(),
+    });
+
+    expect(engine._completeBootIfQualityReady()).toBe(true);
     expect(engine._bootPending).toBe(false);
+    expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
-    expect(engine._schedulePostFirstPaintWarmups).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes boot fallback release idempotent', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _bootPending: true,
+      _disposed: false,
+      _contextLost: false,
+      _tierNotice: null,
+      cb: {
+        onStatus: vi.fn(),
+        onBootComplete: vi.fn(),
+      },
+      _renderInitialStudioFrame: vi.fn(),
+      _scheduleErosionGPUWarmImport: vi.fn(),
+    });
+
+    expect(engine._releaseBootFallback('test')).toBe(true);
+    expect(engine._releaseBootFallback('duplicate')).toBe(false);
+    expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);
+    expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
   });
 });

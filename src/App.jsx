@@ -295,6 +295,17 @@ export default function App() {
     let bootTimer = null;
     let cancelled = false;
 
+    // Install the escape hatch before engine construction. The constructor
+    // begins shader preparation immediately, so the initial proxy await is part
+    // of the window that needs protection.
+    bootTimer = setTimeout(() => {
+      if (bootedRef.current || cancelled) return;
+      engine?._releaseBootFallback?.('15s app watchdog');
+      bootedRef.current = true;
+      loadingRef.current.done('boot');
+      landingRef.current?.setBootReady(true);
+    }, 15000);
+
     const init = async () => {
     try {
       engine = await createEngineProxy({
@@ -414,16 +425,6 @@ export default function App() {
       engine.setLandingShowcase(true);
     }
     if (import.meta.env.DEV) window.terrainStudio = engine;
-    // safety: never leave the boot overlay stuck, but do not reveal the canvas
-    // while the first studio frame is still being compiled/prepared.
-    bootTimer = setTimeout(() => {
-      const e = engineRef.current;
-      if (!bootedRef.current && (!e || e._disposed || (!e._bootPending && !e._compiling))) {
-        bootedRef.current = true;
-        loadingRef.current.done('boot');
-        landingRef.current?.setBootReady(true);
-      }
-    }, 30000);
     };
 
     init();
