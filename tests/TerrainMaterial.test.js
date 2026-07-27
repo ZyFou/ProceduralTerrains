@@ -60,6 +60,21 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(boot.fragmentShader).toContain('diff *= 1.0 - terrainCloudShadow(vWorldPos)');
   });
 
+  it('keeps terrain caustics clear of the water surface with a smooth falloff', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    expect(uniforms.uCausticMinDepth.value).toBe(1);
+    expect(uniforms.uCausticMinDepthFalloff.value).toBe(1);
+    expect(material.fragmentShader).toContain(
+      'uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001)',
+    );
+    expect(material.fragmentShader).toContain(
+      'depthFade = depthFade * depthFade * minDepthMask',
+    );
+  });
+
   it('exposes manual surface weight maps and blends painted material roles', () => {
     const uniforms = createTerrainUniforms();
     const tile = createTerrainMaterial(uniforms, 5);

@@ -26,6 +26,20 @@ function val(params, key) {
   return params[key] ?? WATER_DEFAULT_PARAMS[key];
 }
 
+function fmtWaterCostMs(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)} ms` : 'unavailable';
+}
+
+function fmtWaterResolution(pass) {
+  return pass?.resolution
+    ? `${pass.resolution.width}×${pass.resolution.height}`
+    : 'not allocated';
+}
+
+function fmtWaterMemory(bytes) {
+  return `${((bytes || 0) / 1048576).toFixed(1)} MB`;
+}
+
 const SEA_LEVEL_DEF = TERRAIN_SLIDERS.find((s) => s.key === 'seaLevel');
 
 const MODE_HINTS = {
@@ -33,7 +47,7 @@ const MODE_HINTS = {
   legacy: 'Fast original water shader. Best for performance and Infinite World.',
   realistic: 'RGB absorption, live sky reflection, directional waves, and shoreline foam.',
   volumetric: 'Realistic surface plus half-resolution scene refraction, depth rejection, and higher-tier underwater effects.',
-  cinematic: 'Volumetric water plus planar reflections of terrain, props, clouds, and sky. Best for Tile screenshots.',
+  cinematic: 'Volumetric water plus displaced geometry, sparse crest foam, and planar scene reflections. Best for Tile screenshots.',
 };
 
 const MATERIAL_SLIDERS = [
@@ -86,6 +100,26 @@ const CAUSTIC_SLIDERS = [
   { key: 'waterUnderwaterCaustics', label: 'Caustics Strength', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterUnderwaterCausticScale', label: 'Caustics Scale', min: 0.25, max: 3, step: 0.05, digits: 2 },
   { key: 'waterUnderwaterCausticSpeed', label: 'Caustics Speed', min: 0, max: 3, step: 0.05, digits: 2 },
+  {
+    key: 'waterUnderwaterCausticMinDepth',
+    label: 'Minimum Caustics Depth',
+    min: 0,
+    max: 20,
+    step: 0.25,
+    digits: 2,
+    unit: ' u',
+    info: 'Prevents caustics from appearing where terrain is almost touching the water surface.',
+  },
+  {
+    key: 'waterUnderwaterCausticMinDepthFalloff',
+    label: 'Minimum Depth Falloff',
+    min: 0.1,
+    max: 20,
+    step: 0.25,
+    digits: 2,
+    unit: ' u',
+    info: 'Distance over which caustics fade in after the minimum depth.',
+  },
 ];
 
 const REALISTIC_PERF_SLIDERS = [
@@ -144,6 +178,8 @@ export default function WaterPanelInner({
   onParam,
   worldMode,
   perf,
+  perfStats,
+  gpu,
   onPerfSetting,
   planetStyleProps,
   onResetWaterSettings,
@@ -173,6 +209,7 @@ export default function WaterPanelInner({
   const downgraded = isWaterModeDowngraded(params, worldMode);
   const modeLabel = WATER_MODES.find((m) => m.value === mode)?.label ?? mode;
   const effectiveLabel = WATER_MODES.find((m) => m.value === effectiveMode)?.label ?? effectiveMode;
+  const waterCost = perfStats?.waterCost ?? null;
   const p = perf ?? {};
   const [baselineScene, setBaselineScene] = useState(WATER_BASELINE_SCENES[0].value);
   const [baselineBusy, setBaselineBusy] = useState('');
@@ -629,6 +666,17 @@ export default function WaterPanelInner({
           onChange={(v) => onParam('waterShowPerfCost', v)}
           settingId="water.waterShowPerfCost"
         />
+        {!!val(params, 'waterShowPerfCost') && waterCost && (
+          <div className="section-hint">
+            <strong>Live water cost</strong><br />
+            Surface CPU submission: {fmtWaterCostMs(waterCost.surface?.surfaceSubmitAvgMs)}<br />
+            Surface GPU: individual timing unavailable · whole frame {gpu?.supported ? fmtWaterCostMs(gpu.frameMs) : 'unavailable'}<br />
+            Geometry: {waterCost.surface?.vertices ?? 0} vertices · {waterCost.surface?.triangles ?? 0} triangles<br />
+            Opaque refraction: {fmtWaterCostMs(waterCost.refraction?.captureMs)} · {fmtWaterResolution(waterCost.refraction)}<br />
+            Planar reflection: {fmtWaterCostMs(waterCost.reflection?.captureMs)} · {fmtWaterResolution(waterCost.reflection)}<br />
+            Targets: {fmtWaterMemory(waterCost.renderTargetMemoryBytes)} · {waterCost.additionalSceneRenders ?? 0} extra scene render(s)
+          </div>
+        )}
         {!effectiveRealistic && (
           <p className="section-hint">Shader debug views need an effective Realistic (or higher) mode.</p>
         )}

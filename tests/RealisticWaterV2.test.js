@@ -87,6 +87,42 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
+  it('uses camera-focused Gerstner geometry and anti-aliased persistent whitecaps', () => {
+    const material = createRealisticWaterMaterial(createTerrainUniforms());
+
+    expect(material.vertexShader).toContain('waterConcentratedGridAxis');
+    expect(material.vertexShader).toContain('waterCinematicDisplacement');
+    expect(material.vertexShader).toMatch(
+      /uGeometryDisplacementEnabled\s*\*\s*step\(2\.5,\s*uWaterTier\)/,
+    );
+    expect(material.fragmentShader).toContain('waterCinematicCrest');
+    expect(material.fragmentShader).toContain('float foamPersistence');
+    expect(material.fragmentShader).toContain('fwidth(foamPersistence)');
+    expect(material.fragmentShader).toContain('float breakingFoam');
+
+    applyRealisticWaterUniforms(material, {}, 'cinematic');
+    expect(material.uniforms.uGeometryDisplacementEnabled.value).toBe(1);
+    applyRealisticWaterUniforms(material, {}, 'volumetric');
+    expect(material.uniforms.uGeometryDisplacementEnabled.value).toBe(0);
+    material.dispose();
+  });
+
+  it('fades caustics in after a configurable minimum water depth', () => {
+    const material = createRealisticWaterMaterial(createTerrainUniforms());
+
+    expect(material.fragmentShader).toContain('float minDepthMask = smoothstep');
+    expect(material.fragmentShader).toContain(
+      'uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001)',
+    );
+    applyRealisticWaterUniforms(material, {
+      waterUnderwaterCausticMinDepth: 2.5,
+      waterUnderwaterCausticMinDepthFalloff: 1.75,
+    }, 'cinematic');
+    expect(material.uniforms.uCausticMinDepth.value).toBe(2.5);
+    expect(material.uniforms.uCausticMinDepthFalloff.value).toBe(1.75);
+    material.dispose();
+  });
+
   it('applies roughness and sky-reflection settings without recompiling', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
     const fragmentShader = material.fragmentShader;

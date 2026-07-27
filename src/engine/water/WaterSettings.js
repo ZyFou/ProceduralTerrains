@@ -141,6 +141,10 @@ export const WATER_DEFAULT_PARAMS = {
   waterUnderwaterCausticsEnabled: true,
   waterUnderwaterCausticScale: 1.0,
   waterUnderwaterCausticSpeed: 1.0,
+  // Keep projected caustics away from terrain that nearly intersects the
+  // surface. They fade from zero at 1 unit to full strength at 2 units.
+  waterUnderwaterCausticMinDepth: 1.0,
+  waterUnderwaterCausticMinDepthFalloff: 1.0,
   waterUnderwaterParticles: false,
   waterUnderwaterLightShafts: false,
   waterSurfaceTransition: 0.8,

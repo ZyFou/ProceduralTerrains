@@ -261,6 +261,8 @@ uniform float uCausticScale;     // user scale multiplier
 uniform float uCausticSpeed;     // user speed multiplier
 uniform vec3  uCausticColor;
 uniform float uCausticDepthFade; // depth (world units) over which caustics fade
+uniform float uCausticMinDepth;  // no caustics closer than this to the surface
+uniform float uCausticMinDepthFalloff;
 uniform float uCausticWaterAnim;
 uniform float uCausticAnimSpeed;
 uniform float uCausticWaveSpeed;
@@ -389,9 +391,18 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
   float below = uSeaLevel - hC;          // >0 when terrain is under water
   if (below <= 0.0) return col;
 
+  // Avoid the bright caustic/water overlap on terrain that nearly intersects
+  // the surface, then ease the light back in over a user-controlled band.
+  float minDepthMask = smoothstep(
+    uCausticMinDepth,
+    uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
+    below
+  );
+  if (minDepthMask <= 0.001) return col;
+
   // shallow terrain near the shoreline catches the most light; deep fades out
   float depthFade = 1.0 - clamp(below / max(uCausticDepthFade, 1.0), 0.0, 1.0);
-  depthFade = depthFade * depthFade;     // bias toward shallow water
+  depthFade = depthFade * depthFade * minDepthMask;
   // upward-facing surfaces catch the light; vertical cliffs stay dark
   float upFace = clamp(nGeo.y * 1.1, 0.0, 1.0);
   upFace *= upFace;
@@ -870,6 +881,8 @@ export function createTerrainUniforms() {
     uCausticSpeed:    { value: 1.0 },
     uCausticColor:    { value: new THREE.Vector3(0.85, 0.95, 1.0) },
     uCausticDepthFade:{ value: 70.0 },
+    uCausticMinDepth: { value: 1.0 },
+    uCausticMinDepthFalloff: { value: 1.0 },
     uCausticWaterAnim:     { value: 1.0 },
     uCausticAnimSpeed:     { value: 1.0 },
     uCausticWaveSpeed:     { value: 1.0 },

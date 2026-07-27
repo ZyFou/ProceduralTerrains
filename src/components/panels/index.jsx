@@ -326,6 +326,8 @@ function WaterPanel({ ctx }) {
         onParam={ctx.onParam}
         worldMode={ctx.worldMode}
         perf={ctx.perf}
+        perfStats={ctx.stats}
+        gpu={ctx.gpu}
         onPerfSetting={ctx.onPerfSetting}
         planetStyleProps={ctx.planetStyleProps}
         onResetWaterSettings={() => ctx.onResetPanel?.('water')}

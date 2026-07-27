@@ -10,7 +10,10 @@ import { generateStackGLSL } from '../terrain/noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from '../terrain/noise/NoiseStack.js';
 import { buildWaterHeightShaderParts } from './waterShaderGLSL.js';
 import { WATER_OPTICS_GLSL } from './waterOpticsGLSL.js';
-import { WATER_WAVES_GLSL } from './waterWavesGLSL.js';
+import {
+  WATER_GEOMETRY_WAVES_GLSL,
+  WATER_WAVES_GLSL,
+} from './waterWavesGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -22,10 +25,65 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 // ============================================================================
 
 const VERTEX = /* glsl */ `
+uniform float uTime;
+uniform float uWaterAnim;
+uniform float uWaterTier;
+uniform float uWaveComplexity;
+uniform float uWaveSpeed;
+uniform float uWaveScale;
+uniform float uWaveStrength;
+uniform float uSmallWaveStr;
+uniform float uLargeWaveStr;
+uniform vec2 uWaveDir;
+uniform float uAnimSpeed;
+uniform vec2 uGeometryFocus;
+uniform float uGeometryDisplacementEnabled;
+
 varying vec3 vWorldPos;
 varying vec4 vClipPosition;
+
+${WATER_GEOMETRY_WAVES_GLSL}
+
+float waterConcentratedGridAxis(float coordinate, float focus) {
+  float u = coordinate + 0.5;
+  float densityPower = 1.72;
+  if (u < 0.5) {
+    float sideT = u * 2.0;
+    return focus - (focus + 0.5)
+      * pow(max(1.0 - sideT, 0.0), densityPower);
+  }
+  float sideT = (u - 0.5) * 2.0;
+  return focus + (0.5 - focus)
+    * pow(max(sideT, 0.0), densityPower);
+}
+
 void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
+  float geometryEnabled = uGeometryDisplacementEnabled
+    * step(2.5, uWaterTier);
+  vec3 localPosition = position;
+  if (geometryEnabled > 0.5) {
+    localPosition.x = waterConcentratedGridAxis(
+      position.x,
+      clamp(uGeometryFocus.x, -0.42, 0.42)
+    );
+    localPosition.z = waterConcentratedGridAxis(
+      position.z,
+      clamp(uGeometryFocus.y, -0.42, 0.42)
+    );
+  }
+
+  vec4 wp = modelMatrix * vec4(localPosition, 1.0);
+  if (geometryEnabled > 0.5) {
+    float crest;
+    float t = uTime * uWaterAnim * uAnimSpeed;
+    vec3 displacement = waterCinematicDisplacement(wp.xz, t, crest);
+    float distanceFade = 1.0 - smoothstep(
+      900.0,
+      2200.0,
+      length(cameraPosition.xz - wp.xz)
+    );
+    wp.xyz += displacement * distanceFade;
+  }
   vWorldPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
   vClipPosition = gl_Position;
@@ -86,6 +144,8 @@ uniform float uFoamAnimSpeed;
 uniform float uSlopeFoam;
 uniform float uCliffFoam;
 uniform float uCausticsStr;
+uniform float uCausticMinDepth;
+uniform float uCausticMinDepthFalloff;
 uniform float uRefractionQual;
 uniform float uFoamQual;
 uniform float uCausticsQual;
@@ -99,6 +159,8 @@ uniform sampler2D uPlanarReflection;
 uniform mat4 uPlanarReflectionMatrix;
 uniform vec2 uPlanarReflectionTexelSize;
 uniform float uPlanarReflectionEnabled;
+uniform vec2 uGeometryFocus;
+uniform float uGeometryDisplacementEnabled;
 uniform float uDebugMode;          // see WaterDebugViews / setWaterDebugMode
 uniform float uVisualFoamBreakup;
 uniform float uVisualWetSandRange;
@@ -109,6 +171,7 @@ varying vec4 vClipPosition;
 
 ${PROCEDURAL_SKY_EVALUATION_GLSL}
 ${WATER_OPTICS_GLSL}
+${WATER_GEOMETRY_WAVES_GLSL}
 ${WATER_WAVES_GLSL}
 
 float terrainHeightAt(vec2 xz) {
@@ -146,7 +209,11 @@ void main() {
 #endif
 
   float floorH = terrainHeightAt(xz);
-  float depth = uSeaLevel - floorH;
+  float depth = mix(
+    uSeaLevel,
+    vWorldPos.y,
+    uGeometryDisplacementEnabled * step(2.5, uWaterTier)
+  ) - floorH;
   if (depth <= 0.02) discard;
 
   // Smoothed bathymetry for depth tint — 4 extra samples max (not 20+).
@@ -410,7 +477,65 @@ void main() {
     slopeFoam = smoothstep(0.35, 1.1, slope) * uSlopeFoam * nearShore;
     cliffFoam = smoothstep(0.85, 1.8, slope) * uCliffFoam * nearShore;
   }
-  float foam = clamp((shoreFoam * foamPatch + slopeFoam * 0.2 + cliffFoam * 0.15) * uFoamStrength, 0.0, 1.0);
+  // Cinematic whitecaps follow the same Gerstner phases as vertex movement.
+  // A delayed sample leaves a short advected trail, approximating temporal
+  // foam persistence without another history render target.
+  float crestFoam = 0.0;
+  float breakingFoam = 0.0;
+  if (
+    uWaterTier > 2.5
+    && uGeometryDisplacementEnabled > 0.5
+    && uFoamEnabled > 0.5
+    && uFoamQual > 0.75
+  ) {
+    float crestNow = waterCinematicCrest(xz, t);
+    float crestPrevious = waterCinematicCrest(
+      xz - normalize(uWaveDir) * 1.8,
+      t - 0.42 * uFoamAnimSpeed
+    );
+    float foamPersistence = max(crestNow, crestPrevious * 0.78);
+    float crestAa = max(fwidth(foamPersistence) * 1.35, 0.018);
+    crestFoam = smoothstep(
+      0.86 - crestAa,
+      0.86 + crestAa,
+      foamPersistence
+    );
+    // Break the remaining crests into sparse streaks. Reusing the existing
+    // foam fields avoids a new noise lookup and keeps whitecaps from forming
+    // repeated rows over a large ocean.
+    float crestBreakup = smoothstep(
+      0.42,
+      0.76,
+      foamNoise * 0.62 + foamPatch * 0.38
+    );
+    crestFoam *= crestBreakup;
+    float waveEnergy = smoothstep(
+      0.82,
+      1.72,
+      uWaveStrength * uLargeWaveStr
+    );
+    float crestDistanceFade = 1.0 - smoothstep(520.0, 1750.0, camDist);
+    crestFoam *= waveEnergy * crestDistanceFade;
+
+    float breakingBand = 1.0 - smoothstep(
+      max(uFoamWidth * 0.7, 1.0),
+      max(uShallowDist * 1.65, uFoamWidth * 2.0),
+      visualDepth
+    );
+    float shoreApproach = smoothstep(0.35, 0.82, foamPatch);
+    breakingFoam = crestFoam * breakingBand * shoreApproach;
+  }
+  float foam = clamp(
+    (
+      shoreFoam * foamPatch
+      + slopeFoam * 0.2
+      + cliffFoam * 0.15
+      + crestFoam * 0.13
+      + breakingFoam * 0.48
+    ) * uFoamStrength,
+    0.0,
+    1.0
+  );
   premultipliedColor = mix(premultipliedColor, uColFoam, foam);
   alpha = mix(alpha, 1.0, foam);
 
@@ -423,9 +548,15 @@ void main() {
   // fake caustics in shallow water (smoothed depth, coarse noise)
   if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
     float shallowMask = 1.0 - smoothstep(uShallowDist * 0.5, uDeepDist, visualDepth);
+    float minDepthMask = smoothstep(
+      uCausticMinDepth,
+      uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
+      visualDepth
+    );
     float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
     float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));
-    float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;
+    float caust = pow(max(c1 * c2, 0.0), 2.2)
+      * shallowMask * minDepthMask;
     premultipliedColor += vec3(0.9, 0.95, 1.0)
       * caust * uCausticsStr * uCausticsQual * 0.28 * alpha;
   }
@@ -542,6 +673,8 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSlopeFoam: { value: 0.5 },
     uCliffFoam: { value: 0.65 },
     uCausticsStr: { value: 0.4 },
+    uCausticMinDepth: { value: 1.0 },
+    uCausticMinDepthFalloff: { value: 1.0 },
     uRefractionQual: { value: 0.6 },
     uFoamQual: { value: 1.0 },
     uCausticsQual: { value: 0.5 },
@@ -555,6 +688,8 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uPlanarReflectionMatrix: { value: new THREE.Matrix4() },
     uPlanarReflectionTexelSize: { value: new THREE.Vector2(1, 1) },
     uPlanarReflectionEnabled: { value: 0.0 },
+    uGeometryFocus: { value: new THREE.Vector2(0, 0) },
+    uGeometryDisplacementEnabled: { value: 0.0 },
     uDebugMode: { value: 0.0 },
   };
 }
@@ -645,9 +780,14 @@ export function applyRealisticWaterUniforms(mat, params, mode) {
   u.uSlopeFoam.value = params.waterSlopeFoam ?? 0.5;
   u.uCliffFoam.value = params.waterCliffFoam ?? 0.65;
   u.uCausticsStr.value = params.waterUnderwaterCaustics ?? 0.4;
+  u.uCausticMinDepth.value =
+    params.waterUnderwaterCausticMinDepth ?? 1;
+  u.uCausticMinDepthFalloff.value =
+    params.waterUnderwaterCausticMinDepthFalloff ?? 1;
   u.uRefractionQual.value = (params.waterRefractionQuality ?? 0.6) * (tier >= 2 ? 1 : 0.5);
   u.uFoamQual.value = params.waterFoamQuality ?? 1;
   u.uCausticsQual.value = (params.waterCausticsQuality ?? 0.5) * (tier >= 2 ? 1 : 0.25);
+  u.uGeometryDisplacementEnabled.value = tier >= 3 ? 1 : 0;
 }
 
 export function setWaterDebugMode(mat, debugView) {

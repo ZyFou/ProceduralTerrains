@@ -24,6 +24,131 @@ export function getWaterWaveFeatureSpacing(waveScale = 1) {
   };
 }
 
+// Shared analytic field for Cinematic vertex displacement and fragment
+// whitecaps. It deliberately uses the same legacy domain scale as the normal
+// field, so geometry movement does not make the waves look larger.
+export const WATER_GEOMETRY_WAVES_GLSL = /* glsl */ `
+vec2 waterGeometryRotateDirection(vec2 direction, float radians) {
+  float c = cos(radians);
+  float s = sin(radians);
+  return vec2(
+    direction.x * c - direction.y * s,
+    direction.x * s + direction.y * c
+  );
+}
+
+void waterGeometryPhases(
+  vec2 xz,
+  float t,
+  out vec2 dirA,
+  out vec2 dirB,
+  out vec2 dirC,
+  out float phaseA,
+  out float phaseB,
+  out float phaseC
+) {
+  dirA = normalize(uWaveDir);
+  dirB = waterGeometryRotateDirection(dirA, 0.6108652);
+  dirC = waterGeometryRotateDirection(dirA, 0.9250245);
+  // Bend the three analytic wave trains over broad, incommensurate regions.
+  // This only perturbs phase direction; the legacy-compatible local
+  // frequencies below remain unchanged.
+  float macroA = sin(
+    dot(xz, vec2(0.00417, 0.00531))
+      + t * max(uWaveSpeed, 0.0) * 0.027
+  );
+  float macroB = sin(
+    dot(xz, vec2(-0.00613, 0.00377))
+      - t * max(uWaveSpeed, 0.0) * 0.019
+      + macroA * 0.43
+  );
+  float macroC = cos(
+    dot(xz, vec2(0.00289, -0.00719))
+      + t * max(uWaveSpeed, 0.0) * 0.013
+      - macroB * 0.37
+  );
+  vec2 waveXZ = xz + vec2(
+    macroA + macroC * 0.46,
+    macroB - macroA * 0.38
+  ) * 7.0;
+  float domain = ${WATER_WAVE_SCALE_COMPATIBILITY.domainScale}
+    * max(uWaveScale, 0.2);
+  float speed = uWaveSpeed;
+  phaseA = dot(waveXZ, dirA) * domain
+    * ${WATER_WAVE_SCALE_COMPATIBILITY.largeMultiplier}
+    + t * speed * 3.1
+    + macroB * 0.42;
+  phaseB = dot(waveXZ, dirB) * domain * 4.15
+    - t * speed * 2.6
+    - macroA * 0.36;
+  phaseC = dot(waveXZ, dirC) * domain * 6.1
+    + t * speed * 4.3
+    + macroC * 0.48;
+}
+
+float waterCinematicCrest(vec2 xz, float t) {
+  vec2 dirA;
+  vec2 dirB;
+  vec2 dirC;
+  float phaseA;
+  float phaseB;
+  float phaseC;
+  waterGeometryPhases(
+    xz,
+    t,
+    dirA,
+    dirB,
+    dirC,
+    phaseA,
+    phaseB,
+    phaseC
+  );
+  float combined = sin(phaseA) * 0.56
+    + sin(phaseB) * 0.29
+    + sin(phaseC) * 0.15;
+  return clamp(combined * 0.5 + 0.5, 0.0, 1.0);
+}
+
+vec3 waterCinematicDisplacement(vec2 xz, float t, out float crest) {
+  vec2 dirA;
+  vec2 dirB;
+  vec2 dirC;
+  float phaseA;
+  float phaseB;
+  float phaseC;
+  waterGeometryPhases(
+    xz,
+    t,
+    dirA,
+    dirB,
+    dirC,
+    phaseA,
+    phaseB,
+    phaseC
+  );
+
+  float strength = uWaveStrength * uWaveComplexity;
+  float mediumWeight = mix(uLargeWaveStr, uSmallWaveStr, 0.65);
+  float ampA = 0.52 * uLargeWaveStr * strength;
+  float ampB = 0.30 * uLargeWaveStr * strength;
+  float ampC = 0.16 * mediumWeight * strength;
+  float horizontal = 0.22;
+  vec2 xzOffset = dirA * cos(phaseA) * ampA * horizontal;
+  xzOffset += dirB * cos(phaseB) * ampB * horizontal;
+  xzOffset += dirC * cos(phaseC) * ampC * horizontal;
+  float height = sin(phaseA) * ampA
+    + sin(phaseB) * ampB
+    + sin(phaseC) * ampC;
+  crest = clamp(
+    (sin(phaseA) * 0.56 + sin(phaseB) * 0.29 + sin(phaseC) * 0.15)
+      * 0.5 + 0.5,
+    0.0,
+    1.0
+  );
+  return vec3(xzOffset.x, height, xzOffset.y);
+}
+`;
+
 export const WATER_WAVES_GLSL = /* glsl */ `
 vec2 waterRotateDirection(vec2 direction, float radians) {
   float c = cos(radians);

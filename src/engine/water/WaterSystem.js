@@ -19,6 +19,12 @@ import {
   isPlanarReflectionMode,
   WaterPlanarReflectionPass,
 } from './WaterPlanarReflectionPass.js';
+import {
+  createCinematicWaterGeometry,
+  getWaterGeometryDiagnostics,
+  resolveCinematicWaterSegments,
+  shouldUseCinematicWaterGeometry,
+} from './CinematicWaterGeometry.js';
 
 // ============================================================================
 // WaterSystem — central controller for the scalable water pipeline.
@@ -37,6 +43,15 @@ export class WaterSystem {
     this._waterCompilePending = false;
     this._surfacePass = new WaterSurfacePass();
     this._planarReflectionPass = new WaterPlanarReflectionPass();
+    this._baseStudioGeometry = engine.water?.geometry ?? null;
+    this._cinematicGeometry = null;
+    this._cinematicSegments = 0;
+    this._geometryFocusAnchored = false;
+    this._surfaceSubmitStarted = 0;
+    this._surfaceSubmitMs = 0;
+    this._surfaceSubmitAvgMs = 0;
+    this._timedMeshes = new Map();
+    this._bindSurfaceTiming(engine.water);
 
     // owned realistic materials (legacy materials stay on engine)
     this._realisticStudio = null;
@@ -98,6 +113,7 @@ export class WaterSystem {
       applyWaterMaterialSettings(eng.planetWaterMat, p, 'legacy', 'off');
     }
 
+    this._syncStudioGeometry(p, worldMode);
     this._applyVisibility(p, worldMode);
     this._applyUniforms(p);
     this._applyDebug(p);
@@ -131,6 +147,7 @@ export class WaterSystem {
     const prevRealistic = this._usingRealistic;
     this._effectiveMode = resolveEffectiveWaterMode(params, worldMode);
     this._usingRealistic = isRealisticWaterMode(this._effectiveMode);
+    this._syncStudioGeometry(params, worldMode);
 
     if (prevMode !== this._effectiveMode || prevRealistic !== this._usingRealistic) {
       if (!this._usingRealistic && prevRealistic) this._disposeRealistic();
@@ -164,6 +181,7 @@ export class WaterSystem {
       }
       if (mat.uniforms.uWaveComplexity) mat.uniforms.uWaveComplexity.value = perf.waterWaves;
     }
+    this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
     this._maybeFpsDowngrade(perf);
   }
 
@@ -232,6 +250,39 @@ export class WaterSystem {
 
   getPlanarReflectionDiagnostics() {
     return this._planarReflectionPass.diagnostics();
+  }
+
+  getSurfaceDiagnostics() {
+    return {
+      ...getWaterGeometryDiagnostics(this.engine.water?.geometry),
+      displaced: !!(
+        this._cinematicGeometry
+        && this.engine.water?.geometry === this._cinematicGeometry
+        && !this._fpsDowngraded
+      ),
+      cameraFocused: !!this._cinematicGeometry,
+      focusAnchored: this._geometryFocusAnchored,
+      surfaceSubmitMs: this._surfaceSubmitMs,
+      surfaceSubmitAvgMs: this._surfaceSubmitAvgMs,
+      surfaceGpuMs: null,
+      gpuTimingScope: 'whole-frame-only',
+    };
+  }
+
+  getPerformanceDiagnostics() {
+    const refraction = this.getRefractionDiagnostics();
+    const reflection = this.getPlanarReflectionDiagnostics();
+    const surface = this.getSurfaceDiagnostics();
+    return {
+      surface,
+      refraction,
+      reflection,
+      renderTargetMemoryBytes:
+        (refraction.memoryBytes || 0) + (reflection.memoryBytes || 0),
+      additionalSceneRenders:
+        (refraction.additionalSceneRenders || 0)
+        + (reflection.additionalSceneRenders || 0),
+    };
   }
 
   onStackRebuilt(stackGLSL, octaves) {
@@ -323,6 +374,8 @@ export class WaterSystem {
     this._waterCompilePending = false;
     this._surfacePass.dispose();
     this._planarReflectionPass.dispose();
+    this._disposeCinematicGeometry();
+    this._restoreSurfaceTiming();
     this._disposeRealistic();
     if (this._boundsHelper) {
       this.engine.scene.remove(this._boundsHelper);
@@ -489,6 +542,7 @@ export class WaterSystem {
     }
 
     if (eng.infiniteWorld?.waterPlane) {
+      this._bindSurfaceTiming(eng.infiniteWorld.waterPlane);
       eng.infiniteWorld.waterPlane.position.y = sea;
       eng.infiniteWorld.waterPlane.visible = active;
       eng.infiniteWorld.updateSettings?.({ seaLevel: sea });
@@ -519,6 +573,7 @@ export class WaterSystem {
         this._realisticInfinite,
       ].filter(Boolean));
     }
+    this._applyGeometryUniforms();
 
     // The underwater pass + caustics are driven centrally each frame by
     // Engine._updateUnderwater (UnderwaterController is the single source of
@@ -562,6 +617,7 @@ export class WaterSystem {
     const shouldDowngrade = fps < threshold && isRealisticWaterMode(this._effectiveMode);
     if (shouldDowngrade && !this._fpsDowngraded) {
       this._fpsDowngraded = true;
+      this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
       this._planarReflectionPass.deactivate(
         [this._realisticStudio, this._realisticInfinite].filter(Boolean),
       );
@@ -573,7 +629,121 @@ export class WaterSystem {
       }
     } else if (!shouldDowngrade && this._fpsDowngraded) {
       this._fpsDowngraded = false;
+      this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
       this._applyUniforms(this.engine.params);
     }
+  }
+
+  _syncStudioGeometry(params, worldMode) {
+    const water = this.engine.water;
+    if (!water || !this._baseStudioGeometry) return;
+    const useCinematic = shouldUseCinematicWaterGeometry(
+      this._effectiveMode,
+      worldMode,
+      this._fpsDowngraded,
+    );
+    if (!useCinematic) {
+      this._disposeCinematicGeometry();
+      this._applyGeometryUniforms();
+      return;
+    }
+
+    const segments = resolveCinematicWaterSegments(
+      this.engine.perf?.waterQuality ?? 2,
+    );
+    if (!this._cinematicGeometry || this._cinematicSegments !== segments) {
+      const previous = this._cinematicGeometry;
+      this._cinematicGeometry = createCinematicWaterGeometry(segments);
+      this._cinematicSegments = segments;
+      this._geometryFocusAnchored = false;
+      water.geometry = this._cinematicGeometry;
+      previous?.dispose();
+    } else if (water.geometry !== this._cinematicGeometry) {
+      water.geometry = this._cinematicGeometry;
+    }
+    // Anchor the density distribution once for this geometry. Continuously
+    // following the camera morphs vertex positions and makes the displaced
+    // surface wobble while orbiting, even though its wave field is world-space.
+    if (!this._geometryFocusAnchored) {
+      this._updateGeometryFocus(this.engine.camera);
+    }
+    this._applyGeometryUniforms();
+  }
+
+  _disposeCinematicGeometry() {
+    const water = this.engine.water;
+    if (water && water.geometry === this._cinematicGeometry) {
+      water.geometry = this._baseStudioGeometry;
+    }
+    this._cinematicGeometry?.dispose();
+    this._cinematicGeometry = null;
+    this._cinematicSegments = 0;
+    this._geometryFocusAnchored = false;
+  }
+
+  _applyGeometryUniforms() {
+    const enabled = this._cinematicGeometry
+      && this.engine.water?.geometry === this._cinematicGeometry
+      && this.engine.worldMode === 'studio'
+      && this._effectiveMode === 'cinematic'
+      && !this._fpsDowngraded;
+    for (const material of [
+      this._realisticStudio,
+      this._realisticInfinite,
+    ]) {
+      if (material?.uniforms?.uGeometryDisplacementEnabled) {
+        material.uniforms.uGeometryDisplacementEnabled.value =
+          material === this._realisticStudio && enabled ? 1 : 0;
+      }
+    }
+  }
+
+  _updateGeometryFocus(camera) {
+    const water = this.engine.water;
+    const uniform = this._realisticStudio?.uniforms?.uGeometryFocus;
+    if (!water || !camera || !uniform || !this._cinematicGeometry) return;
+    const sx = Math.max(Math.abs(water.scale.x), 1);
+    const sz = Math.max(Math.abs(water.scale.z), 1);
+    uniform.value.set(
+      THREE.MathUtils.clamp((camera.position.x - water.position.x) / sx, -0.42, 0.42),
+      THREE.MathUtils.clamp((camera.position.z - water.position.z) / sz, -0.42, 0.42),
+    );
+    this._geometryFocusAnchored = true;
+  }
+
+  _bindSurfaceTiming(mesh) {
+    if (!mesh || this._timedMeshes.has(mesh)) return;
+    const originalBefore = mesh.onBeforeRender;
+    const originalAfter = mesh.onAfterRender;
+    mesh.onBeforeRender = (...args) => {
+      originalBefore?.apply(mesh, args);
+      if (this.engine.params?.waterShowPerfCost) {
+        this._surfaceSubmitStarted =
+          globalThis.performance?.now?.() ?? Date.now();
+      }
+    };
+    mesh.onAfterRender = (...args) => {
+      originalAfter?.apply(mesh, args);
+      if (!this._surfaceSubmitStarted) return;
+      const ended = globalThis.performance?.now?.() ?? Date.now();
+      this._surfaceSubmitMs = Math.max(0, ended - this._surfaceSubmitStarted);
+      this._surfaceSubmitAvgMs = this._surfaceSubmitAvgMs
+        ? THREE.MathUtils.lerp(
+          this._surfaceSubmitAvgMs,
+          this._surfaceSubmitMs,
+          0.15,
+        )
+        : this._surfaceSubmitMs;
+      this._surfaceSubmitStarted = 0;
+    };
+    this._timedMeshes.set(mesh, { originalBefore, originalAfter });
+  }
+
+  _restoreSurfaceTiming() {
+    for (const [mesh, callbacks] of this._timedMeshes) {
+      mesh.onBeforeRender = callbacks.originalBefore;
+      mesh.onAfterRender = callbacks.originalAfter;
+    }
+    this._timedMeshes.clear();
   }
 }

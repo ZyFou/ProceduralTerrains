@@ -6807,6 +6807,14 @@ export class Engine {
       u.uCausticBlend.value = causticsOn ? 1.0 : 0.0;
       u.uCausticScale.value = p.waterUnderwaterCausticScale ?? 1;
       u.uCausticSpeed.value = p.waterUnderwaterCausticSpeed ?? 1;
+      if (u.uCausticMinDepth) {
+        u.uCausticMinDepth.value =
+          p.waterUnderwaterCausticMinDepth ?? 1;
+      }
+      if (u.uCausticMinDepthFalloff) {
+        u.uCausticMinDepthFalloff.value =
+          p.waterUnderwaterCausticMinDepthFalloff ?? 1;
+      }
       this._syncCausticWaveUniforms(p);
     }
 
@@ -7018,7 +7026,14 @@ export class Engine {
         angle: `${this.controls.azimuthDeg.toFixed(0)}°, ${this.controls.elevationDeg.toFixed(0)}°`,
         distance: this.controls.distance.toFixed(0),
       });
-      this.cb.onStats({ fps: this._fps, triangles: this._lastTris, drawCalls: this._lastDraws });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles: this._lastTris,
+        drawCalls: this._lastDraws,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
       if (this.cb.onPlayerState) {
         this.cb.onPlayerState(this.player ? this.player.state : null);
       }
@@ -7100,7 +7115,14 @@ export class Engine {
           terrainDrawCalls: this.infiniteWorld ? this.infiniteWorld.terrainDrawCallCount : 0,
         });
       }
-      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles,
+        drawCalls,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
     }
   }
 
@@ -7193,7 +7215,14 @@ export class Engine {
           lodCounts: this.planetWorld ? [...this.planetWorld.lodCounts] : [0, 0, 0, 0],
         });
       }
-      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles,
+        drawCalls,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
     }
   }
 
@@ -7292,6 +7321,8 @@ export class Engine {
         refractionPass: this.waterSystem?.getRefractionDiagnostics?.() ?? null,
         planarReflectionPass:
           this.waterSystem?.getPlanarReflectionDiagnostics?.() ?? null,
+        performanceCost:
+          this.waterSystem?.getPerformanceDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
     };
@@ -7425,6 +7456,7 @@ export class Engine {
     this.underwater.dispose();
     this.visualPost?.dispose();
     this.waterSystem?.dispose();
+    this.water?.geometry?.dispose();
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];
     this._warmGeo.dispose();

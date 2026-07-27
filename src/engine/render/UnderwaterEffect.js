@@ -116,6 +116,19 @@ void main() {
   float dist = viewDistance(uv);
   float murk = clamp(uSubmergeDepth / 45.0, 0.0, 1.0);
   vec3 waterCol = mix(uWaterShallow, uWaterDeep, 0.35 + 0.65 * murk);
+  // Palette water colors can be highly saturated because the surface also
+  // contains reflection and transmission. Underwater fog fills the whole
+  // screen, so retain less chroma here and bias away from an electric-blue
+  // result while preserving custom/alien palette identity.
+  float waterLuma = dot(waterCol, vec3(0.299, 0.587, 0.114));
+  waterCol = mix(
+    vec3(waterLuma),
+    waterCol,
+    high ? 0.52 : 0.66
+  );
+  waterCol.g *= 1.03;
+  waterCol.b *= high ? 0.78 : 0.86;
+  waterCol = clamp(waterCol, vec3(0.0), vec3(1.0));
 
   // depth-aware fog (denser deeper). High mode shifts color with depth more
   // aggressively (physically-inspired absorption: red goes first).
@@ -124,11 +137,16 @@ void main() {
   float fogF = clamp(1.0 - exp(-density * density * dist * dist), 0.0, 1.0);
 
   vec3 uw = col * (0.85 - 0.25 * murk);
-  uw = mix(uw, uw * waterCol * 2.2, high ? 0.45 : 0.35);
+  uw = mix(
+    uw,
+    uw * (vec3(0.65) + waterCol * 1.25),
+    high ? 0.30 : 0.26
+  );
 
   if (high) {
-    // wavelength-dependent absorption — warm channels attenuate with distance
-    vec3 absorb = vec3(0.45, 0.16, 0.07) * (0.6 + 0.9 * murk);
+    // Wavelength-dependent absorption, kept moderate so physical warm-channel
+    // loss does not turn the entire view into saturated blue.
+    vec3 absorb = vec3(0.32, 0.17, 0.10) * (0.6 + 0.9 * murk);
     uw *= exp(-absorb * dist / max(uVisibility, 10.0));
   }
 
