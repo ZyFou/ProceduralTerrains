@@ -32,15 +32,15 @@ const MODE_HINTS = {
   off: 'Water disabled — no mesh, no underwater effect.',
   legacy: 'Fast original water shader. Best for performance and Infinite World.',
   realistic: 'RGB absorption, live sky reflection, directional waves, and shoreline foam.',
-  volumetric: 'Realistic surface plus higher-tier caustics and underwater effects.',
-  cinematic: 'Highest quality — expensive. Best for screenshots in Tile mode.',
+  volumetric: 'Realistic surface plus half-resolution scene refraction, depth rejection, and higher-tier underwater effects.',
+  cinematic: 'Highest-quality scene refraction and water effects. Expensive; best for Tile screenshots.',
 };
 
 const MATERIAL_SLIDERS = [
   { key: 'waterOpacity', label: 'Density / Opacity', min: 0.2, max: 1, step: 0.01, digits: 2, info: 'Optical density in Realistic modes; traditional transparency in Legacy mode.' },
   { key: 'waterRoughness', label: 'Roughness', min: 0, max: 1, step: 0.02, digits: 2, info: 'Broadens the reflected sky and sun highlight, and softens micro ripples.' },
   { key: 'waterFresnelStrength', label: 'Fresnel Strength', min: 0, max: 2, step: 0.05, digits: 2 },
-  { key: 'waterRefractionStrength', label: 'Transmission Strength', min: 0.05, max: 1.5, step: 0.05, digits: 2, info: 'Controls clarity through the single-pass surface. Distorted scene refraction is reserved for Volumetric mode.' },
+  { key: 'waterRefractionStrength', label: 'Transmission / Refraction', min: 0.05, max: 1.5, step: 0.05, digits: 2, info: 'Controls transmission clarity in Realistic mode and scene distortion in Volumetric/Cinematic modes.' },
   { key: 'waterSpecularStrength', label: 'Specular Strength', min: 0, max: 2, step: 0.05, digits: 2 },
 ];
 
@@ -94,6 +94,11 @@ const REALISTIC_PERF_SLIDERS = [
   { key: 'waterCausticsQuality', label: 'Caustics Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
   { key: 'waterNormalResolution', label: 'Micro Wave Detail', min: 0.25, max: 1.5, step: 0.05, digits: 2, info: 'Scales only the fine procedural ripples; it does not change the main wave size.' },
   { key: 'waterDisableExpensiveBelowFps', label: 'FPS Downgrade Threshold', min: 24, max: 60, step: 1, digits: 0 },
+];
+
+const REFRACTION_PERF_SLIDERS = [
+  { key: 'waterRefractionQuality', label: 'Refraction Detail', min: 0.1, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Controls distortion detail and terrain-silhouette rejection.' },
+  { key: 'waterRenderScale', label: 'Refraction Resolution', min: 0.5, max: 2, step: 0.25, digits: 2, expensive: true, info: '1× renders refraction at half scene resolution; 2× renders at full scene resolution.' },
 ];
 
 const WATER_QUALITY_OPTIONS = [
@@ -150,6 +155,7 @@ export default function WaterPanelInner({
   const mode = val(params, 'waterMode');
   const enabled = val(params, 'waterEnabled');
   const selectedRealistic = isRealisticWaterMode(mode);
+  const selectedSceneRefraction = mode === 'volumetric' || mode === 'cinematic';
   const legacy = mode === 'legacy' || mode === 'off';
   const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
@@ -516,7 +522,7 @@ export default function WaterPanelInner({
           title="Performance"
           defaultOpen={false}
           settingId="water.section.performance"
-          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
+          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterRefractionQuality', 'water.waterRenderScale', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
         >
           {mode === 'cinematic' && isStudio && (
             <p className="section-hint warning">Cinematic mode is expensive — best for Tile mode screenshots.</p>
@@ -529,6 +535,18 @@ export default function WaterPanelInner({
                 info: def.expensive
                   ? `${def.info ? `${def.info} ` : ''}May impact FPS.`
                   : def.info,
+              }}
+              value={val(params, def.key)}
+              onChange={(v) => onParam(def.key, v)}
+              settingId={`water.${def.key}`}
+            />
+          ))}
+          {selectedSceneRefraction && !isPlanet && REFRACTION_PERF_SLIDERS.map((def) => (
+            <SliderCtl
+              key={def.key}
+              def={{
+                ...def,
+                info: `${def.info} May impact FPS.`,
               }}
               value={val(params, def.key)}
               onChange={(v) => onParam(def.key, v)}

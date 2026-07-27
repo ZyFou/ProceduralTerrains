@@ -14,6 +14,7 @@ import {
 } from './WaterMaterialFactory.js';
 import { applyWaterDebugToMaterials } from './WaterDebugViews.js';
 import { buildWaterMaskFiles, buildWaterMetadata } from './WaterExport.js';
+import { isSceneRefractionMode, WaterSurfacePass } from './WaterSurfacePass.js';
 
 // ============================================================================
 // WaterSystem — central controller for the scalable water pipeline.
@@ -30,6 +31,7 @@ export class WaterSystem {
     this._disposed = false;
     this._waterCompileGen = 0;
     this._waterCompilePending = false;
+    this._surfacePass = new WaterSurfacePass();
 
     // owned realistic materials (legacy materials stay on engine)
     this._realisticStudio = null;
@@ -167,6 +169,36 @@ export class WaterSystem {
     }
   }
 
+  /**
+   * Capture the water-free scene and bind it to Volumetric/Cinematic water.
+   * Allocation remains lazy; Realistic, Legacy, Off, and Planet modes only
+   * execute the cheap uniform-disable path.
+   */
+  captureSceneRefraction(renderer, scene, camera, sceneSize) {
+    const eng = this.engine;
+    const materials = [
+      this._realisticStudio,
+      this._realisticInfinite,
+    ].filter(Boolean);
+    return this._surfacePass.capture(renderer, scene, camera, {
+      params: eng.params,
+      mode: this._effectiveMode,
+      worldMode: eng.worldMode,
+      sceneSize,
+      hiddenObjects: [
+        eng.water,
+        eng.infiniteWorld?.waterPlane,
+        eng.planetWater,
+        this._boundsHelper,
+      ],
+      materials,
+    });
+  }
+
+  getRefractionDiagnostics() {
+    return this._surfacePass.diagnostics();
+  }
+
   onStackRebuilt(stackGLSL, octaves) {
     const eng = this.engine;
     if (this._realisticInfinite) {
@@ -254,6 +286,7 @@ export class WaterSystem {
     this._disposed = true;
     this._waterCompileGen++;
     this._waterCompilePending = false;
+    this._surfacePass.dispose();
     this._disposeRealistic();
     if (this._boundsHelper) {
       this.engine.scene.remove(this._boundsHelper);
@@ -437,6 +470,12 @@ export class WaterSystem {
     const debug = params.waterDebugView ?? 'off';
     for (const mat of this._allActiveMaterials()) {
       applyWaterMaterialSettings(mat, params, this._effectiveMode, debug);
+    }
+    if (!isSceneRefractionMode(this._effectiveMode)) {
+      this._surfacePass.deactivate([
+        this._realisticStudio,
+        this._realisticInfinite,
+      ].filter(Boolean));
     }
 
     // The underwater pass + caustics are driven centrally each frame by

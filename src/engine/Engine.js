@@ -2972,6 +2972,21 @@ export class Engine {
     return true;
   }
 
+  _captureWaterSceneRefraction(sceneSize) {
+    if (!this.waterSystem) return false;
+    this.profiler.begin('water-refraction');
+    try {
+      return this.waterSystem.captureSceneRefraction(
+        this.renderer,
+        this.scene,
+        this.camera,
+        sceneSize,
+      );
+    } finally {
+      this.profiler.end('water-refraction');
+    }
+  }
+
   // -------------------------------------------------- async shader compiling
   // Heavy shaders are compiled via renderer.compile + _waitForMaterialsReady so
   // the GPU driver can link off-thread (KHR_parallel_shader_compile) while ticks
@@ -6958,6 +6973,7 @@ export class Engine {
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
+      this._captureWaterSceneRefraction(cameraSceneSize);
       this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
@@ -7035,7 +7051,9 @@ export class Engine {
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     const cameraPlan = this._prepareCameraPipeline();
+    const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    this._captureWaterSceneRefraction(cameraSceneSize);
     this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
@@ -7254,6 +7272,7 @@ export class Engine {
         underwater: !!this.underwater?.active,
         baselineScene: this._activeWaterBaseline ?? null,
         shaderCompile: this._lastWaterShaderCompile ?? null,
+        refractionPass: this.waterSystem?.getRefractionDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
     };

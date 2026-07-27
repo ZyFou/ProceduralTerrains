@@ -17,15 +17,18 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 // ============================================================================
 // Realistic Water Surface V2 — physical depth absorption, coherent directional
 // normals, live procedural-sky reflection, roughness-aware sunlight and foam.
-// This remains a single transparent pass with no scene/reflection render target.
+// Volumetric/Cinematic tiers can additionally sample a water-free scene capture
+// for real screen-space refraction while the surface itself stays single-pass.
 // ============================================================================
 
 const VERTEX = /* glsl */ `
 varying vec3 vWorldPos;
+varying vec4 vClipPosition;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
+  vClipPosition = gl_Position;
 }
 `;
 
@@ -86,12 +89,19 @@ uniform float uCausticsStr;
 uniform float uRefractionQual;
 uniform float uFoamQual;
 uniform float uCausticsQual;
+uniform sampler2D uSceneColor;
+uniform sampler2D uSceneDepth;
+uniform vec2 uSceneTexelSize;
+uniform float uSceneNear;
+uniform float uSceneFar;
+uniform float uSceneRefractionEnabled;
 uniform float uDebugMode;          // see WaterDebugViews / setWaterDebugMode
 uniform float uVisualFoamBreakup;
 uniform float uVisualWetSandRange;
 uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
+varying vec4 vClipPosition;
 
 ${PROCEDURAL_SKY_EVALUATION_GLSL}
 ${WATER_OPTICS_GLSL}
@@ -116,6 +126,12 @@ float slopeFromCenter(vec2 xz, float centerH) {
   float hx = terrainHeightAt(xz + vec2(e, 0.0));
   float hz = terrainHeightAt(xz + vec2(0.0, e));
   return length(vec2(hx - centerH, hz - centerH)) / e;
+}
+
+float waterLinearSceneDepth(float rawDepth) {
+  float z = rawDepth * 2.0 - 1.0;
+  return (2.0 * uSceneNear * uSceneFar)
+    / max(uSceneFar + uSceneNear - z * (uSceneFar - uSceneNear), 0.0001);
 }
 
 void main() {
@@ -186,6 +202,51 @@ void main() {
   // Schlick Fresnel now follows the animated wave normal.
   float fres = waterSchlickFresnel(n, viewDir, uFresnelStrength);
 
+  // Screen-space refraction for Volumetric/Cinematic modes. The water-free
+  // capture is decoded back to linear space before optical composition.
+  float sceneRefractionWeight = uSceneRefractionEnabled
+    * step(1.5, uWaterTier);
+  vec2 screenUv = vClipPosition.xy / max(vClipPosition.w, 0.0001);
+  screenUv = screenUv * 0.5 + 0.5;
+  vec2 refractedUv = screenUv;
+  vec3 refractedSceneLinear = vec3(0.0);
+  if (sceneRefractionWeight > 0.5) {
+    float refractionDetail = clamp(uRefractionQual, 0.0, 1.5) / 1.5;
+    float distortionScale = mix(0.018, 0.065, refractionDetail)
+      * uRefractionStrength
+      * (1.0 - fres);
+    vec2 uvMargin = uSceneTexelSize * 1.5;
+    vec2 distortedUv = clamp(
+      screenUv + n.xz * distortionScale,
+      uvMargin,
+      vec2(1.0) - uvMargin
+    );
+
+    // Reject samples that cross a terrain/prop silhouette. Sampling the
+    // undistorted pixel instead prevents cliffs from smearing across the sea.
+    float centerDepth = waterLinearSceneDepth(
+      texture2D(uSceneDepth, screenUv).r
+    );
+    float distortedDepth = waterLinearSceneDepth(
+      texture2D(uSceneDepth, distortedUv).r
+    );
+    float rejectStart = max(
+      1.5,
+      min(centerDepth, distortedDepth) * 0.035
+    );
+    float silhouetteReject = smoothstep(
+      rejectStart,
+      rejectStart * 3.0,
+      abs(distortedDepth - centerDepth)
+    );
+    refractedUv = mix(distortedUv, screenUv, silhouetteReject);
+    vec3 encodedScene = texture2D(uSceneColor, refractedUv).rgb;
+    refractedSceneLinear = pow(
+      max(encodedScene, vec3(0.0)),
+      vec3(2.2)
+    );
+  }
+
   // Evaluate the same live procedural sky as the sky dome. Rough water blends
   // toward a broad reflection direction; distant water trends toward horizon
   // radiance and suppresses micro detail through waterDirectionalNormal().
@@ -246,8 +307,9 @@ void main() {
     * uSpecularStrength
     * reflectionScale;
 
-  // The transparent blend supplies background transmission until Phase 3 adds
-  // an opaque-scene color buffer. The emitted body color is premultiplied.
+  // Realistic mode keeps the transparent single-pass approximation. Higher
+  // tiers overwrite the water pixel with a complete refracted volume composite,
+  // because the same opaque scene is already behind the transparent surface.
   float diff = max(dot(n, uSunDir), 0.0);
   vec3 bodyPremultiplied = scatteringColor
     * (vec3(1.0) - transmittance)
@@ -256,6 +318,19 @@ void main() {
   vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
   float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
   float alpha = 1.0 - (1.0 - volumeAlpha) * (1.0 - reflectionAlpha);
+  vec3 refractedVolume = refractedSceneLinear * transmittance
+    + scatteringColor
+      * (vec3(1.0) - transmittance)
+      * (0.62 + 0.38 * diff);
+  vec3 sceneComposite = refractedVolume * (1.0 - fres)
+    + reflectionTerm
+    + sunSpecularTerm;
+  premultipliedColor = mix(
+    premultipliedColor,
+    sceneComposite,
+    sceneRefractionWeight
+  );
+  alpha = mix(alpha, 1.0, sceneRefractionWeight);
 
   // shoreline foam — depth-based only; slope foam restricted to very shallow water
   float shoreDist = depth;
@@ -279,9 +354,11 @@ void main() {
   premultipliedColor = mix(premultipliedColor, uColFoam, foam);
   alpha = mix(alpha, 1.0, foam);
 
-  // Actual distorted scene-color refraction arrives with the Volumetric pass.
-  // This transmission term keeps the existing debug view physically meaningful.
-  vec3 refractionTerm = transmittance * (1.0 - fres);
+  vec3 refractionTerm = mix(
+    transmittance,
+    refractedSceneLinear * transmittance,
+    sceneRefractionWeight
+  ) * (1.0 - fres);
 
   // fake caustics in shallow water (smoothed depth, coarse noise)
   if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
@@ -408,6 +485,12 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uRefractionQual: { value: 0.6 },
     uFoamQual: { value: 1.0 },
     uCausticsQual: { value: 0.5 },
+    uSceneColor: { value: null },
+    uSceneDepth: { value: null },
+    uSceneTexelSize: { value: new THREE.Vector2(1, 1) },
+    uSceneNear: { value: 1.0 },
+    uSceneFar: { value: 50000.0 },
+    uSceneRefractionEnabled: { value: 0.0 },
     uDebugMode: { value: 0.0 },
   };
 }

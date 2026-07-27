@@ -45,6 +45,23 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
+  it('contains depth-rejected scene refraction for higher water tiers', () => {
+    const material = createRealisticWaterMaterial(createTerrainUniforms());
+
+    expect(material.uniforms.uSceneRefractionEnabled.value).toBe(0);
+    expect(material.fragmentShader).toContain('texture2D(uSceneColor');
+    expect(material.fragmentShader).toContain('texture2D(uSceneDepth');
+    expect(material.fragmentShader).toContain('float silhouetteReject');
+    expect(material.fragmentShader).toContain('refractedVolume');
+
+    applyRealisticWaterUniforms(material, {
+      waterRefractionQuality: 0.8,
+    }, 'volumetric');
+    expect(material.uniforms.uWaterTier.value).toBe(2);
+    expect(material.uniforms.uRefractionQual.value).toBe(0.8);
+    material.dispose();
+  });
+
   it('applies roughness and sky-reflection settings without recompiling', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
     const fragmentShader = material.fragmentShader;
