@@ -141,6 +141,14 @@ function yieldTask() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function yieldFrame() {
+  if (typeof requestAnimationFrame === 'function'
+      && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  return new Promise((resolve) => setTimeout(resolve, 16));
+}
+
 // Parameter keys that change the terrain shape (deferred when Auto Update is
 // off). Everything else (debug toggles, sun, fog…) always applies instantly.
 const SHAPE_KEYS = new Set([
@@ -205,9 +213,15 @@ export class Engine {
     this._waterDeferred = true;
     this._waterMaterialWarmed = false;
     this._waterWarmPromise = null;
+    this._waterWarmRetryTimer = null;
+    this._waterWarmRetryCount = 0;
     this._terrainHeightBakeDeferred = true;
     this._postFirstPaintWarmupsStarted = false;
     this._postFirstPaintWarmTimer = null;
+    this._postFirstPaintWaterTimer = null;
+    this._terrainUpgradeRetryTimer = null;
+    this._terrainUpgradeRetryCount = 0;
+    this._contextLost = false;
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
     this._compiling = 0;
@@ -337,6 +351,22 @@ export class Engine {
     this._landingShowcase = false;
 
     this._initRenderer();
+    this._onContextLost = (event) => {
+      event.preventDefault();
+      this._contextLost = true;
+      console.warn('[webgl] context lost; aborting shader waits');
+      this._releaseBootFallback('WebGL context lost', { render: false });
+      this.cb.onStatus('Graphics context lost — waiting to recover…', false);
+    };
+    this._onContextRestored = () => {
+      this._contextLost = false;
+      this._needsRender = true;
+      console.info('[webgl] context restored');
+      this.cb.onStatus('Ready', false);
+      this._schedulePostFirstPaintWarmups(250);
+    };
+    this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
+    this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
@@ -2627,6 +2657,8 @@ export class Engine {
     );
     if (!this._bootPending) {
       this.cb.onStatus(this.board.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
+    } else if (!this.board.isBuilding) {
+      this._completeBootIfQualityReady();
     }
     return created;
   }
@@ -3057,6 +3089,7 @@ export class Engine {
   _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
     const pending = new Set(materials);
     const props = this.renderer.properties;
+    const gl = this.renderer.getContext?.();
 
     return new Promise((resolve) => {
       if (!pending.size) {
@@ -3071,6 +3104,18 @@ export class Engine {
       const start = performance.now();
 
       const check = () => {
+        if (this._disposed || this._contextLost || gl?.isContextLost?.()) {
+          resolve({
+            ready: false,
+            timedOut: false,
+            aborted: true,
+            contextLost: this._contextLost || gl?.isContextLost?.() || false,
+            pendingCount: pending.size,
+            waitMs: performance.now() - start,
+          });
+          return;
+        }
+
         pending.forEach((material) => {
           const program = props.get(material)?.currentProgram;
           if (program?.isReady?.()) pending.delete(material);
@@ -3096,10 +3141,10 @@ export class Engine {
           });
           return;
         }
-        yieldTask().then(check);
+        yieldFrame().then(check);
       };
 
-      yieldTask().then(check);
+      yieldFrame().then(check);
     });
   }
 
@@ -3242,114 +3287,108 @@ export class Engine {
     });
   }
 
-  /** Compile and instantiate the textured terrain before releasing boot. */
+  /**
+   * Compile and render a lightweight safety frame behind the loading overlay.
+   * Full terrain colour, height baking and water remain non-blocking jobs, but
+   * the overlay is released only after they have produced one final frame.
+   */
   async _warmupInitialShaders() {
     this._compiling++;
-    this.cb.onStatus('Compiling terrain…', true);
-    const _tCompile0 = performance.now();
-    let fullTerrainResult = null;
-    let waterJob = null;
-    let bakeMs = 0;
+    this.cb.onStatus('Preparing first frame…', true);
+    const startedAt = performance.now();
+    let firstFrameResult = null;
+    let initialRenderTarget = null;
     try {
-      // Studio's default visual pipeline renders the scene into a linear
-      // post-processing target, not directly to the canvas. Program cache keys
-      // include the target colour-space variant, so warming the canvas variant
-      // here would still make the first real frame compile the full terrain
-      // shader a second time.
+      // Warm the exact target variant used by the first real frame. Warming a
+      // canvas variant here would still leave a synchronous scene-target link.
       const initialPlan = this._prepareCameraPipeline();
-      const initialRenderTarget = initialPlan.usesSceneTarget
+      initialRenderTarget = initialPlan.usesSceneTarget
         ? this.visualPost.inputTarget
         : null;
 
-      // Start the full terrain program first. renderer.compile() performs its
-      // synchronous translation immediately, then the driver can link it while
-      // the remaining small scene programs and height texture are prepared.
-      // The minimal terrain shader is deliberately skipped: because boot now
-      // waits for the textured material, compiling both would be pure duplicate
-      // work with the same generated height vertex source.
-      const fullTerrainJob = this._upgradeMinimalTerrain(initialRenderTarget);
-
-      const bakeStartedAt = performance.now();
-      try {
-        this._terrainHeightBakeDeferred = false;
-        this._ensureTerrainHeightTex();
-      } catch (e) {
-        this._terrainHeightBakeDeferred = true;
-        console.warn('Boot height bake failed', e);
-      }
-      bakeMs = performance.now() - bakeStartedAt;
-
-      // Start the lightweight baked-height water program while the full terrain
-      // program is linking. Boot awaits it below so the first revealed frame
-      // already contains water.
-      if (this.params.waterEnabled !== false && this._waterDeferred) {
-        waterJob = this._warmDeferredWater(initialRenderTarget);
-      }
-
-      // Boot compiles ONLY the first-frame scene-target programs. The underwater
-      // render-target variants (a second distinct program — linear output color
-      // space — for every heavy terrain/water/sky material) are deferred and
-      // warmed lazily when the camera first approaches water. Most sessions
-      // never submerge, so this roughly halves the cold-boot compile burst that
-      // otherwise saturates Chrome's shared GPU process and stalls other tabs.
-      //
-      // Materials are compiled one-per-task instead of all at once. On Windows
-      // ANGLE/FXC, calling gl.compileShader() for every material in one
-      // synchronous burst freezes the main thread for several seconds even with
-      // KHR_parallel_shader_compile. Spreading initiations across rAF frames
-      // keeps each frame short while still letting the GPU compile in parallel.
-      // visibleOnly: the first burst only translates the on-screen set (the
-      // hidden water / disk wall / ghost / disabled sky compile lazily later).
-      await this._withBootDeferredObjectsDetached(
+      // Water and other hidden objects stay detached. Crucially, the boot
+      // terrain is included: it is intentionally small and guarantees that
+      // revealing the canvas cannot trigger the full surface shader.
+      firstFrameResult = await this._withBootDeferredObjectsDetached(
         () => this._compileSceneStaggered(initialRenderTarget, {
           visibleOnly: true,
-          skipMinimalTerrain: true,
-          // Water owns its dedicated concurrent warmup above.
+          skipMinimalTerrain: false,
           skipWaterMaterial: true,
         })
       );
-      try {
-        fullTerrainResult = await fullTerrainJob;
-      } catch (error) {
-        console.warn('Boot terrain warmup failed', error);
-      }
-
-      if (waterJob) {
-        try {
-          await waterJob;
-        } catch (error) {
-          console.warn('Boot water warmup failed', error);
-        }
-      }
-
-      // If the full program failed or timed out, warm the minimal fallback now
-      // so the first frame still cannot trigger a surprise synchronous compile.
-      if (!fullTerrainResult?.swapped && this.terrainMaterial?.userData?.minimalFragment) {
-        await this._compileMaterialVariants([this.terrainMaterial], {
-          canvasOnly: true,
-          renderTarget: initialRenderTarget,
-        });
-      }
     } catch (e) {
-      console.warn('Shader warmup failed (falling back to sync compile)', e);
+      console.warn('Lightweight shader warmup failed', e);
     }
+
     try {
       if (!this._disposed && this._compiling === 1) {
-        const _paintMs = this._renderInitialStudioFrame();
-        console.info(`[boot] first textured frame ${(_paintMs ?? 0).toFixed(0)}ms after optimized warmup ${(performance.now() - _tCompile0).toFixed(0)}ms + height bake ${bakeMs.toFixed(0)}ms (terrain ready=${fullTerrainResult?.ready === true}, water ready=${!this._waterDeferred}); elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`);
-
-        this._bootPending = false;
-        this.cb.onStatus('Ready', false);
-        // Surface the first-run GPU-tier notice now that the boot overlay is gone
-        // (info toasts are suppressed while a blocking overlay is up).
-        if (this._tierNotice) { this.cb.onToast(this._tierNotice); this._tierNotice = null; }
-        this.cb.onBootComplete?.();
-        this._scheduleErosionGPUWarmImport();
-        this._schedulePostFirstPaintWarmups();
+        const paintMs = this._renderInitialStudioFrame();
+        console.info(
+          `[boot] first hidden fallback frame ${(paintMs ?? 0).toFixed(0)}ms after lightweight warmup `
+          + `${(performance.now() - startedAt).toFixed(0)}ms `
+          + `(ready=${firstFrameResult?.ready !== false}, water deferred=${this._waterDeferred}); `
+          + `elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`
+        );
+        this.cb.onStatus('Loading terrain detail…', true);
       }
     } finally {
       this._compiling--;
+      if (!this._disposed && this._bootPending) {
+        this._schedulePostFirstPaintWarmups(850, initialRenderTarget);
+      }
     }
+  }
+
+  _completeBootIfQualityReady(reason = 'quality upgrades ready') {
+    if (!this._bootPending || this._disposed) return false;
+
+    const nodeMode = this.projectMode === 'nodes';
+    const terrainReady = nodeMode || !this.terrainMaterial?.userData?.minimalFragment;
+    const waterReady = nodeMode
+      || this.params.waterEnabled === false
+      || !this.waterMaterial
+      || !this._waterDeferred;
+    const boardReady = !this.board?.isBuilding;
+    if (!terrainReady || !waterReady || !boardReady) return false;
+
+    let paintMs = null;
+    if (!this._contextLost) {
+      try {
+        paintMs = this._renderInitialStudioFrame();
+      } catch (error) {
+        console.warn('Final boot frame render failed', error);
+      }
+    }
+    console.info(
+      `[boot] final quality frame ${(paintMs ?? 0).toFixed(0)}ms `
+      + `(terrain ready=${terrainReady}, water ready=${waterReady}, board ready=${boardReady}); `
+      + `elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`
+    );
+    return this._releaseBootFallback(reason, { render: false });
+  }
+
+  _releaseBootFallback(reason = 'fallback', { render = true } = {}) {
+    if (!this._bootPending || this._disposed) return false;
+
+    const log = reason === 'quality upgrades ready' ? console.info : console.warn;
+    log(`[boot] releasing fallback: ${reason}`);
+    if (render && !this._contextLost) {
+      try {
+        this._renderInitialStudioFrame();
+      } catch (error) {
+        console.warn('Fallback frame render failed', error);
+      }
+    }
+
+    this._bootPending = false;
+    this.cb.onStatus('Ready', false);
+    if (this._tierNotice) {
+      this.cb.onToast(this._tierNotice);
+      this._tierNotice = null;
+    }
+    this.cb.onBootComplete?.();
+    this._scheduleErosionGPUWarmImport();
+    return true;
   }
 
   _scheduleErosionGPUWarmImport() {
@@ -3418,7 +3457,7 @@ export class Engine {
   async _upgradeMinimalTerrain(renderTarget = null) {
     if (!this.terrainMaterial?.userData?.minimalFragment) return;
     if (this._terrainUpgradePromise) return this._terrainUpgradePromise;
-    this._terrainUpgradePromise = (async () => {
+    const promise = (async () => {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
       const heightProgram = this._activeHeightProgram('studio');
@@ -3430,12 +3469,12 @@ export class Engine {
       let swapMs = 0;
       try {
         const tCompile = performance.now();
-        await this._compileMaterialVariants([warm], {
+        const result = await this._compileMaterialVariants([warm], {
           canvasOnly: true,
           timeoutMs: 120000,
           renderTarget,
         });
-        ready = await this._pollProgramReady(warm);
+        ready = result?.ready === true;
         compileWaitMs = performance.now() - tCompile;
         console.info(`[boot] full terrain compile wait ${compileWaitMs.toFixed(0)}ms (ready=${ready})`);
         // Swap ONLY when the warmed program is genuinely ready and the live
@@ -3454,6 +3493,7 @@ export class Engine {
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
           console.info(`[boot] full terrain live material source swapped in ${swapMs.toFixed(1)}ms; elapsed ${(performance.now() - t0).toFixed(0)}ms`);
+          this._completeBootIfQualityReady();
         }
       } catch (e) {
         console.warn('Full terrain material upgrade failed', e);
@@ -3461,12 +3501,24 @@ export class Engine {
         this._bgWorkEnd('terrain-full');
       }
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
+      if (!ready && !this._disposed && this._terrainUpgradeRetryCount < 1) {
+        this._terrainUpgradeRetryTimer = setTimeout(() => {
+          this._terrainUpgradeRetryTimer = null;
+          if (this._disposed || !this.terrainMaterial?.userData?.minimalFragment) return;
+          this._terrainUpgradeRetryCount++;
+          void this._upgradeMinimalTerrain(renderTarget);
+        }, 3000);
+      }
       return { ready, swapped, compileWaitMs, swapMs };
     })();
-    return this._terrainUpgradePromise;
+    this._terrainUpgradePromise = promise;
+    promise.finally(() => {
+      if (this._terrainUpgradePromise === promise) this._terrainUpgradePromise = null;
+    });
+    return promise;
   }
 
-  _schedulePostFirstPaintWarmups(delayMs = 850) {
+  _schedulePostFirstPaintWarmups(delayMs = 850, renderTarget = null) {
     if (this._disposed || this._postFirstPaintWarmupsStarted) return;
     this._postFirstPaintWarmupsStarted = true;
 
@@ -3484,6 +3536,7 @@ export class Engine {
       // replace it with full surface shaders or start unrelated water work.
       if (this.projectMode === 'nodes') {
         this._postFirstPaintWarmupsStarted = false;
+        this._completeBootIfQualityReady();
         return;
       }
 
@@ -3495,11 +3548,26 @@ export class Engine {
         console.warn('Deferred height bake failed', e);
       }
 
+      // Give the compositor a paint opportunity between the height bake and
+      // each synchronous GLSL translation burst. On slower ANGLE drivers this
+      // prevents one long, back-to-back main-thread freeze.
       const jobs = [];
-      if (this.terrainMaterial?.userData?.minimalFragment) jobs.push(this._upgradeMinimalTerrain());
-      if (this.params.waterEnabled !== false && this._waterDeferred) jobs.push(this._warmDeferredWater());
+      if (this.terrainMaterial?.userData?.minimalFragment) {
+        jobs.push(yieldFrame().then(() => this._upgradeMinimalTerrain(renderTarget)));
+      }
+      if (this.params.waterEnabled !== false && this._waterDeferred) {
+        jobs.push(new Promise((resolve) => {
+          this._postFirstPaintWaterTimer = setTimeout(() => {
+            this._postFirstPaintWaterTimer = null;
+            resolve(this._disposed ? undefined : this._warmDeferredWater(renderTarget));
+          }, 250);
+        }));
+      }
       Promise.allSettled(jobs).then(() => {
-        if (!this._disposed) this._needsRender = true;
+        if (!this._disposed) {
+          this._needsRender = true;
+          this._completeBootIfQualityReady();
+        }
       });
     };
 
@@ -3550,12 +3618,16 @@ export class Engine {
         this._waterMaterialWarmed = result?.ready === true;
         if (!this._waterMaterialWarmed) {
           console.warn(
-            `Water compile still pending after ${result?.waitMs?.toFixed?.(0) ?? 0}ms; waiting in the background`
+            `Water compile still pending after ${result?.waitMs?.toFixed?.(0) ?? 0}ms; keeping water deferred`
           );
-          const states = await Promise.all(
-            materials.map((mat) => this._pollProgramReady(mat, { tries: 240, intervalMs: 250 }))
-          );
-          this._waterMaterialWarmed = states.every(Boolean);
+          if (!this._disposed && this._waterWarmRetryCount < 1 && !this._waterWarmRetryTimer) {
+            this._waterWarmRetryTimer = setTimeout(() => {
+              this._waterWarmRetryTimer = null;
+              if (this._disposed || !this._waterDeferred) return;
+              this._waterWarmRetryCount++;
+              void this._warmDeferredWater(renderTarget);
+            }, 3000);
+          }
         }
       } catch (e) {
         console.warn('Deferred water warmup failed', e);
@@ -3572,6 +3644,7 @@ export class Engine {
     this.waterSystem?.activateInitialMaterials(this.params, this.worldMode);
     this._needsRender = true;
     console.info(`[boot] water init ${(performance.now() - t0).toFixed(0)}ms (precompiled)`);
+    this._completeBootIfQualityReady();
     if (!this._bootPending) this.cb.onStatus('Ready', false);
   }
 
@@ -5140,8 +5213,11 @@ export class Engine {
     const warm = planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL);
     this._bgWorkStart('planet-full', 'Loading full planet colors…');
     try {
-      await this._compileMaterialVariants([warm], { canvasOnly: true, timeoutMs: 120000 });
-      const ready = await this._pollProgramReady(warm);
+      const result = await this._compileMaterialVariants(
+        [warm],
+        { canvasOnly: true, timeoutMs: 120000 }
+      );
+      const ready = result?.ready === true;
       if (ready) this._compiledKeys.add(`planet:${oct}`);
       if (!this._disposed && this.worldMode === 'planet' && this.planetWorld &&
           this._planetMatMinimal === true && ready &&
@@ -6065,43 +6141,69 @@ export class Engine {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  _captureOverlayRoots() {
+    return [
+      this._tileGhost,
+      this.paintMode?.cursor?.group,
+      this.manualTerrain?.group,
+      this.manualTerrain?.anchor,
+      this.manualTerrain?.transform,
+      this.manualTerrain?.cursor?.group,
+      this.splineManager?.group,
+      this._rwLoadGroup,
+    ].filter(Boolean);
+  }
+
+  _withCaptureOverlaysHidden(capture) {
+    const visibility = [...new Set(this._captureOverlayRoots())]
+      .map((object) => [object, object.visible]);
+    for (const [object] of visibility) object.visible = false;
+    try {
+      return capture();
+    } finally {
+      for (const [object, visible] of visibility) object.visible = visible;
+    }
+  }
+
   _renderCameraCapture() {
-    const plan = this._prepareCameraPipeline();
-    const sceneSize = this._cameraSceneSize(plan);
-    const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    return this._withCaptureOverlaysHidden(() => {
+      const plan = this._prepareCameraPipeline();
+      const sceneSize = this._cameraSceneSize(plan);
+      const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
-    const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
-    const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
+      const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
+      const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
-    if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
-      this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-    } else if (this.worldMode === 'planet') {
-      this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      if (!planetLowRes) {
-        this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
+        this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+      } else if (this.worldMode === 'planet') {
+        this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+        if (!planetLowRes) {
+          this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
+        }
       }
-    }
 
-    if (this.worldMode === 'planet') {
-      this.renderer.setRenderTarget(target);
-      this.renderer.render(this.scene, this.camera);
-    } else {
-      this.underwater.render(this.renderer, this.scene, this.camera, target);
-      if (target) this.renderer.setRenderTarget(target);
-    }
-    const stats = {
-      triangles: this.renderer.info.render.triangles,
-      drawCalls: this.renderer.info.render.calls,
-    };
+      if (this.worldMode === 'planet') {
+        this.renderer.setRenderTarget(target);
+        this.renderer.render(this.scene, this.camera);
+      } else {
+        this.underwater.render(this.renderer, this.scene, this.camera, target);
+        if (target) this.renderer.setRenderTarget(target);
+      }
+      const stats = {
+        triangles: this.renderer.info.render.triangles,
+        drawCalls: this.renderer.info.render.calls,
+      };
 
-    if (studioLowRes) {
-      this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
-    } else if (planetLowRes) {
-      this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
-    }
-    if (target) this.renderer.setRenderTarget(null);
-    this.visualPost.finish(this.renderer);
-    return stats;
+      if (studioLowRes) {
+        this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
+      } else if (planetLowRes) {
+        this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
+      }
+      if (target) this.renderer.setRenderTarget(null);
+      this.visualPost.finish(this.renderer);
+      return stats;
+    });
   }
 
   exportScreenshot() {
@@ -6982,8 +7084,22 @@ export class Engine {
       clearTimeout(this._postFirstPaintWarmTimer);
       this._postFirstPaintWarmTimer = null;
     }
+    if (this._postFirstPaintWaterTimer) {
+      clearTimeout(this._postFirstPaintWaterTimer);
+      this._postFirstPaintWaterTimer = null;
+    }
+    if (this._terrainUpgradeRetryTimer) {
+      clearTimeout(this._terrainUpgradeRetryTimer);
+      this._terrainUpgradeRetryTimer = null;
+    }
+    if (this._waterWarmRetryTimer) {
+      clearTimeout(this._waterWarmRetryTimer);
+      this._waterWarmRetryTimer = null;
+    }
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
+    if (this._onContextLost) this.canvas.removeEventListener('webglcontextlost', this._onContextLost, false);
+    if (this._onContextRestored) this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored, false);
     if (this.renderer) {
       this.renderer.setAnimationLoop(null);
     }
