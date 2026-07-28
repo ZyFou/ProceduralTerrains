@@ -10,6 +10,13 @@ export const WATER_DEBUG_VIEWS = [
   { value: 'shoreline', label: 'Shoreline Mask' },
   { value: 'foam', label: 'Foam Mask' },
   { value: 'mask', label: 'Water Mask' },
+  { value: 'normal', label: 'Surface Normal' },
+  { value: 'opticalDepth', label: 'Optical Depth' },
+  { value: 'transmittance', label: 'Transmittance' },
+  { value: 'fresnel', label: 'Fresnel' },
+  { value: 'reflection', label: 'Sky Reflection' },
+  { value: 'refraction', label: 'Transmission / Refraction' },
+  { value: 'opacity', label: 'Final Opacity' },
 ];
 
 export function applyWaterDebugToMaterials(materials, debugView) {

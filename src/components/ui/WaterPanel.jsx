@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
@@ -19,10 +19,25 @@ import {
   WORLD_MODE_WATER_HINTS,
 } from '../../engine/water/WaterSettings.js';
 import { WATER_DEBUG_VIEWS } from '../../engine/water/WaterDebugViews.js';
+import { WATER_BASELINE_SCENES } from '../../engine/water/WaterBaseline.js';
 import PanelResetButton from './PanelResetButton.jsx';
 
 function val(params, key) {
   return params[key] ?? WATER_DEFAULT_PARAMS[key];
+}
+
+function fmtWaterCostMs(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)} ms` : 'unavailable';
+}
+
+function fmtWaterResolution(pass) {
+  return pass?.resolution
+    ? `${pass.resolution.width}×${pass.resolution.height}`
+    : 'not allocated';
+}
+
+function fmtWaterMemory(bytes) {
+  return `${((bytes || 0) / 1048576).toFixed(1)} MB`;
 }
 
 const SEA_LEVEL_DEF = TERRAIN_SLIDERS.find((s) => s.key === 'seaLevel');
@@ -30,16 +45,16 @@ const SEA_LEVEL_DEF = TERRAIN_SLIDERS.find((s) => s.key === 'seaLevel');
 const MODE_HINTS = {
   off: 'Water disabled — no mesh, no underwater effect.',
   legacy: 'Fast original water shader. Best for performance and Infinite World.',
-  realistic: 'Depth-based color, fresnel, shoreline foam, underwater fog.',
-  volumetric: 'Stronger absorption, caustics, and refraction distortion.',
-  cinematic: 'Highest quality — expensive. Best for screenshots in Tile mode.',
+  realistic: 'RGB absorption, live sky reflection, directional waves, and shoreline foam.',
+  volumetric: 'Realistic surface plus half-resolution scene refraction, depth rejection, and higher-tier underwater effects.',
+  cinematic: 'Volumetric water plus displaced geometry, sparse crest foam, and planar scene reflections. Best for Tile screenshots.',
 };
 
 const MATERIAL_SLIDERS = [
-  { key: 'waterOpacity', label: 'Opacity', min: 0.2, max: 1, step: 0.01, digits: 2 },
-  { key: 'waterRoughness', label: 'Roughness', min: 0, max: 1, step: 0.02, digits: 2 },
+  { key: 'waterOpacity', label: 'Density / Opacity', min: 0.2, max: 1, step: 0.01, digits: 2, info: 'Optical density in Realistic modes; traditional transparency in Legacy mode.' },
+  { key: 'waterRoughness', label: 'Roughness', min: 0, max: 1, step: 0.02, digits: 2, info: 'Broadens the reflected sky and sun highlight, and softens micro ripples.' },
   { key: 'waterFresnelStrength', label: 'Fresnel Strength', min: 0, max: 2, step: 0.05, digits: 2 },
-  { key: 'waterRefractionStrength', label: 'Refraction Strength', min: 0, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterRefractionStrength', label: 'Transmission / Refraction', min: 0.05, max: 1.5, step: 0.05, digits: 2, info: 'Controls transmission clarity in Realistic mode and scene distortion in Volumetric/Cinematic modes.' },
   { key: 'waterSpecularStrength', label: 'Specular Strength', min: 0, max: 2, step: 0.05, digits: 2 },
 ];
 
@@ -85,16 +100,45 @@ const CAUSTIC_SLIDERS = [
   { key: 'waterUnderwaterCaustics', label: 'Caustics Strength', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterUnderwaterCausticScale', label: 'Caustics Scale', min: 0.25, max: 3, step: 0.05, digits: 2 },
   { key: 'waterUnderwaterCausticSpeed', label: 'Caustics Speed', min: 0, max: 3, step: 0.05, digits: 2 },
+  {
+    key: 'waterUnderwaterCausticMinDepth',
+    label: 'Minimum Caustics Depth',
+    min: 0,
+    max: 20,
+    step: 0.25,
+    digits: 2,
+    unit: ' u',
+    info: 'Prevents caustics from appearing where terrain is almost touching the water surface.',
+  },
+  {
+    key: 'waterUnderwaterCausticMinDepthFalloff',
+    label: 'Minimum Depth Falloff',
+    min: 0.1,
+    max: 20,
+    step: 0.25,
+    digits: 2,
+    unit: ' u',
+    info: 'Distance over which caustics fade in after the minimum depth.',
+  },
 ];
 
 const REALISTIC_PERF_SLIDERS = [
-  { key: 'waterReflectionQuality', label: 'Reflection Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
-  { key: 'waterRefractionQuality', label: 'Refraction Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
+  { key: 'waterReflectionQuality', label: 'Reflection Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Up to 1× controls analytical sky clarity. Above 1× enables planar scene reflection in Cinematic Tile mode.' },
   { key: 'waterFoamQuality', label: 'Foam Quality', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterCausticsQuality', label: 'Caustics Quality', min: 0, max: 1.5, step: 0.05, digits: 2, expensive: true },
-  { key: 'waterNormalResolution', label: 'Normal Map Resolution', min: 0.25, max: 1.5, step: 0.05, digits: 2 },
-  { key: 'waterRenderScale', label: 'Water Render Scale', min: 0.4, max: 1.5, step: 0.05, digits: 2 },
+  { key: 'waterNormalResolution', label: 'Micro Wave Detail', min: 0.25, max: 1.5, step: 0.05, digits: 2, info: 'Scales only the fine procedural ripples; it does not change the main wave size.' },
   { key: 'waterDisableExpensiveBelowFps', label: 'FPS Downgrade Threshold', min: 24, max: 60, step: 1, digits: 0 },
+];
+
+const REFRACTION_PERF_SLIDERS = [
+  { key: 'waterRefractionQuality', label: 'Refraction Detail', min: 0.1, max: 1.5, step: 0.05, digits: 2, expensive: true, info: 'Controls distortion detail and terrain-silhouette rejection.' },
+  { key: 'waterRenderScale', label: 'Water Pass Resolution', min: 0.5, max: 2, step: 0.25, digits: 2, expensive: true, info: '1× renders refraction at half resolution; 2× reaches full resolution and also raises Cinematic reflection resolution.' },
+];
+
+const REFLECTION_UPDATE_OPTIONS = [
+  { value: '1', label: 'Every frame' },
+  { value: '2', label: 'Every 2 frames' },
+  { value: '4', label: 'Every 4 frames' },
 ];
 
 const WATER_QUALITY_OPTIONS = [
@@ -134,10 +178,14 @@ export default function WaterPanelInner({
   onParam,
   worldMode,
   perf,
+  perfStats,
+  gpu,
   onPerfSetting,
   planetStyleProps,
   onResetWaterSettings,
   onExportWaterMasks,
+  onApplyWaterBaselineScene,
+  onCaptureWaterBaseline,
   settingsTarget,
   id = 'inspector-water',
 }) {
@@ -149,17 +197,31 @@ export default function WaterPanelInner({
   const mode = val(params, 'waterMode');
   const enabled = val(params, 'waterEnabled');
   const selectedRealistic = isRealisticWaterMode(mode);
+  const selectedSceneRefraction = mode === 'volumetric' || mode === 'cinematic';
   const legacy = mode === 'legacy' || mode === 'off';
   const isStudio = worldMode === 'studio';
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
+  const selectedPlanarReflection = mode === 'cinematic' && isStudio;
   const worldLabel = WORLD_MODE_WATER_LABELS[worldMode] ?? worldMode;
   const effectiveMode = resolveEffectiveWaterMode(params, worldMode);
   const effectiveRealistic = isRealisticWaterMode(effectiveMode);
   const downgraded = isWaterModeDowngraded(params, worldMode);
   const modeLabel = WATER_MODES.find((m) => m.value === mode)?.label ?? mode;
   const effectiveLabel = WATER_MODES.find((m) => m.value === effectiveMode)?.label ?? effectiveMode;
+  const waterCost = perfStats?.waterCost ?? null;
   const p = perf ?? {};
+  const [baselineScene, setBaselineScene] = useState(WATER_BASELINE_SCENES[0].value);
+  const [baselineBusy, setBaselineBusy] = useState('');
+
+  const runBaselineAction = async (action, busyLabel) => {
+    setBaselineBusy(busyLabel);
+    try {
+      await action?.(baselineScene);
+    } finally {
+      setBaselineBusy('');
+    }
+  };
 
   const setEnabled = (v) => {
     onParam('waterEnabled', v);
@@ -307,6 +369,32 @@ export default function WaterPanelInner({
           settingId="water.section.waterColors"
           forceOpen={forceSection('water.section.waterColors', 'Water Colors', ['planet.water'])}
         >
+          {selectedRealistic && (
+            <>
+              <ToggleRow
+                label="Biome Color Variation"
+                value={val(params, 'waterBiomeColorEnabled')}
+                onChange={(v) => onParam('waterBiomeColorEnabled', v)}
+                settingId="water.waterBiomeColorEnabled"
+                info="Smoothly adapts water tint to the local procedural biome while preserving the selected base colors."
+              />
+              {val(params, 'waterBiomeColorEnabled') && (
+                <SliderCtl
+                  def={{
+                    key: 'waterBiomeColorStrength',
+                    label: 'Biome Color Strength',
+                    min: 0,
+                    max: 1.5,
+                    step: 0.05,
+                    digits: 2,
+                  }}
+                  value={val(params, 'waterBiomeColorStrength')}
+                  onChange={(v) => onParam('waterBiomeColorStrength', v)}
+                  settingId="water.waterBiomeColorStrength"
+                />
+              )}
+            </>
+          )}
           {WATER_COLORS.map(({ key, label, icon, info }) => (
             <ColorField
               key={key}
@@ -504,20 +592,47 @@ export default function WaterPanelInner({
           title="Performance"
           defaultOpen={false}
           settingId="water.section.performance"
-          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterRefractionQuality', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterRender', 'water.waterDisable'])}
+          forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterUpdateFrequency', 'water.waterRefractionQuality', 'water.waterRenderScale', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
         >
           {mode === 'cinematic' && isStudio && (
-            <p className="section-hint warning">Cinematic mode is expensive — best for Tile mode screenshots.</p>
+            <p className="section-hint warning">Cinematic adds a mirrored scene render for planar reflection — best for Tile mode screenshots.</p>
           )}
           {REALISTIC_PERF_SLIDERS.map((def) => (
             <SliderCtl
               key={def.key}
-              def={{ ...def, info: def.expensive ? `${def.label} — may impact FPS.` : undefined }}
+              def={{
+                ...def,
+                info: def.expensive
+                  ? `${def.info ? `${def.info} ` : ''}May impact FPS.`
+                  : def.info,
+              }}
               value={val(params, def.key)}
               onChange={(v) => onParam(def.key, v)}
               settingId={`water.${def.key}`}
             />
           ))}
+          {selectedSceneRefraction && !isPlanet && REFRACTION_PERF_SLIDERS.map((def) => (
+            <SliderCtl
+              key={def.key}
+              def={{
+                ...def,
+                info: `${def.info} May impact FPS.`,
+              }}
+              value={val(params, def.key)}
+              onChange={(v) => onParam(def.key, v)}
+              settingId={`water.${def.key}`}
+            />
+          ))}
+          {selectedPlanarReflection && (
+            <SelectRow
+              label="Reflection Updates"
+              value={String(val(params, 'waterUpdateFrequency'))}
+              options={REFLECTION_UPDATE_OPTIONS}
+              onChange={(v) => onParam('waterUpdateFrequency', Number(v))}
+              settingId="water.waterUpdateFrequency"
+              info="Reuse the planar reflection between updates to reduce its scene-render cost."
+            />
+          )}
         </ControlSection>
       )}
 
@@ -529,12 +644,40 @@ export default function WaterPanelInner({
         forceOpen={forceSection('water.section.debug', 'Debug', ['water.waterDebug', 'water.waterShow'])}
       >
         <SelectRow
+          label="Visual Baseline Scene"
+          value={baselineScene}
+          options={WATER_BASELINE_SCENES}
+          onChange={setBaselineScene}
+          settingId="water.waterBaselineScene"
+          info="Load a fixed terrain, camera, water preset, and time of day for before/after comparisons."
+        />
+        <button
+          type="button"
+          className="action-btn"
+          disabled={!!baselineBusy}
+          onClick={() => runBaselineAction(onApplyWaterBaselineScene, 'load')}
+        >
+          {baselineBusy === 'load' ? 'Loading Baseline…' : 'Load Baseline Scene'}
+        </button>
+        <button
+          type="button"
+          className="action-btn"
+          disabled={!!baselineBusy}
+          onClick={() => runBaselineAction(onCaptureWaterBaseline, 'capture')}
+        >
+          {baselineBusy === 'capture' ? 'Capturing Baseline…' : 'Capture PNG + Metrics (.zip)'}
+        </button>
+        <p className="section-hint">
+          Capture the same scene on each target GPU. The ZIP records FPS, frame time,
+          whole-frame GPU time when available, draw calls, triangles, and water shader compile time.
+        </p>
+        <SelectRow
           label="Water Debug View"
           value={val(params, 'waterDebugView')}
           options={WATER_DEBUG_VIEWS}
           onChange={(v) => onParam('waterDebugView', v)}
           settingId="water.waterDebugView"
-          info="Overlay water masks on the surface (requires effective Realistic mode)."
+          info="Inspect water inputs and terms on the surface (requires effective Realistic mode)."
         />
         <ToggleRow
           label="Show Water Mesh Bounds"
@@ -549,6 +692,17 @@ export default function WaterPanelInner({
           onChange={(v) => onParam('waterShowPerfCost', v)}
           settingId="water.waterShowPerfCost"
         />
+        {!!val(params, 'waterShowPerfCost') && waterCost && (
+          <div className="section-hint">
+            <strong>Live water cost</strong><br />
+            Surface CPU submission: {fmtWaterCostMs(waterCost.surface?.surfaceSubmitAvgMs)}<br />
+            Surface GPU: individual timing unavailable · whole frame {gpu?.supported ? fmtWaterCostMs(gpu.frameMs) : 'unavailable'}<br />
+            Geometry: {waterCost.surface?.vertices ?? 0} vertices · {waterCost.surface?.triangles ?? 0} triangles<br />
+            Opaque refraction: {fmtWaterCostMs(waterCost.refraction?.captureMs)} · {fmtWaterResolution(waterCost.refraction)}<br />
+            Planar reflection: {fmtWaterCostMs(waterCost.reflection?.captureMs)} · {fmtWaterResolution(waterCost.reflection)}<br />
+            Targets: {fmtWaterMemory(waterCost.renderTargetMemoryBytes)} · {waterCost.additionalSceneRenders ?? 0} extra scene render(s)
+          </div>
+        )}
         {!effectiveRealistic && (
           <p className="section-hint">Shader debug views need an effective Realistic (or higher) mode.</p>
         )}

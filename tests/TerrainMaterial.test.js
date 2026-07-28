@@ -46,6 +46,43 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('INFINITE_MODE');
   });
 
+  it('projects the live cloud mask into both Tile terrain shader variants', () => {
+    const uniforms = createTerrainUniforms();
+    const full = createTerrainMaterial(uniforms, 5);
+    const boot = createBootTerrainMaterial(uniforms, 5);
+    materials.push(full, boot);
+
+    expect(uniforms.uTerrainCloudShadowEnabled.value).toBe(0);
+    expect(uniforms.uTerrainCloudShadowStrength.value).toBeCloseTo(0.45);
+    expect(uniforms.uTerrainCloudShadowTex).toBeUndefined();
+    expect(full.fragmentShader).toContain('float terrainCloudShadow(vec3 worldPos)');
+    expect(full.fragmentShader).toContain('float terrainCloudFbm(vec3 p)');
+    expect(full.fragmentShader).toContain('float cloudShadow = terrainCloudShadow(vWorldPos)');
+    expect(boot.fragmentShader).toContain('diff *= 1.0 - terrainCloudShadow(vWorldPos)');
+  });
+
+  it('keeps terrain caustics clear of the water surface with a smooth falloff', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    expect(uniforms.uCausticMinDepth.value).toBe(1);
+    expect(uniforms.uCausticMinDepthFalloff.value).toBe(1);
+    expect(material.fragmentShader).toContain(
+      'uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001)',
+    );
+    expect(material.fragmentShader).toContain(
+      'depthFade = depthFade * depthFade * minDepthMask',
+    );
+  });
+
+  it('shares an optional baked climate texture with realistic Studio water', () => {
+    const uniforms = createTerrainUniforms();
+
+    expect(uniforms.uTerrainBiomeTex.value).toBeNull();
+    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+  });
+
   it('exposes manual surface weight maps and blends painted material roles', () => {
     const uniforms = createTerrainUniforms();
     const tile = createTerrainMaterial(uniforms, 5);

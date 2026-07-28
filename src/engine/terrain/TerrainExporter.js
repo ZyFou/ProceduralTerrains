@@ -117,7 +117,7 @@ const buildBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_CO
         vec3 col = terrainLighting(
           tc.albedo, n, uSunDir, ao,
           tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-          viewDir
+          viewDir, 0.0
         );
         col = pow(col, vec3(1.0 / 2.2));
         gl_FragColor = vec4(col, 1.0);

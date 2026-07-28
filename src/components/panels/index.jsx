@@ -326,10 +326,14 @@ function WaterPanel({ ctx }) {
         onParam={ctx.onParam}
         worldMode={ctx.worldMode}
         perf={ctx.perf}
+        perfStats={ctx.stats}
+        gpu={ctx.gpu}
         onPerfSetting={ctx.onPerfSetting}
         planetStyleProps={ctx.planetStyleProps}
         onResetWaterSettings={() => ctx.onResetPanel?.('water')}
         onExportWaterMasks={ctx.onExportWaterMasks}
+        onApplyWaterBaselineScene={ctx.onApplyWaterBaselineScene}
+        onCaptureWaterBaseline={ctx.onCaptureWaterBaseline}
         settingsTarget={ctx.settingsTarget}
       />
     </SidePanel>
@@ -474,7 +478,7 @@ function LightingPanel({ ctx }) {
   return (
     <SidePanel title="Lighting" description="Sun, atmosphere and fog." onClose={ctx.onClose}>
       {skyOn && (
-        <p className="section-hint">Time of day and the sky environment are configured in the <strong>Skybox</strong> tab. While the procedural sky is on, it drives the sun direction and atmosphere; the manual sun angles below apply when the sky is disabled.</p>
+        <p className="section-hint">Time of day and the sky environment are configured in the <strong>Skybox</strong> tab. While the procedural sky is on, it drives the sun direction and atmosphere. Turn it off to use the manual lighting palette below.</p>
       )}
       <EnvironmentPanelInner params={params} planetStyle={params.planetStyle}
         onParam={ctx.onParam} onTuning={ctx.onStyleTuning} settingsTarget={ctx.settingsTarget} />

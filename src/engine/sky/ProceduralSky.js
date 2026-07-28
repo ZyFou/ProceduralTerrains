@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  createProceduralSkyUniforms,
+  PROCEDURAL_SKY_EVALUATION_GLSL,
+  PROCEDURAL_SKY_UNIFORMS_GLSL,
+} from './proceduralSkyGLSL.js';
 
 // ============================================================================
 // ProceduralSky: a large inverted sphere with a procedural gradient shader.
@@ -27,87 +32,14 @@ void main() {
 const SKY_FRAGMENT = /* glsl */ `
 precision highp float;
 
-uniform vec3 uSkyZenith;      // color at the top of the sky
-uniform vec3 uSkyHorizon;     // color at the horizon
-uniform vec3 uSkySunColor;    // sun disc tint
-uniform vec3 uSkyFogColor;    // fog/haze at the very bottom
-uniform vec3 uSkySunDir;      // sun direction (shared with terrain)
-uniform float uSkyLightIntensity;  // overall brightness scale
-uniform float uSkyBrightness; // user brightness multiplier (Skybox tab)
-uniform float uSkyHaze;       // horizon haze band strength (Skybox tab)
-uniform float uSkyStars;      // 0/1 — render the night star field
-uniform float uSkyHdrIntensity;
-uniform float uSkySunGlow;
-uniform float uSkyHorizonGlow;
-uniform vec3  uSkyAtmosphereTint;
+${PROCEDURAL_SKY_UNIFORMS_GLSL}
+${PROCEDURAL_SKY_EVALUATION_GLSL}
 
 varying vec3 vDirection;
 
 void main() {
-  vec3 dir = normalize(vDirection);
-  float y = dir.y;
-
-  // ---- Sky gradient: zenith -> horizon -> below-horizon ----
-  // Above horizon: smooth blend from zenith to horizon
-  float horizonBlend = 1.0 - pow(max(y, 0.0), 0.45);
-  vec3 skyCol = mix(uSkyZenith, uSkyHorizon, horizonBlend) * uSkyAtmosphereTint;
-
-  // Horizon haze band: blend toward fog color near y ≈ 0
-  float hazeBand = exp(-abs(y) * 8.0);
-  skyCol = mix(skyCol, uSkyFogColor, hazeBand * uSkyHaze);
-
-  // Below horizon: fade to fog color
-  if (y < 0.0) {
-    float belowBlend = clamp(-y * 5.0, 0.0, 1.0);
-    skyCol = mix(skyCol, uSkyFogColor, belowBlend);
-  }
-
-  // ---- Sun disc ----
-  float sunDot = max(dot(dir, normalize(uSkySunDir)), 0.0);
-
-  // Hard core (small bright disc)
-  float sunDisc = smoothstep(0.9994, 0.9998, sunDot);
-
-  // Soft glow around the sun
-  float sunGlow = pow(sunDot, 256.0) * 0.8;
-  float sunHalo = pow(sunDot, 32.0) * 0.25;
-  float sunScatter = pow(sunDot, 8.0) * 0.08;
-
-  // Sun color with intensity
-  vec3 sunCol = uSkySunColor * uSkyLightIntensity;
-  skyCol += sunCol * (sunDisc * 3.0 + sunGlow + sunHalo * uSkySunGlow) * uSkySunGlow;
-
-  // Scatter warm light around the sun at the horizon
-  float scatterMask = exp(-abs(y) * 3.0);
-  skyCol += uSkySunColor * sunScatter * scatterMask * uSkyLightIntensity;
-
-  // Slight warmth at horizon on the sun side
-  float horizonWarmth = pow(max(sunDot, 0.0), 4.0) * hazeBand * 0.3;
-  skyCol += uSkySunColor * horizonWarmth * uSkyLightIntensity * (1.0 + uSkyHorizonGlow);
-  skyCol += uSkyHorizon * hazeBand * uSkyHorizonGlow * 0.35;
-
-  // ---- Night: add stars when sun is below horizon ----
-  float nightFactor = smoothstep(0.15, -0.1, uSkySunDir.y) * uSkyStars;
-  if (nightFactor > 0.01 && y > 0.0) {
-    // Simple pseudo-random stars from direction.
-    // Hash keeps intermediate values small so it stays stable on all GPUs
-    // (sin-of-large-number hashes break down and band on ANGLE/mobile).
-    vec3 starGrid = floor(dir * 300.0);
-    vec3 p = fract(starGrid * vec3(0.1031, 0.1030, 0.0973));
-    p += dot(p, p.yxz + 33.33);
-    float starHash = fract((p.x + p.y) * p.z);
-    float star = step(0.998, starHash) * pow(max(y, 0.0), 0.3);
-    // Twinkle using a second hash
-    float twinkle = 0.7 + 0.3 * sin(starHash * 6283.0 + starGrid.x * 0.5);
-    skyCol += vec3(0.8, 0.85, 1.0) * star * twinkle * nightFactor * 0.6;
-  }
-
-  // ---- User brightness ----
-  skyCol *= uSkyBrightness * uSkyHdrIntensity;
-
-  // ---- Gamma correction ----
+  vec3 skyCol = evaluateProceduralSkyLinear(normalize(vDirection), 1.0, 1.0);
   skyCol = pow(max(skyCol, vec3(0.0)), vec3(1.0 / 2.2));
-
   gl_FragColor = vec4(skyCol, 1.0);
 }
 `;
@@ -120,21 +52,7 @@ export class ProceduralSky {
     this.scene = scene;
 
     // Sky uniforms (independent from terrain — set by TimeOfDay)
-    this.uniforms = {
-      uSkyZenith:         { value: new THREE.Color(0.18, 0.35, 0.72) },
-      uSkyHorizon:        { value: new THREE.Color(0.50, 0.62, 0.78) },
-      uSkySunColor:       { value: new THREE.Color(1.0, 0.98, 0.92) },
-      uSkyFogColor:       { value: new THREE.Color(0.55, 0.62, 0.75) },
-      uSkySunDir:         { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },
-      uSkyLightIntensity: { value: 1.0 },
-      uSkyBrightness:     { value: 1.0 },
-      uSkyHaze:           { value: 0.55 },
-      uSkyStars:          { value: 1.0 },
-      uSkyHdrIntensity:   { value: 1.08 },
-      uSkySunGlow:        { value: 1.0 },
-      uSkyHorizonGlow:    { value: 0.35 },
-      uSkyAtmosphereTint: { value: new THREE.Color(1.0, 0.98, 0.92) },
-    };
+    this.uniforms = createProceduralSkyUniforms();
 
     // Large inverted sphere
     const geometry = new THREE.IcosahedronGeometry(40000, 4);

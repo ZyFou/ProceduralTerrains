@@ -25,6 +25,7 @@ uniform float uBloomThreshold;
 uniform float uSunRaysStrength;
 uniform vec2 uSunScreen;
 uniform float uSunVisible;
+uniform vec3 uSunRaysColor;
 uniform float uTime;
 
 varying vec2 vUv;
@@ -60,18 +61,59 @@ void main() {
   if (uSunVisible > 0.5 && uSunRaysStrength > 0.001) {
     vec2 dir = uSunScreen - vUv;
     float dist = length(dir);
-    vec2 stepDir = dir / 16.0;
+    vec2 stepDir = dir / 24.0;
     vec2 uv = vUv;
     float shaft = 0.0;
+    float shaftSq = 0.0;
     float decay = 1.0;
-    for (int i = 0; i < 16; i++) {
+    float weight = 0.0;
+    for (int i = 0; i < 24; i++) {
       uv += stepDir;
-      float b = max(luma(texture2D(tDiffuse, clamp(uv, vec2(0.001), vec2(0.999))).rgb) - 0.52, 0.0);
-      shaft += b * decay;
-      decay *= 0.88;
+      float sampleLuma = luma(texture2D(
+        tDiffuse,
+        clamp(uv, vec2(0.001), vec2(0.999))
+      ).rgb);
+      // Isolate the sun disc and hot silver linings. The previous low
+      // threshold treated most of a blue daytime sky as a light source, which
+      // blurred the contribution into an invisible uniform veil.
+      float source = smoothstep(0.78, 1.08, sampleLuma);
+      shaft += source * decay;
+      shaftSq += source * source * decay;
+      weight += decay;
+      decay *= 0.93;
     }
-    float streak = 0.65 + 0.35 * hash21(floor(vec2(atan(dir.y, dir.x) * 20.0, dist * 18.0 - uTime)));
-    col += vec3(1.0, 0.92, 0.72) * shaft * streak * smoothstep(1.15, 0.0, dist) * uSunRaysStrength * 0.035;
+    float meanSource = shaft / max(weight, 1e-4);
+    float sourceVariance = sqrt(max(
+      shaftSq / max(weight, 1e-4) - meanSource * meanSource,
+      0.0
+    ));
+    float localSource = smoothstep(0.78, 1.08, luma(col));
+    // Radial blur alone disappears inside a large bright cloud. Contrast and
+    // variance along the sun path reveal the beams specifically at cloud gaps
+    // and silhouettes while leaving a clear sky comparatively clean.
+    shaft = max(meanSource - localSource, 0.0) * 1.35
+      + sourceVariance * 0.95;
+    float localDarkness = 1.0 - smoothstep(0.38, 0.92, luma(col));
+    float reveal = mix(0.32, 1.0, localDarkness);
+    float angle = atan(dir.y, dir.x);
+    float phase = hash21(vec2(floor(angle * 3.0), 7.0)) * 6.2831853;
+    float broadStreak = 0.5 + 0.5 * sin(angle * 23.0 + phase);
+    float fineStreak = 0.5 + 0.5 * sin(angle * 61.0 - phase * 0.73);
+    float streak = 0.42 + 0.58 * broadStreak * (0.65 + 0.35 * fineStreak);
+    float radialFade = 1.0 - smoothstep(0.0, 1.30, dist);
+    // Keep a restrained directional component even when the source cloud is
+    // clipped to pure white. It is strongest over darker occluders, so max
+    // strength remains visibly "ray-like" instead of becoming global exposure.
+    float atmosphericShaft = mix(0.07, 0.36, localDarkness)
+      * streak
+      * radialFade;
+    col += uSunRaysColor
+      * (
+        shaft * streak * reveal * radialFade * 0.85
+        + atmosphericShaft * 0.65
+      )
+      * uSunRaysStrength
+      * 0.90;
   }
 
   col *= max(uExposure, 0.0);
@@ -245,6 +287,7 @@ export class VisualPostProcess {
         uSunRaysStrength: { value: 0 },
         uSunScreen: { value: new THREE.Vector2(0.5, 0.8) },
         uSunVisible: { value: 0 },
+        uSunRaysColor: { value: new THREE.Color(1.0, 0.92, 0.72) },
         uTime: { value: 0 },
       },
       depthTest: false,
@@ -283,7 +326,8 @@ export class VisualPostProcess {
   get plan() { return this._plan; }
 
   lookEnabled(params, worldMode) {
-    return worldMode === 'studio' && params?.visualsPostEnabled !== false;
+    return (worldMode === 'studio' && params?.visualsPostEnabled !== false)
+      || (params?.visualsSunRaysStrength ?? 0) > 0.001;
   }
 
   cameraEffectsEnabled(params) {
@@ -308,6 +352,7 @@ export class VisualPostProcess {
     renderScale = 1,
     time = 0,
     sunScreen = null,
+    sunColor = null,
     requireSceneDepth = false,
   } = {}) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -317,6 +362,7 @@ export class VisualPostProcess {
       renderScale,
       worldMode,
       visualsPostEnabled: params?.visualsPostEnabled,
+      sunRaysStrength: params?.visualsSunRaysStrength,
       pixelatedEnabled: params?.visualsPixelatedEnabled,
       pixelResolution: params?.visualsPixelResolution,
       ditheringEnabled: params?.visualsDitheringEnabled,
@@ -341,17 +387,19 @@ export class VisualPostProcess {
     if (plan.lookEnabled && plan.needsFinalPass) {
       this._lookRT = this._ensureTarget(this._lookRT, plan.sceneWidth, plan.sceneHeight, false);
     }
-    this.update(params || {}, time, sunScreen);
+    this.update(params || {}, time, sunScreen, sunColor);
     return plan;
   }
 
-  update(params, time, sunScreen) {
+  update(params, time, sunScreen, sunColor = null) {
     const u = this._lookMaterial.uniforms;
-    u.uExposure.value = params.visualsExposure ?? 1;
-    u.uContrast.value = params.visualsContrast ?? 1;
-    u.uSaturation.value = params.visualsSaturation ?? 1;
-    u.uVignette.value = params.visualsVignette ?? 0;
-    u.uBloomStrength.value = params.visualsBloomStrength ?? 0;
+    const artisticLook = this._worldMode === 'studio'
+      && params.visualsPostEnabled !== false;
+    u.uExposure.value = artisticLook ? (params.visualsExposure ?? 1) : 1;
+    u.uContrast.value = artisticLook ? (params.visualsContrast ?? 1) : 1;
+    u.uSaturation.value = artisticLook ? (params.visualsSaturation ?? 1) : 1;
+    u.uVignette.value = artisticLook ? (params.visualsVignette ?? 0) : 0;
+    u.uBloomStrength.value = artisticLook ? (params.visualsBloomStrength ?? 0) : 0;
     u.uBloomThreshold.value = params.visualsBloomThreshold ?? 0.75;
     u.uSunRaysStrength.value = params.visualsSunRaysStrength ?? 0;
     u.uTime.value = time;
@@ -359,6 +407,7 @@ export class VisualPostProcess {
       u.uSunScreen.value.set(sunScreen.x, sunScreen.y);
       u.uSunVisible.value = sunScreen.visible ? 1 : 0;
     }
+    if (sunColor) u.uSunRaysColor.value.copy(sunColor);
 
     const c = this._cameraMaterial.uniforms;
     c.uDithering.value = params.visualsDitheringEnabled ? 1 : 0;

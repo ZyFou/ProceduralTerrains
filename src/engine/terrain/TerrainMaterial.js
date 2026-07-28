@@ -124,6 +124,97 @@ vec3 applyTerrainGraphColor(vec3 fallback, vec2 xz, float h01, float slope, floa
 }
 `;
 
+const TERRAIN_CLOUD_SHADOW_GLSL = /* glsl */ `
+uniform float uTerrainCloudShadowEnabled;
+uniform float uTerrainCloudShadowStrength;
+uniform vec2 uTerrainCloudShadowCenter;
+uniform float uTerrainCloudShadowExtent;
+uniform float uTerrainCloudShadowAltitude;
+uniform float uTerrainCloudShadowScale;
+uniform float uTerrainCloudShadowCoverage;
+uniform float uTerrainCloudShadowSoftness;
+uniform vec3 uTerrainCloudShadowWind;
+uniform float uTerrainCloudShadowTime;
+uniform float uTerrainCloudShadowRotation;
+uniform float uTerrainCloudShadowEvolve;
+
+float terrainCloudHash13(vec3 p3) {
+  p3 = fract(p3 * 0.1031);
+  p3 += dot(p3, p3.zyx + 31.32);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+float terrainCloudNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float n000 = terrainCloudHash13(i + vec3(0.0, 0.0, 0.0));
+  float n100 = terrainCloudHash13(i + vec3(1.0, 0.0, 0.0));
+  float n010 = terrainCloudHash13(i + vec3(0.0, 1.0, 0.0));
+  float n110 = terrainCloudHash13(i + vec3(1.0, 1.0, 0.0));
+  float n001 = terrainCloudHash13(i + vec3(0.0, 0.0, 1.0));
+  float n101 = terrainCloudHash13(i + vec3(1.0, 0.0, 1.0));
+  float n011 = terrainCloudHash13(i + vec3(0.0, 1.0, 1.0));
+  float n111 = terrainCloudHash13(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
+    u.z
+  );
+}
+
+float terrainCloudFbm(vec3 p) {
+  const mat3 rot = mat3(
+     0.00,  0.80,  0.60,
+    -0.80,  0.36, -0.48,
+    -0.60, -0.48,  0.64
+  );
+  float amp = 0.5, sum = 0.0, norm = 0.0;
+  for (int i = 0; i < 3; i++) {
+    sum += amp * terrainCloudNoise(p);
+    norm += amp;
+    amp *= 0.5;
+    p = rot * p * 2.02;
+  }
+  return sum / max(norm, 1e-4);
+}
+
+float terrainCloudShadow(vec3 worldPos) {
+  if (uTerrainCloudShadowEnabled < 0.5 || uSunDir.y <= 0.01) return 0.0;
+
+  // Project the terrain point toward the sun until it reaches the middle of
+  // the cloud slab, then evaluate the same animated base cloud field there.
+  float rise = max(uTerrainCloudShadowAltitude - worldPos.y, 0.0);
+  vec2 cloudXZ = worldPos.xz + uSunDir.xz * (rise / max(uSunDir.y, 0.08));
+  float radius = max(uTerrainCloudShadowExtent, 1.0);
+  float radialDistance = length(cloudXZ - uTerrainCloudShadowCenter);
+  float edge = 1.0 - smoothstep(radius * 0.65, radius, radialDistance);
+  if (edge <= 0.0) return 0.0;
+
+  float c = cos(uTerrainCloudShadowRotation);
+  float s = sin(uTerrainCloudShadowRotation);
+  vec3 point = vec3(cloudXZ.x, uTerrainCloudShadowAltitude, cloudXZ.y);
+  vec3 domain = vec3(
+    c * point.x + s * point.z,
+    point.y,
+    -s * point.x + c * point.z
+  );
+  vec3 drift = uTerrainCloudShadowWind * uTerrainCloudShadowTime;
+  vec3 samplePoint = domain * uTerrainCloudShadowScale
+    + drift
+    + vec3(0.0, uTerrainCloudShadowTime * uTerrainCloudShadowEvolve, 0.0);
+  float base = terrainCloudFbm(samplePoint);
+  float threshold = 1.0 - uTerrainCloudShadowCoverage;
+  float softness = max(uTerrainCloudShadowSoftness, 0.08);
+  float mask = smoothstep(threshold, threshold + softness, base) * edge;
+
+  float sunAboveHorizon = smoothstep(0.01, 0.16, uSunDir.y);
+  return smoothstep(0.04, 0.82, mask)
+    * clamp(uTerrainCloudShadowStrength, 0.0, 0.85)
+    * sunAboveHorizon;
+}
+`;
+
 const buildFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
 precision highp float;
 
@@ -138,6 +229,7 @@ ${graphColorGLSL}
 ${SURFACE_TEXTURE_UNIFORMS_GLSL}
 ${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 ${TERRAIN_DETAIL_GLSL}
+${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -169,6 +261,8 @@ uniform float uCausticScale;     // user scale multiplier
 uniform float uCausticSpeed;     // user speed multiplier
 uniform vec3  uCausticColor;
 uniform float uCausticDepthFade; // depth (world units) over which caustics fade
+uniform float uCausticMinDepth;  // no caustics closer than this to the surface
+uniform float uCausticMinDepthFalloff;
 uniform float uCausticWaterAnim;
 uniform float uCausticAnimSpeed;
 uniform float uCausticWaveSpeed;
@@ -297,9 +391,18 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
   float below = uSeaLevel - hC;          // >0 when terrain is under water
   if (below <= 0.0) return col;
 
+  // Avoid the bright caustic/water overlap on terrain that nearly intersects
+  // the surface, then ease the light back in over a user-controlled band.
+  float minDepthMask = smoothstep(
+    uCausticMinDepth,
+    uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
+    below
+  );
+  if (minDepthMask <= 0.001) return col;
+
   // shallow terrain near the shoreline catches the most light; deep fades out
   float depthFade = 1.0 - clamp(below / max(uCausticDepthFade, 1.0), 0.0, 1.0);
-  depthFade = depthFade * depthFade;     // bias toward shallow water
+  depthFade = depthFade * depthFade * minDepthMask;
   // upward-facing surfaces catch the light; vertical cliffs stay dark
   float upFace = clamp(nGeo.y * 1.1, 0.0, 1.0);
   upFace *= upFace;
@@ -508,10 +611,11 @@ void main() {
   ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  float cloudShadow = terrainCloudShadow(vWorldPos);
   vec3 col = terrainLighting(
     td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-    viewDir
+    viewDir, cloudShadow
   );
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
@@ -596,6 +700,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${graphColorGLSL}
+${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uColorMode;
 uniform float uEps;
@@ -665,6 +770,7 @@ void main() {
 
   vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
   float diff = max(dot(n, uSunDir), 0.0);
+  diff *= 1.0 - terrainCloudShadow(vWorldPos);
   vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
                        + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
 
@@ -754,6 +860,18 @@ export function createTerrainUniforms() {
     uAnalysisContourSpacing: { value: 50.0 },
     uAnalysisContourStrength: { value: .35 },
     uWallThickness:  { value: 12 },
+    uTerrainCloudShadowEnabled: { value: 0.0 },
+    uTerrainCloudShadowStrength: { value: 0.45 },
+    uTerrainCloudShadowCenter: { value: new THREE.Vector2() },
+    uTerrainCloudShadowExtent: { value: 1.0 },
+    uTerrainCloudShadowAltitude: { value: 1000.0 },
+    uTerrainCloudShadowScale: { value: 0.001 },
+    uTerrainCloudShadowCoverage: { value: 0.5 },
+    uTerrainCloudShadowSoftness: { value: 0.16 },
+    uTerrainCloudShadowWind: { value: new THREE.Vector3() },
+    uTerrainCloudShadowTime: { value: 0.0 },
+    uTerrainCloudShadowRotation: { value: 0.0 },
+    uTerrainCloudShadowEvolve: { value: 0.0 },
     // Underwater caustics (shared by every terrain material — studio/infinite
     // declare + use them; the planet material harmlessly ignores them). Default
     // off; the engine raises uCausticBlend with camera submersion each frame.
@@ -763,6 +881,8 @@ export function createTerrainUniforms() {
     uCausticSpeed:    { value: 1.0 },
     uCausticColor:    { value: new THREE.Vector3(0.85, 0.95, 1.0) },
     uCausticDepthFade:{ value: 70.0 },
+    uCausticMinDepth: { value: 1.0 },
+    uCausticMinDepthFalloff: { value: 1.0 },
     uCausticWaterAnim:     { value: 1.0 },
     uCausticAnimSpeed:     { value: 1.0 },
     uCausticWaveSpeed:     { value: 1.0 },
@@ -814,6 +934,10 @@ export function createTerrainUniforms() {
     // terrain on the procedural path.
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
+    // Low-resolution procedural climate bake used by Studio water tinting.
+    // RGBA = temperature, moisture, continentalness, region jitter.
+    uTerrainBiomeTex:     { value: null },
+    uUseTerrainBiomeTex:  { value: 0.0 },
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
     uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
 

@@ -142,6 +142,14 @@ uniform float uCloudShadowStrength;
 uniform float uCloudScattering;
 uniform vec3  uCloudColor;
 uniform vec3  uCloudShadowColor;
+uniform vec3  uCloudDirectLight;
+uniform vec3  uCloudAmbientTop;
+uniform vec3  uCloudAmbientBottom;
+uniform vec3  uCloudGroundBounce;
+uniform float uCloudAtmosphereInfluence;
+uniform float uCloudSunResponse;
+uniform float uCloudAmbientResponse;
+uniform float uCloudSilverLining;
 uniform vec3  uCloudWind;          // domain drift vector (already × speed)
 uniform float uCloudRotation;      // domain rotation angle (radians)
 uniform float uCloudTime;
@@ -240,13 +248,24 @@ export const CLOUD_VOLUME_GLSL = /* glsl */ `
 uniform float uCloudInner;        // inner shell radius (world units)
 uniform float uCloudOuter;        // outer shell radius (world units)
 
-// cloud fraction in [0,1] at a planet-local world position
-float cloudDensity(vec3 P) {
+// Cloud fraction + normalized layer height at a planet-local world position.
+// Returning both avoids a second length(P) in the primary lighting loop.
+vec2 cloudSample(vec3 P) {
   float r = length(P);
   float hf = (r - uCloudInner) / max(uCloudOuter - uCloudInner, 1e-3);
-  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  if (hf <= 0.0 || hf >= 1.0) return vec2(0.0, clamp(hf, 0.0, 1.0));
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
-  return cloudShape(cl_domain(P)) * fall;
+  return vec2(cloudShape(cl_domain(P)) * fall, hf);
+}
+
+float cloudDensity(vec3 P) {
+  return cloudSample(P).x;
+}
+
+float cl_sunVisibility(vec3 P, float cloudHeight) {
+  float r = mix(uCloudInner, uCloudOuter, clamp(cloudHeight, 0.0, 1.0));
+  float localSun = dot(P, uCloudSunDir) / max(r, 1e-3);
+  return smoothstep(-0.08, 0.05, localSun);
 }
 
 float cloudDensityForLight(vec3 P) {
@@ -303,14 +322,20 @@ uniform float uCloudRadius;       // horizontal fade radius
 uniform float uCloudFar;          // clamp marched distance (horizon bound)
 uniform vec3  uCloudCenter;       // board center (xz used)
 
-float cloudDensity(vec3 P) {
+vec2 cloudSample(vec3 P) {
   float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);
-  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  if (hf <= 0.0 || hf >= 1.0) return vec2(0.0, clamp(hf, 0.0, 1.0));
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
   float rad = length(P.xz - uCloudCenter.xz);
   float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
-  if (edge <= 0.0) return 0.0;
-  return cloudShape(cl_domain(P)) * fall * edge;
+  if (edge <= 0.0) return vec2(0.0, hf);
+  return vec2(cloudShape(cl_domain(P)) * fall * edge, hf);
+}
+float cloudDensity(vec3 P) {
+  return cloudSample(P).x;
+}
+float cl_sunVisibility(vec3 P, float cloudHeight) {
+  return smoothstep(-0.08, 0.08, uCloudSunDir.y);
 }
 float cloudDensityForLight(vec3 P) {
   float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);

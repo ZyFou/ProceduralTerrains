@@ -45,6 +45,7 @@ import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
 } from './project/NodeProjectTemplates.js';
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
+import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
@@ -1376,6 +1377,9 @@ export default function App() {
 
       case 'lighting.sunAzimuth': return `${Math.round(params.sunAzimuth ?? 0)}°`;
       case 'lighting.sunElevation': return `${Math.round(params.sunElevation ?? 0)}°`;
+      case 'lighting.cloudShadowsEnabled': return yesNo(!!params.cloudShadowsEnabled);
+      case 'lighting.cloudShadowOpacity': return num(params.cloudShadowOpacity ?? 0.45, 2);
+      case 'lighting.godRays': return num(params.visualsSunRaysStrength ?? 0.22, 2);
       case 'lighting.sunColor': return hex(paramsStyle.sunColor);
       case 'lighting.sunIntensity': return num(paramsStyle.sunIntensity ?? 1.25, 2);
       case 'lighting.fogDensity': return num(params.fogDensity, 2);
@@ -1396,9 +1400,13 @@ export default function App() {
       case 'clouds.cloudWindDir': return `${Math.round(params.cloudWindDir ?? 0)}°`;
       case 'clouds.cloudWindSpeed': return num(params.cloudWindSpeed ?? 0, 2);
       case 'clouds.cloudRotationSpeed': return num(params.cloudRotationSpeed ?? 0, 2);
-      case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 0, 2);
+      case 'clouds.cloudLightAbsorption': return num(params.cloudLightAbsorption ?? 3, 2);
       case 'clouds.cloudShadowStrength': return num(params.cloudShadowStrength ?? 0, 2);
       case 'clouds.cloudScatteringStrength': return num(params.cloudScatteringStrength ?? 0, 2);
+      case 'clouds.cloudAtmosphereInfluence': return num(params.cloudAtmosphereInfluence ?? 1, 2);
+      case 'clouds.cloudSunResponse': return num(params.cloudSunResponse ?? 1, 2);
+      case 'clouds.cloudAmbientResponse': return num(params.cloudAmbientResponse ?? 1, 2);
+      case 'clouds.cloudSilverLining': return num(params.cloudSilverLining ?? 0.25, 2);
       case 'clouds.cloudNoiseVariant': return String(params.cloudNoiseVariant ?? 'default');
       case 'clouds.cloudColor': return hex(params.cloudColor);
       case 'clouds.cloudShadowColor': return hex(params.cloudShadowColor);
@@ -1715,6 +1723,31 @@ export default function App() {
     onPerfSetting: (key, value) => engine().setPerfSetting(key, value),
     onCloudQuality: (key) => engine().setCloudQuality(key),
     onExportWaterMasks: (opts) => engine().exportWaterMasks(opts),
+    onApplyWaterBaselineScene: async (sceneId) => {
+      const scene = getWaterBaselineScene(sceneId);
+      if (!scene) return;
+      try {
+        if (engine().worldMode !== scene.worldMode) {
+          await runModeSwitch(scene.worldMode, { silent: true });
+        }
+        if (engine().worldMode !== scene.worldMode) {
+          throw new Error(`Could not switch to ${scene.worldMode} mode`);
+        }
+        engine().applyWaterBaselineScene(sceneId);
+        setTimeOfDay(engine().timeOfDay);
+      } catch (error) {
+        console.error(error);
+        showToast(error?.message || 'Water baseline could not be loaded', 'error');
+      }
+    },
+    onCaptureWaterBaseline: async (sceneId) => {
+      try {
+        await engine().captureWaterBaseline(sceneId);
+      } catch (error) {
+        console.error(error);
+        showToast(error?.message || 'Water baseline capture failed', 'error');
+      }
+    },
     // bake / clear change the baked delta (a heavy, non-param edit) — record a
     // history entry afterwards so the whole bake is a single Ctrl+Z away.
     onErosionBake: async (onProgress) => {

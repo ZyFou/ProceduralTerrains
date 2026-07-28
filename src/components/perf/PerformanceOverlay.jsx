@@ -299,6 +299,46 @@ export default function PerformanceOverlay({
               <Row label="Waves" value={fmtMaybe(diag.water.waves)} />
               <Row label="Sea level" value={fmtMaybe(diag.water.seaLevel)} />
               <Row label="Underwater" value={diag.water.underwater ? 'active' : 'inactive'} />
+              {diag.water.performanceCost && (() => {
+                const cost = diag.water.performanceCost;
+                const surface = cost.surface || {};
+                const refraction = cost.refraction || {};
+                const reflectionPass = cost.reflection || {};
+                return (
+                  <>
+                    <Row
+                      label="Surface geometry"
+                      value={`${surface.mode || '–'} · ${fmtNum(surface.vertices || 0)} verts · ${fmtNum(surface.triangles || 0)} tris`}
+                    />
+                    <Row
+                      label="Surface CPU submit"
+                      value={fmtMs(surface.surfaceSubmitAvgMs)}
+                    />
+                    <Row
+                      label="Surface GPU"
+                      value={gpu?.supported
+                        ? `${fmtMs(gpu.frameMs)} whole frame`
+                        : 'whole-frame timer unavailable'}
+                    />
+                    <Row
+                      label="Opaque refraction"
+                      value={`${fmtMs(refraction.captureMs)} · ${fmtPassResolution(refraction)}`}
+                    />
+                    <Row
+                      label="Planar reflection"
+                      value={`${fmtMs(reflectionPass.captureMs)} · ${fmtPassResolution(reflectionPass)}`}
+                    />
+                    <Row
+                      label="Water target memory"
+                      value={mb(cost.renderTargetMemoryBytes || 0)}
+                    />
+                    <Row
+                      label="Extra scene renders"
+                      value={cost.additionalSceneRenders ?? 0}
+                    />
+                  </>
+                );
+              })()}
             </>
           )}
         </Section>
@@ -350,6 +390,12 @@ function fmtMaybe(v) {
   if (v == null) return '–';
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
   return String(v);
+}
+
+function fmtPassResolution(pass) {
+  return pass?.resolution
+    ? `${pass.resolution.width}×${pass.resolution.height}`
+    : 'not allocated';
 }
 
 function renderTerrain(diag) {

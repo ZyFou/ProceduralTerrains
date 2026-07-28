@@ -66,6 +66,30 @@ void main() {
 }
 `;
 
+// Climate changes over hundreds of world units, so it does not need the
+// high-resolution height target. Baking it separately keeps Studio water on a
+// cheap texture lookup while preserving the exact procedural biome layout.
+const BIOME_BAKE_FRAGMENT = /* glsl */ `
+precision highp float;
+
+${COMMON_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+
+varying vec2 vUv;
+
+void main() {
+  vec2 xz = uBakeOrigin + vUv * max(uBakeSpan, vec2(1.0));
+  Climate climate = climateAt(xz * uFrequency + uSeedOffset);
+  gl_FragColor = vec4(
+    climate.temp,
+    climate.moist,
+    climate.cont,
+    climate.region
+  );
+}
+`;
+
 export class TerrainHeightBaker {
   /**
    * @param {object} opts
@@ -81,11 +105,21 @@ export class TerrainHeightBaker {
     this._maxSize = maxSize;
     this._texW = size;
     this._texH = size;
+    this._biomeW = 512;
+    this._biomeH = 512;
 
     this.target = this._makeTarget(size, size);
+    this.biomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
 
     this.scene = new THREE.Scene();
     this.material = null;   // built on first bake so OCTAVES matches the params
+    this.biomeMaterial = new THREE.ShaderMaterial({
+      uniforms: this.uniforms,
+      vertexShader: BAKE_VERTEX,
+      fragmentShader: BIOME_BAKE_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+    });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
     this.mesh.frustumCulled = false;
     this.scene.add(this.mesh);
@@ -96,6 +130,7 @@ export class TerrainHeightBaker {
   }
 
   get texture() { return this.target.texture; }
+  get biomeTexture() { return this.biomeTarget.texture; }
 
   _makeTarget(w, h) {
     return new THREE.WebGLRenderTarget(w, h, {
@@ -108,6 +143,20 @@ export class TerrainHeightBaker {
     });
   }
 
+  _makeBiomeTarget(w, h) {
+    const target = new THREE.WebGLRenderTarget(w, h, {
+      type: THREE.UnsignedByteType,
+      format: THREE.RGBAFormat,
+      magFilter: THREE.LinearFilter,
+      minFilter: THREE.LinearFilter,
+      depthBuffer: false,
+      generateMipmaps: false,
+    });
+    target.texture.colorSpace = THREE.NoColorSpace;
+    target.texture.name = 'TerrainBiomeClimate';
+    return target;
+  }
+
   /** Resize the bake target to cover a multi-cell union (cols × rows cells). */
   _ensureTargetSize(cols, rows) {
     const cap = Math.max(this._baseSize, this._maxSize || 4096);
@@ -118,6 +167,16 @@ export class TerrainHeightBaker {
     this.target = this._makeTarget(w, h);
     this._texW = w;
     this._texH = h;
+
+    const maxCells = Math.max(1, cols, rows);
+    const biomeW = Math.max(128, Math.round(512 * cols / maxCells));
+    const biomeH = Math.max(128, Math.round(512 * rows / maxCells));
+    if (biomeW !== this._biomeW || biomeH !== this._biomeH) {
+      this.biomeTarget.dispose();
+      this.biomeTarget = this._makeBiomeTarget(biomeW, biomeH);
+      this._biomeW = biomeW;
+      this._biomeH = biomeH;
+    }
   }
 
   _ensureMaterial(octaves, stackGLSL) {
@@ -142,15 +201,22 @@ export class TerrainHeightBaker {
     this._ensureMaterial(octaves, stackGLSL);
     const r = this.renderer;
     const prevTarget = r.getRenderTarget();
+    this.mesh.material = this.material;
     r.setRenderTarget(this.target);
     r.render(this.scene, this.cam);
+    this.mesh.material = this.biomeMaterial;
+    r.setRenderTarget(this.biomeTarget);
+    r.render(this.scene, this.cam);
+    this.mesh.material = this.material;
     r.setRenderTarget(prevTarget);
   }
 
   dispose() {
     this.target.dispose();
+    this.biomeTarget.dispose();
     this.mesh.geometry.dispose();
     if (this.material) this.material.dispose();
+    this.biomeMaterial.dispose();
     this.material = null;
   }
 }

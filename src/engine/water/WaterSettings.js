@@ -91,12 +91,17 @@ export const WATER_DEFAULT_PARAMS = {
   waterAutoDowngradeInfinite: true,
   waterLegacyOnLowFps: true,
 
-  // material
+  // material — Realistic V2 interprets the legacy-compatible waterOpacity key
+  // as optical density; Legacy mode retains its original transparency meaning.
   waterOpacity: 0.72,
   waterRoughness: 0.35,
   waterFresnelStrength: 1.0,
+  // Serialized name retained for compatibility. Realistic uses it for
+  // transmission clarity; Volumetric/Cinematic also use it for distortion.
   waterRefractionStrength: 0.45,
   waterSpecularStrength: 1.0,
+  waterBiomeColorEnabled: true,
+  waterBiomeColorStrength: 0.55,
 
   // depth
   waterDepthColorStrength: 1.0,
@@ -138,18 +143,29 @@ export const WATER_DEFAULT_PARAMS = {
   waterUnderwaterCausticsEnabled: true,
   waterUnderwaterCausticScale: 1.0,
   waterUnderwaterCausticSpeed: 1.0,
+  // Keep projected caustics away from terrain that nearly intersects the
+  // surface. They fade from zero at 1 unit to full strength at 2 units.
+  waterUnderwaterCausticMinDepth: 1.0,
+  waterUnderwaterCausticMinDepthFalloff: 1.0,
   waterUnderwaterParticles: false,
   waterUnderwaterLightShafts: false,
   waterSurfaceTransition: 0.8,
 
   // performance (quality knobs — heavy ones also in perf)
+  // 0–1 controls analytical sky detail. Cinematic values above 1 enable the
+  // planar scene-reflection pass and scale its resolution up to 1.5.
   waterReflectionQuality: 1.0,
-  waterRefractionQuality: 0.6,
+  waterRefractionQuality: 0.6, // distortion detail + silhouette rejection
   waterFoamQuality: 1.0,
   waterCausticsQuality: 0.5,
+  // Serialized name retained for compatibility; procedural V2 has no normal
+  // texture, so this controls micro-wave detail instead.
   waterNormalResolution: 1.0,
+  // 1× means half-resolution refraction; 2× reaches full resolution and raises
+  // the Cinematic planar-reflection target toward its quality-defined maximum.
   waterRenderScale: 1.0,
-  waterUpdateFrequency: 1.0,
+  // Planar reflection cadence: update every 1, 2, or 4 rendered frames.
+  waterUpdateFrequency: 1,
   waterDisableExpensiveBelowFps: 42,
 
   // debug

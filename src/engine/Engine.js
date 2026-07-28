@@ -24,6 +24,7 @@ import { Minimap } from './Minimap.js';
 import { DEFAULT_PARAMS, applyPreset, PRESETS } from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
+import { resolveCloudLightingState } from './sky/CloudLightingState.js';
 import { FogManager } from './render/FogManager.js';
 import { UnderwaterEffect } from './render/UnderwaterEffect.js';
 import { UnderwaterController } from './render/UnderwaterController.js';
@@ -67,6 +68,12 @@ import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { FlatPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
 import { migrateWaterParams, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
+import {
+  createWaterBaselineReport,
+  getWaterBaselineScene,
+  resolveWaterBaselineCamera,
+  waterBaselineParams,
+} from './water/WaterBaseline.js';
 import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
 import {
   SURFACE_TEXTURE_SOURCE,
@@ -1994,6 +2001,7 @@ export class Engine {
     this._syncPlanetStyleToParams();
     this.cb.onParams(this._paramsSnapshot());
     this.planetStyle.applyToUniforms(this.uniforms);
+    this._syncCloudLighting();
     this._applyStudioFogFromStyle();
     this._applyStudioSunFromStyle();
     this._minimapDirtyAt = performance.now();
@@ -2001,7 +2009,7 @@ export class Engine {
   }
 
   _applyStudioSunFromStyle() {
-    if (this.worldMode === 'infinite') return;
+    if (this.worldMode === 'infinite' || this._skyActive()) return;
     const style = this.planetStyle.getStyle();
     const sunI = style.sunIntensity ?? 1.25;
     if (style.sunColor) {
@@ -2942,6 +2950,7 @@ export class Engine {
       renderScale: this._effectiveRenderScale(),
       time: this.uniforms.uTime.value,
       sunScreen: this._underwaterSunScreen(),
+      sunColor: this.sunLight?.color,
       requireSceneDepth,
     });
   }
@@ -2963,6 +2972,36 @@ export class Engine {
     return true;
   }
 
+  _captureWaterSceneRefraction(sceneSize) {
+    if (!this.waterSystem) return false;
+    this.profiler.begin('water-refraction');
+    try {
+      return this.waterSystem.captureSceneRefraction(
+        this.renderer,
+        this.scene,
+        this.camera,
+        sceneSize,
+      );
+    } finally {
+      this.profiler.end('water-refraction');
+    }
+  }
+
+  _captureWaterPlanarReflection(sceneSize) {
+    if (!this.waterSystem) return false;
+    this.profiler.begin('water-reflection');
+    try {
+      return this.waterSystem.capturePlanarReflection(
+        this.renderer,
+        this.scene,
+        this.camera,
+        sceneSize,
+      );
+    } finally {
+      this.profiler.end('water-reflection');
+    }
+  }
+
   // -------------------------------------------------- async shader compiling
   // Heavy shaders are compiled via renderer.compile + _waitForMaterialsReady so
   // the GPU driver can link off-thread (KHR_parallel_shader_compile) while ticks
@@ -2981,6 +3020,7 @@ export class Engine {
       return {
         ready: true,
         timedOut: false,
+        materialCount: 0,
         pendingCount: 0,
         waitMs: 0,
         syncCompileMs: 0,
@@ -3006,6 +3046,7 @@ export class Engine {
       return {
         ready: results.every((result) => result.ready),
         timedOut: results.some((result) => result.timedOut),
+        materialCount: list.length,
         pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
         waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
         syncCompileMs: results.reduce((sum, result) => sum + result.syncCompileMs, 0),
@@ -3047,7 +3088,7 @@ export class Engine {
     onProgress?.(list.length, total);
 
     if (canvasOnly) {
-      return { ...canvasResult, syncCompileMs, asyncWaitMs };
+      return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
     }
 
     this.underwater._ensureTarget(this.renderer);
@@ -3074,6 +3115,7 @@ export class Engine {
     return {
       ready: canvasResult.ready && rtResult.ready,
       timedOut: canvasResult.timedOut || rtResult.timedOut,
+      materialCount: list.length,
       pendingCount: canvasResult.pendingCount + rtResult.pendingCount,
       waitMs: canvasResult.waitMs + rtResult.waitMs,
       syncCompileMs: syncCompileMs + rtSyncCompileMs,
@@ -3262,6 +3304,7 @@ export class Engine {
             timeoutMs: 20000,
             stagger: mats.length > 1,
           });
+          this._recordWaterShaderCompile('mode-switch', result);
           ready = result?.ready === true;
           if (!ready) {
             console.warn(
@@ -3285,6 +3328,23 @@ export class Engine {
       // Yield twice so the UI can paint before kicking off GPU work.
       yieldTask().then(() => yieldTask().then(run));
     });
+  }
+
+  _recordWaterShaderCompile(reason, result) {
+    if (!result) return;
+    this._lastWaterShaderCompile = {
+      reason,
+      ready: result.ready === true,
+      timedOut: result.timedOut === true,
+      materialCount: result.materialCount ?? null,
+      syncCompileMs: Number.isFinite(result.syncCompileMs) ? Math.round(result.syncCompileMs * 100) / 100 : null,
+      asyncWaitMs: Number.isFinite(result.asyncWaitMs) ? Math.round(result.asyncWaitMs * 100) / 100 : null,
+      totalMs: Number.isFinite(result.syncCompileMs) && Number.isFinite(result.asyncWaitMs)
+        ? Math.round((result.syncCompileMs + result.asyncWaitMs) * 100) / 100
+        : null,
+      capturedAt: new Date().toISOString(),
+    };
+    this.profiler.setMetric('waterShaderCompile', this._lastWaterShaderCompile);
   }
 
   /**
@@ -3615,6 +3675,7 @@ export class Engine {
           timeoutMs: 20000,
           renderTarget,
         });
+        this._recordWaterShaderCompile('deferred-startup', result);
         this._waterMaterialWarmed = result?.ready === true;
         if (!this._waterMaterialWarmed) {
           console.warn(
@@ -3705,6 +3766,7 @@ export class Engine {
 
     if (this.studioCloud) {
       this.studioCloud.update(0.016, this.camera.position, this.uniforms.uSunDir.value);
+      this._syncTerrainCloudShadows();
     }
 
     const renderStats = this._renderCameraCapture();
@@ -4917,6 +4979,8 @@ export class Engine {
     this.profiler.setMetric('lastBakeMs', performance.now() - _t0);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
+    this.uniforms.uTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
+    this.uniforms.uUseTerrainBiomeTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
     this._bakedStudioLayout = layoutKey;
   }
@@ -5055,6 +5119,7 @@ export class Engine {
         center: this._unionCenter(),
       });
     }
+    this._syncCloudLighting();
   }
 
   /** Rebuild the planet for a radius / face-grid change (settings panel). */
@@ -5592,6 +5657,96 @@ export class Engine {
     return this.worldMode !== 'planet' && this.params.skyboxEnabled !== false;
   }
 
+  _resolveCloudLighting(tod = null) {
+    const u = this.uniforms || {};
+    const toRgb = (value, fallback) => {
+      if (value?.toArray) return value.toArray([]).slice(0, 3);
+      if (Array.isArray(value)) return value.slice(0, 3);
+      return fallback;
+    };
+    const skyActive = this._skyActive();
+    const evaluated = skyActive ? (tod || evaluateTimeOfDay(this.timeOfDay)) : null;
+
+    return resolveCloudLightingState({
+      proceduralSkyActive: skyActive,
+      timeOfDay: evaluated,
+      params: this.params,
+      sunDirection: u.uSunDir?.value,
+      terrainSunColor: toRgb(u.uTerrainSunCol?.value, [1.0, 0.94, 0.82]),
+      terrainSunIntensity: u.uTerrainSunIntensity?.value ?? 1.25,
+      terrainSkyAmbient: toRgb(u.uTerrainSkyAmb?.value, [0.36, 0.46, 0.62]),
+      terrainGroundBounce: toRgb(u.uTerrainBounce?.value, [0.20, 0.16, 0.11]),
+    });
+  }
+
+  _syncCloudLighting(tod = null) {
+    const state = this._resolveCloudLighting(tod);
+    this.studioCloud?.setLighting(state);
+    this.planetCloudLayer?.setLighting(state);
+    this.planetCloudChunks?.setLighting(state);
+    this._syncTerrainLighting(state, tod);
+    this._syncTerrainCloudShadows();
+    this._needsRender = true;
+  }
+
+  _syncTerrainLighting(state = null, tod = null) {
+    if (!this._skyActive() || !this.uniforms) return;
+    const lighting = state || this._resolveCloudLighting(tod);
+    const evaluated = tod || evaluateTimeOfDay(this.timeOfDay);
+    const u = this.uniforms;
+
+    // Terrain shaders keep direct color/intensity separate, while the resolved
+    // cloud state already contains physical ambient radiance. Convert the
+    // latter back through the terrain shader's historical 0.5 / 0.25 scales.
+    u.uTerrainSunCol.value.set(
+      evaluated.sunColor[0],
+      evaluated.sunColor[1],
+      evaluated.sunColor[2]
+    );
+    u.uTerrainSunIntensity.value = Math.max(0, evaluated.lightIntensity);
+
+    const top = lighting.ambientTopColor;
+    const bottom = lighting.ambientBottomColor;
+    u.uTerrainSkyAmb.value.set(
+      (top[0] * 0.7 + bottom[0] * 0.3) * 2.0,
+      (top[1] * 0.7 + bottom[1] * 0.3) * 2.0,
+      (top[2] * 0.7 + bottom[2] * 0.3) * 2.0
+    );
+    u.uTerrainBounce.value.set(
+      lighting.groundBounceColor[0] * 4.0,
+      lighting.groundBounceColor[1] * 4.0,
+      lighting.groundBounceColor[2] * 4.0
+    );
+  }
+
+  _syncTerrainCloudShadows() {
+    const u = this.uniforms;
+    if (!u?.uTerrainCloudShadowEnabled) return;
+    const state = this.studioCloud?.getTerrainShadowState?.();
+    const enabled = this.worldMode === 'studio'
+      && this.params.cloudsEnabled
+      && this.params.cloudShadowsEnabled
+      && !!state;
+
+    u.uTerrainCloudShadowEnabled.value = enabled ? 1.0 : 0.0;
+    u.uTerrainCloudShadowStrength.value = Math.min(
+      0.85,
+      Math.max(0, this.params.cloudShadowOpacity ?? 0.45)
+    );
+    if (state) {
+      u.uTerrainCloudShadowCenter.value.copy(state.center);
+      u.uTerrainCloudShadowExtent.value = state.extent;
+      u.uTerrainCloudShadowAltitude.value = state.altitude;
+      u.uTerrainCloudShadowScale.value = state.scale;
+      u.uTerrainCloudShadowCoverage.value = state.coverage;
+      u.uTerrainCloudShadowSoftness.value = state.softness;
+      u.uTerrainCloudShadowWind.value.copy(state.wind);
+      u.uTerrainCloudShadowTime.value = state.time;
+      u.uTerrainCloudShadowRotation.value = state.rotation;
+      u.uTerrainCloudShadowEvolve.value = state.evolve;
+    }
+  }
+
   /**
    * Sync the skybox appearance params + dome visibility for the current mode.
    * Pure uniform/visibility updates — never rebuilds or recompiles.
@@ -5602,6 +5757,7 @@ export class Engine {
     }
     this.proceduralSky.applyParams(this.params);
     this.proceduralSky.setVisible(this._skyActive());
+    this._syncCloudLighting();
     this._needsRender = true;
   }
 
@@ -5641,6 +5797,7 @@ export class Engine {
     // Update directional sun light intensity and color
     this.sunLight.intensity = tod.lightIntensity;
     this.sunLight.color.setRGB(tod.sunColor[0], tod.sunColor[1], tod.sunColor[2]);
+    this._syncCloudLighting(tod);
     this._needsRender = true;
   }
 
@@ -6131,6 +6288,144 @@ export class Engine {
     this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
   }
 
+  applyWaterBaselineScene(sceneId) {
+    const scene = getWaterBaselineScene(sceneId);
+    if (!scene) throw new Error(`Unknown water baseline scene: ${sceneId}`);
+    if (scene.worldMode !== this.worldMode) {
+      throw new Error(`Water baseline "${sceneId}" requires ${scene.worldMode} mode`);
+    }
+    if (this.generationSource !== 'classic') {
+      throw new Error('Water baselines require the Procedural terrain editor');
+    }
+
+    // Baselines deliberately use the classic deterministic field. Keeping the
+    // seed, terrain preset and water preset fixed makes captures comparable
+    // across shader revisions and across machines.
+    this.params = applyPreset(this.params, scene.terrainPreset);
+    this.params = this.waterSystem.applyPreset(scene.waterPreset);
+    this.params = waterBaselineParams(scene, this.params);
+    this.params.autoUpdate = true;
+    this.setNoiseStack(migrateStack(undefined));
+
+    this._terrainGen++;
+    this._bakedStudioGen = -1;
+    this._bakedTerrainGen = -1;
+    this._activeWaterBaseline = scene.value;
+    this.profiler.setMetric('waterBaselineScene', scene.value);
+    this.cb.onParams({ ...this.params });
+    this.setTimeOfDay(scene.timeOfDay);
+    this.applyAll({ force: true });
+    this._applyWaterBaselineCamera(scene);
+    this._needsRender = true;
+    this.cb.onToast(`Water baseline loaded: ${scene.label}`);
+    return scene;
+  }
+
+  _applyWaterBaselineCamera(scene) {
+    const resolved = resolveWaterBaselineCamera(scene, {
+      seaLevel: this.params.seaLevel,
+      boardSize: this.boardSize,
+    });
+    if (!resolved) return;
+
+    if (resolved.kind === 'first-person') {
+      this.camera.position.fromArray(resolved.position);
+      if (this.fpsControls) {
+        this.fpsControls.yaw = resolved.yaw;
+        this.fpsControls.pitch = resolved.pitch;
+        this.fpsControls.update(0);
+      }
+      this.camera.updateMatrixWorld(true);
+      return;
+    }
+
+    const controls = this.controls;
+    if (!controls) return;
+    controls.mode = 'orbit';
+    controls.target.fromArray(resolved.target);
+    controls.goalTarget.copy(controls.target);
+    controls.radius = resolved.radius;
+    controls.goalRadius = resolved.radius;
+    controls.phi = resolved.phi;
+    controls.goalPhi = resolved.phi;
+    controls.theta = resolved.theta;
+    controls.goalTheta = resolved.theta;
+    controls._smoothRate = null;
+    controls.update(0);
+    this.camera.updateMatrixWorld(true);
+  }
+
+  async captureWaterBaseline(sceneId = this._activeWaterBaseline) {
+    const scene = getWaterBaselineScene(sceneId);
+    if (!scene) throw new Error('Load a water baseline scene before capturing');
+    if (this._activeWaterBaseline !== sceneId) {
+      throw new Error(`Load "${scene.label}" before capturing it`);
+    }
+    if (scene.worldMode !== this.worldMode) {
+      throw new Error(`Water baseline "${sceneId}" requires ${scene.worldMode} mode`);
+    }
+
+    this.cb.onStatus('Capturing water baseline…', true);
+    const profilerWasActive = this.profiler.active;
+    this.profiler.setActive(true);
+    try {
+      const ready = await this._waitForWaterBaselineReady();
+      if (!ready) throw new Error('Water baseline did not become ready before capture');
+      // Give asynchronous GPU timing queries enough rendered frames to resolve.
+      for (let frame = 0; frame < 12; frame++) {
+        this._needsRender = true;
+        await yieldFrame();
+      }
+
+      const captureStats = this._renderCameraCapture();
+      this.profiler.captureRenderer(this.renderer);
+      const performanceSnapshot = this.profiler.snapshot();
+      const diagnostics = this.getPerfDiagnostics();
+      const png = await new Promise((resolve) => {
+        this.renderer.domElement.toBlob(resolve, 'image/png');
+      });
+      if (!png) throw new Error('Water baseline screenshot could not be encoded');
+
+      const report = createWaterBaselineReport({
+        scene,
+        params: this.params,
+        diagnostics,
+        performance: performanceSnapshot,
+        captureStats,
+        shaderCompile: this._lastWaterShaderCompile ?? null,
+      });
+      const { strToU8, zipSync } = await import('fflate');
+      const pngBytes = new Uint8Array(await png.arrayBuffer());
+      const reportBytes = strToU8(JSON.stringify(report, null, 2));
+      const archive = zipSync({
+        [`${scene.value}.png`]: pngBytes,
+        [`${scene.value}.json`]: reportBytes,
+      });
+      this._download(
+        URL.createObjectURL(new Blob([archive], { type: 'application/zip' })),
+        `water-baseline-${scene.value}.zip`,
+      );
+      this.cb.onToast(`Water baseline captured: ${scene.label}`);
+      return report;
+    } finally {
+      if (!profilerWasActive) this.profiler.setActive(false);
+      this.cb.onStatus('Ready', false);
+    }
+  }
+
+  async _waitForWaterBaselineReady(timeoutMs = 30000) {
+    const startedAt = performance.now();
+    while (
+      this._compiling
+      || this.board?.isBuilding
+      || this.waterSystem?._waterCompilePending
+    ) {
+      if (performance.now() - startedAt >= timeoutMs) return false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return true;
+  }
+
   // --------------------------------------------------------------- exports
 
   _download(url, filename) {
@@ -6514,6 +6809,14 @@ export class Engine {
       u.uCausticBlend.value = causticsOn ? 1.0 : 0.0;
       u.uCausticScale.value = p.waterUnderwaterCausticScale ?? 1;
       u.uCausticSpeed.value = p.waterUnderwaterCausticSpeed ?? 1;
+      if (u.uCausticMinDepth) {
+        u.uCausticMinDepth.value =
+          p.waterUnderwaterCausticMinDepth ?? 1;
+      }
+      if (u.uCausticMinDepthFalloff) {
+        u.uCausticMinDepthFalloff.value =
+          p.waterUnderwaterCausticMinDepthFalloff ?? 1;
+      }
       this._syncCausticWaveUniforms(p);
     }
 
@@ -6593,7 +6896,7 @@ export class Engine {
     const v = this._uwSunScratch || (this._uwSunScratch = new THREE.Vector3());
     v.copy(cam.position).addScaledVector(sunDir, 1e6);
     v.project(cam);
-    const visible = v.z > -1 && v.z < 1;
+    const visible = sunDir.y > -0.02 && v.z > -1 && v.z < 1;
     return { x: v.x * 0.5 + 0.5, y: v.y * 0.5 + 0.5, visible };
   }
 
@@ -6652,6 +6955,7 @@ export class Engine {
       if (this.studioCloud) {
         this.profiler.begin('clouds');
         this.studioCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+        this._syncTerrainCloudShadows();
         this.profiler.end('clouds');
       }
 
@@ -6694,6 +6998,8 @@ export class Engine {
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
+      this._captureWaterPlanarReflection(cameraSceneSize);
+      this._captureWaterSceneRefraction(cameraSceneSize);
       this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
@@ -6722,7 +7028,14 @@ export class Engine {
         angle: `${this.controls.azimuthDeg.toFixed(0)}°, ${this.controls.elevationDeg.toFixed(0)}°`,
         distance: this.controls.distance.toFixed(0),
       });
-      this.cb.onStats({ fps: this._fps, triangles: this._lastTris, drawCalls: this._lastDraws });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles: this._lastTris,
+        drawCalls: this._lastDraws,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
       if (this.cb.onPlayerState) {
         this.cb.onPlayerState(this.player ? this.player.state : null);
       }
@@ -6771,7 +7084,10 @@ export class Engine {
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     const cameraPlan = this._prepareCameraPipeline();
+    const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    this._captureWaterPlanarReflection(cameraSceneSize);
+    this._captureWaterSceneRefraction(cameraSceneSize);
     this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
@@ -6801,7 +7117,14 @@ export class Engine {
           terrainDrawCalls: this.infiniteWorld ? this.infiniteWorld.terrainDrawCallCount : 0,
         });
       }
-      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles,
+        drawCalls,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
     }
   }
 
@@ -6894,7 +7217,14 @@ export class Engine {
           lodCounts: this.planetWorld ? [...this.planetWorld.lodCounts] : [0, 0, 0, 0],
         });
       }
-      this.cb.onStats({ fps: this._fps, triangles, drawCalls });
+      this.cb.onStats({
+        fps: this._fps,
+        triangles,
+        drawCalls,
+        waterCost: this.params.waterShowPerfCost
+          ? this.waterSystem?.getPerformanceDiagnostics?.() ?? null
+          : null,
+      });
     }
   }
 
@@ -6988,6 +7318,13 @@ export class Engine {
         waves: perf.waterWaves,
         seaLevel: p.seaLevel,
         underwater: !!this.underwater?.active,
+        baselineScene: this._activeWaterBaseline ?? null,
+        shaderCompile: this._lastWaterShaderCompile ?? null,
+        refractionPass: this.waterSystem?.getRefractionDiagnostics?.() ?? null,
+        planarReflectionPass:
+          this.waterSystem?.getPlanarReflectionDiagnostics?.() ?? null,
+        performanceCost:
+          this.waterSystem?.getPerformanceDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
     };
@@ -7121,6 +7458,7 @@ export class Engine {
     this.underwater.dispose();
     this.visualPost?.dispose();
     this.waterSystem?.dispose();
+    this.water?.geometry?.dispose();
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];
     this._warmGeo.dispose();

@@ -3,6 +3,7 @@ import { createCloudSlabMaterial } from './CloudSlabShader.js';
 import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
+import { applyCloudLightingState } from './CloudLightingState.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
@@ -184,9 +185,13 @@ export class CloudSlabLayer {
     u.uCloudSoftness.value = Math.max(0.01, params.cloudSoftness ?? 0.16);
 
     u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0 / thickness;
-    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 1.1;
+    u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 3.0;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;
+    u.uCloudAtmosphereInfluence.value = params.cloudAtmosphereInfluence ?? 1.0;
+    u.uCloudSunResponse.value = params.cloudSunResponse ?? 1.0;
+    u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
+    u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
     u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
@@ -244,6 +249,10 @@ export class CloudSlabLayer {
     if (this._enabled && !this._ready && !this._warming && this._compile) {
       this._compileCurrentMaterial();
     }
+  }
+
+  setLighting(lightingState) {
+    applyCloudLightingState(this.material?.uniforms, lightingState);
   }
 
   _configMatches(config) {
@@ -352,6 +361,23 @@ export class CloudSlabLayer {
     this._occupancyRatio = occupancyRatio;
     this._occupancyUseful = occupancyRatio > 0 && occupancyRatio < 0.78;
     u.uUseOccupancy.value = this._occupancyUseful ? 1.0 : 0.0;
+  }
+
+  getTerrainShadowState() {
+    const u = this.material?.uniforms;
+    if (!u) return null;
+    return {
+      center: u.uOccCenter.value,
+      extent: u.uOccExtent.value,
+      altitude: (u.uCloudBottom.value + u.uCloudTop.value) * 0.5,
+      scale: u.uCloudScale.value,
+      coverage: u.uCloudCoverage.value,
+      softness: u.uCloudSoftness.value,
+      wind: u.uCloudWind.value,
+      time: u.uCloudTime.value,
+      rotation: u.uCloudRotation.value,
+      evolve: u.uCloudEvolve.value,
+    };
   }
 
   _rebuildMaterial(steps, lightSteps, octaves, detailOctaves, useErosion, lightMode = this._lightMode) {

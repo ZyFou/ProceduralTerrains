@@ -36,6 +36,10 @@ const LIGHT_SLIDERS = [
   { key: 'cloudLightAbsorption', label: 'Light Absorption', min: 0.1, max: 3, step: 0.05, digits: 2, info: 'How much the clouds absorb sunlight (contrast of shading).' },
   { key: 'cloudShadowStrength', label: 'Shadow Strength', min: 0, max: 1, step: 0.02, digits: 2, info: 'Darkness of self-shadowed cloud regions.' },
   { key: 'cloudScatteringStrength', label: 'Scattering', min: 0, max: 2, step: 0.05, digits: 2, info: 'Brightness of light scattered toward the camera.' },
+  { key: 'cloudAtmosphereInfluence', label: 'Sky Influence', min: 0, max: 1, step: 0.02, digits: 2, info: 'How strongly the active sky, sun and atmosphere color the clouds. Zero restores the legacy independent lighting.' },
+  { key: 'cloudSunResponse', label: 'Sun Response', min: 0, max: 2, step: 0.05, digits: 2, info: 'Strength of direct sunlight received by the clouds.' },
+  { key: 'cloudAmbientResponse', label: 'Ambient Response', min: 0, max: 2, step: 0.05, digits: 2, info: 'Strength of zenith, horizon and ground-bounce lighting.' },
+  { key: 'cloudSilverLining', label: 'Silver Lining', min: 0, max: 1, step: 0.01, digits: 2, info: 'Directional glow when looking toward the sun through cloud edges.' },
 ];
 
 const RESOLUTION_OPTIONS = [
@@ -59,8 +63,8 @@ const RENDER_SCALE_OPTIONS = [
 ];
 
 const COLOR_FIELDS = [
-  { key: 'cloudColor', label: 'Cloud Color', info: 'Base color of sunlit clouds.', def: [1, 1, 1] },
-  { key: 'cloudShadowColor', label: 'Shadow Color', info: 'Color of shadowed / underside cloud regions.', def: [0.42, 0.47, 0.6] },
+  { key: 'cloudColor', label: 'Cloud Color', info: 'Cloud albedo multiplied by sunlight and sky lighting.', def: [1, 1, 1] },
+  { key: 'cloudShadowColor', label: 'Shadow Color', info: 'Artistic tint applied only to self-shadowed cloud regions.', def: [0.42, 0.47, 0.6] },
 ];
 
 function val(params, key) {

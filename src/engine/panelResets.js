@@ -39,7 +39,10 @@ export const WORLD_RESET_KEYS = [
   'chunkCount', 'chunkSize', 'chunkGrid', 'planetRadius', 'planetFaceGrid',
 ];
 
-export const LIGHTING_PARAM_KEYS = ['sunAzimuth', 'sunElevation', 'fogDensity'];
+export const LIGHTING_PARAM_KEYS = [
+  'sunAzimuth', 'sunElevation', 'fogDensity',
+  'cloudShadowsEnabled', 'cloudShadowOpacity', 'visualsSunRaysStrength',
+];
 
 export const LIGHTING_STYLE_KEYS = ['sunColor', 'sunIntensity', 'skyAmbient', 'groundBounce'];
 
