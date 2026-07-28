@@ -6733,6 +6733,11 @@ export class Engine {
 
     this.paintMode?.update(dt);
     this.manualTerrain?.update(dt);
+    // Coalesce every brush stamp produced during this tick into one texture
+    // version bump per changed map. This keeps pointer interpolation from
+    // triggering several full DataTexture uploads before a single draw.
+    this.paintMode?.flushUploads();
+    this.manualTerrain?.flushUploads();
     this.propsManager?.tickWind(now * 0.001, this.params);
     this.propsManager?.update({
       mode: this.worldMode,
@@ -6743,6 +6748,7 @@ export class Engine {
       planetSampler: this.worldMode === 'planet' ? this._getPlanetPropSampler() : null,
       paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
       splineRevision: this.worldMode === 'studio' ? this.splineManager?.baker?.revision : -1,
+      terrainRevision: this._terrainGen,
     });
 
     if (this.worldMode === 'infinite') {
@@ -6927,15 +6933,29 @@ export class Engine {
     const cam = this.camera;
     const moved = this._camPos.distanceToSquared(cam.position) > 1e-7
       || this._camQuat.angleTo(cam.quaternion) > 1e-5;
+    const cloudMotion = Math.abs(this.params.cloudWindSpeed ?? 0) > 0.0001
+      || Math.abs(this.params.cloudRotationSpeed ?? 0) > 0.0001
+      || Math.abs(this.params.cloudEvolveSpeed ?? 0) > 0.0001;
+    const waterMotion = this.params.waterAnim
+      && Math.abs(this.params.waterAnimSpeed ?? 1) > 0.0001;
+    const propMotion = this.params.propsEnabled
+      && Math.abs(this.params.propsWind ?? 0.6) > 0.0001
+      && Math.abs(this.params.propsWindSpeed ?? 1.6) > 0.0001;
+    const manualEditing = !!(
+      this.manualTerrain?.sculpt?.enabled
+      || this.manualTerrain?.texturePaint?.enabled
+    );
     const animating =
-      (this.params.cloudsEnabled && !!this.studioCloud) ||
-      (this.water.visible && this.params.waterAnim) ||
+      (this.params.cloudsEnabled && !!this.studioCloud && cloudMotion) ||
+      (this.water.visible && waterMotion) ||
+      (this.propsManager?.group?.visible && propMotion) ||
       (this.visualPost?.enabled(this.params, this.worldMode) && (this.params.visualsSunRaysStrength ?? 0) > 0.001) ||
       !!this.params.visualsCrtEnabled ||
       this.underwater.active ||
       this._debug.freeCamNoClip ||
       this.exploreMode !== 'none' ||
       !!this.paintState?.enabled ||
+      manualEditing ||
       this.board?.isBuilding ||
       this.board._lodRebuildQueue.length > 0;
     const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;

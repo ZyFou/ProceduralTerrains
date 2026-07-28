@@ -264,9 +264,9 @@ export class ProceduralPropsManager {
     this.rockMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
 
     this.meshes = [];
+    this._meshPool = new Map();
     this._lastKey = '';
     this._lastPaintRevision = -1;
-    this._lastUpdateAt = 0;
     this._lastCenter = new THREE.Vector3(Infinity, Infinity, Infinity);
     this._lastForward = new THREE.Vector3(0, 0, 0);
     this._tmpMat = new THREE.Matrix4();
@@ -279,29 +279,48 @@ export class ProceduralPropsManager {
     this._up = new THREE.Vector3(0, 1, 0);
     this._tmpColor = new THREE.Color();
     this._cameraDir = new THREE.Vector3();
+    this._centerScratch = new THREE.Vector3();
+    this._viewForward = new THREE.Vector3();
+    this._tmpNormal = new THREE.Vector3();
+    this._planetCamDir = new THREE.Vector3();
+    this._planetRef = new THREE.Vector3();
+    this._planetT1 = new THREE.Vector3();
+    this._planetT2 = new THREE.Vector3();
+    this._planetDir = new THREE.Vector3();
+    this._planetProbe = new THREE.Vector3();
+    this._planetForward = new THREE.Vector3();
   }
 
-  update({ mode, camera, params, boardSize, sampler, planetSampler, paintLayers, splineRevision = -1 }) {
+  update({
+    mode,
+    camera,
+    params,
+    boardSize,
+    sampler,
+    planetSampler,
+    paintLayers,
+    splineRevision = -1,
+    terrainRevision = -1,
+  }) {
     const enabled = !!params.propsEnabled;
     this.group.visible = enabled;
     if (!enabled || !camera) return;
 
-    const now = performance.now();
     const paintRevision = paintLayers?.revision ?? -1;
     const center = this._resolveCenter(mode, camera, boardSize);
     const moved = center.distanceToSquared(this._lastCenter) > Math.pow(Math.max(60, params.propsCullDistance * 0.22), 2);
-    const viewForward = camera.getWorldDirection(new THREE.Vector3()).normalize();
+    const viewForward = camera.getWorldDirection(this._viewForward).normalize();
     const turned = this._lastForward.lengthSq() < 0.5 || viewForward.dot(this._lastForward) < 0.92;
     const key = [
       mode, params.seed, params.propsDensity, params.propsGrass, params.propsFlowers,
       params.propsRocks, params.propsRockScale, params.propsWindSpeed, params.propsGust,
-      params.propsCullDistance, params.propsLodDistance, params.seaLevel, boardSize, splineRevision,
+      params.propsCullDistance, params.propsLodDistance, params.seaLevel, boardSize,
+      splineRevision, terrainRevision,
     ].join('|');
 
-    if (key === this._lastKey && paintRevision === this._lastPaintRevision && !moved && !turned && now - this._lastUpdateAt < 700) return;
+    if (key === this._lastKey && paintRevision === this._lastPaintRevision && !moved && !turned) return;
     this._lastKey = key;
     this._lastPaintRevision = paintRevision;
-    this._lastUpdateAt = now;
     this._lastCenter.copy(center);
     this._lastForward.copy(viewForward);
 
@@ -315,20 +334,20 @@ export class ProceduralPropsManager {
   _resolveCenter(mode, camera, boardSize) {
     if (mode === 'studio') {
       const half = boardSize / 2;
-      return new THREE.Vector3(
+      return this._centerScratch.set(
         clamp(camera.position.x, -half, half),
         0,
         clamp(camera.position.z, -half, half)
       );
     }
-    return camera.position.clone();
+    return this._centerScratch.copy(camera.position);
   }
 
   _clearMeshes() {
-    for (const mesh of this.meshes) {
+    for (const mesh of this._meshPool.values()) {
       this.group.remove(mesh);
-      mesh.dispose?.();
     }
+    this._meshPool.clear();
     this.meshes = [];
   }
 
@@ -336,7 +355,7 @@ export class ProceduralPropsManager {
     camera.getWorldDirection(this._cameraDir);
     this._cameraDir.y = 0;
     if (this._cameraDir.lengthSq() < 0.03) return null;
-    return this._cameraDir.normalize().clone();
+    return this._cameraDir.normalize();
   }
 
   _buildFlat({ mode, center, camera, params, boardSize, sampler }) {
@@ -445,10 +464,12 @@ export class ProceduralPropsManager {
 
   _buildPlanet({ camera, params, planetSampler }) {
     if (!planetSampler) return;
-    const camDir = camera.position.clone().normalize();
-    const ref = Math.abs(camDir.y) < 0.96 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    const t1 = new THREE.Vector3().crossVectors(ref, camDir).normalize();
-    const t2 = new THREE.Vector3().crossVectors(camDir, t1).normalize();
+    const camDir = this._planetCamDir.copy(camera.position).normalize();
+    const ref = Math.abs(camDir.y) < 0.96
+      ? this._planetRef.set(0, 1, 0)
+      : this._planetRef.set(1, 0, 0);
+    const t1 = this._planetT1.crossVectors(ref, camDir).normalize();
+    const t2 = this._planetT2.crossVectors(camDir, t1).normalize();
     const radius = params.propsCullDistance;
     const density = clamp(params.propsDensity, 0, 2);
     const cell = lerp(70, 22, Math.sqrt(density / 2));
@@ -459,8 +480,8 @@ export class ProceduralPropsManager {
     const flowers = [];
     const rocks = [];
     const maxInstances = Math.round(700 + density * 1300);
-    const cameraForward = camera.getWorldDirection(new THREE.Vector3()).normalize();
-    const probe = new THREE.Vector3();
+    const cameraForward = camera.getWorldDirection(this._planetForward).normalize();
+    const probe = this._planetProbe;
 
     for (let gy = min; gy <= max; gy++) {
       for (let gx = min; gx <= max; gx++) {
@@ -475,7 +496,7 @@ export class ProceduralPropsManager {
         // Cheap density pre-gate BEFORE the expensive terrain sample (no paint on planet).
         if (hashInt(gx - 17, gy + 53, params.seed) > fillChance(params, 0)) continue;
 
-        const dir = camDir.clone().multiplyScalar(params.planetRadius)
+        const dir = this._planetDir.copy(camDir).multiplyScalar(params.planetRadius)
           .addScaledVector(t1, ox)
           .addScaledVector(t2, oy)
           .normalize();
@@ -517,9 +538,9 @@ export class ProceduralPropsManager {
   }
 
   _replaceMeshes(grassNear, grassMid, flowers, rocks) {
-    this._clearMeshes();
-    this._addInstanced('grass-near', this.grassNearGeometry, this.grassNearMaterial, grassNear);
-    this._addInstanced('grass-mid', this.grassMidGeometry, this.grassMidMaterial, grassMid);
+    const active = new Set();
+    this._updateInstanced('grass-near', this.grassNearGeometry, this.grassNearMaterial, grassNear, active);
+    this._updateInstanced('grass-mid', this.grassMidGeometry, this.grassMidMaterial, grassMid, active);
     // Group flowers by species so each variant gets its own instanced mesh.
     const byVariant = [];
     for (const f of flowers) {
@@ -527,7 +548,7 @@ export class ProceduralPropsManager {
       (byVariant[v] || (byVariant[v] = [])).push(f);
     }
     for (let v = 0; v < this.flowerGeometries.length; v++) {
-      if (byVariant[v]) this._addInstanced(`flowers-${v}`, this.flowerGeometries[v], this.flowerMaterial, byVariant[v]);
+      this._updateInstanced(`flowers-${v}`, this.flowerGeometries[v], this.flowerMaterial, byVariant[v] || [], active);
     }
     const rocksByVariant = [];
     for (const r of rocks) {
@@ -535,28 +556,41 @@ export class ProceduralPropsManager {
       (rocksByVariant[v] || (rocksByVariant[v] = [])).push(r);
     }
     for (let v = 0; v < this.rockGeometries.length; v++) {
-      if (rocksByVariant[v]) this._addInstanced(`rocks-${v}`, this.rockGeometries[v], this.rockMaterial, rocksByVariant[v]);
+      this._updateInstanced(`rocks-${v}`, this.rockGeometries[v], this.rockMaterial, rocksByVariant[v] || [], active);
     }
+    for (const [name, mesh] of this._meshPool) {
+      if (!active.has(name)) mesh.count = 0;
+    }
+    this.meshes = [...this._meshPool.values()];
   }
 
-  _addInstanced(name, geometry, material, items) {
-    if (!items.length) return;
-    const mesh = new THREE.InstancedMesh(geometry, material, items.length);
-    mesh.name = `procedural-${name}`;
-    mesh.frustumCulled = false;
+  _updateInstanced(name, geometry, material, items, active) {
+    let mesh = this._meshPool.get(name);
+    if (!mesh && !items.length) return;
+    if (!mesh || mesh.instanceMatrix.count < items.length) {
+      const capacity = Math.max(16, 2 ** Math.ceil(Math.log2(items.length || 1)));
+      if (mesh) this.group.remove(mesh);
+      mesh = new THREE.InstancedMesh(geometry, material, capacity);
+      mesh.name = `procedural-${name}`;
+      mesh.frustumCulled = false;
+      this._meshPool.set(name, mesh);
+      this.group.add(mesh);
+    }
+    mesh.count = items.length;
+    active.add(name);
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       this._tmpPos.set(item.pos[0], item.pos[1], item.pos[2]);
-      const normal = new THREE.Vector3(item.normal[0], item.normal[1], item.normal[2]).normalize();
-      this._qFull.setFromUnitVectors(this._up, normal);
+      this._tmpNormal.set(item.normal[0], item.normal[1], item.normal[2]).normalize();
+      this._qFull.setFromUnitVectors(this._up, this._tmpNormal);
       // partial alignment: slerp from upright (identity) toward full normal-align
       const amount = item.alignAmount == null ? 1 : item.alignAmount;
       this._qAlign.copy(this._qIdentity).slerp(this._qFull, amount);
       this._qYaw.setFromAxisAngle(this._up, item.yaw);
-      const q = this._qAlign.clone().multiply(this._qYaw);
+      this._qAlign.multiply(this._qYaw);
       if (Array.isArray(item.scale)) this._tmpScale.set(item.scale[0], item.scale[1], item.scale[2]);
       else this._tmpScale.setScalar(item.scale);
-      this._tmpMat.compose(this._tmpPos, q, this._tmpScale);
+      this._tmpMat.compose(this._tmpPos, this._qAlign, this._tmpScale);
       mesh.setMatrixAt(i, this._tmpMat);
       if (item.tint) {
         // per-instance biome tint, multiplied onto the vertex-color gradient
@@ -566,8 +600,6 @@ export class ProceduralPropsManager {
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    this.group.add(mesh);
-    this.meshes.push(mesh);
   }
 
   dispose() {

@@ -38,6 +38,9 @@ export class WaterSystem {
     this._usingRealistic = false;
     this._boundsHelper = null;
     this._fpsDowngraded = false;
+    this._fpsBelowSince = 0;
+    this._fpsAboveSince = 0;
+    this._lastFpsTierChangeAt = -Infinity;
     this._disposed = false;
     this._waterCompileGen = 0;
     this._waterCompilePending = false;
@@ -186,10 +189,8 @@ export class WaterSystem {
   }
 
   /** Per-frame update — FPS downgrade + bounds helper. */
-  update(fps) {
-    if (this.engine.params.waterLegacyOnLowFps) {
-      this._maybeFpsDowngrade(this.engine.perf, fps);
-    }
+  update(fps, now = performance.now()) {
+    this._maybeFpsDowngrade(this.engine.perf, fps, now);
   }
 
   /**
@@ -611,12 +612,52 @@ export class WaterSystem {
     }
   }
 
-  _maybeFpsDowngrade(perf, fps = this.engine._fps) {
+  _maybeFpsDowngrade(perf, fps = this.engine._fps, now = performance.now()) {
     const threshold = this.engine.params.waterDisableExpensiveBelowFps ?? 42;
-    if (!this.engine.params.waterLegacyOnLowFps || fps <= 0) return;
-    const shouldDowngrade = fps < threshold && isRealisticWaterMode(this._effectiveMode);
-    if (shouldDowngrade && !this._fpsDowngraded) {
+    const restoreThreshold = Math.max(
+      threshold + 8,
+      this.engine.params.waterRestoreExpensiveAboveFps ?? threshold + 12,
+    );
+    const downgradeDelay = Math.max(0, this.engine.params.waterDowngradeDelayMs ?? 2500);
+    const restoreDelay = Math.max(0, this.engine.params.waterRestoreDelayMs ?? 5000);
+    const cooldown = Math.max(0, this.engine.params.waterQualityCooldownMs ?? 8000);
+    const safeguardEnabled = !!this.engine.params.waterLegacyOnLowFps
+      && isRealisticWaterMode(this._effectiveMode);
+
+    if (!safeguardEnabled || fps <= 0) {
+      this._fpsBelowSince = 0;
+      this._fpsAboveSince = 0;
+      if (this._fpsDowngraded && !safeguardEnabled) this._restoreFpsQuality(now);
+      return;
+    }
+
+    if (fps < threshold) {
+      if (!this._fpsBelowSince) this._fpsBelowSince = now;
+      this._fpsAboveSince = 0;
+    } else if (fps > restoreThreshold) {
+      if (!this._fpsAboveSince) this._fpsAboveSince = now;
+      this._fpsBelowSince = 0;
+    } else {
+      // Inside the hysteresis band: neither accumulate a downgrade nor a
+      // restore. A brief threshold crossing cannot flip quality.
+      this._fpsBelowSince = 0;
+      this._fpsAboveSince = 0;
+    }
+
+    const cooldownElapsed = now - this._lastFpsTierChangeAt >= cooldown;
+    const shouldDowngrade = !this._fpsDowngraded
+      && this._fpsBelowSince > 0
+      && now - this._fpsBelowSince >= downgradeDelay
+      && cooldownElapsed;
+    const shouldRestore = this._fpsDowngraded
+      && this._fpsAboveSince > 0
+      && now - this._fpsAboveSince >= restoreDelay
+      && cooldownElapsed;
+
+    if (shouldDowngrade) {
       this._fpsDowngraded = true;
+      this._lastFpsTierChangeAt = now;
+      this._fpsBelowSince = 0;
       this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
       this._planarReflectionPass.deactivate(
         [this._realisticStudio, this._realisticInfinite].filter(Boolean),
@@ -627,11 +668,16 @@ export class WaterSystem {
         if (mat.uniforms.uCausticsQual) mat.uniforms.uCausticsQual.value *= 0.25;
         if (mat.uniforms.uRefractionQual) mat.uniforms.uRefractionQual.value *= 0.25;
       }
-    } else if (!shouldDowngrade && this._fpsDowngraded) {
-      this._fpsDowngraded = false;
-      this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
-      this._applyUniforms(this.engine.params);
-    }
+    } else if (shouldRestore) this._restoreFpsQuality(now);
+  }
+
+  _restoreFpsQuality(now = performance.now()) {
+    this._fpsDowngraded = false;
+    this._lastFpsTierChangeAt = now;
+    this._fpsBelowSince = 0;
+    this._fpsAboveSince = 0;
+    this._syncStudioGeometry(this.engine.params, this.engine.worldMode);
+    this._applyUniforms(this.engine.params);
   }
 
   _syncStudioGeometry(params, worldMode) {

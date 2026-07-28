@@ -136,6 +136,10 @@ export class PaintModeManager {
     if (this.isPainting) this._stamp();
   }
 
+  flushUploads() {
+    return this.layers.flushUploads();
+  }
+
   _syncUniforms() {
     this.layers.setBoardSize(this.getBoardSize());
     this.uniforms.uPaintEnabled.value = this.state.enabled ? 1 : 0;

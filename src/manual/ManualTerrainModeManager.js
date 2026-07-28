@@ -961,6 +961,12 @@ export class ManualTerrainModeManager {
     }
   }
 
+  flushUploads() {
+    const height = this.field.flushUploads();
+    const surface = this.surfaceField.flushUploads();
+    return height || surface;
+  }
+
   dispose() {
     if (this.enabled) {
       this.controls.inputMode = this._previousControlInputMode ?? 'all';

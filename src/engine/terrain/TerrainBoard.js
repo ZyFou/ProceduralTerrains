@@ -48,6 +48,8 @@ export class TerrainBoard {
     this.cullingAggressiveness = 1.0;
     this.visibleChunkCount = 0;
     this.culledChunkCount = 0;
+    this._cullingContext = {};
+    this._cullChunks = [];
 
     // --- Merge layer (quadtree chunked-LOD) ---------------------------------
     // The chunks are the leaves of a quadtree. Each internal node covers a
@@ -589,10 +591,6 @@ export class TerrainBoard {
     this._mergedNodes.length = 0;
   }
 
-  *_activeChunks() {
-    for (const chunk of this.chunks) if (!chunk.merged) yield chunk;
-  }
-
   // --- Debug overlay -------------------------------------------------------
   // Colour folded terrain by merge level (green = small 2x2 fold → magenta =
   // whole board) via the shared terrain shader's uMergeDebug branch. Merged
@@ -628,11 +626,15 @@ export class TerrainBoard {
       this.chunkSize,
       this.behindCameraCulling,
       this.cullingAggressiveness,
-      {},
+      this._cullingContext,
       -this._skirtDepth
     );
+    this._cullChunks.length = 0;
+    for (const chunk of this.chunks) {
+      if (!chunk.merged) this._cullChunks.push(chunk);
+    }
     const chunkResult = cullChunks(
-      this._activeChunks(),
+      this._cullChunks,
       camera,
       this.chunkSize,
       this._maxHeight,
@@ -681,6 +683,7 @@ export class TerrainBoard {
     this.targetChunkCount = 0;
     this.visibleChunkCount = 0;
     this.culledChunkCount = 0;
+    this._cullChunks.length = 0;
     this.lodCounts = [0, 0, 0, 0];
   }
 }

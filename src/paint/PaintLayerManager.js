@@ -66,6 +66,9 @@ export class PaintLayerManager {
     this.biomeData = new Uint8Array(res * res * 4);
     this.propsData = new Uint8Array(res * res * 4);
     this.revision = 0;
+    this._heightUploadPending = false;
+    this._biomeUploadPending = false;
+    this._propsUploadPending = false;
 
     this.heightTexture = new THREE.DataTexture(this.heightData, res, res, THREE.RGBAFormat, THREE.HalfFloatType);
     this.heightTexture.colorSpace = THREE.NoColorSpace;
@@ -169,6 +172,43 @@ export class PaintLayerManager {
     return data[iy * this.resolution + ix];
   }
 
+  _copyHeightRegion(minX, maxX, minY, maxY) {
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const data = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const sourceStart = (minY + y) * this.resolution + minX;
+      data.set(this.heightDelta.subarray(sourceStart, sourceStart + width), y * width);
+    }
+    return { data, minX, minY, width, height };
+  }
+
+  _heightOffsetFromRegion(region, px, py) {
+    const x = clamp(Math.round(px) - region.minX, 0, region.width - 1);
+    const y = clamp(Math.round(py) - region.minY, 0, region.height - 1);
+    return region.data[y * region.width + x];
+  }
+
+  _queueUploads({ height = false, biome = false, props = false } = {}) {
+    this._heightUploadPending ||= height;
+    this._biomeUploadPending ||= biome;
+    this._propsUploadPending ||= props;
+  }
+
+  // A stroke may contain many stamps in one animation frame. Defer the
+  // DataTexture version bump until the engine is about to render so Three.js
+  // uploads each changed texture at most once for that frame.
+  flushUploads() {
+    if (this._heightUploadPending) this.heightTexture.needsUpdate = true;
+    if (this._biomeUploadPending) this.biomeTexture.needsUpdate = true;
+    if (this._propsUploadPending) this.propsTexture.needsUpdate = true;
+    const flushed = this._heightUploadPending || this._biomeUploadPending || this._propsUploadPending;
+    this._heightUploadPending = false;
+    this._biomeUploadPending = false;
+    this._propsUploadPending = false;
+    return flushed;
+  }
+
   _brushAlpha({ px, py, center, pixelRadius, falloff, strength, shape, rotation, scatter }) {
     let dx = px - center.px;
     let dy = py - center.py;
@@ -216,8 +256,19 @@ export class PaintLayerManager {
     const maxY = clamp(Math.ceil(center.py + pixelRadius), 0, this.resolution - 1);
     const channel = PAINT_BIOME_CHANNELS[biome] ?? 0;
     const propChannel = PAINT_PROP_CHANNELS[propType] ?? PAINT_PROP_CHANNELS.mixed;
-    const sourceHeight = tool === 'smooth' ? this.heightDelta.slice() : this.heightDelta;
+    const smoothStep = tool === 'smooth' ? Math.max(1, Math.round(pixelRadius * 0.08)) : 0;
+    const sourceHeight = tool === 'smooth'
+      ? this._copyHeightRegion(
+        Math.max(0, minX - smoothStep),
+        Math.min(this.resolution - 1, maxX + smoothStep),
+        Math.max(0, minY - smoothStep),
+        Math.min(this.resolution - 1, maxY + smoothStep),
+      )
+      : null;
     const toHalf = THREE.DataUtils.toHalfFloat;
+    let heightChanged = false;
+    let biomeChanged = false;
+    let propsChanged = false;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
@@ -231,6 +282,7 @@ export class PaintLayerManager {
 
         if (tool === 'biome') {
           this.biomeData[i + channel] = Math.round(clamp(this.biomeData[i + channel] + alpha * 255, 0, 255));
+          biomeChanged = true;
           continue;
         }
 
@@ -240,6 +292,7 @@ export class PaintLayerManager {
           } else {
             this.propsData[i + propChannel] = Math.round(clamp(this.propsData[i + propChannel] + alpha * 255, 0, 255));
           }
+          propsChanged = true;
           continue;
         }
 
@@ -248,6 +301,9 @@ export class PaintLayerManager {
           this.heightData[i] = toHalf(this.heightDelta[hi]);
           for (let c = 0; c < 4; c++) this.biomeData[i + c] = Math.round(this.biomeData[i + c] * (1 - alpha));
           for (let c = 0; c < 4; c++) this.propsData[i + c] = Math.round(this.propsData[i + c] * (1 - alpha));
+          heightChanged = true;
+          biomeChanged = true;
+          propsChanged = true;
           continue;
         }
 
@@ -262,16 +318,15 @@ export class PaintLayerManager {
           const desiredOffset = targetHeight - base;
           nextOffset = currentOffset + (desiredOffset - currentOffset) * alpha;
         } else if (tool === 'smooth') {
-          const k = Math.max(1, Math.round(pixelRadius * 0.08));
           let sum = 0;
           let count = 0;
           for (let oy = -1; oy <= 1; oy++) {
             for (let ox = -1; ox <= 1; ox++) {
-              const sx = clamp(px + ox * k, 0, this.resolution - 1);
-              const sy = clamp(py + oy * k, 0, this.resolution - 1);
+              const sx = clamp(px + ox * smoothStep, 0, this.resolution - 1);
+              const sy = clamp(py + oy * smoothStep, 0, this.resolution - 1);
               const wx = (sx / (this.resolution - 1) - 0.5) * this.boardSize;
               const wz = (sy / (this.resolution - 1) - 0.5) * this.boardSize;
-              sum += (baseHeightAt ? baseHeightAt(wx, wz) : 0) + this._heightOffsetFrom(sourceHeight, sx, sy);
+              sum += (baseHeightAt ? baseHeightAt(wx, wz) : 0) + this._heightOffsetFromRegion(sourceHeight, sx, sy);
               count++;
             }
           }
@@ -293,12 +348,11 @@ export class PaintLayerManager {
         }
         this.heightDelta[hi] = nextOffset;
         this.heightData[i] = toHalf(nextOffset);
+        heightChanged = true;
       }
     }
-    this.heightTexture.needsUpdate = true;
-    this.biomeTexture.needsUpdate = true;
-    this.propsTexture.needsUpdate = true;
-    this.revision++;
+    this._queueUploads({ height: heightChanged, biome: biomeChanged, props: propsChanged });
+    if (heightChanged || biomeChanged || propsChanged) this.revision++;
   }
 
   clear() {
@@ -306,8 +360,7 @@ export class PaintLayerManager {
     this.biomeData.fill(0);
     this.propsData.fill(0);
     this._uploadHeight();
-    this.biomeTexture.needsUpdate = true;
-    this.propsTexture.needsUpdate = true;
+    this._queueUploads({ biome: true, props: true });
     this.revision++;
   }
 
@@ -352,8 +405,7 @@ export class PaintLayerManager {
     if (propsBytes.byteLength === this.propsData.byteLength) this.propsData.set(propsBytes);
     this.boardSize = data.boardSize ?? this.boardSize;
     this._uploadHeight();
-    this.biomeTexture.needsUpdate = true;
-    this.propsTexture.needsUpdate = true;
+    this._queueUploads({ biome: true, props: true });
     this.revision++;
     return true;
   }

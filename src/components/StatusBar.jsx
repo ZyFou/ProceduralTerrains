@@ -1,4 +1,5 @@
 import { GITHUB_REPO_URL } from '../constants/app.js';
+import { useLiveMetrics } from '../state/LiveMetricsStore.js';
 
 function fmtTris(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(0)}K`;
@@ -14,9 +15,10 @@ const PLAYER_STATE_LABELS = {
 };
 
 export default function StatusBar({
-  status, bgWork, gpu, stats, worldMode, infiniteStats, qualityPreset, exploreMode, playerMode, playerState,
+  status, bgWork, gpu, liveMetrics, worldMode, qualityPreset, exploreMode, playerMode,
   perfOpen, onPerfToggle,
 }) {
+  const { stats, infiniteStats, playerState } = useLiveMetrics(liveMetrics);
   const exploring = playerMode || exploreMode === 'plane';
   return (
     <footer id="statusbar">

@@ -11,6 +11,7 @@ import { QUALITY_PRESETS, getQualityKeys } from '../engine/render/QualitySetting
 import { PLANET_PRESETS } from '../engine/style/PlanetPresets.js';
 import PerfSettings from './panels/PerfSettings.jsx';
 import PerformanceStats from './ui/PerformancePanel.jsx';
+import { useLiveMetrics } from '../state/LiveMetricsStore.js';
 
 const PLAYER_STATE_LABELS = {
   grounded: 'Grounded',
@@ -34,15 +35,16 @@ const DockBtn = ({ active, onClick, title, children }) => (
 );
 
 export default function InfiniteHUD({
-  stats, onReturn, isPlanet,
+  liveMetrics, onReturn, isPlanet,
   exploreMode, onExploreMode,
   quality, onQualityChange,
   timeOfDay, onTimeOfDay,
   behindCameraCulling, onBehindCameraCulling,
   planetPreset, onPlanetPreset, onGeneratePalette, onRandomPlanet,
-  perf, rendererInfo, gpu, perfStats, onPerfPreset, onPerfSetting, onPerfReset,
+  perf, rendererInfo, gpu, onPerfPreset, onPerfSetting, onPerfReset,
 }) {
   const [perfOpen, setPerfOpen] = useState(false);
+  const { infiniteStats: stats, stats: perfStats } = useLiveMetrics(liveMetrics);
   if (!stats) return null;
 
   const qualityKeys = getQualityKeys();
