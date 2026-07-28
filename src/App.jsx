@@ -298,15 +298,14 @@ export default function App() {
     let bootTimer = null;
     let cancelled = false;
 
-    // Install the escape hatch before engine construction. The constructor
-    // begins shader preparation immediately, so the initial proxy await is part
-    // of the window that needs protection.
+    // Keep the cover up for slow drivers too. This timer only refreshes the
+    // message; it must never reveal the canvas while terrain/water quality is
+    // still being prepared.
     bootTimer = setTimeout(() => {
       if (bootedRef.current || cancelled) return;
-      engine?._releaseBootFallback?.('15s app watchdog');
-      bootedRef.current = true;
-      loadingRef.current.done('boot');
-      landingRef.current?.setBootReady(true);
+      loadingRef.current.update('boot', {
+        detail: 'Finalizing terrain mesh, materials and water…',
+      });
     }, 15000);
 
     const init = async () => {

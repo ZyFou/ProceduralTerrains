@@ -3520,7 +3520,8 @@ export class Engine {
       || this.params.waterEnabled === false
       || !this.waterMaterial
       || !this._waterDeferred;
-    const boardReady = !this.board?.isBuilding;
+    const boardReady = !this.board?.isBuilding
+      && !(this.board?._lodRebuildQueue?.length > 0);
     if (!terrainReady || !bakeReady || !waterReady || !boardReady) return false;
 
     let paintMs = null;
@@ -5143,13 +5144,14 @@ export class Engine {
         b.cols,
         b.rows,
       );
-      // Water samples the baked terrain field directly. Bind the complete
-      // low-resolution union before the next scene render so an expanded board
-      // never waits for every high-resolution stripe to finish.
-      this.uniforms.uTerrainHeightTex.value = preview.heightTexture;
-      this.uniforms.uUseTerrainHeightTex.value = 1.0;
-      this.uniforms.uTerrainBiomeTex.value = preview.biomeTexture;
-      this.uniforms.uUseTerrainBiomeTex.value = 1.0;
+      // Water gets the complete low-resolution union immediately. Terrain
+      // shading deliberately stays procedural during the bake: sharing this
+      // preview with its normals/biomes caused the visible coarse -> sharp pop.
+      this.uniforms.uWaterTerrainHeightTex.value = preview.heightTexture;
+      this.uniforms.uWaterTerrainBiomeTex.value = preview.biomeTexture;
+      this.uniforms.uUseWaterTerrainBiomeTex.value = 1.0;
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
       this.profiler.setMetric('terrainBakePreviewReady', 1);
       this._terrainBakeJobKey = jobKey;
       this._terrainBakeElapsedMs = 0;
@@ -5172,6 +5174,9 @@ export class Engine {
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this.uniforms.uTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
     this.uniforms.uUseTerrainBiomeTex.value = 1.0;
+    this.uniforms.uWaterTerrainHeightTex.value = this.terrainHeightBaker.texture;
+    this.uniforms.uWaterTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
+    this.uniforms.uUseWaterTerrainBiomeTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
     this._bakedStudioLayout = layoutKey;
     this._terrainBakeJobKey = null;
@@ -7258,6 +7263,13 @@ export class Engine {
           this.board.visibleChunkCount,
           this.board.culledChunkCount
         );
+        // A quality preset may rebuild the four shared LOD geometries over
+        // several hidden boot frames. Re-check readiness after the last level
+        // so the loading cover cannot reveal an intermediate mesh.
+        if (this._bootPending && !this.board.isBuilding
+            && !this.board._lodRebuildQueue.length) {
+          this._completeBootIfQualityReady();
+        }
       }
 
       const cameraPlan = this._prepareCameraPipeline();

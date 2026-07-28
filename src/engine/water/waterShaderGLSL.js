@@ -27,6 +27,23 @@ float vnoise(vec2 p) {
 }
 `;
 
+// Studio water owns a separate preview cache so a fast, low-resolution shore
+// mask can be published immediately without changing terrain normals/colors.
+// The terrain keeps its live procedural shading until the final bake commits.
+export const WATER_TERRAIN_CACHE_GLSL = /* glsl */ `
+uniform sampler2D uWaterTerrainHeightTex;
+uniform sampler2D uWaterTerrainBiomeTex;
+uniform float uUseWaterTerrainBiomeTex;
+
+vec2 waterBakedUvAt(vec2 xz) {
+  return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0));
+}
+
+float waterBakedHeightAt(vec2 xz) {
+  return texture2D(uWaterTerrainHeightTex, waterBakedUvAt(xz)).r * uHeightScale;
+}
+`;
+
 export function buildWaterHeightShaderParts(stackGLSL, infinite) {
   if (infinite) {
     return {
@@ -43,7 +60,7 @@ float waterTerrainHeightAt(vec2 xz) {
     dependencies: WATER_RIPPLE_NOISE_GLSL,
     terrainHeightFunction: /* glsl */ `
 float waterTerrainHeightAt(vec2 xz) {
-  return bakedHeightAt(xz);
+  return waterBakedHeightAt(xz);
 }
 `,
   };

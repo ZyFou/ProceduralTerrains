@@ -1034,6 +1034,12 @@ export function createTerrainUniforms() {
     // reconstructed cheaply from low-frequency noise in visible shaders.
     uTerrainBiomeTex:     { value: null },
     uUseTerrainBiomeTex:  { value: 0.0 },
+    // Dedicated Studio water cache. During a terrain rebuild these may point
+    // at the immediate low-resolution preview while terrain shading stays on
+    // its exact live procedural field until the final bake is complete.
+    uWaterTerrainHeightTex:   { value: null },
+    uWaterTerrainBiomeTex:    { value: null },
+    uUseWaterTerrainBiomeTex: { value: 0.0 },
     uInfiniteFieldTex0:   { value: null },
     uInfiniteFieldTex1:   { value: null },
     uInfiniteFieldTex2:   { value: null },

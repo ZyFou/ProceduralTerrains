@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -8,7 +8,10 @@ import {
 } from '../sky/proceduralSkyGLSL.js';
 import { generateStackGLSL } from '../terrain/noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from '../terrain/noise/NoiseStack.js';
-import { buildWaterHeightShaderParts } from './waterShaderGLSL.js';
+import {
+  buildWaterHeightShaderParts,
+  WATER_TERRAIN_CACHE_GLSL,
+} from './waterShaderGLSL.js';
 import { WATER_OPTICS_GLSL } from './waterOpticsGLSL.js';
 import {
   WATER_GEOMETRY_WAVES_GLSL,
@@ -115,13 +118,13 @@ float waterBiomeClimateAvailable() {
 `
     : /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
-  vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+  vec4 baked = texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz));
   float region = vnoise((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
   return vec4(baked.rgb, region);
 }
 
 float waterBiomeClimateAvailable() {
-  return uUseTerrainBiomeTex;
+  return uUseWaterTerrainBiomeTex;
 }
 `;
   return /* glsl */ `
@@ -129,7 +132,7 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${dependencies}
-${TERRAIN_HEIGHT_TEX_GLSL}
+${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${terrainHeightFunction}
 ${PROCEDURAL_SKY_UNIFORMS_GLSL}
@@ -147,8 +150,6 @@ uniform float uRoughness;
 uniform float uReflectionQuality;
 uniform float uMicroWaveDetail;
 uniform float uSkyReflectionEnabled;
-uniform sampler2D uTerrainBiomeTex;
-uniform float uUseTerrainBiomeTex;
 uniform float uBiomeColorEnabled;
 uniform float uBiomeColorStrength;
 

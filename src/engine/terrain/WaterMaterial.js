@@ -1,9 +1,12 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL } from './terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
-import { buildWaterHeightShaderParts } from '../water/waterShaderGLSL.js';
+import {
+  buildWaterHeightShaderParts,
+  WATER_TERRAIN_CACHE_GLSL,
+} from '../water/waterShaderGLSL.js';
 import {
   WATER_LIGHTING_UNIFORMS_GLSL,
   createWaterLightingUniforms,
@@ -34,7 +37,7 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${dependencies}
-${TERRAIN_HEIGHT_TEX_GLSL}
+${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${terrainHeightFunction}
 ${WATER_LIGHTING_UNIFORMS_GLSL}
