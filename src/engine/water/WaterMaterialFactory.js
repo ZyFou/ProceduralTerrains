@@ -51,6 +51,9 @@ export function applyWaterMaterialSettings(mat, params, mode, debugView = 'off')
     mat.uniforms.uWaterAnim.value = params.waterAnim ? 1 : 0;
   }
   applyWaterLightingUniforms(mat.uniforms, params);
+  if (mat.uniforms.uFoamWidth) {
+    mat.uniforms.uFoamWidth.value = params.waterFoamWidth ?? 3.2;
+  }
   if (isRealisticWaterMode(mode)) {
     applyRealisticWaterUniforms(mat, params, mode);
     setWaterDebugMode(mat, debugView);

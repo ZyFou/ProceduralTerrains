@@ -79,6 +79,7 @@ const SETTINGS_INDEX = [
   { panelId: 'water', settingId: 'water.seaLevel', label: 'Sea Level', keywords: 'water ocean sea level height coast' },
   { panelId: 'water', settingId: 'water.waterMode', label: 'Water Mode', keywords: 'water legacy realistic volumetric cinematic quality cartoon tropical ocean lake', aliases: 'cartoon toon' },
   { panelId: 'water', settingId: 'water.waterAnim', label: 'Water Animation', keywords: 'water waves ocean motion' },
+  { panelId: 'water', sectionLabel: 'Shoreline', settingId: 'water.waterFoamWidth', label: 'Shore Distance', keywords: 'water shore shoreline coast distance width foam band' },
   { panelId: 'water', settingId: 'water.waterDebugView', label: 'Water Debug View', keywords: 'water debug depth foam shoreline mask' },
 
   // Planet style / colors
@@ -215,7 +216,7 @@ const SECTION_INDEX = [
   { panelId: 'water', sectionLabel: 'Material', settingId: 'water.section.material', label: 'Material', keywords: 'water material animation colors', isSection: true },
   { panelId: 'water', sectionLabel: 'Depth', settingId: 'water.section.depth', label: 'Depth', keywords: 'water depth absorption shallow deep', isSection: true },
   { panelId: 'water', sectionLabel: 'Waves', settingId: 'water.section.waves', label: 'Waves', keywords: 'water waves animation motion', isSection: true },
-  { panelId: 'water', sectionLabel: 'Foam', settingId: 'water.section.foam', label: 'Foam', keywords: 'water foam shoreline', isSection: true },
+  { panelId: 'water', sectionLabel: 'Shoreline', settingId: 'water.section.foam', label: 'Shoreline', keywords: 'water foam shoreline shore distance coast', isSection: true },
   { panelId: 'water', sectionLabel: 'Underwater', settingId: 'water.section.underwater', label: 'Underwater', keywords: 'water underwater fog caustics', isSection: true },
 
   // Clouds

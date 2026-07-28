@@ -4,6 +4,7 @@ import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.j
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
+import { CloudOccupancyPass } from './CloudOccupancyPass.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
@@ -88,6 +89,7 @@ export class CloudSlabLayer {
     this._occTex.generateMipmaps = false;
     this._occTex.needsUpdate = true;
     this._occBuiltAt = 0;
+    this._occupancyPass = null;
 
     this.material = createCloudSlabMaterial(
       this._steps,
@@ -97,6 +99,13 @@ export class CloudSlabLayer {
       this._useErosion,
       this._lightMode
     );
+    if (opts.renderer) {
+      this._occupancyPass = new CloudOccupancyPass(
+        opts.renderer,
+        this.material.uniforms,
+        { size: OCC_SIZE, planet: false },
+      );
+    }
     this._applyOccupancyUniforms();
 
     // a unit box that ENCLOSES the slab volume (scaled in applyParams). Drawn
@@ -332,13 +341,23 @@ export class CloudSlabLayer {
   /** Point the current material at the occupancy texture (after create/rebuild). */
   _applyOccupancyUniforms() {
     const u = this.material.uniforms;
-    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+    if (this._occupancyPass) this._occupancyPass.setUniforms(u);
+    if (u.uCloudOccupancy) {
+      u.uCloudOccupancy.value = this._occupancyPass?.texture || this._occTex;
+    }
   }
 
   /** Rebuild the planar occupancy grid from the current field params (cheap,
    *  throttled by the caller). */
   _rebuildOccupancy() {
     const u = this.material.uniforms;
+    if (this._occupancyPass) {
+      this._occupancyPass.render();
+      this._occupancyRatio = null;
+      this._occupancyUseful = true;
+      u.uUseOccupancy.value = 1.0;
+      return;
+    }
     const w = u.uCloudWind.value;
     const occupancyRatio = buildOccupancyPlanar(
       this._occData, OCC_SIZE,
@@ -563,6 +582,10 @@ export class CloudSlabLayer {
       this._depthTexture = null;
     }
     if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
+    if (this._occupancyPass) {
+      this._occupancyPass.dispose();
+      this._occupancyPass = null;
+    }
     if (this._lowResPass) { this._lowResPass.dispose(); this._lowResPass = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();

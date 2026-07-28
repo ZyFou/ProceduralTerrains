@@ -4,6 +4,7 @@ import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.j
 import { buildOccupancyOctahedral } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
+import { CloudOccupancyPass } from './CloudOccupancyPass.js';
 
 // Resolution of the directional occupancy grid (octahedral). Low-res + dilated
 // is enough: it only needs to say "this column has some cloud" so the shader can
@@ -81,8 +82,16 @@ export class PlanetCloudLayer {
     this._occTex.generateMipmaps = false;
     this._occTex.needsUpdate = true;
     this._occBuiltAt = 0;
+    this._occupancyPass = null;
 
     this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion, this._lightMode);
+    if (opts.renderer) {
+      this._occupancyPass = new CloudOccupancyPass(
+        opts.renderer,
+        this.material.uniforms,
+        { size: OCC_SIZE, planet: true },
+      );
+    }
     this._applyOccupancyUniforms();
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
     this.mesh.frustumCulled = false;
@@ -240,13 +249,23 @@ export class PlanetCloudLayer {
   /** Point the current material at the occupancy texture (after create/rebuild). */
   _applyOccupancyUniforms() {
     const u = this.material.uniforms;
-    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+    if (this._occupancyPass) this._occupancyPass.setUniforms(u);
+    if (u.uCloudOccupancy) {
+      u.uCloudOccupancy.value = this._occupancyPass?.texture || this._occTex;
+    }
   }
 
   /** Rebuild the directional occupancy grid from the current field params. Cheap
    *  (one FBM sample per texel of a 48² map) and throttled by the caller. */
   _rebuildOccupancy() {
     const u = this.material.uniforms;
+    if (this._occupancyPass) {
+      this._occupancyPass.render();
+      this._occupancyRatio = null;
+      this._occupancyUseful = true;
+      u.uUseOccupancy.value = 1.0;
+      return;
+    }
     const inner = u.uCloudInner.value, outer = u.uCloudOuter.value;
     const w = u.uCloudWind.value;
     const occupancyRatio = buildOccupancyOctahedral(this._occData, OCC_SIZE, inner, outer, {
@@ -431,6 +450,10 @@ export class PlanetCloudLayer {
       this._depthTexture = null;
     }
     if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
+    if (this._occupancyPass) {
+      this._occupancyPass.dispose();
+      this._occupancyPass = null;
+    }
     if (this._lowResPass) { this._lowResPass.dispose(); this._lowResPass = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();

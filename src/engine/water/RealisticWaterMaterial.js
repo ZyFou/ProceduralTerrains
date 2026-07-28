@@ -99,6 +99,12 @@ const buildFragment = (stackGLSL, infinite = false) => {
   const biomeClimateFunction = infinite
     ? /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
+  float available = 0.0;
+  vec4 field = infiniteFieldSampleAt(xz, available);
+  if (available > 0.5) {
+    float region = fbm3((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
+    return vec4(field.g, field.b, field.a, region);
+  }
   Climate climate = climateAt(xz * uFrequency + uSeedOffset);
   return vec4(climate.temp, climate.moist, climate.cont, climate.region);
 }
@@ -109,7 +115,9 @@ float waterBiomeClimateAvailable() {
 `
     : /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
-  return texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+  vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+  float region = vnoise((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
+  return vec4(baked.rgb, region);
 }
 
 float waterBiomeClimateAvailable() {

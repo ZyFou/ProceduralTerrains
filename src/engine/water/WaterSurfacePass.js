@@ -57,6 +57,7 @@ export class WaterSurfacePass {
     this._active = false;
     this._captureMs = 0;
     this._captureCount = 0;
+    this._sharedSource = null;
     this._disposed = false;
   }
 
@@ -82,6 +83,7 @@ export class WaterSurfacePass {
     this.disable(materials);
     this._target?.dispose();
     this._target = null;
+    this._sharedSource = null;
     this._captureMs = 0;
   }
 
@@ -92,11 +94,32 @@ export class WaterSurfacePass {
     sceneSize,
     hiddenObjects = [],
     materials = [],
+    sourceTarget = null,
   } = {}) {
     if (!this.shouldCapture(params, mode, worldMode)) {
       this.deactivate(materials);
       return false;
     }
+    if (sourceTarget?.texture && sourceTarget?.depthTexture) {
+      this._target?.dispose();
+      this._target = null;
+      this._sharedSource = sourceTarget;
+      this._active = true;
+      this._captureMs = 0;
+      for (const material of materials) {
+        setMaterialCapture(material, {
+          color: sourceTarget.texture,
+          depth: sourceTarget.depthTexture,
+          width: sourceTarget.width,
+          height: sourceTarget.height,
+          near: camera.near,
+          far: camera.far,
+          enabled: true,
+        });
+      }
+      return true;
+    }
+    this._sharedSource = null;
 
     const fallbackSize = renderer.getDrawingBufferSize(new THREE.Vector2());
     const sourceWidth = sceneSize?.x ?? sceneSize?.width ?? fallbackSize.x;
@@ -145,7 +168,7 @@ export class WaterSurfacePass {
   }
 
   diagnostics() {
-    if (!this._target) {
+    if (!this._target && !this._sharedSource) {
       return {
         active: false,
         allocated: false,
@@ -156,13 +179,15 @@ export class WaterSurfacePass {
         captures: this._captureCount,
       };
     }
+    const source = this._target || this._sharedSource;
     return {
       active: this._active,
       allocated: true,
-      resolution: { width: this._target.width, height: this._target.height },
+      shared: !!this._sharedSource,
+      resolution: { width: source.width, height: source.height },
       // RGBA8 scene color + unsigned-int depth.
-      memoryBytes: this._target.width * this._target.height * 8,
-      additionalSceneRenders: this._active ? 1 : 0,
+      memoryBytes: this._sharedSource ? 0 : source.width * source.height * 8,
+      additionalSceneRenders: this._sharedSource ? 0 : (this._active ? 1 : 0),
       captureMs: this._captureMs,
       captures: this._captureCount,
     };
@@ -197,5 +222,6 @@ export class WaterSurfacePass {
     this._active = false;
     this._target?.dispose();
     this._target = null;
+    this._sharedSource = null;
   }
 }

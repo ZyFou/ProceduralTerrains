@@ -143,29 +143,26 @@ void main() {
   vec3 dA = normalize(dir + t1 * eps);
   vec3 dB = normalize(dir + t2 * eps);
 
-  // Height + geometric normal. When the baked cubemap is active, one fetch
-  // replaces the centre height field and two more cover the neighbour heights
-  // used by the concavity AO term — versus three full ~46-octave evaluations.
+  // Height + geometric normal. Three R16F cubemap samples replace three full
+  // ~46-octave evaluations and reconstruct the normal from neighbouring heights.
   // The branch is on a uniform, so it stays coherent across the warp (a real
   // GPU saving, not just fewer ALU on paper).
   float hC, hA, hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    vec4 hT = textureCube(uPlanetHeightTex, dir);
-    hC = hT.a * uHeightScale;
-    nGeo = normalize(hT.rgb * 2.0 - 1.0);
-    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
-    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+    hC = textureCube(uPlanetHeightTex, dir).r * uHeightScale;
+    hA = textureCube(uPlanetHeightTex, dA).r * uHeightScale;
+    hB = textureCube(uPlanetHeightTex, dB).r * uHeightScale;
   } else {
     hC = heightAt3D(dir);
     hA = heightAt3D(dA);
     hB = heightAt3D(dB);
-    vec3 pC = dir * (uPlanetRadius + hC);
-    vec3 pA = dA  * (uPlanetRadius + hA);
-    vec3 pB = dB  * (uPlanetRadius + hB);
-    nGeo = normalize(cross(pA - pC, pB - pC));
-    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
   }
+  vec3 pC = dir * (uPlanetRadius + hC);
+  vec3 pA = dA  * (uPlanetRadius + hA);
+  vec3 pB = dB  * (uPlanetRadius + hB);
+  nGeo = normalize(cross(pA - pC, pB - pC));
+  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
 
   // normal-strength tweak: lean the geometric normal toward/away from up
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
@@ -302,25 +299,27 @@ void main() {
   vec3 t1 = normalize(cross(ref, dir));
   vec3 t2 = cross(dir, t1);
 
+  float eps = uPlanetEps;
+  vec3 dA = normalize(dir + t1 * eps);
+  vec3 dB = normalize(dir + t2 * eps);
   float hC;
+  float hA;
+  float hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    vec4 hT = textureCube(uPlanetHeightTex, dir);
-    hC = hT.a * uHeightScale;
-    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+    hC = textureCube(uPlanetHeightTex, dir).r * uHeightScale;
+    hA = textureCube(uPlanetHeightTex, dA).r * uHeightScale;
+    hB = textureCube(uPlanetHeightTex, dB).r * uHeightScale;
   } else {
-    float eps = uPlanetEps;
-    vec3 dA = normalize(dir + t1 * eps);
-    vec3 dB = normalize(dir + t2 * eps);
     hC = heightAt3D(dir);
-    float hA = heightAt3D(dA);
-    float hB = heightAt3D(dB);
-    vec3 pC = dir * (uPlanetRadius + hC);
-    vec3 pA = dA  * (uPlanetRadius + hA);
-    vec3 pB = dB  * (uPlanetRadius + hB);
-    nGeo = normalize(cross(pA - pC, pB - pC));
-    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
+    hA = heightAt3D(dA);
+    hB = heightAt3D(dB);
   }
+  vec3 pC = dir * (uPlanetRadius + hC);
+  vec3 pA = dA  * (uPlanetRadius + hA);
+  vec3 pB = dB  * (uPlanetRadius + hB);
+  nGeo = normalize(cross(pA - pC, pB - pC));
+  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
 
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
   vec3 n = normalize(mix(dir, nGeo, uNormalStrength));
@@ -429,6 +428,7 @@ uniform float uWaterQuality;
 uniform float uWaterDetail;
 uniform float uWaterReflection;
 uniform float uWaveComplexity;
+uniform float uFoamWidth;
 uniform samplerCube uPlanetHeightTex;
 uniform float uUsePlanetHeightTex;
 
@@ -462,7 +462,7 @@ void main() {
   // re-evaluating the full per-pixel field — this is the bulk of the planet
   // water shader's cost when the ocean fills the screen up close.
   float terrainH = uUsePlanetHeightTex > 0.5
-    ? textureCube(uPlanetHeightTex, dir).a * uHeightScale
+    ? textureCube(uPlanetHeightTex, dir).r * uHeightScale
     : heightAt3D(dir);
   float terrainR = uPlanetRadius + terrainH;
   float waterR = uPlanetRadius + uSeaLevel;
@@ -520,7 +520,9 @@ void main() {
               + vnoise(fp.zx + fo) * blend.y
               + vnoise(fp.xy + fo) * blend.z;
   }
-  float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
+  float shoreDistance = max(uFoamWidth, 0.5);
+  float shoreInner = min(0.6, shoreDistance * 0.5);
+  float foam = 1.0 - smoothstep(shoreInner, shoreDistance, depth + foamNoise * 2.4);
   vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
   col = mix(col, litFoamColor, foam * 0.75);
 
@@ -541,6 +543,7 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7, stackGLSL = DEF
       uWaterDetail:     { value: 1.0 },
       uWaterReflection: { value: 1.0 },
       uWaveComplexity:  { value: 1.0 },
+      uFoamWidth:       { value: 3.2 },
       ...createWaterLightingUniforms(),
     },
     defines: { OCTAVES: octaves, PLANET_MODE: 1 },

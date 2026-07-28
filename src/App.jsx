@@ -330,8 +330,8 @@ export default function App() {
             setStatus({ text, busy });
             // feed the active blocking task's detail line
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
-            // clear the initial boot overlay once the full-detail terrain
-            // material is compiled, swapped in, and rendered once
+            // The engine only reports Ready after the final terrain variant,
+            // bake, water and board have all produced a complete frame.
             if (!busy && !bootedRef.current) {
               bootedRef.current = true;
               loadingRef.current.done('boot');

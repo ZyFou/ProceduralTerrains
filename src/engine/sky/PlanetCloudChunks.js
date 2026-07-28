@@ -436,6 +436,22 @@ export class PlanetCloudChunks {
   }
 
   // ---- terrain depth occlusion (shared; identical to PlanetCloudLayer)
+  useSceneDepth(depthTexture, camera, baseSize = null) {
+    if (!this.active || !this.shared || !depthTexture) {
+      if (this.shared) this.shared.uUseDepth.value = 0.0;
+      return false;
+    }
+    const size = baseSize || depthTexture.image || {};
+    const width = size.x ?? size.width ?? 1;
+    const height = size.y ?? size.height ?? 1;
+    this.shared.tSceneDepth.value = depthTexture;
+    this.shared.uDepthResolution.value.set(width, height);
+    this.shared.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    this.shared.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    this.shared.uUseDepth.value = 1.0;
+    return true;
+  }
+
   renderDepthPrepass(renderer, camera, baseSize = null) {
     if (!this.active) { if (this.shared) this.shared.uUseDepth.value = 0.0; return false; }
     this._ensureDepthTarget(renderer, baseSize);

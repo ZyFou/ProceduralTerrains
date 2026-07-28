@@ -49,6 +49,7 @@ uniform float uWaterQuality;     // 0 = low, 1 = medium, 2 = high
 uniform float uWaterDetail;      // secondary ripple octave amount
 uniform float uWaterReflection;  // sun glints + sky fresnel strength
 uniform float uWaveComplexity;   // ripple normal strength
+uniform float uFoamWidth;        // visible shoreline distance
 uniform float uVisualFoamBreakup;
 uniform float uVisualShallowWaterSoftness;
 
@@ -121,7 +122,13 @@ void main() {
   }
   float breakup = clamp(uVisualFoamBreakup, 0.0, 1.0);
   float foamPatch = mix(1.0, smoothstep(0.2, 0.82, vnoise(xz * 0.055 + vec2(t * 0.35, -t * 0.28))), breakup);
-  float foam = smoothstep(3.2 + shoreSoft * 1.8, 0.6, depth + foamNoise * mix(2.4, 4.6, breakup)) * foamPatch;
+  float shoreDistance = max(uFoamWidth, 0.5);
+  float shoreInner = min(0.6, shoreDistance * 0.5);
+  float foam = (1.0 - smoothstep(
+    shoreInner,
+    shoreDistance + shoreSoft * 1.8,
+    depth + foamNoise * mix(2.4, 4.6, breakup)
+  )) * foamPatch;
   vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
   col = mix(col, litFoamColor, foam * 0.75);
 
@@ -153,6 +160,7 @@ function waterQualityUniforms() {
     uWaterDetail:     { value: 1.0 },
     uWaterReflection: { value: 1.0 },
     uWaveComplexity:  { value: 1.0 },
+    uFoamWidth:       { value: 3.2 },
     ...createWaterLightingUniforms(),
   };
 }

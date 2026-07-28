@@ -1,5 +1,12 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL, TERRAIN_HEIGHT_TEX_GLSL } from './terrainGLSL.js';
+import {
+  COMMON_UNIFORMS_GLSL,
+  NOISE_GLSL,
+  buildHeightGLSL,
+  TERRAIN_HEIGHT_TEX_GLSL,
+  INFINITE_FIELD_CACHE_GLSL,
+  TERRAIN_CLIMATE_CACHE_GLSL,
+} from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack, MAX_LAYERS } from './noise/NoiseStack.js';
@@ -32,6 +39,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
+${INFINITE_FIELD_CACHE_GLSL}
 
 uniform float uSkirtDepth;
 uniform float uPlinthBaseY;
@@ -53,7 +61,7 @@ void main() {
     localPosition = instanceMatrix * localPosition;
   #endif
   vec4 wp = modelMatrix * localPosition;
-  float h = heightAt(wp.xz);
+  float h = terrainCachedHeightAt(wp.xz);
 
   float skirt = aSkirt;
   float wall = 0.0;   // outer-perimeter skirt -> plinth wall
@@ -215,7 +223,75 @@ float terrainCloudShadow(vec3 worldPos) {
 }
 `;
 
-const buildFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
+const TERRAIN_DETAIL_STUB_GLSL = /* glsl */ `
+uniform float uTerrainDetailDebug;
+uniform float uTerrainDetailNormalStrength;
+uniform float uTerrainDetailScale;
+
+struct TerrainDetailResult {
+  vec3 albedo;
+  float detail;
+  float fade;
+  float rockMask;
+  float shoreMask;
+};
+
+float terrainDetailQualityFactor() { return 0.0; }
+float terrainDetailEnabled() { return 0.0; }
+float terrainDetailRelief(vec3 worldPos, vec3 n, float scale) { return 0.5; }
+
+TerrainDetailResult applyTerrainDetailLayer(
+  TerrainColorResult tc, Climate cl, BiomeWeights bw, vec3 worldPos,
+  vec3 normalGeo, float hC, float hRel, float h01, float slope, float jitter
+) {
+  TerrainDetailResult result;
+  result.albedo = tc.albedo;
+  result.detail = 0.5;
+  result.fade = 0.0;
+  result.rockMask = tc.rockBlend;
+  result.shoreMask = 0.0;
+  return result;
+}
+`;
+
+const SURFACE_TEXTURE_STUB_GLSL = /* glsl */ `
+struct SurfaceTexResult {
+  vec3 albedo;
+  vec3 normal;
+  float ao;
+  float rough;
+  float amount;
+};
+
+SurfaceTexResult applySurfaceMaterials(
+  vec3 baseAlbedo, vec3 n, vec3 baseNormal, vec3 nGeo, vec3 wpos, float dist,
+  TerrainColorResult tc, Climate cl, BiomeWeights bw, float slope, float hRel,
+  float h01, float detail, float jitter
+) {
+  SurfaceTexResult result;
+  result.albedo = baseAlbedo;
+  result.normal = n;
+  result.ao = 1.0;
+  result.rough = 0.8;
+  result.amount = 0.0;
+  return result;
+}
+`;
+
+function resolveTerrainVariant(variant = 'full') {
+  if (variant === 'base') return { name: 'base', detail: false, surface: false };
+  if (variant === 'detail') return { name: 'detail', detail: true, surface: false };
+  if (variant === 'surface') return { name: 'surface', detail: false, surface: true };
+  return { name: 'full', detail: true, surface: true };
+}
+
+const buildFragment = (
+  heightGLSL,
+  graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
+  variant = 'full',
+) => {
+  const features = resolveTerrainVariant(variant);
+  return /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
@@ -223,12 +299,14 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
+${INFINITE_FIELD_CACHE_GLSL}
+${TERRAIN_CLIMATE_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${graphColorGLSL}
-${SURFACE_TEXTURE_UNIFORMS_GLSL}
-${SURFACE_TEXTURE_FUNCTIONS_GLSL}
-${TERRAIN_DETAIL_GLSL}
+${features.surface ? SURFACE_TEXTURE_UNIFORMS_GLSL : ''}
+${features.surface ? SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
+${features.detail ? TERRAIN_DETAIL_GLSL : TERRAIN_DETAIL_STUB_GLSL}
 ${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uNormalStrength;
@@ -444,7 +522,7 @@ void main() {
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
   if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
-  Climate cl = climateAt(xz * uFrequency + uSeedOffset);
+  Climate cl = terrainCachedClimateAt(xz);
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz);
   vec4 splineMask = splineMaskAt(xz);
@@ -473,22 +551,32 @@ void main() {
   float hC, hX, hZ;
   vec3 nGeo;
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    // Baked path: one fetch covers height + geometric normal, two more cover
-    // the neighbour heights used by the concavity AO term — versus three full
-    // ~46-octave evaluations. Branch is on a uniform, so it stays warp-coherent.
+    // Three R16F samples reconstruct height + geometric normal + concavity,
+    // replacing three full ~46-octave procedural evaluations.
     vec2 uv = bakedUvAt(xz);
-    float du = uEps / max(uBakeSpan.x, 1.0);
-    vec4 hT = texture2D(uTerrainHeightTex, uv);
-    hC = hT.a * uHeightScale;
-    nGeo = normalize(hT.rgb * 2.0 - 1.0);
-    hX = texture2D(uTerrainHeightTex, uv + vec2(du, 0.0)).a * uHeightScale;
-    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, du)).a * uHeightScale;
-  } else
-  {
-    hC = heightAt(xz);
-    hX = heightAt(xz + vec2(eps, 0.0));
-    hZ = heightAt(xz + vec2(0.0, eps));
+    vec2 duv = vec2(
+      uEps / max(uBakeSpan.x, 1.0),
+      uEps / max(uBakeSpan.y, 1.0)
+    );
+    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
+    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
+    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
     nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  } else {
+    hC = terrainCachedHeightAt(xz);
+    float normalDistance = length(cameraPosition - vWorldPos);
+    bool farInfiniteNormal = uInfiniteMode > 0.5
+      && (vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0));
+    if (farInfiniteNormal) {
+      hX = hC;
+      hZ = hC;
+      nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+      if (nGeo.y < 0.0) nGeo = -nGeo;
+    } else {
+      hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
+      hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
+      nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+    }
   }
 
   if (uTileDebugView > 0.5) {
@@ -686,6 +774,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }
 `;
+};
 
 // Minimal boot fragment: height + a simple height/slope-banded colour + sun +
 // fog only. It skips the palette/colour, surface-texture, terrain-detail and
@@ -719,9 +808,15 @@ void main() {
   float hC;
   vec3 nGeo;
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    vec4 hT = texture2D(uTerrainHeightTex, bakedUvAt(xz));
-    hC = hT.a * uHeightScale;
-    nGeo = normalize(hT.rgb * 2.0 - 1.0);
+    vec2 uv = bakedUvAt(xz);
+    vec2 duv = vec2(
+      uEps / max(uBakeSpan.x, 1.0),
+      uEps / max(uBakeSpan.y, 1.0)
+    );
+    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
+    float hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
+    float hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
+    nGeo = normalize(vec3(-(hX - hC) / uEps, 1.0, -(hZ - hC) / uEps));
   } else
   {
     hC = vWorldPos.y;
@@ -920,14 +1015,14 @@ export function createTerrainUniforms() {
     uSplineHeightTexture: { value: null },
     uSplineMaskTexture: { value: null },
     uSplineAuxTexture: { value: null },
-    // Planet-mode baked height/normal cubemap (shared by the planet terrain +
+    // Planet-mode baked height cubemap (shared by the planet terrain +
     // water shaders). When uUsePlanetHeightTex is 1, those shaders sample this
     // texture instead of re-evaluating the ~46-octave height field per pixel.
     // Ignored by the studio/infinite materials, which never declare them.
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
 
-    // Studio-mode baked height/normal texture (shared by the studio terrain +
+    // Studio-mode baked height texture (shared by the studio terrain +
     // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
     // 2D texture instead of re-evaluating the height field per pixel. The shared
     // Tile/Infinite program always declares it; uInfiniteMode keeps unbounded
@@ -935,9 +1030,21 @@ export function createTerrainUniforms() {
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
     // Low-resolution procedural climate bake used by Studio water tinting.
-    // RGBA = temperature, moisture, continentalness, region jitter.
+    // RGBA = temperature, moisture, continentalness, erosion. Region jitter is
+    // reconstructed cheaply from low-frequency noise in visible shaders.
     uTerrainBiomeTex:     { value: null },
     uUseTerrainBiomeTex:  { value: 0.0 },
+    uInfiniteFieldTex0:   { value: null },
+    uInfiniteFieldTex1:   { value: null },
+    uInfiniteFieldTex2:   { value: null },
+    uInfiniteFieldOrigin0:{ value: new THREE.Vector2() },
+    uInfiniteFieldOrigin1:{ value: new THREE.Vector2() },
+    uInfiniteFieldOrigin2:{ value: new THREE.Vector2() },
+    uInfiniteFieldSpan0:  { value: new THREE.Vector2(1, 1) },
+    uInfiniteFieldSpan1:  { value: new THREE.Vector2(1, 1) },
+    uInfiniteFieldSpan2:  { value: new THREE.Vector2(1, 1) },
+    uInfiniteFieldReady:  { value: new THREE.Vector3() },
+    uUseInfiniteFieldCache: { value: 0.0 },
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
     uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
 
@@ -1043,21 +1150,39 @@ export function createTerrainUniforms() {
 // existing call sites stay valid and render exactly as before.
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
-export function createTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createTerrainMaterial(
+  uniforms,
+  octaves = 7,
+  stackGLSL = DEFAULT_STACK_GLSL,
+  options = {},
+) {
+  const variant = resolveTerrainVariant(options.variant).name;
   const h = buildHeightGLSL(stackGLSL.body2d);
-  return new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },
     vertexShader: buildVertex(h),
-    fragmentShader: buildFragment(h, stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL),
+    fragmentShader: buildFragment(
+      h,
+      stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
+      variant,
+    ),
     side: THREE.DoubleSide,
+    extensions: { derivatives: true },
   });
+  material.userData.terrainVariant = variant;
+  return material;
 }
 
-export function createInfiniteTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createInfiniteTerrainMaterial(
+  uniforms,
+  octaves = 7,
+  stackGLSL = DEFAULT_STACK_GLSL,
+  options = {},
+) {
   // A distinct material object keeps mode ownership/disposal simple, while the
   // identical source + defines let Three.js reuse Tile's compiled GPU program.
-  return createTerrainMaterial(uniforms, octaves, stackGLSL);
+  return createTerrainMaterial(uniforms, octaves, stackGLSL, options);
 }
 
 /**
@@ -1084,11 +1209,19 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 // in place (same material object → every mesh referencing it updates). The
 // program for the identical source was warm-compiled first, so the relink is
 // served from three's cache.
-export function rebuildTerrainShaderSource(mat, stackGLSL) {
+export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
+  const variant = resolveTerrainVariant(options.variant).name;
   const h = buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h);
-  mat.fragmentShader = buildFragment(h, stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
+  mat.fragmentShader = buildFragment(
+    h,
+    stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
+    variant,
+  );
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
+  mat.userData.terrainVariant = variant;
+  mat.extensions ||= {};
+  mat.extensions.derivatives = true;
   mat.needsUpdate = true;
 }
 

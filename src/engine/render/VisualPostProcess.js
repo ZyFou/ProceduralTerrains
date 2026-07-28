@@ -323,7 +323,12 @@ export class VisualPostProcess {
 
   get inputTarget() { return this._sceneRT; }
   get inputDepthTexture() { return this._sceneRT?.depthTexture || null; }
+  get opaqueTarget() { return this._requiresSharedOpaque ? this._opaqueRT : null; }
   get plan() { return this._plan; }
+
+  setInputTexture(texture = null) {
+    this._inputTextureOverride = texture;
+  }
 
   lookEnabled(params, worldMode) {
     return (worldMode === 'studio' && params?.visualsPostEnabled !== false)
@@ -354,6 +359,8 @@ export class VisualPostProcess {
     sunScreen = null,
     sunColor = null,
     requireSceneDepth = false,
+    requireSceneTarget = false,
+    requireSharedOpaque = false,
   } = {}) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const plan = resolveCameraRenderPlan({
@@ -368,12 +375,14 @@ export class VisualPostProcess {
       ditheringEnabled: params?.visualsDitheringEnabled,
       crtEnabled: params?.visualsCrtEnabled,
       chromaticAberrationEnabled: params?.visualsChromaticAberrationEnabled,
-      requireSceneTarget: requireSceneDepth,
+      requireSceneTarget: requireSceneDepth || requireSceneTarget || requireSharedOpaque,
     });
     this._plan = plan;
     this._params = params || {};
     this._perf = perf || {};
     this._worldMode = worldMode;
+    this._inputTextureOverride = null;
+    this._requiresSharedOpaque = requireSharedOpaque;
 
     if (plan.usesSceneTarget) {
       this._sceneRT = this._ensureTarget(
@@ -382,6 +391,15 @@ export class VisualPostProcess {
         plan.sceneHeight,
         true,
         requireSceneDepth
+      );
+    }
+    if (requireSharedOpaque) {
+      this._opaqueRT = this._ensureTarget(
+        this._opaqueRT,
+        plan.sceneWidth,
+        plan.sceneHeight,
+        true,
+        true
       );
     }
     if (plan.lookEnabled && plan.needsFinalPass) {
@@ -426,7 +444,7 @@ export class VisualPostProcess {
   finish(renderer) {
     const plan = this._plan;
     if (!plan?.usesSceneTarget || !this._sceneRT) return;
-    let sourceTexture = this._sceneRT.texture;
+    let sourceTexture = this._inputTextureOverride || this._sceneRT.texture;
 
     if (plan.lookEnabled) {
       this._lookMaterial.uniforms.tDiffuse.value = sourceTexture;
@@ -515,8 +533,10 @@ export class VisualPostProcess {
 
   dispose() {
     this._sceneRT?.dispose();
+    this._opaqueRT?.dispose();
     this._lookRT?.dispose();
     this._sceneRT = null;
+    this._opaqueRT = null;
     this._lookRT = null;
     this._lookMaterial.dispose();
     this._cameraMaterial.dispose();

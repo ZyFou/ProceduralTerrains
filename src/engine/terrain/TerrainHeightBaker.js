@@ -7,7 +7,7 @@ import { defaultLegacyStack } from './noise/NoiseStack.js';
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
-// Studio (flat board) height/normal baker — the 2D analog of
+// Studio (flat board) height baker — the 2D analog of
 // PlanetHeightBaker. The studio terrain + water fragment shaders re-evaluate
 // the full ~46-octave height field FOR EVERY PIXEL, EVERY FRAME (the terrain
 // fragment does it three times to build the analytic normal). Whenever the
@@ -16,10 +16,10 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 //
 // This baker evaluates the field once into a 2D texture whenever it actually
 // changes (seed / shape / biome / paint edits, tracked by the engine's terrain
-// generation counter). The studio shaders then sample it with a single
-// texture2D fetch:
-//   RGB = geometric surface normal (encoded *0.5+0.5)
-//   A   = height / heightScale   (h01, in [0, 1.35])
+// generation counter). The R16F texture stores height / heightScale in its red
+// channel. Visible shaders reconstruct geometric normals from neighbouring
+// samples, so the procedural field is evaluated once rather than three times
+// per baked texel while the target uses one quarter of the previous memory.
 //
 // The board spans world XZ in [-uBoardHalf, uBoardHalf]; the bake maps the
 // fullscreen quad UV straight onto that range, so a later fetch by world XZ
@@ -47,22 +47,14 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
 
-uniform float uEps;
 varying vec2 vUv;
+uniform vec4 uBakeUvTransform;
 
 void main() {
-  vec2 xz = uBakeOrigin + vUv * max(uBakeSpan, vec2(1.0));
-
-  float eps = uEps;
-  float hC = heightAt(xz);
-  float hX = heightAt(xz + vec2(eps, 0.0));
-  float hZ = heightAt(xz + vec2(0.0, eps));
-
-  // identical finite-difference normal to the live terrain fragment
-  vec3 nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
-
-  float h01 = hC / max(uHeightScale, 1e-3);
-  gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);
+  vec2 bakeUv = uBakeUvTransform.xy + vUv * uBakeUvTransform.zw;
+  vec2 xz = uBakeOrigin + bakeUv * max(uBakeSpan, vec2(1.0));
+  float h01 = heightAt(xz) / max(uHeightScale, 1e-3);
+  gl_FragColor = vec4(h01, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -77,15 +69,17 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 
 varying vec2 vUv;
+uniform vec4 uBakeUvTransform;
 
 void main() {
-  vec2 xz = uBakeOrigin + vUv * max(uBakeSpan, vec2(1.0));
+  vec2 bakeUv = uBakeUvTransform.xy + vUv * uBakeUvTransform.zw;
+  vec2 xz = uBakeOrigin + bakeUv * max(uBakeSpan, vec2(1.0));
   Climate climate = climateAt(xz * uFrequency + uSeedOffset);
   gl_FragColor = vec4(
     climate.temp,
     climate.moist,
     climate.cont,
-    climate.region
+    climate.erosion
   );
 }
 `;
@@ -107,6 +101,9 @@ export class TerrainHeightBaker {
     this._texH = size;
     this._biomeW = 512;
     this._biomeH = 512;
+    this._activeJob = null;
+    this._jobSerial = 0;
+    this._bakeUvTransform = { value: new THREE.Vector4(0, 0, 1, 1) };
 
     this.target = this._makeTarget(size, size);
     this.biomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
@@ -114,7 +111,10 @@ export class TerrainHeightBaker {
     this.scene = new THREE.Scene();
     this.material = null;   // built on first bake so OCTAVES matches the params
     this.biomeMaterial = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,
+      uniforms: {
+        ...this.uniforms,
+        uBakeUvTransform: this._bakeUvTransform,
+      },
       // NOISE_GLSL declares FBM helpers with an OCTAVES loop even though this
       // climate-only pass only calls vnoise(). Keep the unused helpers valid.
       defines: { OCTAVES: 1 },
@@ -136,14 +136,18 @@ export class TerrainHeightBaker {
   get biomeTexture() { return this.biomeTarget.texture; }
 
   _makeTarget(w, h) {
-    return new THREE.WebGLRenderTarget(w, h, {
+    const target = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType,
-      format: THREE.RGBAFormat,
+      format: THREE.RedFormat,
+      internalFormat: 'R16F',
       magFilter: THREE.LinearFilter,
       minFilter: THREE.LinearFilter,
       depthBuffer: false,
       generateMipmaps: false,
     });
+    target.texture.colorSpace = THREE.NoColorSpace;
+    target.texture.name = 'TerrainHeightR16F';
+    return target;
   }
 
   _makeBiomeTarget(w, h) {
@@ -186,7 +190,10 @@ export class TerrainHeightBaker {
     if (this.material && this._octaves === octaves && this._stackSig === stackGLSL.sig) return;
     if (this.material) this.material.dispose();
     this.material = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,           // share the live height uniforms
+      uniforms: {
+        ...this.uniforms,                // share the live height uniforms
+        uBakeUvTransform: this._bakeUvTransform,
+      },
       defines: { OCTAVES: octaves },     // no INFINITE_MODE → island falloff applies
       vertexShader: BAKE_VERTEX,
       fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d)),
@@ -198,20 +205,86 @@ export class TerrainHeightBaker {
     this._stackSig = stackGLSL.sig;
   }
 
-  /** Re-evaluate the height field into the 2D texture from the current uniforms. */
-  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
+  /**
+   * Start a progressive bake. Existing textures remain hidden by the Engine
+   * until every stripe has completed, so consumers never sample a half-written
+   * terrain field.
+   */
+  begin(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
     this._ensureTargetSize(cols, rows);
     this._ensureMaterial(octaves, stackGLSL);
+    this._activeJob = {
+      id: ++this._jobSerial,
+      pass: 'height',
+      row: 0,
+    };
+    return this._activeJob.id;
+  }
+
+  get isBaking() { return !!this._activeJob; }
+
+  /**
+   * Render at most maxRows from the current pass. A 1536px bake split into
+   * 64-row stripes yields to the browser instead of issuing one long command.
+   */
+  step(maxRows = 64) {
+    const job = this._activeJob;
+    if (!job) return { complete: true, progress: 1 };
+
+    const isHeight = job.pass === 'height';
+    const width = isHeight ? this._texW : this._biomeW;
+    const height = isHeight ? this._texH : this._biomeH;
+    const target = isHeight ? this.target : this.biomeTarget;
+    const material = isHeight ? this.material : this.biomeMaterial;
+    const rows = Math.min(Math.max(1, Math.round(maxRows)), height - job.row);
+    this._renderStripe(target, material, width, height, job.row, rows);
+    job.row += rows;
+
+    if (job.row >= height) {
+      if (isHeight) {
+        job.pass = 'biome';
+        job.row = 0;
+      } else {
+        this._activeJob = null;
+        this._bakeUvTransform.value.set(0, 0, 1, 1);
+        return { complete: true, progress: 1 };
+      }
+    }
+
+    const heightShare = 0.85;
+    const progress = job.pass === 'height'
+      ? heightShare * (job.row / this._texH)
+      : heightShare + (1 - heightShare) * (job.row / this._biomeH);
+    return { complete: false, progress, pass: job.pass };
+  }
+
+  _renderStripe(target, material, width, height, row, rows) {
     const r = this.renderer;
     const prevTarget = r.getRenderTarget();
-    this.mesh.material = this.material;
-    r.setRenderTarget(this.target);
-    r.render(this.scene, this.cam);
-    this.mesh.material = this.biomeMaterial;
-    r.setRenderTarget(this.biomeTarget);
-    r.render(this.scene, this.cam);
-    this.mesh.material = this.material;
-    r.setRenderTarget(prevTarget);
+    const prevViewport = r.getViewport(new THREE.Vector4());
+    const prevScissor = r.getScissor(new THREE.Vector4());
+    const prevScissorTest = r.getScissorTest();
+    this.mesh.material = material;
+    this._bakeUvTransform.value.set(0, row / height, 1, rows / height);
+    try {
+      r.setRenderTarget(target);
+      r.setViewport(0, row, width, rows);
+      r.setScissor(0, row, width, rows);
+      r.setScissorTest(true);
+      r.render(this.scene, this.cam);
+    } finally {
+      r.setRenderTarget(prevTarget);
+      r.setViewport(prevViewport);
+      r.setScissor(prevScissor);
+      r.setScissorTest(prevScissorTest);
+      this.mesh.material = this.material;
+    }
+  }
+
+  /** Synchronous compatibility path used by exports and focused tests. */
+  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
+    this.begin(octaves, stackGLSL, cols, rows);
+    while (this._activeJob) this.step(Number.MAX_SAFE_INTEGER);
   }
 
   dispose() {
@@ -221,5 +294,6 @@ export class TerrainHeightBaker {
     if (this.material) this.material.dispose();
     this.biomeMaterial.dispose();
     this.material = null;
+    this._activeJob = null;
   }
 }

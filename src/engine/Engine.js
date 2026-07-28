@@ -3,6 +3,7 @@ import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMate
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
+import { InfiniteTerrainClipmap } from './terrain/InfiniteTerrainClipmap.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
@@ -264,6 +265,7 @@ export class Engine {
     // or 'planet' (cube-sphere world)
     this.worldMode = 'studio';
     this.infiniteWorld = null;
+    this.infiniteTerrainClipmap = null;
     this.fpsControls = null;
 
     // Tile mode: the studio board can grow into a grid of square cells. Each
@@ -294,10 +296,11 @@ export class Engine {
     this.planetCloudLayer = null;
     this.planetHeightBaker = null;   // bakes the static height field → cubemap
     this._bakedTerrainGen = -1;      // terrain generation the cubemap was baked at
+    this._planetBakeRequestedGen = -1;
     this._planetModules = null;
     this._planetModulesPromise = null;
 
-    // Studio (flat board) height/normal bake: replaces the per-pixel height
+    // Studio (flat board) height bake: replaces the per-pixel height
     // field in the studio terrain + water shaders with a single texture fetch.
     this.terrainHeightBaker = null;
     this._bakedStudioGen = -1;       // terrain generation the studio texture was baked at
@@ -557,11 +560,14 @@ export class Engine {
     this.underwater = new UnderwaterEffect();
     this.underwaterController = new UnderwaterController();
     this.visualPost = new VisualPostProcess();
+    this._sharedOpaqueRevision = null;
+    this._sharedOpaqueTarget = null;
 
     // studio/flat-board volumetric cloud slab (sits above the board; hidden
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
     this.studioCloud = new CloudSlabLayer(this.scene, {
       compile: (mats) => this._compileMaterialVariants(mats),
+      renderer: this.renderer,
     });
 
     // Procedural sky dome. Persistent + shared by studio (Tile) and infinite
@@ -1827,6 +1833,7 @@ export class Engine {
 
     if (key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
       this._applySurfaceSettings();
+      void this._ensureTerrainShaderVariantAsync();
       return;
     }
 
@@ -2400,12 +2407,16 @@ export class Engine {
     const heightSourceSig = sg.heightSig || sg.sig;
     const heightSourceChanged = this._liveHeightSourceSig !== heightSourceSig;
     const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
+    const terrainVariant = this._targetTerrainVariant();
     // Presets commonly change only uniforms. Do not touch WebGL when the live
     // studio program already matches the requested structural variant.
     if (this.worldMode === 'studio'
         && this._liveHeightSig === sg.sig
         && this.terrainMaterial?.defines?.OCTAVES === oct
-        && (nodePreviewMaterial || !this.terrainMaterial?.userData?.minimalFragment)) {
+        && (nodePreviewMaterial
+          || (!this.terrainMaterial?.userData?.minimalFragment
+            && (!this.terrainMaterial?.userData?.terrainVariant
+              || this.terrainMaterial.userData.terrainVariant === terrainVariant)))) {
       this._applyUniforms();
       this._needsRender = true;
       this.cb.onStatus('Ready', false);
@@ -2419,7 +2430,7 @@ export class Engine {
     try {
       warm = [nodePreviewMaterial
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
-        : createTerrainMaterial(this.uniforms, oct, sg)];
+        : createTerrainMaterial(this.uniforms, oct, sg, { variant: terrainVariant })];
       const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
       if (heightSourceChanged && waterActive && this.worldMode === 'infinite') {
         warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
@@ -2466,8 +2477,10 @@ export class Engine {
           if (mat.defines.OCTAVES !== oct) mat.defines.OCTAVES = oct;
         }
         if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
-        else rebuildTerrainShaderSource(this.terrainMaterial, sg);
-        if (this._infiniteTerrainMat) rebuildTerrainShaderSource(this._infiniteTerrainMat, sg);
+        else rebuildTerrainShaderSource(this.terrainMaterial, sg, { variant: terrainVariant });
+        if (this._infiniteTerrainMat) {
+          rebuildTerrainShaderSource(this._infiniteTerrainMat, sg, { variant: terrainVariant });
+        }
         if (heightSourceChanged && this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
           rebuildWaterShaderSource(this._infiniteWaterMat, sg);
         }
@@ -2478,6 +2491,7 @@ export class Engine {
         this._underwaterWarmed = false;
         if (this._waterDeferred) this._waterMaterialWarmed = false;
         this.waterSystem?.onStackRebuilt(sg, oct);
+        if (heightSourceChanged) this.infiniteTerrainClipmap?.setProgram(oct, sg);
         if (this.heightSampler) this.heightSampler.invalidate();
         if (this.propSurfaceField) this.propSurfaceField.invalidate();
         this._applyUniforms();
@@ -2940,9 +2954,12 @@ export class Engine {
   }
 
   _prepareCameraPipeline() {
-    const requireSceneDepth = this.worldMode === 'studio'
-      ? !!this.studioCloud?.usesLowRes
-      : (this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes);
+    const cloudsNeedDepth = this.worldMode === 'studio'
+      ? !!this.studioCloud?.active
+      : (this.worldMode === 'planet'
+        && (!!this.planetCloudLayer?.active || !!this.planetCloudChunks?.active));
+    const requireSharedOpaque = cloudsNeedDepth
+      || !!this.waterSystem?.needsSceneRefraction?.();
     return this.visualPost.prepare(this.renderer, {
       params: this.params,
       perf: this.perf,
@@ -2951,7 +2968,9 @@ export class Engine {
       time: this.uniforms.uTime.value,
       sunScreen: this._underwaterSunScreen(),
       sunColor: this.sunLight?.color,
-      requireSceneDepth,
+      requireSceneDepth: requireSharedOpaque || !!this.underwater?.active,
+      requireSceneTarget: !!this.underwater?.active,
+      requireSharedOpaque,
     });
   }
 
@@ -2961,7 +2980,9 @@ export class Engine {
 
   _renderLowResCloudAfterScene(layer, target, sceneSize) {
     if (!layer?.usesLowRes) return false;
-    const sceneDepth = this.underwater?.sceneDepthTexture || target?.depthTexture || null;
+    const sceneDepth = this.visualPost?.opaqueTarget?.depthTexture
+      || target?.depthTexture
+      || null;
     if (!layer.useSceneDepth(sceneDepth, this.camera, sceneSize)) return false;
     layer.renderLowRes(this.renderer, this.camera, sceneSize);
     this.renderer.setRenderTarget(target);
@@ -2972,7 +2993,7 @@ export class Engine {
     return true;
   }
 
-  _captureWaterSceneRefraction(sceneSize) {
+  _captureWaterSceneRefraction(sceneSize, sourceTarget = null) {
     if (!this.waterSystem) return false;
     this.profiler.begin('water-refraction');
     try {
@@ -2981,13 +3002,14 @@ export class Engine {
         this.scene,
         this.camera,
         sceneSize,
+        sourceTarget,
       );
     } finally {
       this.profiler.end('water-refraction');
     }
   }
 
-  _captureWaterPlanarReflection(sceneSize) {
+  _captureWaterPlanarReflection(sceneSize, revision = null) {
     if (!this.waterSystem) return false;
     this.profiler.begin('water-reflection');
     try {
@@ -2996,10 +3018,92 @@ export class Engine {
         this.scene,
         this.camera,
         sceneSize,
+        revision,
       );
     } finally {
       this.profiler.end('water-reflection');
     }
+  }
+
+  _sceneRevisionKey(sceneSize, includeCloudMotion = false) {
+    this.camera.updateMatrixWorld?.(true);
+    const worldElements = this.camera.matrixWorld?.elements || [];
+    const projectionElements = this.camera.projectionMatrix?.elements || [];
+    const camera = [...worldElements, ...projectionElements]
+      .map((value) => Number(value).toFixed(4))
+      .join(',');
+    const sun = this.uniforms?.uSunDir?.value;
+    const cloudTick = includeCloudMotion && this.params?.cloudsEnabled
+      ? Math.floor((this.uniforms?.uTime?.value || 0) * 4)
+      : 0;
+    return [
+      this.worldMode,
+      sceneSize.x ?? sceneSize.width,
+      sceneSize.y ?? sceneSize.height,
+      this._terrainGen,
+      camera,
+      sun ? `${sun.x.toFixed(4)},${sun.y.toFixed(4)},${sun.z.toFixed(4)}` : '',
+      cloudTick,
+      JSON.stringify(this.params || {}),
+    ].join('|');
+  }
+
+  _sharedOpaqueRoots() {
+    return [
+      this.water,
+      this.infiniteWorld?.waterPlane,
+      this.planetWater,
+      this.studioCloud?.mesh,
+      this.planetCloudLayer?.mesh,
+      this.planetCloudChunks?.group,
+      this.waterSystem?._boundsHelper,
+      ...this._captureOverlayRoots(),
+    ].filter(Boolean);
+  }
+
+  _prepareSharedOpaque(plan, sceneSize) {
+    const target = this.visualPost.opaqueTarget;
+    if (!target) {
+      this._captureWaterSceneRefraction(sceneSize, null);
+      return false;
+    }
+    const revision = this._sceneRevisionKey(sceneSize, false);
+    const targetChanged = target !== this._sharedOpaqueTarget;
+    if (targetChanged || revision !== this._sharedOpaqueRevision) {
+      const visibility = [...new Set(this._sharedOpaqueRoots())]
+        .map((object) => [object, object.visible]);
+      const previousTarget = this.renderer.getRenderTarget();
+      try {
+        for (const [object] of visibility) object.visible = false;
+        this.renderer.setRenderTarget(target);
+        this.renderer.render(this.scene, this.camera);
+      } finally {
+        this.renderer.setRenderTarget(previousTarget);
+        for (const [object, visible] of visibility) object.visible = visible;
+      }
+      this._sharedOpaqueRevision = revision;
+      this._sharedOpaqueTarget = target;
+    }
+
+    this._captureWaterSceneRefraction(sceneSize, target);
+    const depth = target.depthTexture;
+    this.studioCloud?.useSceneDepth?.(depth, this.camera, sceneSize);
+    this.planetCloudLayer?.useSceneDepth?.(depth, this.camera, sceneSize);
+    this.planetCloudChunks?.useSceneDepth?.(depth, this.camera, sceneSize);
+    return true;
+  }
+
+  _applyUnderwaterFromSharedTarget(target) {
+    if (!this.underwater?.active || !target) return target;
+    const underwaterTarget = this.underwater.compositeFromTarget(
+      this.renderer,
+      this.camera,
+      target,
+    );
+    if (underwaterTarget?.texture) {
+      this.visualPost.setInputTexture(underwaterTarget.texture);
+    }
+    return underwaterTarget;
   }
 
   // -------------------------------------------------- async shader compiling
@@ -3349,8 +3453,8 @@ export class Engine {
 
   /**
    * Compile and render a lightweight safety frame behind the loading overlay.
-   * Full terrain colour, height baking and water remain non-blocking jobs, but
-   * the overlay is released only after they have produced one final frame.
+   * The overlay remains visible until the final terrain variant, height/climate
+   * bake, water and board have all produced a complete frame.
    */
   async _warmupInitialShaders() {
     this._compiling++;
@@ -3403,13 +3507,21 @@ export class Engine {
     if (!this._bootPending || this._disposed) return false;
 
     const nodeMode = this.projectMode === 'nodes';
-    const terrainReady = nodeMode || !this.terrainMaterial?.userData?.minimalFragment;
+    const targetVariant = this._targetTerrainVariant();
+    const terrainReady = nodeMode
+      || (!this.terrainMaterial?.userData?.minimalFragment
+        && this.terrainMaterial?.userData?.terrainVariant === targetVariant);
+    const bakeReady = nodeMode
+      || this._debug?.disableHeightBake
+      || (this.uniforms.uUseTerrainHeightTex.value > 0.5
+        && this.uniforms.uUseTerrainBiomeTex.value > 0.5
+        && !this.terrainHeightBaker?.isBaking);
     const waterReady = nodeMode
       || this.params.waterEnabled === false
       || !this.waterMaterial
       || !this._waterDeferred;
     const boardReady = !this.board?.isBuilding;
-    if (!terrainReady || !waterReady || !boardReady) return false;
+    if (!terrainReady || !bakeReady || !waterReady || !boardReady) return false;
 
     let paintMs = null;
     if (!this._contextLost) {
@@ -3421,7 +3533,8 @@ export class Engine {
     }
     console.info(
       `[boot] final quality frame ${(paintMs ?? 0).toFixed(0)}ms `
-      + `(terrain ready=${terrainReady}, water ready=${waterReady}, board ready=${boardReady}); `
+      + `(terrain ready=${terrainReady}, bake ready=${bakeReady}, `
+      + `water ready=${waterReady}, board ready=${boardReady}); `
       + `elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`
     );
     return this._releaseBootFallback(reason, { render: false });
@@ -3430,7 +3543,9 @@ export class Engine {
   _releaseBootFallback(reason = 'fallback', { render = true } = {}) {
     if (!this._bootPending || this._disposed) return false;
 
-    const log = reason === 'quality upgrades ready' ? console.info : console.warn;
+    const log = (reason === 'quality upgrades ready' || reason === 'interactive terrain ready')
+      ? console.info
+      : console.warn;
     log(`[boot] releasing fallback: ${reason}`);
     if (render && !this._contextLost) {
       try {
@@ -3514,15 +3629,18 @@ export class Engine {
    * The landing page is opaque, so the colour pop from the swap is invisible
    * on a normal boot.
    */
-  async _upgradeMinimalTerrain(renderTarget = null) {
+  async _upgradeMinimalTerrain(renderTarget = null, variant = this._targetTerrainVariant()) {
     if (!this.terrainMaterial?.userData?.minimalFragment) return;
     if (this._terrainUpgradePromise) return this._terrainUpgradePromise;
     const promise = (async () => {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
       const heightProgram = this._activeHeightProgram('studio');
-      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram);
-      this._bgWorkStart('terrain-full', 'Loading full terrain colors…');
+      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, { variant });
+      const workId = `terrain-${variant}`;
+      this._bgWorkStart(workId, variant === 'base'
+        ? 'Preparing lightweight terrain colors…'
+        : `Preparing ${variant} terrain shader…`);
       let swapped = false;
       let ready = false;
       let compileWaitMs = 0;
@@ -3536,7 +3654,7 @@ export class Engine {
         });
         ready = result?.ready === true;
         compileWaitMs = performance.now() - tCompile;
-        console.info(`[boot] full terrain compile wait ${compileWaitMs.toFixed(0)}ms (ready=${ready})`);
+        console.info(`[boot] ${variant} terrain compile wait ${compileWaitMs.toFixed(0)}ms (ready=${ready})`);
         // Swap ONLY when the warmed program is genuinely ready and the live
         // material still matches what was warmed (octaves may have changed
         // mid-compile — that path upgrades the source itself). Swapping onto a
@@ -3546,19 +3664,19 @@ export class Engine {
             this.terrainMaterial.defines.OCTAVES === oct &&
             this._activeHeightProgram('studio').sig === heightProgram.sig) {
           const tSwap = performance.now();
-          rebuildTerrainShaderSource(this.terrainMaterial, heightProgram);
+          rebuildTerrainShaderSource(this.terrainMaterial, heightProgram, { variant });
           swapMs = performance.now() - tSwap;
           swapped = true;
           this._needsRender = true;
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
-          console.info(`[boot] full terrain live material source swapped in ${swapMs.toFixed(1)}ms; elapsed ${(performance.now() - t0).toFixed(0)}ms`);
+          console.info(`[boot] ${variant} terrain live material source swapped in ${swapMs.toFixed(1)}ms; elapsed ${(performance.now() - t0).toFixed(0)}ms`);
           this._completeBootIfQualityReady();
         }
       } catch (e) {
-        console.warn('Full terrain material upgrade failed', e);
+        console.warn(`${variant} terrain material upgrade failed`, e);
       } finally {
-        this._bgWorkEnd('terrain-full');
+        this._bgWorkEnd(workId);
       }
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
       if (!ready && !this._disposed && this._terrainUpgradeRetryCount < 1) {
@@ -3566,7 +3684,7 @@ export class Engine {
           this._terrainUpgradeRetryTimer = null;
           if (this._disposed || !this.terrainMaterial?.userData?.minimalFragment) return;
           this._terrainUpgradeRetryCount++;
-          void this._upgradeMinimalTerrain(renderTarget);
+          void this._upgradeMinimalTerrain(renderTarget, variant);
         }, 3000);
       }
       return { ready, swapped, compileWaitMs, swapMs };
@@ -3608,19 +3726,30 @@ export class Engine {
         console.warn('Deferred height bake failed', e);
       }
 
-      // Give the compositor a paint opportunity between the height bake and
-      // each synchronous GLSL translation burst. On slower ANGLE drivers this
-      // prevents one long, back-to-back main-thread freeze.
+      // The height baker advances by one narrow stripe per frame. Shader
+      // translation is staggered after the first stripe so neither job owns a
+      // long uninterrupted startup interval.
       const jobs = [];
       if (this.terrainMaterial?.userData?.minimalFragment) {
-        jobs.push(yieldFrame().then(() => this._upgradeMinimalTerrain(renderTarget)));
+        jobs.push(yieldFrame()
+          .then(() => this._upgradeMinimalTerrain(renderTarget, 'base'))
+          .then(() => {
+            const upgradeFeatures = () => {
+              if (!this._disposed) void this._ensureTerrainShaderVariantAsync(renderTarget);
+            };
+            if (typeof requestIdleCallback === 'function') {
+              requestIdleCallback(upgradeFeatures, { timeout: 6000 });
+            } else {
+              setTimeout(upgradeFeatures, 2500);
+            }
+          }));
       }
       if (this.params.waterEnabled !== false && this._waterDeferred) {
         jobs.push(new Promise((resolve) => {
           this._postFirstPaintWaterTimer = setTimeout(() => {
             this._postFirstPaintWaterTimer = null;
             resolve(this._disposed ? undefined : this._warmDeferredWater(renderTarget));
-          }, 250);
+          }, 1000);
         }));
       }
       Promise.allSettled(jobs).then(() => {
@@ -3790,10 +3919,11 @@ export class Engine {
 
     const studioProgram = this._activeHeightProgram('studio');
     const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
+    const terrainVariant = this._targetTerrainVariant();
     const warm = [
       nodePreviewMaterial
         ? createBootTerrainMaterial(this.uniforms, oct, studioProgram)
-        : createTerrainMaterial(this.uniforms, oct, studioProgram),
+        : createTerrainMaterial(this.uniforms, oct, studioProgram, { variant: terrainVariant }),
     ];
     const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
     if (waterActive && this.worldMode === 'infinite') {
@@ -3830,7 +3960,7 @@ export class Engine {
           if (m.userData?.minimalFragment) {
             const source = m === this.terrainMaterial ? studioProgram : this._stackGLSL;
             if (nodePreviewMaterial && m === this.terrainMaterial) rebuildTerrainPreviewShaderSource(m, source);
-            else rebuildTerrainShaderSource(m, source);
+            else rebuildTerrainShaderSource(m, source, { variant: terrainVariant });
           }
           m.needsUpdate = true;
         }
@@ -4689,7 +4819,12 @@ export class Engine {
     // are byte-identical to Tile terrain. Tile's compiled program remains owned
     // by terrainMaterial, so Three.js can reuse it immediately for these chunks.
     const oct = Math.round(p.octaves);
-    this._infiniteTerrainMat = createInfiniteTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    this._infiniteTerrainMat = createInfiniteTerrainMaterial(
+      this.uniforms,
+      oct,
+      this._stackGLSL,
+      { variant: this._targetTerrainVariant() },
+    );
     this._infiniteTerrainMat.wireframe = p.wireframe;
     this._infiniteWaterMat = this.waterSystem.createInfiniteMaterial();
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
@@ -4726,6 +4861,19 @@ export class Engine {
     });
     this.infiniteWorld.behindCameraCulling = this.board.behindCameraCulling;
     this.infiniteWorld.setMergeDebug(this._debug.mergeDebug);
+
+    const clipmapResolutions = this.gpuTier === 'low'
+      ? [256, 192, 128]
+      : (this.gpuTier === 'medium' ? [384, 256, 192] : [512, 384, 256]);
+    this.infiniteTerrainClipmap = new InfiniteTerrainClipmap({
+      renderer: this.renderer,
+      uniforms: this.uniforms,
+      chunkSize: p.chunkSize,
+      viewRadius: perf.viewRadius,
+      octaves: oct,
+      stackGLSL: this._stackGLSL,
+      resolutions: clipmapResolutions,
+    });
 
     // Create FPS controls
     this.fpsControls = new FPSControls(this.camera, this.canvas);
@@ -4786,6 +4934,10 @@ export class Engine {
   }
   /** Dispose the infinite-world systems (does not restore studio). */
   _disposeInfinite() {
+    if (this.infiniteTerrainClipmap) {
+      this.infiniteTerrainClipmap.dispose();
+      this.infiniteTerrainClipmap = null;
+    }
     if (this.infiniteWorld) {
       this.infiniteWorld.dispose();
       this.infiniteWorld = null;
@@ -4905,7 +5057,7 @@ export class Engine {
   }
 
   /**
-   * Ensure the planet height/normal cubemap is baked and current. Re-bakes only
+   * Ensure the planet height cubemap is baked and current. Re-bakes only
    * when the terrain generation counter has advanced (seed / shape / biome
    * edits), so a steady camera costs nothing. Until the first bake completes,
    * uUsePlanetHeightTex stays 0 and the shaders fall back to the live field.
@@ -4925,16 +5077,24 @@ export class Engine {
         size: 1024,
       });
       this._bakedTerrainGen = -1;
+      this._planetBakeRequestedGen = -1;
     }
     if (this._bakedTerrainGen === this._terrainGen) return;
-    this.planetHeightBaker.bake(Math.round(this.params.octaves), this._stackGLSL);
-    this.uniforms.uPlanetHeightTex.value = this.planetHeightBaker.texture;
-    this.uniforms.uUsePlanetHeightTex.value = 1.0;
-    this._bakedTerrainGen = this._terrainGen;
+    if (this._planetBakeRequestedGen !== this._terrainGen) {
+      this.planetHeightBaker.begin(Math.round(this.params.octaves), this._stackGLSL);
+      this._planetBakeRequestedGen = this._terrainGen;
+      this.uniforms.uUsePlanetHeightTex.value = 0.0;
+    }
+    const result = this.planetHeightBaker.step();
+    if (result.ready) {
+      this.uniforms.uPlanetHeightTex.value = result.texture;
+      this.uniforms.uUsePlanetHeightTex.value = 1.0;
+    }
+    if (result.complete) this._bakedTerrainGen = this._terrainGen;
   }
 
   /**
-   * Ensure the studio height/normal texture is baked and current. Re-bakes only
+   * Ensure the studio height texture is baked and current. Re-bakes only
    * when the terrain generation counter has advanced (seed / shape / biome
    * edits), so a steady camera costs nothing. While painting, the height field
    * changes continuously — sample the live field and refresh the bake once the
@@ -4968,25 +5128,51 @@ export class Engine {
         maxSize: this.gpuTier === 'low' ? 2048 : 4096,
       });
       this._bakedStudioGen = -1;
+      this._terrainBakeJobKey = null;
     }
     const layoutKey = this._studioBakeLayoutKey();
     if (this._bakedStudioGen === this._terrainGen && this._bakedStudioLayout === layoutKey) return;
     const b = this._tileBounds();
+    const jobKey = `${this._terrainGen}:${layoutKey}`;
+    if (this._terrainBakeJobKey !== jobKey) {
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
+      this.terrainHeightBaker.begin(
+        Math.round(this.params.octaves),
+        this._activeHeightProgram('studio'),
+        b.cols,
+        b.rows,
+      );
+      this._terrainBakeJobKey = jobKey;
+      this._terrainBakeElapsedMs = 0;
+    }
+
     const _t0 = performance.now();
-    this.terrainHeightBaker.bake(
-      Math.round(this.params.octaves), this._activeHeightProgram('studio'), b.cols, b.rows
-    );
-    this.profiler.setMetric('lastBakeMs', performance.now() - _t0);
+    const stripeRows = this.gpuTier === 'low' ? 32 : (this.gpuTier === 'medium' ? 48 : 64);
+    const result = this.terrainHeightBaker.step(stripeRows);
+    const stepMs = performance.now() - _t0;
+    this._terrainBakeElapsedMs = (this._terrainBakeElapsedMs || 0) + stepMs;
+    this.profiler.setMetric('lastBakeStepMs', stepMs);
+    this.profiler.setMetric('terrainBakeProgress', result.progress ?? 0);
+    if (!result.complete) {
+      this._needsRender = true;
+      return;
+    }
+
+    this.profiler.setMetric('lastBakeMs', this._terrainBakeElapsedMs);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this.uniforms.uTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
     this.uniforms.uUseTerrainBiomeTex.value = 1.0;
     this._bakedStudioGen = this._terrainGen;
     this._bakedStudioLayout = layoutKey;
+    this._terrainBakeJobKey = null;
+    this._terrainBakeElapsedMs = 0;
+    this._completeBootIfQualityReady();
   }
 
   /**
-   * Per-cell resolution of the studio height/normal bake, scaled to the GPU
+   * Per-cell resolution of the studio height bake, scaled to the GPU
    * tier. The bake re-evaluates the full ~46-octave field three times per texel
    * (for the analytic normal), so on a weak GPU a 2048² bake is one of the
    * heaviest single operations at startup. 1024² is plenty for a single board
@@ -5040,6 +5226,7 @@ export class Engine {
       this.planetCloudLayer = new planet.PlanetCloudLayer(this.scene, {
         planetRadius: this._planetRadius(),
         compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+        renderer: this.renderer,
       });
       this.planetCloudLayer.warmup()
         .catch((e) => console.warn('Cloud shader warmup failed', e));
@@ -5100,6 +5287,7 @@ export class Engine {
         this.planetCloudLayer = new planet.PlanetCloudLayer(this.scene, {
           planetRadius: this._planetRadius(),
           compile: (mats) => this._compileMaterialVariants(mats, { canvasOnly: true }),
+          renderer: this.renderer,
         });
         this.planetCloudLayer.warmup()
           .catch((e) => console.warn('Cloud shader warmup failed', e));
@@ -5315,6 +5503,7 @@ export class Engine {
     this.uniforms.uPlanetHeightTex.value = null;
     this.uniforms.uUsePlanetHeightTex.value = 0.0;
     this._bakedTerrainGen = -1;
+    this._planetBakeRequestedGen = -1;
     if (this.planetWorld) { this.planetWorld.dispose(); this.planetWorld = null; }
     if (this.planetWater) {
       this.scene.remove(this.planetWater);
@@ -5510,6 +5699,68 @@ export class Engine {
   }
 
   /** Water quality uniforms — per water material, never shared with terrain. */
+  _targetTerrainVariant() {
+    const surfaceEnabled = this.projectMode === 'manual'
+      || (this.params?.surfaceTextureMode === true
+        && (this.params?.surfaceTextureAmount ?? 1) > 0.001);
+    const detailEnabled = (this.perf?.terrainDetailQuality ?? 3) > 0
+      && (this.perf?.terrainDetailOpacity ?? 1) > 0.001;
+    if (surfaceEnabled && detailEnabled) return 'full';
+    if (surfaceEnabled) return 'surface';
+    if (detailEnabled) return 'detail';
+    return 'base';
+  }
+
+  async _ensureTerrainShaderVariantAsync(renderTarget = null) {
+    if (this._disposed || this.worldMode === 'planet') return false;
+    const live = this.worldMode === 'infinite'
+      ? this._infiniteTerrainMat
+      : this.terrainMaterial;
+    if (!live || live.userData?.minimalFragment) return false;
+    const variant = this._targetTerrainVariant();
+    if (live.userData?.terrainVariant === variant) return true;
+
+    const token = (this._terrainVariantToken || 0) + 1;
+    this._terrainVariantToken = token;
+    const oct = Math.round(this.params.octaves);
+    const program = this.worldMode === 'studio'
+      ? this._activeHeightProgram('studio')
+      : this._stackGLSL;
+    const warm = createTerrainMaterial(
+      this.uniforms,
+      oct,
+      program,
+      { variant },
+    );
+    this._bgWorkStart('terrain-variant', `Preparing ${variant} terrain shader…`);
+    try {
+      await yieldFrame();
+      const result = await this._compileMaterialVariants([warm], {
+        canvasOnly: true,
+        timeoutMs: 120000,
+        renderTarget,
+      });
+      if (result?.ready !== true || token !== this._terrainVariantToken || this._disposed) {
+        return false;
+      }
+      this.infiniteTerrainClipmap?.setProgram(oct, this._stackGLSL);
+      const target = this.worldMode === 'infinite'
+        ? this._infiniteTerrainMat
+        : this.terrainMaterial;
+      if (!target || target.userData?.minimalFragment) return false;
+      rebuildTerrainShaderSource(target, program, { variant });
+      this._needsRender = true;
+      this._completeBootIfQualityReady();
+      return true;
+    } catch (error) {
+      console.warn('Terrain shader variant compile failed', error);
+      return false;
+    } finally {
+      this._bgWorkEnd('terrain-variant');
+      this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
+    }
+  }
+
   _applyTerrainDetailPerf() {
     const s = this.perf;
     const u = this.uniforms;
@@ -5529,6 +5780,7 @@ export class Engine {
     u.uTerrainMicroDetail.value = s.terrainMicroDetail ?? 0.6;
     u.uTerrainMacroVariation.value = s.terrainMacroVariation ?? 0.5;
     this._needsRender = true;
+    if (!this._bootPending) void this._ensureTerrainShaderVariantAsync();
   }
 
   _applyWaterPerf() {
@@ -6469,21 +6721,18 @@ export class Engine {
       const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
       const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
-      if (this.worldMode === 'studio' && this.studioCloud && !studioLowRes) {
-        this.studioCloud.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-      } else if (this.worldMode === 'planet') {
-        this.planetCloudChunks?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-        if (!planetLowRes) {
-          this.planetCloudLayer?.renderDepthPrepass(this.renderer, this.camera, sceneSize);
-        }
-      }
-
-      if (this.worldMode === 'planet') {
+      this._prepareSharedOpaque(plan, sceneSize);
+      this._captureWaterPlanarReflection(
+        sceneSize,
+        this._sceneRevisionKey(sceneSize, true),
+      );
+      if (typeof this.renderer.render === 'function') {
         this.renderer.setRenderTarget(target);
         this.renderer.render(this.scene, this.camera);
       } else {
+        // Lightweight capture harnesses and legacy embedders may only expose
+        // the old renderer-compatible underwater facade.
         this.underwater.render(this.renderer, this.scene, this.camera, target);
-        if (target) this.renderer.setRenderTarget(target);
       }
       const stats = {
         triangles: this.renderer.info.render.triangles,
@@ -6495,6 +6744,7 @@ export class Engine {
       } else if (planetLowRes) {
         this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
       }
+      if (this.worldMode !== 'planet') this._applyUnderwaterFromSharedTarget(target);
       if (target) this.renderer.setRenderTarget(null);
       this.visualPost.finish(this.renderer);
       return stats;
@@ -7008,19 +7258,19 @@ export class Engine {
       const studioLowRes = !!this.studioCloud?.usesLowRes;
       this.profiler.begin('render');
       this.profiler.gpu?.frameBegin();
-      if (this.studioCloud && !studioLowRes) {
-        this.studioCloud.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
-      }
-
       // refresh the baked height/normal texture if the field changed (no-op on a
       // steady frame); the studio terrain + water shaders then sample it per
       // pixel instead of re-evaluating the full height field.
       this._ensureTerrainHeightTex();
 
       this._maybeWarmUnderwater();
-      this._captureWaterPlanarReflection(cameraSceneSize);
-      this._captureWaterSceneRefraction(cameraSceneSize);
-      this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
+      this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
+      this._captureWaterPlanarReflection(
+        cameraSceneSize,
+        this._sceneRevisionKey(cameraSceneSize, true),
+      );
+      this.renderer.setRenderTarget(cameraTarget);
+      this.renderer.render(this.scene, this.camera);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
       // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
@@ -7029,6 +7279,7 @@ export class Engine {
       if (studioLowRes) {
         this._renderLowResCloudAfterScene(this.studioCloud, cameraTarget, cameraSceneSize);
       }
+      this._applyUnderwaterFromSharedTarget(cameraTarget);
       if (cameraTarget) this.renderer.setRenderTarget(null);
       this.visualPost.finish(this.renderer);
       this.profiler.gpu?.frameEnd();
@@ -7094,6 +7345,17 @@ export class Engine {
     if (this.exploreMode !== 'plane' && this.fpsControls) this.fpsControls.update(dt);
     if (this.exploreMode !== 'none' && this.player) this.player.update(dt);
 
+    if (this.infiniteTerrainClipmap) {
+      this.profiler.begin('terrain-field-cache');
+      if (this._debug.disableHeightBake) {
+        this.uniforms.uUseInfiniteFieldCache.value = 0;
+      } else {
+        this.uniforms.uUseInfiniteFieldCache.value = 1;
+        this.infiniteTerrainClipmap.update(this.camera.position, this._terrainGen);
+      }
+      this.profiler.end('terrain-field-cache');
+    }
+
     // Stream chunks around the camera (with culling)
     if (this.infiniteWorld) {
       this.profiler.begin('chunks');
@@ -7106,11 +7368,16 @@ export class Engine {
     const cameraPlan = this._prepareCameraPipeline();
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
-    this._captureWaterPlanarReflection(cameraSceneSize);
-    this._captureWaterSceneRefraction(cameraSceneSize);
-    this.underwater.render(this.renderer, this.scene, this.camera, cameraTarget);
+    this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
+    this._captureWaterPlanarReflection(
+      cameraSceneSize,
+      this._sceneRevisionKey(cameraSceneSize, true),
+    );
+    this.renderer.setRenderTarget(cameraTarget);
+    this.renderer.render(this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
+    this._applyUnderwaterFromSharedTarget(cameraTarget);
     this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
@@ -7196,14 +7463,7 @@ export class Engine {
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
 
-    // depth prepass so the cloud march is occluded by the terrain relief
-    // (otherwise clouds show through the surface up close)
-    if (this.planetCloudChunks) {
-      this.planetCloudChunks.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
-    }
-    if (this.planetCloudLayer && !planetLowRes) {
-      this.planetCloudLayer.renderDepthPrepass(this.renderer, this.camera, cameraSceneSize);
-    }
+    this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
 
     // planet renders straight to the canvas — no underwater render-target pass
     this.renderer.setRenderTarget(cameraTarget);

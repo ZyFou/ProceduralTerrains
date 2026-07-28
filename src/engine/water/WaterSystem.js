@@ -144,6 +144,14 @@ export class WaterSystem {
     return isWaterActive(this._effectiveMode, this.engine.params.seaLevel);
   }
 
+  needsSceneRefraction() {
+    return this._surfacePass.shouldCapture(
+      this.engine.params,
+      this._effectiveMode,
+      this.engine.worldMode,
+    );
+  }
+
   /** Main settings sync — call from _applyUniforms and mode changes. */
   sync(params, worldMode) {
     const prevMode = this._effectiveMode;
@@ -198,7 +206,7 @@ export class WaterSystem {
    * Allocation remains lazy; Realistic, Legacy, Off, and Planet modes only
    * execute the cheap uniform-disable path.
    */
-  captureSceneRefraction(renderer, scene, camera, sceneSize) {
+  captureSceneRefraction(renderer, scene, camera, sceneSize, sourceTarget = null) {
     const eng = this.engine;
     const materials = [
       this._realisticStudio,
@@ -216,6 +224,7 @@ export class WaterSystem {
         this._boundsHelper,
       ],
       materials,
+      sourceTarget,
     });
   }
 
@@ -227,7 +236,7 @@ export class WaterSystem {
    * Capture the mirrored above-water scene for Cinematic mode. Infinite World
    * never reaches this path while its automatic quality safeguard is enabled.
    */
-  capturePlanarReflection(renderer, scene, camera, sceneSize) {
+  capturePlanarReflection(renderer, scene, camera, sceneSize, revision = null) {
     const eng = this.engine;
     const materials = [
       this._realisticStudio,
@@ -246,6 +255,7 @@ export class WaterSystem {
       ],
       materials,
       enabled: !this._fpsDowngraded,
+      revision,
     });
   }
 

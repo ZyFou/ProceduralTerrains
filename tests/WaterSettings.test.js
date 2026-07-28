@@ -83,6 +83,7 @@ describe('water settings compatibility and safeguards', () => {
       waterSunResponse: 1,
       waterAmbientResponse: 1,
       waterFoamLighting: 0.65,
+      waterFoamWidth: 3.2,
     });
     expect(WATER_DEFAULT_PARAMS.waterRenderScale).toBeGreaterThan(0);
     expect([1, 2, 4]).toContain(WATER_DEFAULT_PARAMS.waterUpdateFrequency);

@@ -10,7 +10,7 @@ import { defaultLegacyStack } from './noise/NoiseStack.js';
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
-// Planet height/normal cubemap baker.
+// Planet height cubemap baker.
 //
 // The planet height field is a pure (static) function of a unit sphere
 // direction, yet the terrain + water fragment shaders re-evaluate it ~46 noise
@@ -21,10 +21,8 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 //
 // This baker evaluates the field once into a cubemap whenever it actually
 // changes (seed / shape / biome edits — tracked by the engine's terrain
-// generation counter). The planet shaders then sample it with a single
-// textureCube fetch:
-//   RGB = geometric surface normal (encoded *0.5+0.5)
-//   A   = height / heightScale   (h01, in [0, 1.35])
+// generation counter). Each R16F face stores height / heightScale in its red
+// channel. Terrain shaders reconstruct normals from neighbouring samples.
 //
 // Resolution note: at 1024/face the equator is sampled ~4096× — finer than the
 // full-LOD mesh (~2k verts around) and finer than the analytic normal epsilon
@@ -33,8 +31,8 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 // The bake is rendered with a CubeCamera at the origin looking at a unit box
 // (BackSide). A box gives EXACT ray directions per fragment (normalize of the
 // linearly-interpolated planar position) with only 12 triangles, and the
-// CubeCamera handles all six face orientations for us, so sampling the result
-// by world-space direction later lines up automatically.
+// CubeCamera provides the six face orientations. The engine renders one face
+// per frame: first a 256px preview, then the requested full-resolution cube.
 // ============================================================================
 
 const BAKE_VERTEX = /* glsl */ `
@@ -59,30 +57,8 @@ varying vec3 vDir;
 
 void main() {
   vec3 dir = normalize(vDir);
-
-  // tangent frame for the analytic normal (mirrors PlanetMaterial's terrain
-  // fragment so baked normals match what the live shader would produce)
-  vec3 ref = abs(dir.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-  vec3 t1 = normalize(cross(ref, dir));
-  vec3 t2 = cross(dir, t1);
-
-  float eps = uPlanetEps;
-  vec3 dA = normalize(dir + t1 * eps);
-  vec3 dB = normalize(dir + t2 * eps);
-
-  float hC = heightAt3D(dir);
-  float hA = heightAt3D(dA);
-  float hB = heightAt3D(dB);
-
-  vec3 pC = dir * (uPlanetRadius + hC);
-  vec3 pA = dA  * (uPlanetRadius + hA);
-  vec3 pB = dB  * (uPlanetRadius + hB);
-
-  vec3 nGeo = normalize(cross(pA - pC, pB - pC));
-  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
-
-  float h01 = hC / max(uHeightScale, 1e-3);
-  gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);
+  float h01 = heightAt3D(dir) / max(uHeightScale, 1e-3);
+  gl_FragColor = vec4(h01, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -93,21 +69,15 @@ export class PlanetHeightBaker {
    * @param {object} opts.uniforms   shared terrain uniforms (live objects)
    * @param {number} [opts.size]     cube face resolution (default 1024)
    */
-  constructor({ renderer, uniforms, size = 1024 }) {
+  constructor({ renderer, uniforms, size = 1024, previewSize = 256 }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
     this.size = size;
 
-    // Half-float is core-renderable + linearly filterable in WebGL2, and h01
-    // stays in [0, 1.35] so its precision there is ample for smooth normals.
-    this.target = new THREE.WebGLCubeRenderTarget(size, {
-      type: THREE.HalfFloatType,
-      format: THREE.RGBAFormat,
-      magFilter: THREE.LinearFilter,
-      minFilter: THREE.LinearFilter,
-      generateMipmaps: false,
-    });
-
+    this.previewSize = Math.min(size, Math.max(16, previewSize));
+    this.previewTarget = this._makeTarget(this.previewSize, 'PlanetHeightPreviewR16F');
+    this.target = this._makeTarget(size, 'PlanetHeightR16F');
+    this.previewCamera = new THREE.CubeCamera(0.05, 10, this.previewTarget);
     this.cubeCam = new THREE.CubeCamera(0.05, 10, this.target);
 
     this.bakeScene = new THREE.Scene();
@@ -118,9 +88,29 @@ export class PlanetHeightBaker {
 
     this._octaves = -1;
     this._stackSig = null;
+    this._phase = 'idle';
+    this._face = 0;
+    this._texture = null;
   }
 
-  get texture() { return this.target.texture; }
+  get texture() { return this._texture; }
+  get phase() { return this._phase; }
+  get ready() { return !!this._texture; }
+  get complete() { return this._phase === 'complete'; }
+
+  _makeTarget(size, name) {
+    const target = new THREE.WebGLCubeRenderTarget(size, {
+      type: THREE.HalfFloatType,
+      format: THREE.RedFormat,
+      internalFormat: 'R16F',
+      magFilter: THREE.LinearFilter,
+      minFilter: THREE.LinearFilter,
+      generateMipmaps: false,
+    });
+    target.texture.colorSpace = THREE.NoColorSpace;
+    target.texture.name = name;
+    return target;
+  }
 
   _ensureMaterial(octaves, stackGLSL) {
     if (this.material && this._octaves === octaves && this._stackSig === stackGLSL.sig) return;
@@ -139,18 +129,72 @@ export class PlanetHeightBaker {
     this._stackSig = stackGLSL.sig;
   }
 
-  /** Re-evaluate the height field into the cubemap from the current uniforms. */
-  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+  /** Start a progressive bake. One call to step() renders exactly one face. */
+  begin(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
     this._ensureMaterial(octaves, stackGLSL);
+    this._phase = this.previewSize < this.size ? 'preview' : 'full';
+    this._face = 0;
+  }
+
+  step() {
+    if (this._phase === 'idle' || this._phase === 'complete') {
+      return { updated: false, ready: this.ready, complete: this.complete, texture: this.texture };
+    }
+    const preview = this._phase === 'preview';
+    const cubeCamera = preview ? this.previewCamera : this.cubeCam;
+    const target = preview ? this.previewTarget : this.target;
+    this._renderFace(cubeCamera, target, this._face);
+    this._face += 1;
+
+    if (this._face >= 6) {
+      target.texture.needsPMREMUpdate = true;
+      this._texture = target.texture;
+      if (preview) {
+        this._phase = 'full';
+        this._face = 0;
+      } else {
+        this._phase = 'complete';
+      }
+    }
+    return {
+      updated: true,
+      ready: this.ready,
+      complete: this.complete,
+      texture: this.texture,
+      phase: this._phase,
+      face: this._face,
+    };
+  }
+
+  _renderFace(cubeCamera, target, face) {
     const r = this.renderer;
-    const prevTarget = r.getRenderTarget();
-    // CubeCamera renders all six faces and restores the render target itself,
-    // but be explicit to avoid surprising the surrounding frame.
-    this.cubeCam.update(r, this.bakeScene);
-    r.setRenderTarget(prevTarget);
+    if (cubeCamera.parent === null) cubeCamera.updateMatrixWorld();
+    if (cubeCamera.coordinateSystem !== r.coordinateSystem) {
+      cubeCamera.coordinateSystem = r.coordinateSystem;
+      cubeCamera.updateCoordinateSystem();
+    }
+    const previousTarget = r.getRenderTarget();
+    const previousFace = r.getActiveCubeFace?.() ?? 0;
+    const previousMip = r.getActiveMipmapLevel?.() ?? 0;
+    const previousXr = r.xr?.enabled;
+    try {
+      if (r.xr) r.xr.enabled = false;
+      r.setRenderTarget(target, face, 0);
+      r.render(this.bakeScene, cubeCamera.children[face]);
+    } finally {
+      r.setRenderTarget(previousTarget, previousFace, previousMip);
+      if (r.xr && previousXr !== undefined) r.xr.enabled = previousXr;
+    }
+  }
+
+  /** Compatibility helper for tools that explicitly request a blocking bake. */
+  bake(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+    this.begin(octaves, stackGLSL);
+    while (!this.complete) this.step();
   }
 
   dispose() {
+    this.previewTarget.dispose();
     this.target.dispose();
     this.mesh.geometry.dispose();
     if (this.material) this.material.dispose();

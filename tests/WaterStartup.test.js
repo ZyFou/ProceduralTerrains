@@ -6,6 +6,7 @@ import {
   createInfiniteWaterMaterial,
   createWaterMaterial,
 } from '../src/engine/terrain/WaterMaterial.js';
+import { applyWaterMaterialSettings } from '../src/engine/water/WaterMaterialFactory.js';
 import {
   createInfiniteRealisticWaterMaterial,
   createRealisticWaterMaterial,
@@ -40,8 +41,25 @@ describe('water startup shaders', () => {
       expect(material.forceSinglePass).toBe(true);
       expect(material.userData.bakedHeightOnly).not.toBe(true);
       expect(material.fragmentShader).toContain('float heightAt(vec2 xz)');
-      expect(material.fragmentShader).toContain('return heightAt(xz)');
+      expect(material.fragmentShader).toContain('return terrainCachedHeightAt(xz)');
     }
+  });
+
+  it('applies the shore distance to legacy water without recompiling', () => {
+    const material = createWaterMaterial(createTerrainUniforms(), 7, stackGLSL);
+    const fragmentShader = material.fragmentShader;
+
+    expect(material.uniforms.uFoamWidth.value).toBe(3.2);
+    expect(fragmentShader).toContain('float shoreDistance = max(uFoamWidth, 0.5)');
+    expect(fragmentShader).toContain('shoreDistance + shoreSoft * 1.8');
+
+    applyWaterMaterialSettings(material, {
+      waterFoamWidth: 1.4,
+    }, 'legacy');
+
+    expect(material.uniforms.uFoamWidth.value).toBe(1.4);
+    expect(material.fragmentShader).toBe(fragmentShader);
+    material.dispose();
   });
 
   it('prepares only the requested effective startup material', () => {
@@ -181,7 +199,18 @@ describe('water startup shaders', () => {
       _waterDeferred: false,
       projectMode: 'procedural',
       params: { waterEnabled: true },
-      terrainMaterial: { userData: { minimalFragment: false } },
+      perf: { terrainDetailQuality: 3, terrainDetailOpacity: 1 },
+      uniforms: {
+        uUseTerrainHeightTex: { value: 0 },
+        uUseTerrainBiomeTex: { value: 0 },
+      },
+      terrainHeightBaker: { isBaking: false },
+      terrainMaterial: {
+        userData: {
+          minimalFragment: false,
+          terrainVariant: 'base',
+        },
+      },
       waterMaterial: {},
       board: { isBuilding: false },
       cb: {
@@ -193,6 +222,11 @@ describe('water startup shaders', () => {
       _scheduleErosionGPUWarmImport: vi.fn(),
     });
 
+    expect(engine._completeBootIfQualityReady()).toBe(false);
+    engine.terrainMaterial.userData.terrainVariant = 'detail';
+    expect(engine._completeBootIfQualityReady()).toBe(false);
+    engine.uniforms.uUseTerrainHeightTex.value = 1;
+    engine.uniforms.uUseTerrainBiomeTex.value = 1;
     expect(engine._completeBootIfQualityReady()).toBe(true);
     expect(engine._bootPending).toBe(false);
     expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);

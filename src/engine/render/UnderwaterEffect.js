@@ -327,6 +327,28 @@ export class UnderwaterEffect {
     if (outputTarget) renderer.setRenderTarget(null);
   }
 
+  /**
+   * Composite an already-rendered scene target. This is the render-graph path:
+   * the shared scene color/depth is reused instead of rendering the world a
+   * second time solely for the underwater effect.
+   */
+  compositeFromTarget(renderer, camera, sourceTarget) {
+    if (!this.active || !sourceTarget?.texture) return sourceTarget;
+    const size = new THREE.Vector2(sourceTarget.width, sourceTarget.height);
+    this._ensureTarget(renderer, size.x, size.y);
+    const u = this._material.uniforms;
+    u.uNear.value = camera.near;
+    u.uFar.value = camera.far;
+    u.uAspect.value = size.x / Math.max(size.y, 1);
+    u.uDepthValid.value = sourceTarget.depthTexture ? 1 : 0;
+    u.tDiffuse.value = sourceTarget.texture;
+    u.tDepth.value = sourceTarget.depthTexture;
+    renderer.setRenderTarget(this._rt);
+    renderer.render(this._quadScene, this._quadCam);
+    renderer.setRenderTarget(null);
+    return this._rt;
+  }
+
   _ensureTarget(renderer, width, height) {
     const size = (width && height)
       ? new THREE.Vector2(width, height)

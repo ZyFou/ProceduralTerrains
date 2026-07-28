@@ -1,4 +1,8 @@
-import { NOISE_GLSL, buildHeightGLSL } from '../terrain/terrainGLSL.js';
+import {
+  NOISE_GLSL,
+  buildHeightGLSL,
+  INFINITE_FIELD_CACHE_GLSL,
+} from '../terrain/terrainGLSL.js';
 import { BIOME_GLSL } from '../terrain/biomeGLSL.js';
 
 // The water surface only needs value noise for ripples and foam. Studio depth
@@ -26,10 +30,10 @@ float vnoise(vec2 p) {
 export function buildWaterHeightShaderParts(stackGLSL, infinite) {
   if (infinite) {
     return {
-      dependencies: `${NOISE_GLSL}\n${BIOME_GLSL}\n${buildHeightGLSL(stackGLSL.body2d)}`,
+      dependencies: `${NOISE_GLSL}\n${BIOME_GLSL}\n${buildHeightGLSL(stackGLSL.body2d)}\n${INFINITE_FIELD_CACHE_GLSL}`,
       terrainHeightFunction: /* glsl */ `
 float waterTerrainHeightAt(vec2 xz) {
-  return heightAt(xz);
+  return terrainCachedHeightAt(xz);
 }
 `,
     };
