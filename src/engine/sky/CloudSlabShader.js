@@ -132,6 +132,13 @@ void main() {
     }
   }
 
+  // Preserve the unclipped slab interval as the global sampling domain.
+  // Terrain depth may shorten the visible part of the ray, but must not
+  // redistribute samples per pixel: doing so makes the cloud field jump at
+  // terrain triangle/chunk boundaries and creates geometric-looking holes.
+  float slabStart = t0;
+  float slabEnd = t1;
+
   vec2 depthUv = gl_FragCoord.xy / max(uDepthResolution, vec2(1.0));
   if (uUseDepth > 0.5 && depthUv.x >= 0.0 && depthUv.x <= 1.0 &&
       depthUv.y >= 0.0 && depthUv.y <= 1.0) {
@@ -154,10 +161,8 @@ void main() {
   // use the full budget, still fully covered (stepLen ≤ seg/CLOUD_STEPS).
   float slabSpan = max(uCloudTop - uCloudBottom, 1.0);
   float targetStep = slabSpan / float(CLOUD_STEPS) / clamp(uCloudStepScale, 0.05, 1.0);
-  float segLen = t1 - t0;
+  float segLen = slabEnd - slabStart;
   int effSteps = int(clamp(segLen / targetStep, 8.0, float(CLOUD_STEPS)) + 0.5);
-  float stepLen = segLen / float(effSteps);
-
   // Stable, ordered start-offset dither (spatial only, no time term) so the
   // sampling lattice never crawls — see cl_ign / the spherical shader.
   float dither = cl_ign(gl_FragCoord.xy);
@@ -165,36 +170,37 @@ void main() {
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
 
-  // whole-ray reject: if the columns the segment crosses are all empty, skip it
-  if (uUseOccupancy > 0.5) {
-    float oA = occAt(ro + rd * t0);
-    float oM = occAt(ro + rd * (t0 + t1) * 0.5);
-    float oB = occAt(ro + rd * t1);
-    if (max(oA, max(oM, oB)) < 0.5) discard;
-  }
-
-  // OCCUPANCY-GRID empty-space skipping: a cheap lookup gates the expensive
-  // cloudDensity — empty columns are skipped with a coarse stride, occupied
-  // columns march at the fine step. The map is conservative + dilated (no clip).
-  float coarse = stepLen * 2.0;
-  float t = t0 + stepLen * dither;
+  // Near-biased integration spends more samples close to the camera, where
+  // under-sampling is most visible. Each interval has its own physical length;
+  // that exact length must drive both Beer extinction and scattering.
+  //
+  // Occupancy still gates every expensive density evaluation, but it never
+  // rejects or leaps over a whole ray. Sparse three-point rejection and coarse
+  // strides can miss a thin occupied cell on oblique views, producing hard
+  // holes aligned to the occupancy grid.
   for (int i = 0; i < CLOUD_STEPS; i++) {
-    if (t < t1 && transmittance > 0.01) {
-      vec3 P = ro + rd * t;
-      float occ = uUseOccupancy > 0.5 ? occAt(P) : 1.0;
-      if (occ < 0.5) {
-        t += coarse;
-      } else {
-        vec2 sampleData = cloudSample(P);
-        float dens = sampleData.x;
-        if (dens > 0.001) {
-          float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
-          vec3 lit = cl_resolveLighting(P, rd, light, sampleData.y);
-          float dT = exp(-dens * stepLen * uCloudExtinction);
-          scatter += transmittance * (1.0 - dT) * lit;
-          transmittance *= dT;
+    float sampleIndex = float(i);
+    if (sampleIndex < float(effSteps) && transmittance > 0.01) {
+      float a = (sampleIndex + dither) / float(effSteps);
+      float b = (sampleIndex + 1.0 + dither) / float(effSteps);
+      float ta = pow(clamp(a, 0.0, 1.0), 1.35);
+      float tb = pow(clamp(b, 0.0, 1.0), 1.35);
+      float t = slabStart + segLen * ta;
+      float stepLength = min(segLen * (tb - ta), max(t1 - t, 0.0));
+      if (t < t1 && stepLength > 0.0) {
+        vec3 P = ro + rd * t;
+        float occ = uUseOccupancy > 0.5 ? occAt(P) : 1.0;
+        if (occ >= 0.5) {
+          vec2 sampleData = cloudSample(P);
+          float dens = sampleData.x;
+          if (dens > 0.001) {
+            float light = uCloudSelfShadow > 0.5 ? cl_lightTransmittance(P) : 1.0;
+            vec3 lit = cl_resolveLighting(P, rd, light, sampleData.y);
+            float dT = exp(-dens * stepLength * uCloudExtinction);
+            scatter += transmittance * (1.0 - dT) * lit;
+            transmittance *= dT;
+          }
         }
-        t += stepLen;
       }
     }
   }
@@ -238,11 +244,12 @@ export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5,
       uCloudAmbientResponse: { value: 1.0 },
       uCloudSilverLining:    { value: 0.25 },
       uCloudWind:            { value: new THREE.Vector3() },
+      uCloudNoiseOffset:     { value: new THREE.Vector3() },
+      uCloudDomainOrigin:    { value: new THREE.Vector3() },
       uCloudRotation:        { value: 0.0 },
       uCloudTime:            { value: 0.0 },
       uCloudSelfShadow:      { value: 1.0 },
       uCloudSunDir:          { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
-      uCloudNoiseVariant:    { value: 0.0 },
       uCloudStepScale:       { value: 1.0 },
       uCloudEvolve:          { value: 0.03 },
       tSceneDepth:           { value: null },

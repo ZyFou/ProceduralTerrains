@@ -5,7 +5,13 @@ import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
 import { InfiniteTerrainClipmap } from './terrain/InfiniteTerrainClipmap.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
-import { CLOUD_QUALITY_PRESETS, CLOUD_LEGACY_PERF_KEYS } from './sky/CloudSettings.js';
+import { InfiniteCloudLayer } from './sky/InfiniteCloudLayer.js';
+import { CloudAdaptiveQualityController } from './sky/CloudAdaptiveQualityController.js';
+import {
+  CLOUD_QUALITY_PRESETS,
+  CLOUD_LEGACY_PERF_KEYS,
+  normalizeCloudFormation,
+} from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
 import {
   getLocation, makeCustomLocation, effectiveZoomFor, fetchBboxElevation,
@@ -174,10 +180,10 @@ export class Engine {
     this.canvas = canvas;
     this.cb = callbacks;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
-    this.params = normalizeSurfaceTextureParams(
+    this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
       migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams }),
       initialParams || {},
-    );
+    ));
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
     // get the default single Classic-Terrain layer == bit-identical to before.
     this.noiseStack = migrateStack(this.params.noiseStack);
@@ -266,6 +272,7 @@ export class Engine {
     this.worldMode = 'studio';
     this.infiniteWorld = null;
     this.infiniteTerrainClipmap = null;
+    this.infiniteCloud = null;
     this.fpsControls = null;
 
     // Tile mode: the studio board can grow into a grid of square cells. Each
@@ -335,6 +342,8 @@ export class Engine {
     this._tierNotice = null;
     this._autoScale = 1.0;         // automatic performance mode render scale
     this._autoCheckAt = 0;
+    this._cloudAdaptive = new CloudAdaptiveQualityController();
+    this._cloudAdaptive.suspend(this._bootStart, 9000);
 
     // Developer debug switches (Debug panel). None of these persist — they are
     // pure inspection aids that never touch saved projects or perf settings.
@@ -407,6 +416,7 @@ export class Engine {
     this._onVisibility = () => {
       if (document.visibilityState === 'visible') {
         this._clock.getDelta();   // discard the long hidden gap
+        this._cloudAdaptive?.suspend(performance.now(), 6000);
         this._needsRender = true;
       }
     };
@@ -2956,8 +2966,10 @@ export class Engine {
   _prepareCameraPipeline() {
     const cloudsNeedDepth = this.worldMode === 'studio'
       ? !!this.studioCloud?.active
-      : (this.worldMode === 'planet'
-        && (!!this.planetCloudLayer?.active || !!this.planetCloudChunks?.active));
+      : (this.worldMode === 'infinite'
+        ? !!this.infiniteCloud?.active
+        : (this.worldMode === 'planet'
+          && (!!this.planetCloudLayer?.active || !!this.planetCloudChunks?.active)));
     const requireSharedOpaque = cloudsNeedDepth
       || !!this.waterSystem?.needsSceneRefraction?.();
     return this.visualPost.prepare(this.renderer, {
@@ -3054,6 +3066,7 @@ export class Engine {
       this.infiniteWorld?.waterPlane,
       this.planetWater,
       this.studioCloud?.mesh,
+      this.infiniteCloud?.mesh,
       this.planetCloudLayer?.mesh,
       this.planetCloudChunks?.group,
       this.waterSystem?._boundsHelper,
@@ -3088,6 +3101,7 @@ export class Engine {
     this._captureWaterSceneRefraction(sceneSize, target);
     const depth = target.depthTexture;
     this.studioCloud?.useSceneDepth?.(depth, this.camera, sceneSize);
+    this.infiniteCloud?.useSceneDepth?.(depth, this.camera, sceneSize);
     this.planetCloudLayer?.useSceneDepth?.(depth, this.camera, sceneSize);
     this.planetCloudChunks?.useSceneDepth?.(depth, this.camera, sceneSize);
     return true;
@@ -4782,6 +4796,7 @@ export class Engine {
     else if (prev === 'planet') this._disposePlanet();
 
     this.worldMode = mode;
+    this._cloudAdaptive?.suspend(performance.now(), 6000);
     this.uniforms.uInfiniteMode.value = mode === 'infinite' ? 1.0 : 0.0;
     this.uniforms.uTileDebugView.value = mode === 'studio' ? (this.tileDebug.view === 'noise' ? 1 : this.tileDebug.view === 'height' ? 2 : this.tileDebug.view === 'biome' ? 3 : 0) : 0;
     this._terrainGen++;   // uFrequency / falloff change with the mode
@@ -4863,6 +4878,14 @@ export class Engine {
     this.infiniteWorld.behindCameraCulling = this.board.behindCameraCulling;
     this.infiniteWorld.setMergeDebug(this._debug.mergeDebug);
 
+    this.infiniteCloud = new InfiniteCloudLayer(this.scene, {
+      compile: (mats) => this._compileMaterialVariants(mats),
+      renderer: this.renderer,
+      chunkSize: p.chunkSize,
+      viewRadius: perf.viewRadius,
+    });
+    this._applyCloudSettings();
+
     const clipmapResolutions = this.gpuTier === 'low'
       ? [256, 192, 128]
       : (this.gpuTier === 'medium' ? [384, 256, 192] : [512, 384, 256]);
@@ -4935,6 +4958,10 @@ export class Engine {
   }
   /** Dispose the infinite-world systems (does not restore studio). */
   _disposeInfinite() {
+    if (this.infiniteCloud) {
+      this.infiniteCloud.dispose();
+      this.infiniteCloud = null;
+    }
     if (this.infiniteTerrainClipmap) {
       this.infiniteTerrainClipmap.dispose();
       this.infiniteTerrainClipmap = null;
@@ -5314,6 +5341,18 @@ export class Engine {
     if (this.planetCloudLayer) {
       this.planetCloudLayer.applyParams(this.params, this._planetRadius(), this.perf);
     }
+    if (this.infiniteCloud) {
+      this.infiniteCloud.applyParams(
+        this.params,
+        this._maxHeight(),
+        this.boardSize,
+        this.perf,
+        {
+          chunkSize: this.params.chunkSize,
+          viewRadius: this.perf.viewRadius,
+        },
+      );
+    }
     if (this.studioCloud) {
       // Cover the whole tile assembly (union of cells), not just the origin cell.
       this.studioCloud.applyParams(this.params, this._maxHeight(), this.boardSize, this.perf, {
@@ -5322,6 +5361,7 @@ export class Engine {
       });
     }
     this._syncCloudLighting();
+    this._applyCloudAdaptiveQuality();
   }
 
   /** Rebuild the planet for a radius / face-grid change (settings panel). */
@@ -5590,6 +5630,7 @@ export class Engine {
     }
     if (key === 'autoPerf' && !this.perf.autoPerf) {
       this._autoScale = 1.0;   // leaving auto mode restores full render scale
+      this._cloudAdaptive?.reset(performance.now());
     }
     this.qualityPreset = this.perf.preset;
     this._applyPerformance();
@@ -5624,6 +5665,7 @@ export class Engine {
     this.perf = createPerfSettings('high');
     this.qualityPreset = this.perf.preset;
     this._autoScale = 1.0;
+    this._cloudAdaptive?.reset(performance.now());
     if (this.rendererConfig) {
       this.rendererConfig = {
         ...this.rendererConfig,
@@ -5710,6 +5752,31 @@ export class Engine {
     }
 
     this._applyCloudSettings();
+  }
+
+  _activeCloudLayer() {
+    if (this.worldMode === 'planet') {
+      return this.planetCloudLayer || this.planetCloudChunks;
+    }
+    if (this.worldMode === 'infinite') return this.infiniteCloud || null;
+    return this.studioCloud || null;
+  }
+
+  _applyCloudAdaptiveQuality() {
+    const controller = this._cloudAdaptive;
+    if (!controller) return;
+    for (const layer of [
+      this.studioCloud,
+      this.infiniteCloud,
+      this.planetCloudLayer,
+      this.planetCloudChunks,
+    ]) {
+      layer?.setAdaptiveQuality?.(
+        controller.scaleMultiplier,
+        controller.stepMultiplier,
+      );
+    }
+    this._needsRender = true;
   }
 
   /** Water quality uniforms — per water material, never shared with terrain. */
@@ -5810,17 +5877,36 @@ export class Engine {
   }
 
   /**
-   * Automatic performance mode: nudges an internal render-scale factor when
-   * FPS stays low, and recovers it when there is headroom. Pixel-ratio only —
-   * never rebuilds geometry. Triangle pressure is handled separately by the
-   * InfiniteWorld triangle budget.
+   * Automatic performance mode. Volumetric clouds spend the first degradation
+   * budget on their dedicated target; scene resolution moves only after that
+   * target reaches its floor.
    */
   _autoPerfTick(now) {
     if (!this.perf.autoPerf || now - this._autoCheckAt < 2000) return;
     this._autoCheckAt = now;
     if (this._fps <= 0) return;
 
+    const cloudLayer = this._activeCloudLayer();
+    const cloudAdaptiveActive = !!(
+      this.params.cloudsEnabled
+      && cloudLayer?.active
+      && cloudLayer?.setAdaptiveQuality
+      // The experimental chunk renderer has no low-res composite path.
+      && cloudLayer !== this.planetCloudChunks
+    );
+    const presetCloudScale = this.perf.cloudRenderScale ?? 1;
+    const cloudResult = this._cloudAdaptive.update({
+      now,
+      fps: this._fps,
+      presetScale: presetCloudScale,
+      active: cloudAdaptiveActive,
+      blocked: this._bootPending || this._compiling > 0
+        || (typeof document !== 'undefined' && document.hidden),
+    });
+    if (cloudResult.changed) this._applyCloudAdaptiveQuality();
+
     if (this._fps < 42 && this._autoScale > 0.55) {
+      if (cloudAdaptiveActive && !cloudResult.atScaleFloor) return;
       this._autoScale = Math.max(0.55, this._autoScale - 0.1);
       this._applyPixelRatio();
     } else if (this._fps > 70 && this._autoScale < 1.0) {
@@ -5835,7 +5921,8 @@ export class Engine {
     // on-demand studio idle (which legitimately stops drawing) never triggers a
     // spurious downgrade. ~45ms ≈ sub-22fps while actually working.
     const frameMs = this.profiler?.frame?.avg || 0;
-    if (this._autoScale <= 0.56 && frameMs > 45) {
+    if (this._autoScale <= 0.56 && frameMs > 45
+        && (!cloudAdaptiveActive || cloudResult.atScaleFloor)) {
       const lighter = this._lighterPreset(this.perf.preset);
       if (lighter) {
         this.cb.onToast?.(`Auto performance: GPU struggling — lowering quality to ${lighter}`);
@@ -5948,6 +6035,7 @@ export class Engine {
   _syncCloudLighting(tod = null) {
     const state = this._resolveCloudLighting(tod);
     this.studioCloud?.setLighting(state);
+    this.infiniteCloud?.setLighting(state);
     this.planetCloudLayer?.setLighting(state);
     this.planetCloudChunks?.setLighting(state);
     this._syncTerrainLighting(state, tod);
@@ -6134,7 +6222,7 @@ export class Engine {
         next.waterEnabled = true;
       }
     }
-    this.params = normalizeSurfaceTextureParams(next, src);
+    this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(next, src));
     this.noiseStack = migrateStack(src.noiseStack);
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
@@ -6279,7 +6367,9 @@ export class Engine {
 
     // params: full replacement, but keep any newer default keys the snapshot
     // predates so we never end up with undefined settings.
-    this.params = normalizeSurfaceTextureParams({ ...DEFAULT_PARAMS, ...snap.params }, snap.params);
+    this.params = normalizeCloudFormation(
+      normalizeSurfaceTextureParams({ ...DEFAULT_PARAMS, ...snap.params }, snap.params),
+    );
 
     // planet style lives nested in params — re-import so the style manager and
     // its uniforms match the restored palette/tuning exactly.
@@ -6733,6 +6823,7 @@ export class Engine {
       const target = plan.usesSceneTarget ? this.visualPost.inputTarget : null;
 
       const studioLowRes = this.worldMode === 'studio' && !!this.studioCloud?.usesLowRes;
+      const infiniteLowRes = this.worldMode === 'infinite' && !!this.infiniteCloud?.usesLowRes;
       const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
       this._prepareSharedOpaque(plan, sceneSize);
@@ -6755,6 +6846,8 @@ export class Engine {
 
       if (studioLowRes) {
         this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
+      } else if (infiniteLowRes) {
+        this._renderLowResCloudAfterScene(this.infiniteCloud, target, sceneSize);
       } else if (planetLowRes) {
         this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
       }
@@ -7383,12 +7476,18 @@ export class Engine {
       this.infiniteWorld.update(this.camera.position, this.camera);
       this.profiler.end('chunks');
     }
+    if (this.infiniteCloud) {
+      this.profiler.begin('clouds');
+      this.infiniteCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
+      this.profiler.end('clouds');
+    }
     this._maybeWarmUnderwater();
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     const cameraPlan = this._prepareCameraPipeline();
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
+    const infiniteLowRes = !!this.infiniteCloud?.usesLowRes;
     this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
     this._captureWaterPlanarReflection(
       cameraSceneSize,
@@ -7398,6 +7497,9 @@ export class Engine {
     this.renderer.render(this.scene, this.camera);
     const triangles = this.renderer.info.render.triangles;
     const drawCalls = this.renderer.info.render.calls;
+    if (infiniteLowRes) {
+      this._renderLowResCloudAfterScene(this.infiniteCloud, cameraTarget, cameraSceneSize);
+    }
     this._applyUnderwaterFromSharedTarget(cameraTarget);
     this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();
@@ -7545,9 +7647,7 @@ export class Engine {
     else if (this._baking) state = 'baking';
     else if (this._bootPending) state = 'loading';
 
-    const cloudLayer = this.worldMode === 'planet'
-      ? (this.planetCloudLayer || this.planetCloudChunks)
-      : this.studioCloud;
+    const cloudLayer = this._activeCloudLayer();
     const cloudsActive = !!(p.cloudsEnabled && cloudLayer);
 
     const waterEnabled = !!this.waterSystem?.isEnabled();
@@ -7599,6 +7699,9 @@ export class Engine {
         lightSteps: perf.cloudLightSteps ?? 0,
         octaves: perf.cloudOctaves ?? 0,
         detailOctaves: perf.cloudDetailOctaves ?? 0,
+        renderScale: cloudLayer?.effectiveRenderScale ?? perf.cloudRenderScale ?? 1,
+        adaptiveScale: this._cloudAdaptive?.scaleMultiplier ?? 1,
+        adaptiveStepScale: this._cloudAdaptive?.stepMultiplier ?? 1,
         coverage: p.cloudCoverage,
         density: p.cloudDensity,
         scale: p.cloudScale,
