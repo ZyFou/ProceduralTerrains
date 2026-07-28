@@ -92,18 +92,75 @@ describe('performance phase 3', () => {
       maxSize: 64,
     });
 
-    baker.begin(5);
+    const preview = baker.begin(5);
+    expect(preview.heightTexture).toBe(baker.previewTexture);
+    expect(preview.biomeTexture).toBe(baker.previewBiomeTexture);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+
     const first = baker.step(16);
     expect(first.complete).toBe(false);
-    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
     expect(renderer.setViewport).toHaveBeenCalledWith(0, 0, 64, 16);
 
     let result = first;
     let guard = 0;
     while (!result.complete && guard++ < 64) result = baker.step(16);
     expect(result.complete).toBe(true);
-    // 4 height stripes + 32 climate stripes.
-    expect(renderer.render).toHaveBeenCalledTimes(36);
+    // 2 immediate preview passes + 4 height stripes + 32 climate stripes.
+    expect(renderer.render).toHaveBeenCalledTimes(38);
+    baker.dispose();
+  });
+
+  it('fits the immediate Studio water preview to expanded board bounds', () => {
+    const renderer = renderTargetRenderer();
+    const baker = new TerrainHeightBaker({
+      renderer,
+      uniforms: createTerrainUniforms(),
+      size: 64,
+      maxSize: 128,
+      previewSize: 128,
+    });
+
+    const preview = baker.begin(5, undefined, 2, 1);
+
+    expect(baker.previewTarget.width).toBe(128);
+    expect(baker.previewTarget.height).toBe(64);
+    expect(preview.heightTexture).toBe(baker.previewTarget.texture);
+    expect(renderer.setViewport).toHaveBeenCalledWith(0, 0, 128, 64);
+    baker.dispose();
+  });
+
+  it('keeps published Studio water textures stable until the bake completes', () => {
+    const renderer = renderTargetRenderer();
+    const baker = new TerrainHeightBaker({
+      renderer,
+      uniforms: createTerrainUniforms(),
+      size: 64,
+      maxSize: 64,
+    });
+    const publishedHeight = baker.texture;
+    const publishedBiome = baker.biomeTexture;
+
+    baker.begin(5);
+    const first = baker.step(16);
+
+    expect(first.complete).toBe(false);
+    expect(baker.texture).toBe(publishedHeight);
+    expect(baker.biomeTexture).toBe(publishedBiome);
+    expect(renderer.setRenderTarget).toHaveBeenCalledWith(baker._writeTarget);
+
+    let result = first;
+    let guard = 0;
+    while (!result.complete && guard++ < 64) result = baker.step(16);
+
+    expect(result.complete).toBe(true);
+    expect(baker.texture).not.toBe(publishedHeight);
+    expect(baker.biomeTexture).not.toBe(publishedBiome);
+
+    const committedHeight = baker.texture;
+    baker.begin(5);
+    baker.step(16);
+    expect(baker.texture).toBe(committedHeight);
     baker.dispose();
   });
 

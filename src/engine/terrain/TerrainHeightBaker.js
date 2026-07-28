@@ -91,8 +91,15 @@ export class TerrainHeightBaker {
    * @param {object} opts.uniforms   shared terrain uniforms (live objects)
    * @param {number} [opts.size]     per-cell texture resolution (default 2048)
    * @param {number} [opts.maxSize]  multi-cell atlas cap (default 4096)
+   * @param {number} [opts.previewSize] longest edge of the immediate preview
    */
-  constructor({ renderer, uniforms, size = 2048, maxSize = 4096 }) {
+  constructor({
+    renderer,
+    uniforms,
+    size = 2048,
+    maxSize = 4096,
+    previewSize = 384,
+  }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
     this._baseSize = size;
@@ -101,12 +108,32 @@ export class TerrainHeightBaker {
     this._texH = size;
     this._biomeW = 512;
     this._biomeH = 512;
+    this._previewBaseSize = previewSize;
+    this._previewW = previewSize;
+    this._previewH = previewSize;
+    this._previewBiomeW = Math.max(64, Math.round(previewSize * 0.5));
+    this._previewBiomeH = Math.max(64, Math.round(previewSize * 0.5));
     this._activeJob = null;
     this._jobSerial = 0;
     this._bakeUvTransform = { value: new THREE.Vector4(0, 0, 1, 1) };
 
+    // Double-buffer both outputs. Visible water samples `target` directly even
+    // while uUseTerrainHeightTex is disabled, so progressive stripes must render
+    // into a private back buffer and become visible only after both passes finish.
     this.target = this._makeTarget(size, size);
+    this._writeTarget = this._makeTarget(size, size);
     this.biomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
+    this._writeBiomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
+    this.previewTarget = this._makeTarget(
+      this._previewW,
+      this._previewH,
+      'TerrainHeightPreviewR16F',
+    );
+    this.previewBiomeTarget = this._makeBiomeTarget(
+      this._previewBiomeW,
+      this._previewBiomeH,
+      'TerrainBiomeClimatePreview',
+    );
 
     this.scene = new THREE.Scene();
     this.material = null;   // built on first bake so OCTAVES matches the params
@@ -134,8 +161,10 @@ export class TerrainHeightBaker {
 
   get texture() { return this.target.texture; }
   get biomeTexture() { return this.biomeTarget.texture; }
+  get previewTexture() { return this.previewTarget.texture; }
+  get previewBiomeTexture() { return this.previewBiomeTarget.texture; }
 
-  _makeTarget(w, h) {
+  _makeTarget(w, h, name = 'TerrainHeightR16F') {
     const target = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType,
       format: THREE.RedFormat,
@@ -146,11 +175,11 @@ export class TerrainHeightBaker {
       generateMipmaps: false,
     });
     target.texture.colorSpace = THREE.NoColorSpace;
-    target.texture.name = 'TerrainHeightR16F';
+    target.texture.name = name;
     return target;
   }
 
-  _makeBiomeTarget(w, h) {
+  _makeBiomeTarget(w, h, name = 'TerrainBiomeClimate') {
     const target = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.UnsignedByteType,
       format: THREE.RGBAFormat,
@@ -160,7 +189,7 @@ export class TerrainHeightBaker {
       generateMipmaps: false,
     });
     target.texture.colorSpace = THREE.NoColorSpace;
-    target.texture.name = 'TerrainBiomeClimate';
+    target.texture.name = name;
     return target;
   }
 
@@ -169,21 +198,50 @@ export class TerrainHeightBaker {
     const cap = Math.max(this._baseSize, this._maxSize || 4096);
     const w = Math.min(cap, this._baseSize * Math.max(1, cols));
     const h = Math.min(cap, this._baseSize * Math.max(1, rows));
-    if (w === this._texW && h === this._texH) return;
-    this.target.dispose();
-    this.target = this._makeTarget(w, h);
+    // Keep the published front target alive because visible water may still be
+    // sampling it. Only resize the hidden target used by the pending bake.
+    if (this._writeTarget.width !== w || this._writeTarget.height !== h) {
+      this._writeTarget.dispose();
+      this._writeTarget = this._makeTarget(w, h);
+    }
     this._texW = w;
     this._texH = h;
 
     const maxCells = Math.max(1, cols, rows);
     const biomeW = Math.max(128, Math.round(512 * cols / maxCells));
     const biomeH = Math.max(128, Math.round(512 * rows / maxCells));
-    if (biomeW !== this._biomeW || biomeH !== this._biomeH) {
-      this.biomeTarget.dispose();
-      this.biomeTarget = this._makeBiomeTarget(biomeW, biomeH);
-      this._biomeW = biomeW;
-      this._biomeH = biomeH;
+    if (this._writeBiomeTarget.width !== biomeW
+        || this._writeBiomeTarget.height !== biomeH) {
+      this._writeBiomeTarget.dispose();
+      this._writeBiomeTarget = this._makeBiomeTarget(biomeW, biomeH);
     }
+    this._biomeW = biomeW;
+    this._biomeH = biomeH;
+
+    // The preview always covers the complete new union, but caps its longest
+    // edge so regeneration/expansion only requires two small immediate passes.
+    const previewW = Math.max(64, Math.round(this._previewBaseSize * cols / maxCells));
+    const previewH = Math.max(64, Math.round(this._previewBaseSize * rows / maxCells));
+    if (this.previewTarget.width !== previewW || this.previewTarget.height !== previewH) {
+      this.previewTarget.dispose();
+      this.previewTarget = this._makeTarget(previewW, previewH, 'TerrainHeightPreviewR16F');
+    }
+    this._previewW = previewW;
+    this._previewH = previewH;
+
+    const previewBiomeW = Math.max(64, Math.round(previewW * 0.5));
+    const previewBiomeH = Math.max(64, Math.round(previewH * 0.5));
+    if (this.previewBiomeTarget.width !== previewBiomeW
+        || this.previewBiomeTarget.height !== previewBiomeH) {
+      this.previewBiomeTarget.dispose();
+      this.previewBiomeTarget = this._makeBiomeTarget(
+        previewBiomeW,
+        previewBiomeH,
+        'TerrainBiomeClimatePreview',
+      );
+    }
+    this._previewBiomeW = previewBiomeW;
+    this._previewBiomeH = previewBiomeH;
   }
 
   _ensureMaterial(octaves, stackGLSL) {
@@ -213,12 +271,36 @@ export class TerrainHeightBaker {
   begin(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
     this._ensureTargetSize(cols, rows);
     this._ensureMaterial(octaves, stackGLSL);
+    // Publishable same-frame approximation. This uses the exact height/climate
+    // logic over the complete new bounds, only at a lower spatial resolution.
+    // The high-quality targets remain progressive and double-buffered below.
+    this._renderStripe(
+      this.previewTarget,
+      this.material,
+      this._previewW,
+      this._previewH,
+      0,
+      this._previewH,
+    );
+    this._renderStripe(
+      this.previewBiomeTarget,
+      this.biomeMaterial,
+      this._previewBiomeW,
+      this._previewBiomeH,
+      0,
+      this._previewBiomeH,
+    );
+    this._bakeUvTransform.value.set(0, 0, 1, 1);
     this._activeJob = {
       id: ++this._jobSerial,
       pass: 'height',
       row: 0,
     };
-    return this._activeJob.id;
+    return {
+      id: this._activeJob.id,
+      heightTexture: this.previewTexture,
+      biomeTexture: this.previewBiomeTexture,
+    };
   }
 
   get isBaking() { return !!this._activeJob; }
@@ -234,7 +316,7 @@ export class TerrainHeightBaker {
     const isHeight = job.pass === 'height';
     const width = isHeight ? this._texW : this._biomeW;
     const height = isHeight ? this._texH : this._biomeH;
-    const target = isHeight ? this.target : this.biomeTarget;
+    const target = isHeight ? this._writeTarget : this._writeBiomeTarget;
     const material = isHeight ? this.material : this.biomeMaterial;
     const rows = Math.min(Math.max(1, Math.round(maxRows)), height - job.row);
     this._renderStripe(target, material, width, height, job.row, rows);
@@ -247,6 +329,10 @@ export class TerrainHeightBaker {
       } else {
         this._activeJob = null;
         this._bakeUvTransform.value.set(0, 0, 1, 1);
+        // Publish the complete height and climate pair in one frame.
+        [this.target, this._writeTarget] = [this._writeTarget, this.target];
+        [this.biomeTarget, this._writeBiomeTarget] =
+          [this._writeBiomeTarget, this.biomeTarget];
         return { complete: true, progress: 1 };
       }
     }
@@ -289,7 +375,11 @@ export class TerrainHeightBaker {
 
   dispose() {
     this.target.dispose();
+    this._writeTarget.dispose();
     this.biomeTarget.dispose();
+    this._writeBiomeTarget.dispose();
+    this.previewTarget.dispose();
+    this.previewBiomeTarget.dispose();
     this.mesh.geometry.dispose();
     if (this.material) this.material.dispose();
     this.biomeMaterial.dispose();

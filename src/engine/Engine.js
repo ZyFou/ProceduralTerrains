@@ -5098,8 +5098,8 @@ export class Engine {
    * when the terrain generation counter has advanced (seed / shape / biome
    * edits), so a steady camera costs nothing. While painting, the height field
    * changes continuously — sample the live field and refresh the bake once the
-   * stroke ends. Until the first bake completes, uUseTerrainHeightTex stays 0
-   * and the shaders fall back to the live field.
+   * stroke ends. A small full-board preview is published immediately, then the
+   * progressive high-resolution bake replaces it atomically when complete.
    */
   _ensureTerrainHeightTex() {
     if (this.worldMode !== 'studio') return;
@@ -5126,6 +5126,8 @@ export class Engine {
         uniforms: this.uniforms,
         size: this._bakeBaseSize(),
         maxSize: this.gpuTier === 'low' ? 2048 : 4096,
+        previewSize: this.gpuTier === 'low' ? 256
+          : (this.gpuTier === 'medium' ? 384 : 512),
       });
       this._bakedStudioGen = -1;
       this._terrainBakeJobKey = null;
@@ -5135,14 +5137,20 @@ export class Engine {
     const b = this._tileBounds();
     const jobKey = `${this._terrainGen}:${layoutKey}`;
     if (this._terrainBakeJobKey !== jobKey) {
-      this.uniforms.uUseTerrainHeightTex.value = 0.0;
-      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
-      this.terrainHeightBaker.begin(
+      const preview = this.terrainHeightBaker.begin(
         Math.round(this.params.octaves),
         this._activeHeightProgram('studio'),
         b.cols,
         b.rows,
       );
+      // Water samples the baked terrain field directly. Bind the complete
+      // low-resolution union before the next scene render so an expanded board
+      // never waits for every high-resolution stripe to finish.
+      this.uniforms.uTerrainHeightTex.value = preview.heightTexture;
+      this.uniforms.uUseTerrainHeightTex.value = 1.0;
+      this.uniforms.uTerrainBiomeTex.value = preview.biomeTexture;
+      this.uniforms.uUseTerrainBiomeTex.value = 1.0;
+      this.profiler.setMetric('terrainBakePreviewReady', 1);
       this._terrainBakeJobKey = jobKey;
       this._terrainBakeElapsedMs = 0;
     }
@@ -5168,6 +5176,7 @@ export class Engine {
     this._bakedStudioLayout = layoutKey;
     this._terrainBakeJobKey = null;
     this._terrainBakeElapsedMs = 0;
+    this.profiler.setMetric('terrainBakePreviewReady', 0);
     this._completeBootIfQualityReady();
   }
 
