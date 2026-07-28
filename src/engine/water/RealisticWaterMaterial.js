@@ -14,6 +14,10 @@ import {
   WATER_GEOMETRY_WAVES_GLSL,
   WATER_WAVES_GLSL,
 } from './waterWavesGLSL.js';
+import {
+  WATER_LIGHTING_UNIFORMS_GLSL,
+  createWaterLightingUniforms,
+} from './waterLightingGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -121,6 +125,7 @@ ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${terrainHeightFunction}
 ${PROCEDURAL_SKY_UNIFORMS_GLSL}
+${WATER_LIGHTING_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;
@@ -513,8 +518,9 @@ void main() {
     waterGgxSunSpecular(n, viewDir, skySunDir, roughness),
     8.0
   );
-  vec3 sunSpecularTerm = uSkySunColor
-    * uSkyLightIntensity
+  vec3 sunSpecularTerm = waterResolveSunLight(
+    uSkySunColor * uSkyLightIntensity
+  )
     * sunSpecular
     * uSpecularStrength
     * reflectionScale;
@@ -523,9 +529,15 @@ void main() {
   // tiers overwrite the water pixel with a complete refracted volume composite,
   // because the same opaque scene is already behind the transparent surface.
   float diff = max(dot(n, uSunDir), 0.0);
+  vec3 waterLight = waterResolveLighting(
+    n,
+    vec3(0.0, 1.0, 0.0),
+    diff,
+    vec3(0.62 + 0.38 * diff)
+  );
   vec3 bodyPremultiplied = scatteringColor
     * (vec3(1.0) - transmittance)
-    * (0.62 + 0.38 * diff)
+    * waterLight
     * (1.0 - fres);
   vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
   float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
@@ -545,7 +557,7 @@ void main() {
   vec3 refractedVolume = refractedSceneLinear * sceneTransmittance
     + scatteringColor
       * (vec3(1.0) - transmittance)
-      * (0.62 + 0.38 * diff);
+      * waterLight;
   vec3 sceneComposite = refractedVolume * (1.0 - fres)
     + reflectionTerm
     + sunSpecularTerm;
@@ -633,7 +645,8 @@ void main() {
     0.0,
     1.0
   );
-  premultipliedColor = mix(premultipliedColor, uColFoam, foam);
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
+  premultipliedColor = mix(premultipliedColor, litFoamColor, foam);
   alpha = mix(alpha, 1.0, foam);
 
   vec3 refractionTerm = mix(
@@ -741,6 +754,7 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSkyReflectionEnabled: { value: 1.0 },
     uBiomeColorEnabled: { value: 1.0 },
     uBiomeColorStrength: { value: 0.55 },
+    ...createWaterLightingUniforms(),
     uWaterAnim: { value: 1.0 },
     uWaterFadeStart: { value: 99999.0 },
     uWaterFadeEnd: { value: 100000.0 },
@@ -801,7 +815,7 @@ export function createRealisticWaterMaterial(
 ) {
   const mat = new THREE.ShaderMaterial({
     uniforms: realisticUniforms(sharedUniforms, environmentUniforms),
-    defines: {},
+    defines: { OCTAVES: octaves },
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,

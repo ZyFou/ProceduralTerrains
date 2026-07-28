@@ -4,6 +4,7 @@ import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
 import { SliderCtl, ToggleRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
+import { WATER_DEFAULT_PARAMS } from '../../engine/water/WaterSettings.js';
 
 const FOG_SLIDER = {
   key: 'fogDensity',
@@ -55,6 +56,45 @@ const GOD_RAYS = {
   digits: 2,
   info: 'Screen-space atmospheric light shafts aligned with the active skybox sun.',
 };
+
+const WATER_LIGHTING_SLIDERS = [
+  {
+    key: 'waterAtmosphereInfluence',
+    label: 'Sky Influence',
+    min: 0,
+    max: 1,
+    step: 0.02,
+    digits: 2,
+    info: 'How strongly the active sky, sun, and atmosphere color the water. Zero restores the previous independent water lighting.',
+  },
+  {
+    key: 'waterSunResponse',
+    label: 'Sun Response',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    digits: 2,
+    info: 'Strength of direct sunlight received by the water surface and volume.',
+  },
+  {
+    key: 'waterAmbientResponse',
+    label: 'Ambient Response',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    digits: 2,
+    info: 'Strength of sky ambient light and ground bounce on the water.',
+  },
+  {
+    key: 'waterFoamLighting',
+    label: 'Foam Lighting',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    digits: 2,
+    info: 'How much foam follows environmental lighting. Lower values keep foam more readable in darkness.',
+  },
+];
 
 const ATMOSPHERE_COLORS = [
   {
@@ -190,6 +230,32 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
             />
           </div>
         ))}
+      </ControlSection>
+
+      <ControlSection
+        id="inspector-environment-water-lighting"
+        title="Water Lighting"
+        defaultOpen={false}
+        settingId="lighting.section.waterLighting"
+        forceOpen={forceSection(
+          'lighting.section.waterLighting',
+          'Water Lighting',
+          ['lighting.water']
+        )}
+      >
+        {WATER_LIGHTING_SLIDERS.map((def) => (
+          <SliderCtl
+            key={def.key}
+            def={def}
+            value={params[def.key] ?? WATER_DEFAULT_PARAMS[def.key]}
+            onChange={(v) => onParam(def.key, v)}
+            settingId={`lighting.${def.key}`}
+          />
+        ))}
+        <p className="section-hint">
+          Applies to Legacy, Realistic, Volumetric, Cinematic, Infinite World,
+          and the Planet ocean.
+        </p>
       </ControlSection>
     </>
   );

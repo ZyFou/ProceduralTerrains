@@ -115,6 +115,9 @@ export class TerrainHeightBaker {
     this.material = null;   // built on first bake so OCTAVES matches the params
     this.biomeMaterial = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
+      // NOISE_GLSL declares FBM helpers with an OCTAVES loop even though this
+      // climate-only pass only calls vnoise(). Keep the unused helpers valid.
+      defines: { OCTAVES: 1 },
       vertexShader: BAKE_VERTEX,
       fragmentShader: BIOME_BAKE_FRAGMENT,
       depthTest: false,

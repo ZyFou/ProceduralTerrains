@@ -7,6 +7,7 @@ import {
 } from '../src/engine/terrain/TerrainMaterial.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
+import { TerrainHeightBaker } from '../src/engine/terrain/TerrainHeightBaker.js';
 
 const materials = [];
 
@@ -77,9 +78,12 @@ describe('shared Tile and Infinite terrain program', () => {
 
   it('shares an optional baked climate texture with realistic Studio water', () => {
     const uniforms = createTerrainUniforms();
+    const baker = new TerrainHeightBaker({ renderer: null, uniforms });
 
     expect(uniforms.uTerrainBiomeTex.value).toBeNull();
     expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(baker.biomeMaterial.defines).toEqual({ OCTAVES: 1 });
+    baker.dispose();
   });
 
   it('exposes manual surface weight maps and blends painted material roles', () => {

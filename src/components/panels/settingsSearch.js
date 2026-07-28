@@ -185,6 +185,10 @@ const SETTINGS_INDEX = [
   { panelId: 'clouds', sectionLabel: 'Lighting', settingId: 'clouds.cloudSunResponse', label: 'Sun Response', keywords: 'cloud sunlight direct lighting' },
   { panelId: 'clouds', sectionLabel: 'Lighting', settingId: 'clouds.cloudAmbientResponse', label: 'Ambient Response', keywords: 'cloud ambient zenith horizon bounce lighting' },
   { panelId: 'clouds', sectionLabel: 'Lighting', settingId: 'clouds.cloudSilverLining', label: 'Silver Lining', keywords: 'cloud sun edge halo scattering glow' },
+  { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterAtmosphereInfluence', label: 'Water Sky Influence', keywords: 'water sky atmosphere lighting color legacy realistic planet' },
+  { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterSunResponse', label: 'Water Sun Response', keywords: 'water sunlight direct lighting surface volume' },
+  { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterAmbientResponse', label: 'Water Ambient Response', keywords: 'water ambient sky bounce lighting night' },
+  { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterFoamLighting', label: 'Water Foam Lighting', keywords: 'water foam lighting night brightness shoreline whitecaps' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsDensity', label: 'Density', keywords: 'props grass flowers rocks density scatter' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsFlowers', label: 'Flower Mix', keywords: 'props flowers meadow scatter' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsRocks', label: 'Rock Mix', keywords: 'props rocks boulders stones terrain color' },
@@ -226,6 +230,7 @@ const SECTION_INDEX = [
   { panelId: 'lighting', sectionLabel: 'Sun', settingId: 'lighting.section.sun', label: 'Sun', keywords: 'sun lighting azimuth elevation color intensity', isSection: true },
   { panelId: 'lighting', sectionLabel: 'Atmosphere', settingId: 'lighting.section.atmosphere', label: 'Atmosphere', keywords: 'atmosphere fog ambient bounce lighting', isSection: true },
   { panelId: 'lighting', sectionLabel: 'Clouds & Rays', settingId: 'lighting.section.clouds', label: 'Clouds & Rays', keywords: 'cloud shadows god rays sun shafts lighting', isSection: true },
+  { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.section.waterLighting', label: 'Water Lighting', keywords: 'water sky sun ambient foam lighting legacy realistic planet', isSection: true },
 
   // Skybox
   { panelId: 'skybox', sectionLabel: 'Time of Day', settingId: 'skybox.section.time', label: 'Time of Day', keywords: 'sky time day night sun', isSection: true },

@@ -15,6 +15,10 @@ import {
 } from './surface/terrainSurfaceTextureGLSL.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
+import {
+  WATER_LIGHTING_UNIFORMS_GLSL,
+  createWaterLightingUniforms,
+} from '../water/waterLightingGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -418,6 +422,7 @@ ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
 ${planetHeightGLSL}
 ${PALETTE_UNIFORMS_GLSL}
+${WATER_LIGHTING_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
 uniform float uWaterQuality;
@@ -491,13 +496,21 @@ void main() {
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float diff = max(dot(n, uSunDir), 0.0);
-  col *= 0.55 + 0.65 * diff;
+  vec3 waterLight = waterResolveLighting(
+    n,
+    up,
+    diff,
+    vec3(0.55 + 0.65 * diff)
+  );
+  col *= waterLight;
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
-  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
+  col += waterResolveSunLight(vec3(1.0, 0.95, 0.85))
+    * spec * 0.55 * uWaterReflection;
 
   // spherical fresnel: up is the local normal, not world +Y
   float fres = pow(1.0 - max(dot(viewDir, up), 0.0), 3.0);
-  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
+  col += waterResolveSkyLight(vec3(0.30, 0.42, 0.55))
+    * fres * 0.25 * uWaterReflection;
 
   float foamNoise = 0.0;
   if (uWaterQuality > 0.5) {
@@ -508,7 +521,8 @@ void main() {
               + vnoise(fp.xy + fo) * blend.z;
   }
   float foam = smoothstep(3.2, 0.6, depth + foamNoise * 2.4);
-  col = mix(col, uColFoam, foam * 0.75);
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
+  col = mix(col, litFoamColor, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 
@@ -527,6 +541,7 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7, stackGLSL = DEF
       uWaterDetail:     { value: 1.0 },
       uWaterReflection: { value: 1.0 },
       uWaveComplexity:  { value: 1.0 },
+      ...createWaterLightingUniforms(),
     },
     defines: { OCTAVES: octaves, PLANET_MODE: 1 },
     vertexShader: WATER_VERTEX,
