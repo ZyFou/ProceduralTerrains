@@ -107,6 +107,38 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('(manualMode ? 1.0 : roleBlend)');
   });
 
+  it('keeps the dedicated Manual Terrain shader below the 16 texture-unit limit', () => {
+    const uniforms = createTerrainUniforms();
+    const manual = createTerrainMaterial(uniforms, 5, undefined, { variant: 'manual' });
+    materials.push(manual);
+
+    const samplerNames = (source) => [
+      ...source.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g),
+    ].map((match) => match[1]);
+    const fragmentSamplers = samplerNames(manual.fragmentShader);
+    const vertexSamplers = samplerNames(manual.vertexShader);
+
+    expect(manual.userData.terrainVariant).toBe('manual');
+    expect(fragmentSamplers).toEqual([
+      'uPaintBiomeTexture',
+      'uPaintPropsTexture',
+      'uManualHeightTexture',
+      'uTileOccupancy',
+      'uSurfDiffuse',
+      'uSurfProps',
+    ]);
+    expect(vertexSamplers).toEqual([
+      'uPaintBiomeTexture',
+      'uPaintPropsTexture',
+      'uManualHeightTexture',
+      'uTileOccupancy',
+    ]);
+    expect(fragmentSamplers.length).toBeLessThanOrEqual(16);
+    expect(manual.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
+    expect(manual.fragmentShader).not.toContain('uniform sampler2D uInfiniteFieldTex0');
+    expect(manual.fragmentShader).not.toContain('uniform sampler2D uImportImageryTex');
+  });
+
   it('defines manual surface samplers before the planet surface material uses them', () => {
     const uniforms = createTerrainUniforms();
     const planet = createPlanetMaterial(uniforms, 5);

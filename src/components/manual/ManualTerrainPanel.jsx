@@ -639,6 +639,7 @@ export default function ManualTerrainPanel({
                   <span>Enabled</span>
                   <input type="checkbox" checked={selected.enabled !== false} onChange={(event) => onUpdate(selected.id, { enabled: event.target.checked })} />
                 </label>
+                <SliderCtl def={height} value={selected.height} onChange={(value) => onUpdate(selected.id, { height: value })} />
                 <label className="manual-name-field">
                   <span>Name</span>
                   <input
@@ -668,7 +669,6 @@ export default function ManualTerrainPanel({
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
                 <h3>Terrain Shape</h3>
-                <SliderCtl def={height} value={selected.height} onChange={(value) => onUpdate(selected.id, { height: value })} />
                 <SliderCtl def={detail} value={selected.detail} onChange={(value) => onUpdate(selected.id, { detail: value })} />
                 <SliderCtl def={sharpness} value={selected.sharpness} onChange={(value) => onUpdate(selected.id, { sharpness: value })} />
                 <SliderCtl def={terraces} value={selected.terraces} onChange={(value) => onUpdate(selected.id, { terraces: value })} />

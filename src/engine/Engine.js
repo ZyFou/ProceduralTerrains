@@ -684,6 +684,16 @@ export class Engine {
     return { origin: { x: b.minX * cs - cs * .5, z: b.minZ * cs - cs * .5 }, span: { x: this._unionWidth(), z: this._unionDepth() } };
   }
 
+  _syncManualTerrainBounds() {
+    const changed = this.manualTerrain?.syncBounds();
+    if (changed?.terrainChanged) {
+      this._terrainGen++;
+      this.heightSampler?.invalidate?.();
+      this.propSurfaceField?.invalidate?.();
+    }
+    return changed;
+  }
+
   _initCreatorTools() {
     const contains = (x, z) => { const { origin, span } = this._creatorBounds(); return x >= origin.x && x <= origin.x + span.x && z >= origin.z && z <= origin.z + span.z; };
     const picker = new TerrainPicker({ camera: this.camera, domElement: this.canvas, contains,
@@ -2591,6 +2601,7 @@ export class Engine {
     }
 
     this._applyStudioAssemblyLayout(maxHeight);
+    this._syncManualTerrainBounds();
     this._refreshStudioChunkView();
     this._applyUniforms({ updatePlinth: false });
     this._minimapDirtyAt = performance.now();
@@ -2642,6 +2653,7 @@ export class Engine {
       this._refreshStudioChunkView();
     }
 
+    this._syncManualTerrainBounds();
     this._applyUniforms({ updatePlinth: !rebuildNeeded });
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
@@ -5977,9 +5989,9 @@ export class Engine {
 
   /** Water quality uniforms — per water material, never shared with terrain. */
   _targetTerrainVariant() {
-    const surfaceEnabled = this.projectMode === 'manual'
-      || (this.params?.surfaceTextureMode === true
-        && (this.params?.surfaceTextureAmount ?? 1) > 0.001);
+    if (this.projectMode === 'manual') return 'manual';
+    const surfaceEnabled = this.params?.surfaceTextureMode === true
+      && (this.params?.surfaceTextureAmount ?? 1) > 0.001;
     const detailEnabled = (this.perf?.terrainDetailQuality ?? 3) > 0
       && (this.perf?.terrainDetailOpacity ?? 1) > 0.001;
     if (surfaceEnabled && detailEnabled) return 'full';

@@ -9,6 +9,14 @@ const smoothstep = (value) => {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
 };
+const BOUNDS_EPSILON = 1e-6;
+
+function boundsEqual(originA, spanA, originB, spanB) {
+  return Math.abs(originA.x - originB.x) <= BOUNDS_EPSILON
+    && Math.abs(originA.z - originB.z) <= BOUNDS_EPSILON
+    && Math.abs(spanA.x - spanB.x) <= BOUNDS_EPSILON
+    && Math.abs(spanA.z - spanB.z) <= BOUNDS_EPSILON;
+}
 
 const hash2 = (x, y, seed) => {
   let value = Math.imul(Math.floor(x), 374761393)
@@ -102,6 +110,7 @@ export class ManualTerrainField {
     this.texture.wrapT = THREE.ClampToEdgeWrapping;
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
+    this._syncBounds();
     this._upload();
     this._bindUniforms();
   }
@@ -112,15 +121,59 @@ export class ManualTerrainField {
     this.uniforms.uManualSpan.value.set(this.span.x, this.span.z);
   }
 
-  _syncBounds() {
-    const bounds = this.getBounds();
-    this.origin = { x: Number(bounds?.origin?.x) || 0, z: Number(bounds?.origin?.z) || 0 };
-    this.span = {
+  _readBounds() {
+    const bounds = this.getBounds?.() ?? {};
+    return {
+      origin: { x: Number(bounds?.origin?.x) || 0, z: Number(bounds?.origin?.z) || 0 },
+      span: {
       x: Math.max(1, Number(bounds?.span?.x) || 1),
       z: Math.max(1, Number(bounds?.span?.z) || 1),
+      },
     };
+  }
+
+  _resampleScalarField(source, sourceOrigin, sourceSpan) {
+    const target = new Float32Array(this.resolution * this.resolution);
+    const max = this.resolution - 1;
+    if (max <= 0) return target;
+    for (let py = 0; py < this.resolution; py++) {
+      const worldZ = this.origin.z + (py / max) * this.span.z;
+      const sourceY = ((worldZ - sourceOrigin.z) / sourceSpan.z) * max;
+      if (sourceY < 0 || sourceY > max) continue;
+      const y0 = Math.floor(sourceY);
+      const y1 = Math.min(max, y0 + 1);
+      const fy = sourceY - y0;
+      for (let px = 0; px < this.resolution; px++) {
+        const worldX = this.origin.x + (px / max) * this.span.x;
+        const sourceX = ((worldX - sourceOrigin.x) / sourceSpan.x) * max;
+        if (sourceX < 0 || sourceX > max) continue;
+        const x0 = Math.floor(sourceX);
+        const x1 = Math.min(max, x0 + 1);
+        const fx = sourceX - x0;
+        const top = source[y0 * this.resolution + x0]
+          + (source[y0 * this.resolution + x1] - source[y0 * this.resolution + x0]) * fx;
+        const bottom = source[y1 * this.resolution + x0]
+          + (source[y1 * this.resolution + x1] - source[y1 * this.resolution + x0]) * fx;
+        target[py * this.resolution + px] = top + (bottom - top) * fy;
+      }
+    }
+    return target;
+  }
+
+  _syncBounds() {
+    const next = this._readBounds();
+    const previousOrigin = this.origin;
+    const previousSpan = this.span;
+    const changed = !boundsEqual(previousOrigin, previousSpan, next.origin, next.span);
+    if (changed) {
+      const previousSculpt = this.sculptDelta;
+      this.origin = next.origin;
+      this.span = next.span;
+      this.sculptDelta = this._resampleScalarField(previousSculpt, previousOrigin, previousSpan);
+    }
     this.uniforms.uManualOrigin.value.set(this.origin.x, this.origin.z);
     this.uniforms.uManualSpan.value.set(this.span.x, this.span.z);
+    return changed;
   }
 
   _composeIndex(index) {
@@ -197,6 +250,12 @@ export class ManualTerrainField {
     this.revision++;
   }
 
+  syncBounds(shapes = []) {
+    if (!this._syncBounds()) return false;
+    this.rebuild(shapes);
+    return true;
+  }
+
   worldToPixel(x, z) {
     return {
       px: ((x - this.origin.x) / this.span.x) * (this.resolution - 1),
@@ -219,7 +278,8 @@ export class ManualTerrainField {
 
   _stampErosion({
     center,
-    pixelRadius,
+    pixelRadiusX,
+    pixelRadiusY,
     minX,
     maxX,
     minY,
@@ -255,8 +315,11 @@ export class ManualTerrainField {
       for (let py = minY; py <= maxY; py++) {
         const localY = py - sourceMinY;
         for (let px = minX; px <= maxX; px++) {
-          const distance = Math.hypot(px - center.px, py - center.py);
-          const alpha = this._brushAlpha(distance, pixelRadius, falloff, strength);
+          const distance = Math.hypot(
+            (px - center.px) / pixelRadiusX,
+            (py - center.py) / pixelRadiusY,
+          );
+          const alpha = this._brushAlpha(distance, 1, falloff, strength);
           if (alpha <= 0) continue;
           const localX = px - sourceMinX;
           const localIndex = localY * width + localX;
@@ -296,8 +359,11 @@ export class ManualTerrainField {
       const localRow = (py - sourceMinY) * width;
       const terrainRow = py * this.resolution;
       for (let px = minX; px <= maxX; px++) {
-        const distance = Math.hypot(px - center.px, py - center.py);
-        if (distance > pixelRadius) continue;
+        const distance = Math.hypot(
+          (px - center.px) / pixelRadiusX,
+          (py - center.py) / pixelRadiusY,
+        );
+        if (distance > 1) continue;
         const index = terrainRow + px;
         const erodedHeight = working[localRow + px - sourceMinX];
         this.sculptDelta[index] = clamp(erodedHeight - this.shapeHeight[index], -3000, 3000);
@@ -323,16 +389,19 @@ export class ManualTerrainField {
     erosionDeposition = 0.65,
     erosionTalus = 1.5,
   }) {
+    this._syncBounds();
     const center = this.worldToPixel(x, z);
-    const pixelRadius = Math.max(1, radius / Math.max(this.span.x, this.span.z) * this.resolution);
-    const minX = clamp(Math.floor(center.px - pixelRadius), 0, this.resolution - 1);
-    const maxX = clamp(Math.ceil(center.px + pixelRadius), 0, this.resolution - 1);
-    const minY = clamp(Math.floor(center.py - pixelRadius), 0, this.resolution - 1);
-    const maxY = clamp(Math.ceil(center.py + pixelRadius), 0, this.resolution - 1);
+    const pixelRadiusX = Math.max(1, radius / this.span.x * (this.resolution - 1));
+    const pixelRadiusY = Math.max(1, radius / this.span.z * (this.resolution - 1));
+    const minX = clamp(Math.floor(center.px - pixelRadiusX), 0, this.resolution - 1);
+    const maxX = clamp(Math.ceil(center.px + pixelRadiusX), 0, this.resolution - 1);
+    const minY = clamp(Math.floor(center.py - pixelRadiusY), 0, this.resolution - 1);
+    const maxY = clamp(Math.ceil(center.py + pixelRadiusY), 0, this.resolution - 1);
     if (tool === 'erode') {
       this._stampErosion({
         center,
-        pixelRadius,
+        pixelRadiusX,
+        pixelRadiusY,
         minX,
         maxX,
         minY,
@@ -348,20 +417,24 @@ export class ManualTerrainField {
       this.sculptRevision++;
       return;
     }
-    const smoothStep = tool === 'smooth' ? Math.max(1, Math.round(pixelRadius * 0.07)) : 0;
+    const smoothStepX = tool === 'smooth' ? Math.max(1, Math.round(pixelRadiusX * 0.07)) : 0;
+    const smoothStepY = tool === 'smooth' ? Math.max(1, Math.round(pixelRadiusY * 0.07)) : 0;
     const sourceTotal = tool === 'smooth'
       ? this._copyHeightRegion(
-        Math.max(0, minX - smoothStep),
-        Math.min(this.resolution - 1, maxX + smoothStep),
-        Math.max(0, minY - smoothStep),
-        Math.min(this.resolution - 1, maxY + smoothStep),
+        Math.max(0, minX - smoothStepX),
+        Math.min(this.resolution - 1, maxX + smoothStepX),
+        Math.max(0, minY - smoothStepY),
+        Math.min(this.resolution - 1, maxY + smoothStepY),
       )
       : null;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
-        const distance = Math.hypot(px - center.px, py - center.py);
-        const alpha = this._brushAlpha(distance, pixelRadius, falloff, strength);
+        const normalizedDistance = Math.hypot(
+          (px - center.px) / pixelRadiusX,
+          (py - center.py) / pixelRadiusY,
+        );
+        const alpha = this._brushAlpha(normalizedDistance, 1, falloff, strength);
         if (alpha <= 0) continue;
         const index = py * this.resolution + px;
         const current = this.sculptDelta[index];
@@ -376,8 +449,8 @@ export class ManualTerrainField {
           let count = 0;
           for (let oy = -1; oy <= 1; oy++) {
             for (let ox = -1; ox <= 1; ox++) {
-              const sx = clamp(px + ox * smoothStep, 0, this.resolution - 1);
-              const sy = clamp(py + oy * smoothStep, 0, this.resolution - 1);
+              const sx = clamp(px + ox * smoothStepX, 0, this.resolution - 1);
+              const sy = clamp(py + oy * smoothStepY, 0, this.resolution - 1);
               sum += this._sampleRegion(sourceTotal, sx, sy);
               count++;
             }
@@ -386,7 +459,6 @@ export class ManualTerrainField {
           const desired = average - this.shapeHeight[index];
           next = current + (desired - current) * alpha;
         } else if (tool === 'crease' || tool === 'ridge') {
-          const normalizedDistance = distance / pixelRadius;
           const width = clamp(creaseWidth, 0.04, 0.8);
           const core = Math.exp(-4 * (normalizedDistance / width) ** 2);
           const rimCenter = width * 1.9;

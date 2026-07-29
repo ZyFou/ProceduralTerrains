@@ -113,6 +113,8 @@ export class ManualTerrainModeManager {
     this._surfacePainting = false;
     this._lastSculptPoint = null;
     this._lastSurfacePoint = null;
+    this._lastSculptStampAt = 0;
+    this._lastSurfaceStampAt = 0;
     this._draggingTransform = false;
     this._visuals = new Map();
 
@@ -571,6 +573,15 @@ export class ManualTerrainModeManager {
     this._syncUniforms();
   }
 
+  syncBounds() {
+    const terrainChanged = this.field.syncBounds(this.shapes);
+    const surfaceChanged = this.surfaceField.syncBounds();
+    if (!terrainChanged && !surfaceChanged) return { terrainChanged: false, surfaceChanged: false };
+    this._syncUniforms();
+    this._syncVisuals();
+    return { terrainChanged, surfaceChanged };
+  }
+
   _shapeHeight(shape) {
     const value = this.getHeightAt(shape.position.x, shape.position.z);
     return Number.isFinite(value) ? value + 10 : 10;
@@ -689,6 +700,7 @@ export class ManualTerrainModeManager {
       if (!point) return;
       this._surfacePainting = true;
       this._lastSurfacePoint = null;
+      this._lastSurfaceStampAt = 0;
       this._updateSurfaceHit(point);
       this._stampSurface(point, true);
       return;
@@ -701,6 +713,7 @@ export class ManualTerrainModeManager {
       if (!point) return;
       this._sculpting = true;
       this._lastSculptPoint = null;
+      this._lastSculptStampAt = 0;
       this._updateSculptHit(point);
       this._stampSculpt(point, true);
       return;
@@ -766,6 +779,7 @@ export class ManualTerrainModeManager {
     if (this._surfacePainting) {
       this._surfacePainting = false;
       this._lastSurfacePoint = null;
+      this._lastSurfaceStampAt = 0;
       this._emit({
         documentChanged: true,
         surfaceChanged: true,
@@ -777,6 +791,7 @@ export class ManualTerrainModeManager {
     if (!this._sculpting) return;
     this._sculpting = false;
     this._lastSculptPoint = null;
+    this._lastSculptStampAt = 0;
     this._emit({
       terrainChanged: true,
       documentChanged: true,
@@ -808,6 +823,9 @@ export class ManualTerrainModeManager {
 
   _stampSculpt(point, force = false) {
     if (!point) return;
+    const now = performance.now();
+    const minStampMs = this.sculpt.tool === 'erode' ? 32 : 16;
+    if (!force && now - this._lastSculptStampAt < minStampMs) return;
     const current = point.clone();
     const spacingFactor = this.sculpt.tool === 'crease' || this.sculpt.tool === 'ridge'
       ? 0.1
@@ -825,6 +843,7 @@ export class ManualTerrainModeManager {
       this._stampSculptAt(current);
     }
     this._lastSculptPoint = current;
+    this._lastSculptStampAt = now;
   }
 
   _stampSculptAt(point) {
@@ -864,6 +883,9 @@ export class ManualTerrainModeManager {
 
   _stampSurface(point, force = false) {
     if (!point) return;
+    const now = performance.now();
+    const minStampMs = this.texturePaint.tool === 'blend' ? 32 : 16;
+    if (!force && now - this._lastSurfaceStampAt < minStampMs) return;
     const current = point.clone();
     const spacing = Math.max(2, this.texturePaint.brushSize * 0.18);
     if (!force && this._lastSurfacePoint && this._lastSurfacePoint.distanceTo(current) < spacing) return;
@@ -878,6 +900,7 @@ export class ManualTerrainModeManager {
       this._stampSurfaceAt(current);
     }
     this._lastSurfacePoint = current;
+    this._lastSurfaceStampAt = now;
   }
 
   _stampSurfaceAt(point) {

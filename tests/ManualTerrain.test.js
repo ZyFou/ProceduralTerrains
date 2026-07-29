@@ -118,6 +118,56 @@ describe('Manual Terrain shapes', () => {
     restored.dispose();
   });
 
+  it('keeps shapes and sculpt strokes anchored when tile bounds expand', () => {
+    const uniforms = {
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    };
+    let currentBounds = { origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } };
+    const field = new ManualTerrainField({
+      uniforms,
+      getBounds: () => currentBounds,
+      resolution: 96,
+    });
+    const shape = createManualShape('mountain', { x: -24, z: 18 }, {
+      detail: 0,
+      height: 180,
+      scale: { x: 70, z: 70 },
+    });
+    field.rebuild([shape]);
+    field.stamp({
+      x: -24, z: 18, radius: 34, strength: 0.8, falloff: 0.7, tool: 'raise',
+    });
+    const before = field.sampleHeightOffset(-24, 18);
+
+    currentBounds = { origin: { x: -128, z: -128 }, span: { x: 512, z: 256 } };
+    expect(field.syncBounds([shape])).toBe(true);
+    expect(uniforms.uManualOrigin.value.toArray()).toEqual([-128, -128]);
+    expect(uniforms.uManualSpan.value.toArray()).toEqual([512, 256]);
+    expect(field.sampleHeightOffset(-24, 18)).toBeCloseTo(before, -0.5);
+    expect(field.sampleHeightOffset(300, 18)).toBeCloseTo(0, 5);
+    field.dispose();
+  });
+
+  it('keeps a round sculpt footprint on rectangular multi-tile bounds', () => {
+    const uniforms = {
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    };
+    const field = new ManualTerrainField({
+      uniforms,
+      getBounds: () => ({ origin: { x: -256, z: -128 }, span: { x: 512, z: 256 } }),
+      resolution: 128,
+    });
+    field.rebuild([]);
+    field.stamp({ x: 0, z: 0, radius: 40, strength: 1, falloff: 0.7, tool: 'raise' });
+    expect(field.sampleHeightOffset(0, 28)).toBeGreaterThan(0);
+    expect(field.sampleHeightOffset(0, 48)).toBeCloseTo(0, 5);
+    field.dispose();
+  });
+
   it('paints narrow crease and ridge relief profiles', () => {
     const makeUniforms = () => ({
       uManualHeightTexture: { value: null },

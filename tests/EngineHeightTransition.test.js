@@ -48,6 +48,16 @@ function heightTransitionHarness() {
 }
 
 describe('atomic terrain height transitions', () => {
+  it('always selects the sampler-limited shader for Manual Terrain projects', () => {
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'manual';
+    engine.params.surfaceTextureMode = true;
+    engine.params.surfaceTextureAmount = 1;
+    engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
+
+    expect(engine._targetTerrainVariant()).toBe('manual');
+  });
+
   it('compiles only the visible canvas terrain variant when node-project water is disabled', async () => {
     const program = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;
     const engine = heightTransitionHarness();

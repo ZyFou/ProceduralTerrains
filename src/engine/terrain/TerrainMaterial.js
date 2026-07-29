@@ -6,6 +6,7 @@ import {
   TERRAIN_HEIGHT_TEX_GLSL,
   INFINITE_FIELD_CACHE_GLSL,
   TERRAIN_CLIMATE_CACHE_GLSL,
+  MANUAL_SURFACE_WEIGHTS_GLSL,
 } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
@@ -34,12 +35,73 @@ import { DEFAULT_PLANET_STYLE } from '../style/PlanetStyleConfig.js';
 //    cavity AO, chunk grid overlay, LOD debug tint, exp2 fog.
 // ============================================================================
 
-const buildVertex = (heightGLSL) => /* glsl */ `
-${COMMON_UNIFORMS_GLSL}
+const MANUAL_ACTIVE_COMMON_SAMPLERS = new Set([
+  'uPaintBiomeTexture',
+  'uPaintPropsTexture',
+  'uManualHeightTexture',
+  'uTileOccupancy',
+]);
+
+const MANUAL_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
+  /^uniform sampler2D ([A-Za-z0-9_]+);.*$/gm,
+  (line, name) => (MANUAL_ACTIVE_COMMON_SAMPLERS.has(name) ? line : ''),
+);
+
+const MANUAL_HEIGHT_GLSL = /* glsl */ `
+${MANUAL_SURFACE_WEIGHTS_GLSL}
+
+float manualHeightOffsetAt(vec2 xz) {
+  if (uManualEnabled < 0.5) return 0.0;
+  vec2 uv = (xz - uManualOrigin) / max(uManualSpan, vec2(1.0));
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  return texture2D(uManualHeightTexture, uv).r;
+}
+
+// Manual Terrain owns its complete height and surface fields. These stubs keep
+// shared analysis/debug code source-compatible without activating the standard
+// paint, spline, import, erosion, Studio bake, or Infinite cache samplers.
+float paintHeightOffsetAt(vec2 xz) { return 0.0; }
+vec4 paintBiomeAt(vec2 xz) { return vec4(0.0); }
+float splineHeightOffsetAt(vec2 xz) { return 0.0; }
+vec4 splineMaskAt(vec2 xz) { return vec4(0.0); }
+
+float heightAtWithClimate(vec2 xz, Climate climate) {
+  return manualHeightOffsetAt(xz);
+}
+
+float heightAt(vec2 xz) {
+  return manualHeightOffsetAt(xz);
+}
+
+float moistureAt(vec2 xz) {
+  return climateAt(xz * uFrequency + uSeedOffset).moist;
+}
+
+float stackHeight2D(vec2 xz, Climate climate) {
+  return clamp(manualHeightOffsetAt(xz) / max(uHeightScale, 1e-3), 0.0, 1.0);
+}
+`;
+
+const MANUAL_TERRAIN_CACHE_GLSL = /* glsl */ `
+float terrainCachedHeightAt(vec2 xz) {
+  return manualHeightOffsetAt(xz);
+}
+`;
+
+const MANUAL_TERRAIN_CLIMATE_GLSL = /* glsl */ `
+Climate terrainCachedClimateAt(vec2 xz) {
+  return climateAt(xz * uFrequency + uSeedOffset);
+}
+`;
+
+const buildVertex = (heightGLSL, variant = 'full') => {
+  const manual = variant === 'manual';
+  return /* glsl */ `
+${manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
-${INFINITE_FIELD_CACHE_GLSL}
+${manual ? MANUAL_TERRAIN_CACHE_GLSL : INFINITE_FIELD_CACHE_GLSL}
 
 uniform float uSkirtDepth;
 uniform float uPlinthBaseY;
@@ -125,6 +187,7 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
+};
 
 const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
 vec3 applyTerrainGraphColor(vec3 fallback, vec2 xz, float h01, float slope, float detail, float moisture) {
@@ -279,10 +342,13 @@ SurfaceTexResult applySurfaceMaterials(
 `;
 
 function resolveTerrainVariant(variant = 'full') {
+  if (variant === 'manual') {
+    return { name: 'manual', detail: true, surface: true, manual: true };
+  }
   if (variant === 'base') return { name: 'base', detail: false, surface: false };
   if (variant === 'detail') return { name: 'detail', detail: true, surface: false };
   if (variant === 'surface') return { name: 'surface', detail: false, surface: true };
-  return { name: 'full', detail: true, surface: true };
+  return { name: 'full', detail: true, surface: true, manual: false };
 }
 
 const buildFragment = (
@@ -294,13 +360,13 @@ const buildFragment = (
   return /* glsl */ `
 precision highp float;
 
-${COMMON_UNIFORMS_GLSL}
+${features.manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
-${TERRAIN_HEIGHT_TEX_GLSL}
-${INFINITE_FIELD_CACHE_GLSL}
-${TERRAIN_CLIMATE_CACHE_GLSL}
+${features.manual ? '' : TERRAIN_HEIGHT_TEX_GLSL}
+${features.manual ? MANUAL_TERRAIN_CACHE_GLSL : INFINITE_FIELD_CACHE_GLSL}
+${features.manual ? MANUAL_TERRAIN_CLIMATE_GLSL : TERRAIN_CLIMATE_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${graphColorGLSL}
@@ -524,12 +590,13 @@ void main() {
 
   Climate cl = terrainCachedClimateAt(xz);
   BiomeWeights bw = biomeWeightsAt(cl);
-  vec4 paintedBiome = uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz);
-  vec4 splineMask = splineMaskAt(xz);
+  vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz)'};
+  vec4 splineMask = ${features.manual ? 'vec4(0.0)' : 'splineMaskAt(xz)'};
   bw.desert = clamp(max(bw.desert, paintedBiome.r), 0.0, 1.0);
   bw.canyon = clamp(max(bw.canyon, max(paintedBiome.g, splineMask.r * (1.0 - splineMask.b))), 0.0, 1.0);
   bw.wetland = clamp(max(bw.wetland, max(paintedBiome.b, splineMask.r * splineMask.b)), 0.0, 1.0);
   bw.mountains = clamp(max(bw.mountains, paintedBiome.a), 0.0, 1.0);
+${features.manual ? '' : /* glsl */ `
   if (uInfiniteMode < 0.5 && uImportBiomeMode > 1.5) {
     float b = importedMapValue(uImportBiomeTex, tileUvAt(xz));
     BiomeWeights importedBw;
@@ -546,10 +613,17 @@ void main() {
       bw = importedBw;
     }
   }
+`}
 
   float eps = uEps;
   float hC, hX, hZ;
   vec3 nGeo;
+${features.manual ? /* glsl */ `
+  hC = terrainCachedHeightAt(xz);
+  hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
+  hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
+  nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+` : /* glsl */ `
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
     // Three R16F samples reconstruct height + geometric normal + concavity,
     // replacing three full ~46-octave procedural evaluations.
@@ -578,15 +652,18 @@ void main() {
       nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
     }
   }
+`}
 
   if (uTileDebugView > 0.5) {
     float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
     if (uTileDebugView < 1.5) {
       float n = stackHeight2D(xz, cl);
+${features.manual ? '' : /* glsl */ `
       if (uInfiniteMode < 0.5 && uImportNoiseMode > 1.5) {
         float importedNoise = importedMapValue(uImportNoiseTex, tileUvAt(xz)) * uAmplitude;
         n = (uImportNoiseMode > 2.5) ? mix(n, importedNoise, uImportNoiseBlend) : importedNoise;
       }
+`}
       gl_FragColor = vec4(vec3(clamp(n, 0.0, 1.0)), 1.0);
     } else if (uTileDebugView < 2.5) {
       gl_FragColor = vec4(vec3(h01), 1.0);
@@ -681,6 +758,7 @@ void main() {
   td.albedo = surf.albedo;
   n = surf.normal;
 
+${features.manual ? '' : /* glsl */ `
   // Geo-aligned OpenTopoMap (or file) imagery — same UV region as the real-world
   // height import. Applied after surface materials so the map reads as true albedo.
   if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
@@ -692,6 +770,7 @@ void main() {
         : mapCol;
     }
   }
+`}
 
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
@@ -1163,11 +1242,13 @@ export function createTerrainMaterial(
   options = {},
 ) {
   const variant = resolveTerrainVariant(options.variant).name;
-  const h = buildHeightGLSL(stackGLSL.body2d);
+  const h = variant === 'manual'
+    ? MANUAL_HEIGHT_GLSL
+    : buildHeightGLSL(stackGLSL.body2d);
   const material = new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },
-    vertexShader: buildVertex(h),
+    vertexShader: buildVertex(h, variant),
     fragmentShader: buildFragment(
       h,
       stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
@@ -1217,8 +1298,10 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 // served from three's cache.
 export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   const variant = resolveTerrainVariant(options.variant).name;
-  const h = buildHeightGLSL(stackGLSL.body2d);
-  mat.vertexShader = buildVertex(h);
+  const h = variant === 'manual'
+    ? MANUAL_HEIGHT_GLSL
+    : buildHeightGLSL(stackGLSL.body2d);
+  mat.vertexShader = buildVertex(h, variant);
   mat.fragmentShader = buildFragment(
     h,
     stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,

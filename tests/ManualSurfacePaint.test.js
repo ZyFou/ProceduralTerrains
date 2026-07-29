@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import { MANUAL_SURFACE_MATERIALS } from '../src/manual/ManualSurfaceCatalog.js';
 import { ManualSurfacePaintField } from '../src/manual/ManualSurfacePaintField.js';
 
@@ -55,5 +56,41 @@ describe('Manual Terrain surface painting', () => {
 
     source.dispose();
     restored.dispose();
+  });
+
+  it('reprojects paint and updates shader bounds when tiles are added', () => {
+    let currentBounds = { origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } };
+    const field = new ManualSurfacePaintField({
+      getBounds: () => currentBounds,
+      resolution: 96,
+    });
+    const uniforms = {
+      uPaintBiomeTexture: { value: null },
+      uPaintPropsTexture: { value: null },
+      uManualSurfaceOrigin: { value: new THREE.Vector2() },
+      uManualSurfaceSpan: { value: new THREE.Vector2() },
+    };
+    field.bind(uniforms);
+    field.stamp({ x: -20, z: 12, radius: 42, strength: 1, falloff: 0.7, materialChannel: 1 });
+    const before = field.sampleWeights(-20, 12)[1];
+
+    currentBounds = { origin: { x: -128, z: -128 }, span: { x: 512, z: 256 } };
+    expect(field.syncBounds()).toBe(true);
+    expect(uniforms.uManualSurfaceOrigin.value.toArray()).toEqual([-128, -128]);
+    expect(uniforms.uManualSurfaceSpan.value.toArray()).toEqual([512, 256]);
+    expect(field.sampleWeights(-20, 12)[1]).toBeGreaterThan(before * 0.8);
+    expect(field.sampleWeights(300, 12)[1]).toBe(0);
+    field.dispose();
+  });
+
+  it('keeps a round texture brush footprint on rectangular multi-tile bounds', () => {
+    const field = new ManualSurfacePaintField({
+      getBounds: () => ({ origin: { x: -256, z: -128 }, span: { x: 512, z: 256 } }),
+      resolution: 128,
+    });
+    field.stamp({ x: 0, z: 0, radius: 40, strength: 1, falloff: 0.7, materialChannel: 0 });
+    expect(field.sampleWeights(0, 28)[0]).toBeGreaterThan(0);
+    expect(field.sampleWeights(0, 48)[0]).toBe(0);
+    field.dispose();
   });
 });

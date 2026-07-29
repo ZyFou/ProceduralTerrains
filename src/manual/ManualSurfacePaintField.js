@@ -6,6 +6,14 @@ const smoothstep = (value) => {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
 };
+const BOUNDS_EPSILON = 1e-6;
+
+function boundsEqual(originA, spanA, originB, spanB) {
+  return Math.abs(originA.x - originB.x) <= BOUNDS_EPSILON
+    && Math.abs(originA.z - originB.z) <= BOUNDS_EPSILON
+    && Math.abs(spanA.x - spanB.x) <= BOUNDS_EPSILON
+    && Math.abs(spanA.z - spanB.z) <= BOUNDS_EPSILON;
+}
 
 function resolutionForTier(gpuTier) {
   if (gpuTier === 'low') return 384;
@@ -53,27 +61,101 @@ export class ManualSurfacePaintField {
     this.revision = 0;
     this._uploadAPending = false;
     this._uploadBPending = false;
+    this._boundUniforms = null;
+    this._scratchCurrent = new Float32Array(CHANNEL_COUNT);
+    this._scratchNext = new Float32Array(CHANNEL_COUNT);
+    this._scratchAverage = new Float32Array(CHANNEL_COUNT);
+    this._scratchSample = new Float32Array(CHANNEL_COUNT);
     this._syncBounds();
   }
 
-  _syncBounds() {
+  _readBounds() {
     const bounds = this.getBounds?.() ?? {};
-    this.origin = {
-      x: Number(bounds.origin?.x) || 0,
-      z: Number(bounds.origin?.z) || 0,
+    return {
+      origin: {
+        x: Number(bounds.origin?.x) || 0,
+        z: Number(bounds.origin?.z) || 0,
+      },
+      span: {
+        x: Math.max(1, Number(bounds.span?.x) || 1),
+        z: Math.max(1, Number(bounds.span?.z) || 1),
+      },
     };
-    this.span = {
-      x: Math.max(1, Number(bounds.span?.x) || 1),
-      z: Math.max(1, Number(bounds.span?.z) || 1),
-    };
+  }
+
+  _applyBoundsToUniforms() {
+    if (!this._boundUniforms) return;
+    this._boundUniforms.uManualSurfaceOrigin.value.set(this.origin.x, this.origin.z);
+    this._boundUniforms.uManualSurfaceSpan.value.set(this.span.x, this.span.z);
+  }
+
+  _resamplePackedField(source, sourceOrigin, sourceSpan) {
+    const target = new Uint8Array(this.resolution * this.resolution * 4);
+    const max = this.resolution - 1;
+    if (max <= 0) return target;
+    for (let py = 0; py < this.resolution; py++) {
+      const worldZ = this.origin.z + (py / max) * this.span.z;
+      const sourceY = ((worldZ - sourceOrigin.z) / sourceSpan.z) * max;
+      if (sourceY < 0 || sourceY > max) continue;
+      const y0 = Math.floor(sourceY);
+      const y1 = Math.min(max, y0 + 1);
+      const fy = sourceY - y0;
+      for (let px = 0; px < this.resolution; px++) {
+        const worldX = this.origin.x + (px / max) * this.span.x;
+        const sourceX = ((worldX - sourceOrigin.x) / sourceSpan.x) * max;
+        if (sourceX < 0 || sourceX > max) continue;
+        const x0 = Math.floor(sourceX);
+        const x1 = Math.min(max, x0 + 1);
+        const fx = sourceX - x0;
+        const targetIndex = (py * this.resolution + px) * 4;
+        const topLeft = (y0 * this.resolution + x0) * 4;
+        const topRight = (y0 * this.resolution + x1) * 4;
+        const bottomLeft = (y1 * this.resolution + x0) * 4;
+        const bottomRight = (y1 * this.resolution + x1) * 4;
+        for (let channel = 0; channel < 4; channel++) {
+          const top = source[topLeft + channel]
+            + (source[topRight + channel] - source[topLeft + channel]) * fx;
+          const bottom = source[bottomLeft + channel]
+            + (source[bottomRight + channel] - source[bottomLeft + channel]) * fx;
+          target[targetIndex + channel] = Math.round(top + (bottom - top) * fy);
+        }
+      }
+    }
+    return target;
+  }
+
+  _syncBounds() {
+    const next = this._readBounds();
+    const previousOrigin = this.origin;
+    const previousSpan = this.span;
+    const changed = !boundsEqual(previousOrigin, previousSpan, next.origin, next.span);
+    if (changed) {
+      const previousA = this.weightsA;
+      const previousB = this.weightsB;
+      this.origin = next.origin;
+      this.span = next.span;
+      this.weightsA = this._resamplePackedField(previousA, previousOrigin, previousSpan);
+      this.weightsB = this._resamplePackedField(previousB, previousOrigin, previousSpan);
+      this.textureA.image.data = this.weightsA;
+      this.textureB.image.data = this.weightsB;
+      this.textureA.needsUpdate = true;
+      this.textureB.needsUpdate = true;
+      this.revision++;
+    }
+    this._applyBoundsToUniforms();
+    return changed;
+  }
+
+  syncBounds() {
+    return this._syncBounds();
   }
 
   bind(uniforms) {
     if (!uniforms) return;
+    this._boundUniforms = uniforms;
     uniforms.uPaintBiomeTexture.value = this.textureA;
     uniforms.uPaintPropsTexture.value = this.textureB;
-    uniforms.uManualSurfaceOrigin.value.set(this.origin.x, this.origin.z);
-    uniforms.uManualSurfaceSpan.value.set(this.span.x, this.span.z);
+    this._applyBoundsToUniforms();
   }
 
   worldToPixel(x, z) {
@@ -186,33 +268,39 @@ export class ManualSurfacePaintField {
   stamp({ x, z, radius, strength, falloff, tool = 'paint', materialChannel = 0 }) {
     this._syncBounds();
     const center = this.worldToPixel(x, z);
-    const pixelRadius = Math.max(1, radius / Math.max(this.span.x, this.span.z) * this.resolution);
-    const minX = clamp(Math.floor(center.px - pixelRadius), 0, this.resolution - 1);
-    const maxX = clamp(Math.ceil(center.px + pixelRadius), 0, this.resolution - 1);
-    const minY = clamp(Math.floor(center.py - pixelRadius), 0, this.resolution - 1);
-    const maxY = clamp(Math.ceil(center.py + pixelRadius), 0, this.resolution - 1);
+    const pixelRadiusX = Math.max(1, radius / this.span.x * (this.resolution - 1));
+    const pixelRadiusY = Math.max(1, radius / this.span.z * (this.resolution - 1));
+    const minX = clamp(Math.floor(center.px - pixelRadiusX), 0, this.resolution - 1);
+    const maxX = clamp(Math.ceil(center.px + pixelRadiusX), 0, this.resolution - 1);
+    const minY = clamp(Math.floor(center.py - pixelRadiusY), 0, this.resolution - 1);
+    const maxY = clamp(Math.ceil(center.py + pixelRadiusY), 0, this.resolution - 1);
     const channel = clamp(Math.round(materialChannel) || 0, 0, CHANNEL_COUNT - 1);
-    const sampleStep = Math.max(1, Math.round(pixelRadius * 0.06));
-    const sourceMinX = Math.max(0, minX - sampleStep);
-    const sourceMaxX = Math.min(this.resolution - 1, maxX + sampleStep);
-    const sourceMinY = Math.max(0, minY - sampleStep);
-    const sourceMaxY = Math.min(this.resolution - 1, maxY + sampleStep);
+    const sampleStepX = Math.max(1, Math.round(pixelRadiusX * 0.06));
+    const sampleStepY = Math.max(1, Math.round(pixelRadiusY * 0.06));
+    const sourceMinX = Math.max(0, minX - sampleStepX);
+    const sourceMaxX = Math.min(this.resolution - 1, maxX + sampleStepX);
+    const sourceMinY = Math.max(0, minY - sampleStepY);
+    const sourceMaxY = Math.min(this.resolution - 1, maxY + sampleStepY);
     const sourceA = tool === 'blend'
       ? this._copyRegion(this.weightsA, sourceMinX, sourceMaxX, sourceMinY, sourceMaxY)
       : null;
     const sourceB = tool === 'blend'
       ? this._copyRegion(this.weightsB, sourceMinX, sourceMaxX, sourceMinY, sourceMaxY)
       : null;
-    const current = new Float32Array(CHANNEL_COUNT);
-    const next = new Float32Array(CHANNEL_COUNT);
-    const average = new Float32Array(CHANNEL_COUNT);
-    const sample = new Float32Array(CHANNEL_COUNT);
+    const current = this._scratchCurrent;
+    const next = this._scratchNext;
+    const average = this._scratchAverage;
+    const sample = this._scratchSample;
     let changedA = false;
     let changedB = false;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
-        const alpha = this._brushAlpha(Math.hypot(px - center.px, py - center.py), pixelRadius, falloff, strength);
+        const normalizedDistance = Math.hypot(
+          (px - center.px) / pixelRadiusX,
+          (py - center.py) / pixelRadiusY,
+        );
+        const alpha = this._brushAlpha(normalizedDistance, 1, falloff, strength);
         if (alpha <= 0) continue;
         const pixelIndex = py * this.resolution + px;
         if (tool === 'blend') {
@@ -239,8 +327,8 @@ export class ManualSurfacePaintField {
           let count = 0;
           for (let oy = -1; oy <= 1; oy++) {
             for (let ox = -1; ox <= 1; ox++) {
-              const sx = clamp(px + ox * sampleStep, 0, this.resolution - 1);
-              const sy = clamp(py + oy * sampleStep, 0, this.resolution - 1);
+              const sx = clamp(px + ox * sampleStepX, 0, this.resolution - 1);
+              const sy = clamp(py + oy * sampleStepY, 0, this.resolution - 1);
               this._readWeightsInto(
                 sample,
                 this._regionPixelIndex(sourceA, sx, sy),
