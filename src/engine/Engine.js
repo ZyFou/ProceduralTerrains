@@ -224,17 +224,28 @@ export class Engine {
     this._clock = new THREE.Clock();
     this._disposed = false;
     this._bootPending = true;
+    this._qualityPending = true;
+    this._bootFallbackFrameReady = false;
+    this._bootWatchdogTimer = null;
+    this._qualityWatchdogTimer = null;
+    this._bootGateLogAt = 0;
     this._waterDeferred = true;
     this._waterMaterialWarmed = false;
     this._waterWarmPromise = null;
     this._waterWarmRetryTimer = null;
     this._waterWarmRetryCount = 0;
+    this._waterWarmFailed = false;
     this._terrainHeightBakeDeferred = true;
+    this._terrainHeightBakeFailed = false;
     this._postFirstPaintWarmupsStarted = false;
     this._postFirstPaintWarmTimer = null;
     this._postFirstPaintWaterTimer = null;
     this._terrainUpgradeRetryTimer = null;
     this._terrainUpgradeRetryCount = 0;
+    this._terrainVariantRetryTimer = null;
+    this._terrainVariantRetryCount = 0;
+    this._terrainVariantFailed = false;
+    this._terrainQualityTimer = null;
     this._contextLost = false;
     // Async shader compilation state (KHR_parallel_shader_compile):
     // while > 0, ticks skip rendering so nothing forces a blocking link.
@@ -2689,8 +2700,9 @@ export class Engine {
     );
     if (!this._bootPending) {
       this.cb.onStatus(this.board.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
-    } else if (!this.board.isBuilding) {
-      this._completeBootIfQualityReady();
+    } else {
+      this._completeBootIfInteractiveReady();
+      if (!this.board.isBuilding) this._completeBootIfQualityReady();
     }
     return created;
   }
@@ -3192,17 +3204,15 @@ export class Engine {
     const parallelCompile = Boolean(
       this.renderer.getContext().getExtension('KHR_parallel_shader_compile')
     );
-    console.info('[shader compile]', {
-      materials: list.length,
-      pass: renderTarget ? 'scene-target' : 'canvas',
-      syncCompileMs: syncCompileMs.toFixed(0),
-      asyncWaitMs: asyncWaitMs.toFixed(0),
-      ready: canvasResult.ready,
-      timedOut: canvasResult.timedOut,
-      pending: canvasResult.pendingCount,
-      parallelCompile,
-      fragmentChars: list.map((material) => material.fragmentShader?.length ?? 0),
-    });
+    console.info(
+      `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
+      + ` materials=${list.length}`
+      + ` sync=${syncCompileMs.toFixed(0)}ms`
+      + ` async=${asyncWaitMs.toFixed(0)}ms`
+      + ` ready=${canvasResult.ready}`
+      + ` pending=${canvasResult.pendingCount}`
+      + ` parallel=${parallelCompile}`
+    );
     onProgress?.(list.length, total);
 
     if (canvasOnly) {
@@ -3218,17 +3228,15 @@ export class Engine {
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
-    console.info('[shader compile]', {
-      materials: list.length,
-      pass: 'underwater',
-      syncCompileMs: rtSyncCompileMs.toFixed(0),
-      asyncWaitMs: rtAsyncWaitMs.toFixed(0),
-      ready: rtResult.ready,
-      timedOut: rtResult.timedOut,
-      pending: rtResult.pendingCount,
-      parallelCompile,
-      fragmentChars: list.map((material) => material.fragmentShader?.length ?? 0),
-    });
+    console.info(
+      `[shader compile] pass=underwater`
+      + ` materials=${list.length}`
+      + ` sync=${rtSyncCompileMs.toFixed(0)}ms`
+      + ` async=${rtAsyncWaitMs.toFixed(0)}ms`
+      + ` ready=${rtResult.ready}`
+      + ` pending=${rtResult.pendingCount}`
+      + ` parallel=${parallelCompile}`
+    );
     onProgress?.(total, total);
     return {
       ready: canvasResult.ready && rtResult.ready,
@@ -3501,6 +3509,8 @@ export class Engine {
     try {
       if (!this._disposed && this._compiling === 1) {
         const paintMs = this._renderInitialStudioFrame();
+        this._bootFallbackFrameReady = true;
+        this._startBootWatchdog();
         console.info(
           `[boot] first hidden fallback frame ${(paintMs ?? 0).toFixed(0)}ms after lightweight warmup `
           + `${(performance.now() - startedAt).toFixed(0)}ms `
@@ -3517,27 +3527,123 @@ export class Engine {
     }
   }
 
-  _completeBootIfQualityReady(reason = 'quality upgrades ready') {
+  _bootReadinessSnapshot() {
+    const targetVariant = this._targetTerrainVariant();
+    return {
+      bootPending: this._bootPending,
+      fallbackFrameReady: this._bootFallbackFrameReady,
+      terrain: {
+        minimal: !!this.terrainMaterial?.userData?.minimalFragment,
+        current: this.terrainMaterial?.userData?.terrainVariant ?? null,
+        target: targetVariant,
+        upgradePending: !!this._terrainUpgradePromise,
+      },
+      bake: {
+        heightReady: (this.uniforms?.uUseTerrainHeightTex?.value ?? 0) > 0.5,
+        biomeReady: (this.uniforms?.uUseTerrainBiomeTex?.value ?? 0) > 0.5,
+        active: !!this.terrainHeightBaker?.isBaking,
+        progress: this.profiler?.getMetric?.('terrainBakeProgress') ?? null,
+      },
+      water: {
+        deferred: this._waterDeferred,
+        previewReady: this._isStudioWaterPreviewReady(),
+        warmed: this._waterMaterialWarmed,
+        enabled: this.params?.waterEnabled !== false,
+      },
+      board: {
+        active: this.board?.activeChunkCount ?? 0,
+        target: this.board?.targetChunkCount ?? 0,
+        building: !!this.board?.isBuilding,
+        lodPending: this.board?._lodRebuildQueue?.length ?? 0,
+      },
+    };
+  }
+
+  _logBootGate(label) {
+    const now = performance.now();
+    if (now - this._bootGateLogAt < 1000) return;
+    this._bootGateLogAt = now;
+    console.info(`[boot gate] ${label}`, this._bootReadinessSnapshot());
+  }
+
+  _startBootWatchdog() {
+    if (this._disposed || !this._bootPending || !this._bootFallbackFrameReady
+        || this._bootWatchdogTimer) return;
+    const delayMs = this.gpuTier === 'low' ? 8000 : 12000;
+    this._bootWatchdogTimer = setTimeout(() => {
+      this._bootWatchdogTimer = null;
+      if (this._disposed || !this._bootPending || !this._bootFallbackFrameReady) return;
+      console.warn('[boot] degraded interactive release', this._bootReadinessSnapshot());
+      if (this._releaseBootFallback('degraded interactive watchdog')) {
+        this.cb.onToast?.('Terrain editor opened in reduced quality; visual improvements are continuing.');
+      }
+    }, delayMs);
+  }
+
+  _startQualityWatchdog() {
+    if (this._disposed || !this._qualityPending || this._qualityWatchdogTimer) return;
+    this._qualityWatchdogTimer = setTimeout(() => {
+      this._qualityWatchdogTimer = null;
+      if (this._disposed || !this._qualityPending) return;
+      console.warn('[boot] optional quality work is still pending', this._bootReadinessSnapshot());
+      this._bgWorkEnd('boot-quality');
+    }, 30000);
+  }
+
+  _completeBootIfInteractiveReady(reason = 'interactive terrain ready') {
     if (!this._bootPending || this._disposed) return false;
+
+    const nodeMode = this.projectMode === 'nodes';
+    const terrainReady = nodeMode || !this.terrainMaterial?.userData?.minimalFragment;
+    const boardReady = nodeMode
+      || !this.board
+      || (this.board.activeChunkCount ?? 0) > 0;
+    const waterSafe = nodeMode
+      || this.params.waterEnabled === false
+      || !this.waterMaterial
+      || !this._waterDeferred
+      || (this._waterDeferred && this.water?.visible !== true);
+    if (!this._bootFallbackFrameReady || !terrainReady || !boardReady || !waterSafe) {
+      this._logBootGate('waiting for interactive frame');
+      return false;
+    }
+
+    return this._releaseBootFallback(reason);
+  }
+
+  _completeBootIfQualityReady(reason = 'quality upgrades ready') {
+    if (this._qualityPending === false || this._disposed) return false;
 
     const nodeMode = this.projectMode === 'nodes';
     const targetVariant = this._targetTerrainVariant();
     const terrainReady = nodeMode
       || (!this.terrainMaterial?.userData?.minimalFragment
-        && this.terrainMaterial?.userData?.terrainVariant === targetVariant);
+        && (this.terrainMaterial?.userData?.terrainVariant === targetVariant
+          || this._terrainVariantFailed));
     const bakeReady = nodeMode
       || this._debug?.disableHeightBake
+      || this._terrainHeightBakeFailed
       || (this.uniforms.uUseTerrainHeightTex.value > 0.5
         && this.uniforms.uUseTerrainBiomeTex.value > 0.5
         && !this.terrainHeightBaker?.isBaking);
     const waterReady = nodeMode
       || this.params.waterEnabled === false
       || !this.waterMaterial
-      || !this._waterDeferred;
+      || !this._waterDeferred
+      || this._waterWarmFailed;
     const boardReady = !this.board?.isBuilding
       && !(this.board?._lodRebuildQueue?.length > 0);
-    if (!terrainReady || !bakeReady || !waterReady || !boardReady) return false;
+    if (!terrainReady || !bakeReady || !waterReady || !boardReady) {
+      if (this._bootPending) this._logBootGate('waiting for quality upgrades');
+      return false;
+    }
 
+    this._qualityPending = false;
+    if (this._qualityWatchdogTimer) {
+      clearTimeout(this._qualityWatchdogTimer);
+      this._qualityWatchdogTimer = null;
+    }
+    this._bgWorkEnd('boot-quality');
     let paintMs = null;
     if (!this._contextLost) {
       try {
@@ -3552,7 +3658,8 @@ export class Engine {
       + `water ready=${waterReady}, board ready=${boardReady}); `
       + `elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`
     );
-    return this._releaseBootFallback(reason, { render: false });
+    if (this._bootPending) return this._releaseBootFallback(reason, { render: false });
+    return true;
   }
 
   _releaseBootFallback(reason = 'fallback', { render = true } = {}) {
@@ -3571,12 +3678,20 @@ export class Engine {
     }
 
     this._bootPending = false;
+    if (this._bootWatchdogTimer) {
+      clearTimeout(this._bootWatchdogTimer);
+      this._bootWatchdogTimer = null;
+    }
     this.cb.onStatus('Ready', false);
     if (this._tierNotice) {
       this.cb.onToast(this._tierNotice);
       this._tierNotice = null;
     }
     this.cb.onBootComplete?.();
+    if (this._qualityPending) {
+      this._bgWorkStart('boot-quality', 'Improving terrain quality…');
+      this._startQualityWatchdog();
+    }
     this._scheduleErosionGPUWarmImport();
     return true;
   }
@@ -3607,11 +3722,13 @@ export class Engine {
    * busy=true this never gates rendering or the mode-switch overlay.
    */
   _bgWorkStart(id, label) {
+    if (!this._bgWork) this._bgWork = new Map();
     this._bgWork.set(id, label);
     this.cb.onBackgroundWork?.(label);
   }
 
   _bgWorkEnd(id) {
+    if (!this._bgWork) return;
     this._bgWork.delete(id);
     const rest = [...this._bgWork.values()];
     this.cb.onBackgroundWork?.(rest.length ? rest[rest.length - 1] : null);
@@ -3686,6 +3803,7 @@ export class Engine {
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
           console.info(`[boot] ${variant} terrain live material source swapped in ${swapMs.toFixed(1)}ms; elapsed ${(performance.now() - t0).toFixed(0)}ms`);
+          this._completeBootIfInteractiveReady();
           this._completeBootIfQualityReady();
         }
       } catch (e) {
@@ -3701,7 +3819,11 @@ export class Engine {
           this._terrainUpgradeRetryCount++;
           void this._upgradeMinimalTerrain(renderTarget, variant);
         }, 3000);
+      } else if (!ready && !this._disposed) {
+        this._terrainVariantFailed = true;
+        this._completeBootIfQualityReady();
       }
+      if (swapped) this._terrainVariantFailed = false;
       return { ready, swapped, compileWaitMs, swapMs };
     })();
     this._terrainUpgradePromise = promise;
@@ -3709,6 +3831,19 @@ export class Engine {
       if (this._terrainUpgradePromise === promise) this._terrainUpgradePromise = null;
     });
     return promise;
+  }
+
+  _bootTerrainVariant() {
+    return this.gpuTier === 'high' ? this._targetTerrainVariant() : 'base';
+  }
+
+  _scheduleTerrainQualityUpgrade(renderTarget = null, delayMs = 500) {
+    if (this._disposed || this._terrainQualityTimer) return;
+    this._terrainQualityTimer = setTimeout(() => {
+      this._terrainQualityTimer = null;
+      if (this._disposed) return;
+      void this._ensureTerrainShaderVariantAsync(renderTarget);
+    }, delayMs);
   }
 
   _schedulePostFirstPaintWarmups(delayMs = 850, renderTarget = null) {
@@ -3729,47 +3864,70 @@ export class Engine {
       // replace it with full surface shaders or start unrelated water work.
       if (this.projectMode === 'nodes') {
         this._postFirstPaintWarmupsStarted = false;
+        this._completeBootIfInteractiveReady();
         this._completeBootIfQualityReady();
         return;
       }
 
-      try {
-        this._terrainHeightBakeDeferred = false;
-        this._ensureTerrainHeightTex();
-      } catch (e) {
-        this._terrainHeightBakeDeferred = true;
-        console.warn('Deferred height bake failed', e);
-      }
-
-      // The height baker advances by one narrow stripe per frame. Shader
-      // translation is staggered after the first stripe so neither job owns a
-      // long uninterrupted startup interval.
+      // Establish the interactive terrain before creating/rendering the bake
+      // material. Its first render may synchronously translate a large shader
+      // on ANGLE, so it must never precede the usable Base/target material.
       const jobs = [];
+      let terrainBootJob = Promise.resolve();
       if (this.terrainMaterial?.userData?.minimalFragment) {
-        jobs.push(yieldFrame()
-          .then(() => this._upgradeMinimalTerrain(renderTarget, 'base'))
-          .then(() => {
-            const upgradeFeatures = () => {
-              if (!this._disposed) void this._ensureTerrainShaderVariantAsync(renderTarget);
-            };
-            if (typeof requestIdleCallback === 'function') {
-              requestIdleCallback(upgradeFeatures, { timeout: 6000 });
-            } else {
-              setTimeout(upgradeFeatures, 2500);
+        terrainBootJob = (async () => {
+          await yieldFrame();
+          const bootVariant = this._bootTerrainVariant();
+          let result = await this._upgradeMinimalTerrain(renderTarget, bootVariant);
+          // High-tier devices normally compile the requested shader directly.
+          // If that fails, guarantee a lightweight interactive material instead
+          // of leaving the minimal boot fragment as the only usable program.
+          if (!result?.swapped && bootVariant !== 'base' && !this._disposed) {
+            if (this._terrainUpgradeRetryTimer) {
+              clearTimeout(this._terrainUpgradeRetryTimer);
+              this._terrainUpgradeRetryTimer = null;
             }
-          }));
+            await yieldTask();
+            result = await this._upgradeMinimalTerrain(renderTarget, 'base');
+          }
+          if (result?.swapped) {
+            this._completeBootIfInteractiveReady();
+            if (this.terrainMaterial?.userData?.terrainVariant !== this._targetTerrainVariant()) {
+              this._scheduleTerrainQualityUpgrade(renderTarget);
+            }
+          }
+          return result;
+        })();
+        jobs.push(terrainBootJob);
       }
+      jobs.push(terrainBootJob.then(async () => {
+        await yieldFrame();
+        if (this._disposed) return false;
+        try {
+          this._terrainHeightBakeDeferred = false;
+          this._ensureTerrainHeightTex();
+          return true;
+        } catch (e) {
+          this._terrainHeightBakeDeferred = true;
+          this._terrainHeightBakeFailed = true;
+          console.warn('Deferred height bake failed', e);
+          this._completeBootIfInteractiveReady();
+          this._completeBootIfQualityReady();
+          return false;
+        }
+      }));
       if (this.params.waterEnabled !== false && this._waterDeferred) {
-        jobs.push(new Promise((resolve) => {
+        jobs.push(terrainBootJob.then(() => new Promise((resolve) => {
           this._postFirstPaintWaterTimer = setTimeout(() => {
             this._postFirstPaintWaterTimer = null;
             resolve(this._disposed ? undefined : this._warmDeferredWater(renderTarget));
-          }, 1000);
-        }));
+          }, 250);
+        })));
       }
       Promise.allSettled(jobs).then(() => {
         if (!this._disposed) {
           this._needsRender = true;
+          this._completeBootIfInteractiveReady();
           this._completeBootIfQualityReady();
         }
       });
@@ -3779,7 +3937,7 @@ export class Engine {
   }
 
   _warmDeferredWater(renderTarget = null) {
-    if (this._disposed || !this._waterDeferred || !this.waterMaterial) return;
+    if (this._disposed || !this._waterDeferred || !this.waterMaterial) return false;
     if (this._waterWarmPromise) return this._waterWarmPromise;
     const job = this._warmDeferredWaterImpl(renderTarget);
     const pending = job.finally(() => {
@@ -3787,6 +3945,29 @@ export class Engine {
     });
     this._waterWarmPromise = pending;
     return this._waterWarmPromise;
+  }
+
+  _isStudioWaterPreviewReady() {
+    if (this.worldMode !== 'studio') return true;
+    return this.uniforms?.uWaterTerrainHeightTex?.value != null
+      && this.uniforms?.uWaterTerrainBiomeTex?.value != null
+      && (this.uniforms?.uUseWaterTerrainBiomeTex?.value ?? 0) > 0.5;
+  }
+
+  _scheduleWaterWarmRetry(renderTarget = null, delayMs = 250) {
+    if (this._disposed || !this._waterDeferred || this._waterWarmRetryTimer) return false;
+    if (this._waterWarmRetryCount >= 3) {
+      this._waterWarmFailed = true;
+      this._completeBootIfQualityReady();
+      return false;
+    }
+    this._waterWarmRetryTimer = setTimeout(() => {
+      this._waterWarmRetryTimer = null;
+      if (this._disposed || !this._waterDeferred) return;
+      this._waterWarmRetryCount++;
+      void this._warmDeferredWater(renderTarget);
+    }, delayMs);
+    return true;
   }
 
   async _warmDeferredWaterImpl(renderTarget = null) {
@@ -3798,13 +3979,15 @@ export class Engine {
       this._ensureTerrainHeightTex();
     } catch (e) {
       this._terrainHeightBakeDeferred = true;
+      this._terrainHeightBakeFailed = true;
       console.warn('Water height bake failed', e);
     }
 
-    if (this.worldMode === 'studio' && this.uniforms.uUseTerrainHeightTex.value < 0.5) {
-      console.warn('Studio water remains deferred because its baked terrain height is unavailable');
+    if (!this._isStudioWaterPreviewReady()) {
+      console.warn('Studio water preview is not ready; retrying water startup');
+      this._scheduleWaterWarmRetry(renderTarget);
       if (!this._bootPending) this.cb.onStatus('Ready', false);
-      return;
+      return false;
     }
 
     const materials = this.waterSystem?.prepareInitialMaterials(
@@ -3825,17 +4008,11 @@ export class Engine {
           console.warn(
             `Water compile still pending after ${result?.waitMs?.toFixed?.(0) ?? 0}ms; keeping water deferred`
           );
-          if (!this._disposed && this._waterWarmRetryCount < 1 && !this._waterWarmRetryTimer) {
-            this._waterWarmRetryTimer = setTimeout(() => {
-              this._waterWarmRetryTimer = null;
-              if (this._disposed || !this._waterDeferred) return;
-              this._waterWarmRetryCount++;
-              void this._warmDeferredWater(renderTarget);
-            }, 3000);
-          }
+          this._scheduleWaterWarmRetry(renderTarget, 3000);
         }
       } catch (e) {
         console.warn('Deferred water warmup failed', e);
+        this._scheduleWaterWarmRetry(renderTarget, 1000);
       }
     }
     if (this._disposed || !this._waterMaterialWarmed) {
@@ -3843,14 +4020,17 @@ export class Engine {
         console.warn('Water material was not activated because its shader is not ready');
         if (!this._bootPending) this.cb.onStatus('Ready', false);
       }
-      return;
+      return false;
     }
     this._waterDeferred = false;
+    this._waterWarmFailed = false;
     this.waterSystem?.activateInitialMaterials(this.params, this.worldMode);
     this._needsRender = true;
     console.info(`[boot] water init ${(performance.now() - t0).toFixed(0)}ms (precompiled)`);
+    this._completeBootIfInteractiveReady();
     this._completeBootIfQualityReady();
     if (!this._bootPending) this.cb.onStatus('Ready', false);
+    return true;
   }
 
   /**
@@ -5171,6 +5351,7 @@ export class Engine {
         b.cols,
         b.rows,
       );
+      this._terrainHeightBakeFailed = false;
       // Water gets the complete low-resolution union immediately. Terrain
       // shading deliberately stays procedural during the bake: sharing this
       // preview with its normals/biomes caused the visible coarse -> sharp pop.
@@ -5182,12 +5363,26 @@ export class Engine {
       this.profiler.setMetric('terrainBakePreviewReady', 1);
       this._terrainBakeJobKey = jobKey;
       this._terrainBakeElapsedMs = 0;
+      this._terrainBakeStripeRows = this.gpuTier === 'low' ? 8
+        : (this.gpuTier === 'medium' ? 16 : 32);
+      this._completeBootIfInteractiveReady();
     }
 
     const _t0 = performance.now();
-    const stripeRows = this.gpuTier === 'low' ? 32 : (this.gpuTier === 'medium' ? 48 : 64);
+    const stripeRows = this._terrainBakeStripeRows
+      ?? (this.gpuTier === 'low' ? 8 : (this.gpuTier === 'medium' ? 16 : 32));
     const result = this.terrainHeightBaker.step(stripeRows);
     const stepMs = performance.now() - _t0;
+    const maxStripeRows = this.gpuTier === 'low' ? 32
+      : (this.gpuTier === 'medium' ? 48 : 64);
+    if (stepMs > 8) {
+      this._terrainBakeStripeRows = Math.max(4, Math.floor(stripeRows / 2));
+    } else if (stepMs < 3) {
+      this._terrainBakeStripeRows = Math.min(
+        maxStripeRows,
+        Math.max(stripeRows + 1, Math.round(stripeRows * 1.25)),
+      );
+    }
     this._terrainBakeElapsedMs = (this._terrainBakeElapsedMs || 0) + stepMs;
     this.profiler.setMetric('lastBakeStepMs', stepMs);
     this.profiler.setMetric('terrainBakeProgress', result.progress ?? 0);
@@ -5208,6 +5403,7 @@ export class Engine {
     this._bakedStudioLayout = layoutKey;
     this._terrainBakeJobKey = null;
     this._terrainBakeElapsedMs = 0;
+    this._terrainBakeStripeRows = null;
     this.profiler.setMetric('terrainBakePreviewReady', 0);
     this._completeBootIfQualityReady();
   }
@@ -5822,6 +6018,9 @@ export class Engine {
         renderTarget,
       });
       if (result?.ready !== true || token !== this._terrainVariantToken || this._disposed) {
+        if (result?.ready !== true && token === this._terrainVariantToken) {
+          this._scheduleTerrainVariantRetry(renderTarget);
+        }
         return false;
       }
       this.infiniteTerrainClipmap?.setProgram(oct, this._stackGLSL);
@@ -5831,15 +6030,34 @@ export class Engine {
       if (!target || target.userData?.minimalFragment) return false;
       rebuildTerrainShaderSource(target, program, { variant });
       this._needsRender = true;
+      this._terrainVariantRetryCount = 0;
+      this._terrainVariantFailed = false;
       this._completeBootIfQualityReady();
       return true;
     } catch (error) {
       console.warn('Terrain shader variant compile failed', error);
+      if (token === this._terrainVariantToken) this._scheduleTerrainVariantRetry(renderTarget);
       return false;
     } finally {
       this._bgWorkEnd('terrain-variant');
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
     }
+  }
+
+  _scheduleTerrainVariantRetry(renderTarget = null, delayMs = 3000) {
+    if (this._disposed || this._terrainVariantRetryTimer) return false;
+    if (this._terrainVariantRetryCount >= 2) {
+      this._terrainVariantFailed = true;
+      this._completeBootIfQualityReady();
+      return false;
+    }
+    this._terrainVariantRetryTimer = setTimeout(() => {
+      this._terrainVariantRetryTimer = null;
+      if (this._disposed) return;
+      this._terrainVariantRetryCount++;
+      void this._ensureTerrainShaderVariantAsync(renderTarget);
+    }, delayMs);
+    return true;
   }
 
   _applyTerrainDetailPerf() {
@@ -7361,6 +7579,7 @@ export class Engine {
         // so the loading cover cannot reveal an intermediate mesh.
         if (this._bootPending && !this.board.isBuilding
             && !this.board._lodRebuildQueue.length) {
+          this._completeBootIfInteractiveReady();
           this._completeBootIfQualityReady();
         }
       }
@@ -7833,9 +8052,25 @@ export class Engine {
       clearTimeout(this._terrainUpgradeRetryTimer);
       this._terrainUpgradeRetryTimer = null;
     }
+    if (this._terrainVariantRetryTimer) {
+      clearTimeout(this._terrainVariantRetryTimer);
+      this._terrainVariantRetryTimer = null;
+    }
+    if (this._terrainQualityTimer) {
+      clearTimeout(this._terrainQualityTimer);
+      this._terrainQualityTimer = null;
+    }
     if (this._waterWarmRetryTimer) {
       clearTimeout(this._waterWarmRetryTimer);
       this._waterWarmRetryTimer = null;
+    }
+    if (this._bootWatchdogTimer) {
+      clearTimeout(this._bootWatchdogTimer);
+      this._bootWatchdogTimer = null;
+    }
+    if (this._qualityWatchdogTimer) {
+      clearTimeout(this._qualityWatchdogTimer);
+      this._qualityWatchdogTimer = null;
     }
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);

@@ -288,7 +288,9 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) {
       setWebglError('Viewport canvas is not available.');
+      bootedRef.current = true;
       loadingRef.current.done('boot');
+      landingRef.current?.setBootReady(true);
       return undefined;
     }
 
@@ -298,9 +300,19 @@ export default function App() {
     let bootTimer = null;
     let cancelled = false;
 
-    // Keep the cover up for slow drivers too. This timer only refreshes the
-    // message; it must never reveal the canvas while terrain/water quality is
-    // still being prepared.
+    const completeBootUi = () => {
+      if (cancelled || bootedRef.current) return;
+      bootedRef.current = true;
+      if (bootTimer) {
+        clearTimeout(bootTimer);
+        bootTimer = null;
+      }
+      loadingRef.current.done('boot');
+      landingRef.current?.setBootReady(true);
+    };
+
+    // Engine owns the bounded degraded-release policy. This UI timer only
+    // refreshes the message while the first safe interactive frame is pending.
     bootTimer = setTimeout(() => {
       if (bootedRef.current || cancelled) return;
       loadingRef.current.update('boot', {
@@ -329,14 +341,8 @@ export default function App() {
             setStatus({ text, busy });
             // feed the active blocking task's detail line
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
-            // The engine only reports Ready after the final terrain variant,
-            // bake, water and board have all produced a complete frame.
-            if (!busy && !bootedRef.current) {
-              bootedRef.current = true;
-              loadingRef.current.done('boot');
-            }
           },
-          onBootComplete: () => landingRef.current?.setBootReady(true),
+          onBootComplete: completeBootUi,
           onStats: (stats) => liveMetrics.update({ stats }),
           onBackgroundWork: setBgWork,
           onCompileProgress: setCompileProgress,
@@ -408,9 +414,7 @@ export default function App() {
       const message = err?.message || 'Could not create a WebGL context.';
       setWebglError(message);
       setStatus({ text: 'WebGL unavailable', busy: false });
-      bootedRef.current = true;
-      loadingRef.current.done('boot');
-      landingRef.current?.setBootReady(true);
+      completeBootUi();
       return;
     }
 
@@ -1560,7 +1564,9 @@ export default function App() {
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
-  const showBlockingOverlay = block && !landing?.visible;
+  const showBlockingOverlay = block
+    && !landing?.visible
+    && !(block.id === 'boot' && landing?.bootReady);
 
   useLayoutEffect(() => {
     if (!showStudioUI || !isStudio || !engineRef.current) return;

@@ -91,6 +91,71 @@ describe('water startup shaders', () => {
     expect(engine._needsRender).toBe(true);
   });
 
+  it('activates Studio water from its preview before the final terrain bake is ready', async () => {
+    const engine = Object.create(Engine.prototype);
+    const uniforms = createTerrainUniforms();
+    uniforms.uUseTerrainHeightTex.value = 0;
+    uniforms.uUseTerrainBiomeTex.value = 0;
+    uniforms.uWaterTerrainHeightTex.value = new THREE.Texture();
+    uniforms.uWaterTerrainBiomeTex.value = new THREE.Texture();
+    uniforms.uUseWaterTerrainBiomeTex.value = 1;
+    const waterMaterial = {};
+    const waterSystem = {
+      prepareInitialMaterials: vi.fn(() => [waterMaterial]),
+      activateInitialMaterials: vi.fn(),
+    };
+    Object.assign(engine, {
+      _bootPending: true,
+      _disposed: false,
+      _waterDeferred: true,
+      _waterMaterialWarmed: false,
+      _terrainHeightBakeDeferred: false,
+      _waterWarmRetryCount: 0,
+      worldMode: 'studio',
+      params: { waterEnabled: true },
+      uniforms,
+      waterMaterial,
+      waterSystem,
+      cb: { onStatus: vi.fn() },
+      _ensureTerrainHeightTex: vi.fn(),
+      _compileMaterialVariants: vi.fn(async () => ({ ready: true })),
+      _recordWaterShaderCompile: vi.fn(),
+      _completeBootIfInteractiveReady: vi.fn(),
+      _completeBootIfQualityReady: vi.fn(),
+    });
+
+    await expect(engine._warmDeferredWaterImpl()).resolves.toBe(true);
+
+    expect(uniforms.uUseTerrainHeightTex.value).toBe(0);
+    expect(engine._waterDeferred).toBe(false);
+    expect(waterSystem.activateInitialMaterials).toHaveBeenCalledTimes(1);
+    expect(engine._completeBootIfInteractiveReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries water startup when its dedicated preview is unavailable', async () => {
+    const engine = Object.create(Engine.prototype);
+    const uniforms = createTerrainUniforms();
+    Object.assign(engine, {
+      _bootPending: true,
+      _disposed: false,
+      _waterDeferred: true,
+      _terrainHeightBakeDeferred: false,
+      worldMode: 'studio',
+      uniforms,
+      waterMaterial: {},
+      cb: { onStatus: vi.fn() },
+      _ensureTerrainHeightTex: vi.fn(),
+      _scheduleWaterWarmRetry: vi.fn(() => true),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(engine._warmDeferredWaterImpl()).resolves.toBe(false);
+
+    expect(engine._scheduleWaterWarmRetry).toHaveBeenCalledWith(null);
+    expect(engine._waterDeferred).toBe(true);
+    warn.mockRestore();
+  });
+
   it('applies the shore distance to legacy water without recompiling', () => {
     const material = createWaterMaterial(createTerrainUniforms(), 7, stackGLSL);
     const fragmentShader = material.fragmentShader;
@@ -279,6 +344,92 @@ describe('water startup shaders', () => {
     expect(engine._bootPending).toBe(false);
     expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases an interactive Base frame while bake, board and LOD quality work continue', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _bootPending: true,
+      _qualityPending: true,
+      _disposed: false,
+      _contextLost: false,
+      _bootFallbackFrameReady: true,
+      _tierNotice: null,
+      _waterDeferred: true,
+      projectMode: 'procedural',
+      params: { waterEnabled: true },
+      terrainMaterial: {
+        userData: {
+          minimalFragment: false,
+          terrainVariant: 'base',
+        },
+      },
+      waterMaterial: {},
+      water: { visible: false },
+      board: {
+        activeChunkCount: 1,
+        targetChunkCount: 64,
+        isBuilding: true,
+        _lodRebuildQueue: [3, 2, 1],
+      },
+      cb: {
+        onStatus: vi.fn(),
+        onBootComplete: vi.fn(),
+        onBackgroundWork: vi.fn(),
+      },
+      _bgWork: new Map(),
+      _renderInitialStudioFrame: vi.fn(),
+      _scheduleErosionGPUWarmImport: vi.fn(),
+      _startQualityWatchdog: vi.fn(),
+    });
+
+    expect(engine._completeBootIfInteractiveReady()).toBe(true);
+
+    expect(engine._bootPending).toBe(false);
+    expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
+    expect(engine.cb.onBackgroundWork).toHaveBeenLastCalledWith('Improving terrain quality…');
+  });
+
+  it('uses the requested boot variant on high tier and Base on weaker tiers', () => {
+    const engine = Object.create(Engine.prototype);
+    engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
+    engine.projectMode = 'procedural';
+    engine.params = {};
+
+    engine.gpuTier = 'high';
+    expect(engine._bootTerrainVariant()).toBe('detail');
+    engine.gpuTier = 'medium';
+    expect(engine._bootTerrainVariant()).toBe('base');
+    engine.gpuTier = 'low';
+    expect(engine._bootTerrainVariant()).toBe('base');
+  });
+
+  it('runs the degraded watchdog only after a fallback frame exists', () => {
+    vi.useFakeTimers();
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _bootPending: true,
+      _disposed: false,
+      _bootFallbackFrameReady: false,
+      _bootWatchdogTimer: null,
+      gpuTier: 'low',
+      cb: { onToast: vi.fn() },
+      _bootReadinessSnapshot: vi.fn(() => ({})),
+      _releaseBootFallback: vi.fn(() => true),
+    });
+
+    engine._startBootWatchdog();
+    vi.advanceTimersByTime(8000);
+    expect(engine._releaseBootFallback).not.toHaveBeenCalled();
+
+    engine._bootFallbackFrameReady = true;
+    engine._startBootWatchdog();
+    vi.advanceTimersByTime(7999);
+    expect(engine._releaseBootFallback).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(engine._releaseBootFallback).toHaveBeenCalledWith('degraded interactive watchdog');
+    expect(engine.cb.onToast).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it('makes boot fallback release idempotent', () => {
