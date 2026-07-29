@@ -1047,6 +1047,326 @@ body {
 .realworld-progress { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--accent); }
 .realworld-attribution { margin-top: 8px; font-size: 10px; opacity: 0.55; }
 
+.realworld-map-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  margin: 8px 0 4px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font: 600 12px var(--font);
+  cursor: var(--cursor-pointer);
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.realworld-map-open:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text-bright);
+}
+
+.realworld-map-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 6, 11, .76);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.realworld-map-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1120px, 96vw);
+  height: min(760px, 91vh);
+  min-height: 520px;
+  overflow: hidden;
+  outline: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: 0 26px 90px rgba(0, 0, 0, .68);
+}
+.realworld-map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex: 0 0 auto;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel-soft);
+}
+.realworld-map-header > div {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.realworld-map-heading-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.realworld-map-header h2 {
+  margin: 0;
+  color: var(--text-bright);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.realworld-map-header p {
+  margin: 3px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.realworld-map-header > button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  color: var(--text-muted);
+  cursor: var(--cursor-pointer);
+}
+.realworld-map-header > button:hover:not(:disabled) {
+  border-color: var(--border-active);
+  color: var(--text-main);
+}
+.realworld-map-header > button:disabled { opacity: .45; cursor: var(--cursor-default); }
+.realworld-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.realworld-map-canvas-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #101820;
+}
+.realworld-map-canvas {
+  width: 100%;
+  height: 100%;
+  background: #101820;
+}
+.realworld-map-canvas .leaflet-control-zoom {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 7px;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .35);
+}
+.realworld-map-canvas .leaflet-control-zoom a {
+  border-color: rgba(255, 255, 255, .1);
+  background: rgba(14, 19, 27, .92);
+  color: #e8ecf4;
+}
+.realworld-map-canvas .leaflet-control-zoom a:hover { background: #222a36; }
+.realworld-map-crosshair {
+  position: absolute;
+  z-index: 500;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  color: #fff;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .8));
+  pointer-events: none;
+}
+.realworld-map-instruction {
+  position: absolute;
+  z-index: 500;
+  bottom: 14px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 32px);
+  padding: 7px 10px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 7px;
+  background: rgba(10, 14, 20, .82);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .28);
+  color: rgba(255, 255, 255, .84);
+  font-size: 10.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(7px);
+}
+.realworld-map-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+.realworld-map-coordinates {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+}
+.realworld-map-coordinates span {
+  color: var(--text-dim);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.realworld-map-coordinates strong {
+  color: var(--text-main);
+  font: 600 11.5px var(--mono);
+  white-space: nowrap;
+}
+.realworld-map-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.realworld-map-slider > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.realworld-map-slider output {
+  color: var(--text-main);
+  font: 600 10.5px var(--mono);
+}
+.realworld-map-slider input {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: var(--cursor-pointer);
+}
+.realworld-map-stats {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+.realworld-map-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+.realworld-map-stat strong {
+  color: var(--text-main);
+  font: 600 10.5px var(--mono);
+  text-align: right;
+}
+.realworld-map-warning {
+  margin: -4px 0 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(245, 158, 11, .25);
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, .08);
+  color: #e7b86c;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.realworld-map-layer-credit {
+  margin: auto 0 0;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.realworld-map-load {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font: 700 12px var(--font);
+  cursor: var(--cursor-pointer);
+}
+.realworld-map-load:hover:not(:disabled) { filter: brightness(1.1); }
+.realworld-map-load:disabled { opacity: .62; cursor: var(--cursor-default); }
+.realworld-map-loading {
+  padding: 16px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .55);
+  font-size: 12px;
+}
+
+@media (max-width: 820px) {
+  .realworld-map-backdrop { padding: 0; }
+  .realworld-map-dialog {
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .realworld-map-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(280px, 1fr) auto;
+  }
+  .realworld-map-sidebar {
+    max-height: 44dvh;
+    padding: 14px 16px;
+    gap: 12px;
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+  .realworld-map-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 16px;
+  }
+  .realworld-map-layer-credit { margin-top: 0; }
+}
+
+@media (max-width: 480px) {
+  .realworld-map-header { padding: 11px 12px; }
+  .realworld-map-header p { display: none; }
+  .realworld-map-heading-icon { width: 30px; height: 30px; }
+  .realworld-map-instruction { font-size: 9.5px; }
+  .realworld-map-layout { grid-template-rows: minmax(230px, 1fr) auto; }
+  .realworld-map-sidebar { max-height: 50dvh; }
+}
+
 .biome-legend {
   display: flex;
   flex-direction: column;

@@ -1,11 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair, Map } from 'lucide-react';
+import React, { lazy, Suspense, useMemo, useRef, useState } from 'react';
+import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair, Map, MapPinned } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
   CURATED_LOCATIONS, ELEVATION_SOURCE, IMAGERY_STYLES, CUSTOM_AREA_LIMITS, describeCustomArea,
   formatCoordinateDisplay, parseCoordinateInput, resolveImageryStyle,
 } from '../../engine/terrain/RealWorldHeightmap.js';
+
+const RealWorldMapPicker = lazy(() => import('./RealWorldMapPicker.jsx'));
 
 const IMPORT_MODE_OPTIONS = [
   { value: 'disabled', label: 'Disabled' },
@@ -268,6 +270,7 @@ function CustomAreaPicker({ ctx }) {
   const [coordError, setCoordError] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [mapOpen, setMapOpen] = useState(false);
 
   const info = useMemo(() => describeCustomArea(spec), [spec]);
   const set = (key) => (v) => {
@@ -304,13 +307,31 @@ function CustomAreaPicker({ ctx }) {
     return next;
   };
 
-  const load = async () => {
-    const toLoad = commitCoordText();
+  const updateSpec = (next) => {
+    const normalized = {
+      ...next,
+      lat: Number(next.lat),
+      lon: Number(next.lon),
+      sizeKm: Number(next.sizeKm),
+      zoom: Number(next.zoom),
+    };
+    const nextCoord = formatCoordinateDisplay(normalized);
+    setSpec(normalized);
+    setCoordText(nextCoord);
+    setCoordError('');
+    syncCustomAreaDraft(normalized, nextCoord);
+  };
+
+  const load = async (selectedSpec = null) => {
+    const toLoad = selectedSpec || commitCoordText();
     if (!toLoad || busy) return;
+    if (selectedSpec) updateSpec(selectedSpec);
     setBusy(true);
     setProgress(0);
     try {
-      await ctx.onLoadRealWorldCustom?.(toLoad, { onProgress: (p) => setProgress(p) });
+      const result = await ctx.onLoadRealWorldCustom?.(toLoad, { onProgress: (p) => setProgress(p) });
+      if (selectedSpec && result !== false) setMapOpen(false);
+      return result;
     } finally {
       setBusy(false);
       setProgress(0);
@@ -350,6 +371,10 @@ function CustomAreaPicker({ ctx }) {
         />
       </div>
       {coordError && <p className="section-hint import-map-error">{coordError}</p>}
+      <button type="button" className="realworld-map-open" onClick={() => setMapOpen(true)}>
+        <MapPinned size={15} strokeWidth={1.75} aria-hidden />
+        <span>Select Area on Map</span>
+      </button>
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lat} value={spec.lat} onChange={set('lat')} settingId="terrain.realWorldLat" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lon} value={spec.lon} onChange={set('lon')} settingId="terrain.realWorldLon" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.sizeKm} value={spec.sizeKm} onChange={set('sizeKm')} settingId="terrain.realWorldSize" />
@@ -375,10 +400,28 @@ function CustomAreaPicker({ ctx }) {
           Zoom reduced to z{info.zoom} so this area stays under the tile-fetch cap. Shrink the area size to get more detail.
         </p>
       )}
-      <button type="button" className="file-picker-btn" disabled={busy} onClick={load}>
+      <button type="button" className="file-picker-btn" disabled={busy} onClick={() => load()}>
         <Download size={15} strokeWidth={1.75} aria-hidden />
         <span>{busy ? `Loading… ${Math.round(progress * 100)}%` : 'Load This Area'}</span>
       </button>
+      {mapOpen && (
+        <Suspense fallback={(
+          <div className="realworld-map-backdrop">
+            <div className="realworld-map-loading" role="status">Loading interactive map…</div>
+          </div>
+        )}
+        >
+          <RealWorldMapPicker
+            spec={spec}
+            imageryStyle={ctx.realWorldImageryStyle}
+            busy={busy}
+            progress={progress}
+            onChange={updateSpec}
+            onLoad={load}
+            onClose={() => setMapOpen(false)}
+          />
+        </Suspense>
+      )}
     </CollapsibleGroup>
   );
 }
