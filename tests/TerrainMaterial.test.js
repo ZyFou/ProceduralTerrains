@@ -8,6 +8,7 @@ import {
 import { createPlanetMaterial } from '../src/engine/terrain/PlanetMaterial.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
+import { TerrainHeightBaker } from '../src/engine/terrain/TerrainHeightBaker.js';
 
 const materials = [];
 
@@ -78,9 +79,12 @@ describe('shared Tile and Infinite terrain program', () => {
 
   it('shares an optional baked climate texture with realistic Studio water', () => {
     const uniforms = createTerrainUniforms();
+    const baker = new TerrainHeightBaker({ renderer: null, uniforms });
 
     expect(uniforms.uTerrainBiomeTex.value).toBeNull();
     expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(baker.biomeMaterial.defines).toEqual({ OCTAVES: 1 });
+    baker.dispose();
   });
 
   it('exposes manual surface weight maps and blends painted material roles', () => {
@@ -94,7 +98,9 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsBAt(wpos.xz)');
     const fragmentSamplers = [...tile.fragmentShader.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g)];
-    expect(fragmentSamplers).toHaveLength(16);
+    // Four rolling field samplers were added: three Infinite cache levels and
+    // the Studio climate bake.
+    expect(fragmentSamplers).toHaveLength(20);
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');

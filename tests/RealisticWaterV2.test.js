@@ -72,10 +72,10 @@ describe('Realistic Water Surface V2', () => {
     const uniforms = createTerrainUniforms();
     const material = createRealisticWaterMaterial(uniforms);
 
-    expect(uniforms.uTerrainBiomeTex.value).toBeNull();
-    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(uniforms.uWaterTerrainBiomeTex.value).toBeNull();
+    expect(uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
     expect(material.fragmentShader).toContain(
-      'texture2D(uTerrainBiomeTex, bakedUvAt(xz))',
+      'texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz))',
     );
     expect(material.fragmentShader).toContain(
       'vec3 waterBiomeColorMultiplier(vec2 xz)',

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
-import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
+import { resolveCloudQuality } from './CloudSettings.js';
 import { cloudCoverageAt } from './cloudFieldCPU.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
 
@@ -44,8 +44,9 @@ const SHARED_KEYS = [
   'uCloudColor', 'uCloudShadowColor', 'uCloudDirectLight', 'uCloudAmbientTop',
   'uCloudAmbientBottom', 'uCloudGroundBounce', 'uCloudAtmosphereInfluence',
   'uCloudSunResponse', 'uCloudAmbientResponse', 'uCloudSilverLining',
-  'uCloudWind', 'uCloudRotation', 'uCloudTime', 'uCloudEvolve',
-  'uCloudSelfShadow', 'uCloudSunDir', 'uCloudNoiseVariant', 'uCloudStepScale',
+  'uCloudWind', 'uCloudNoiseOffset', 'uCloudDomainOrigin',
+  'uCloudRotation', 'uCloudTime', 'uCloudEvolve',
+  'uCloudSelfShadow', 'uCloudSunDir', 'uCloudStepScale',
   'tSceneDepth', 'uDepthResolution', 'uProjectionMatrixInverse', 'uViewMatrixInverse',
   'uDepthBias', 'uUseDepth',
 ];
@@ -62,6 +63,7 @@ export class PlanetCloudChunks {
     this._steps = 24; this._lightSteps = 6; this._octaves = 5;
     this._detailOctaves = 4; this._useErosion = true; this._lightMode = 0;
     this._stepLOD = false;
+    this._adaptiveStepScale = 1;
     this._enabled = false; this._inRange = true; this._maxDistance = Infinity;
     this._rotation = 0; this._rotSpeed = 0;
     this._wind = new THREE.Vector3();
@@ -260,7 +262,6 @@ export class PlanetCloudChunks {
     u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
     u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
-    u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
@@ -283,6 +284,10 @@ export class PlanetCloudChunks {
 
   setLighting(lightingState) {
     applyCloudLightingState(this.shared, lightingState);
+  }
+
+  setAdaptiveQuality(_scaleMultiplier = 1, stepMultiplier = 1) {
+    this._adaptiveStepScale = Math.max(0.5, Math.min(1, stepMultiplier));
   }
 
   // ---- background compile (warm the shared program, swap all chunks when ready)
@@ -347,9 +352,10 @@ export class PlanetCloudChunks {
       const far = this._maxDistance;
       if (this._stepLOD && Number.isFinite(far)) {
         const f = far > near ? (dist - near) / (far - near) : 0;
-        u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+        u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6))
+          * this._adaptiveStepScale;
       } else {
-        u.uCloudStepScale.value = 1.0;
+        u.uCloudStepScale.value = this._adaptiveStepScale;
       }
     }
 
@@ -436,6 +442,22 @@ export class PlanetCloudChunks {
   }
 
   // ---- terrain depth occlusion (shared; identical to PlanetCloudLayer)
+  useSceneDepth(depthTexture, camera, baseSize = null) {
+    if (!this.active || !this.shared || !depthTexture) {
+      if (this.shared) this.shared.uUseDepth.value = 0.0;
+      return false;
+    }
+    const size = baseSize || depthTexture.image || {};
+    const width = size.x ?? size.width ?? 1;
+    const height = size.y ?? size.height ?? 1;
+    this.shared.tSceneDepth.value = depthTexture;
+    this.shared.uDepthResolution.value.set(width, height);
+    this.shared.uProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    this.shared.uViewMatrixInverse.value.copy(camera.matrixWorld);
+    this.shared.uUseDepth.value = 1.0;
+    return true;
+  }
+
   renderDepthPrepass(renderer, camera, baseSize = null) {
     if (!this.active) { if (this.shared) this.shared.uUseDepth.value = 0.0; return false; }
     this._ensureDepthTarget(renderer, baseSize);

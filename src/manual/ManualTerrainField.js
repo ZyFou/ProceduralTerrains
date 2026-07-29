@@ -88,6 +88,7 @@ export class ManualTerrainField {
     this.span = { x: 1, z: 1 };
     this.revision = 0;
     this.sculptRevision = 0;
+    this._uploadPending = false;
 
     this.texture = new THREE.DataTexture(
       this.heightData,
@@ -131,6 +132,34 @@ export class ManualTerrainField {
   _composeAll() {
     for (let index = 0; index < this.heightDelta.length; index++) this._composeIndex(index);
     this.texture.needsUpdate = true;
+  }
+
+  _queueUpload() {
+    this._uploadPending = true;
+  }
+
+  flushUploads() {
+    if (!this._uploadPending) return false;
+    this.texture.needsUpdate = true;
+    this._uploadPending = false;
+    return true;
+  }
+
+  _copyHeightRegion(minX, maxX, minY, maxY) {
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const data = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const sourceStart = (minY + y) * this.resolution + minX;
+      data.set(this.heightDelta.subarray(sourceStart, sourceStart + width), y * width);
+    }
+    return { data, minX, minY, width, height };
+  }
+
+  _sampleRegion(region, px, py) {
+    const x = clamp(Math.round(px) - region.minX, 0, region.width - 1);
+    const y = clamp(Math.round(py) - region.minY, 0, region.height - 1);
+    return region.data[y * region.width + x];
   }
 
   _upload() {
@@ -314,12 +343,20 @@ export class ManualTerrainField {
         deposition: erosionDeposition,
         talus: erosionTalus,
       });
-      this.texture.needsUpdate = true;
+      this._queueUpload();
       this.revision++;
       this.sculptRevision++;
       return;
     }
-    const sourceTotal = tool === 'smooth' ? this.heightDelta.slice() : this.heightDelta;
+    const smoothStep = tool === 'smooth' ? Math.max(1, Math.round(pixelRadius * 0.07)) : 0;
+    const sourceTotal = tool === 'smooth'
+      ? this._copyHeightRegion(
+        Math.max(0, minX - smoothStep),
+        Math.min(this.resolution - 1, maxX + smoothStep),
+        Math.max(0, minY - smoothStep),
+        Math.min(this.resolution - 1, maxY + smoothStep),
+      )
+      : null;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
@@ -335,14 +372,13 @@ export class ManualTerrainField {
         } else if (tool === 'flatten') {
           next = current + ((targetHeight - this.shapeHeight[index]) - current) * alpha;
         } else if (tool === 'smooth') {
-          const step = Math.max(1, Math.round(pixelRadius * 0.07));
           let sum = 0;
           let count = 0;
           for (let oy = -1; oy <= 1; oy++) {
             for (let ox = -1; ox <= 1; ox++) {
-              const sx = clamp(px + ox * step, 0, this.resolution - 1);
-              const sy = clamp(py + oy * step, 0, this.resolution - 1);
-              sum += sourceTotal[sy * this.resolution + sx];
+              const sx = clamp(px + ox * smoothStep, 0, this.resolution - 1);
+              const sy = clamp(py + oy * smoothStep, 0, this.resolution - 1);
+              sum += this._sampleRegion(sourceTotal, sx, sy);
               count++;
             }
           }
@@ -385,7 +421,7 @@ export class ManualTerrainField {
       }
     }
 
-    this.texture.needsUpdate = true;
+    this._queueUpload();
     this.revision++;
     this.sculptRevision++;
   }

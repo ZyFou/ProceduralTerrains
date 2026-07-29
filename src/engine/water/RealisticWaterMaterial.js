@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, TERRAIN_HEIGHT_TEX_GLSL } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -8,12 +8,19 @@ import {
 } from '../sky/proceduralSkyGLSL.js';
 import { generateStackGLSL } from '../terrain/noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from '../terrain/noise/NoiseStack.js';
-import { buildWaterHeightShaderParts } from './waterShaderGLSL.js';
+import {
+  buildWaterHeightShaderParts,
+  WATER_TERRAIN_CACHE_GLSL,
+} from './waterShaderGLSL.js';
 import { WATER_OPTICS_GLSL } from './waterOpticsGLSL.js';
 import {
   WATER_GEOMETRY_WAVES_GLSL,
   WATER_WAVES_GLSL,
 } from './waterWavesGLSL.js';
+import {
+  WATER_LIGHTING_UNIFORMS_GLSL,
+  createWaterLightingUniforms,
+} from './waterLightingGLSL.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
@@ -95,6 +102,12 @@ const buildFragment = (stackGLSL, infinite = false) => {
   const biomeClimateFunction = infinite
     ? /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
+  float available = 0.0;
+  vec4 field = infiniteFieldSampleAt(xz, available);
+  if (available > 0.5) {
+    float region = fbm3((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
+    return vec4(field.g, field.b, field.a, region);
+  }
   Climate climate = climateAt(xz * uFrequency + uSeedOffset);
   return vec4(climate.temp, climate.moist, climate.cont, climate.region);
 }
@@ -105,11 +118,13 @@ float waterBiomeClimateAvailable() {
 `
     : /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
-  return texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+  vec4 baked = texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz));
+  float region = vnoise((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
+  return vec4(baked.rgb, region);
 }
 
 float waterBiomeClimateAvailable() {
-  return uUseTerrainBiomeTex;
+  return uUseWaterTerrainBiomeTex;
 }
 `;
   return /* glsl */ `
@@ -117,10 +132,11 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${dependencies}
-${TERRAIN_HEIGHT_TEX_GLSL}
+${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${terrainHeightFunction}
 ${PROCEDURAL_SKY_UNIFORMS_GLSL}
+${WATER_LIGHTING_UNIFORMS_GLSL}
 
 uniform float uWaterAnim;
 uniform float uWaterFadeStart;
@@ -134,8 +150,6 @@ uniform float uRoughness;
 uniform float uReflectionQuality;
 uniform float uMicroWaveDetail;
 uniform float uSkyReflectionEnabled;
-uniform sampler2D uTerrainBiomeTex;
-uniform float uUseTerrainBiomeTex;
 uniform float uBiomeColorEnabled;
 uniform float uBiomeColorStrength;
 
@@ -513,8 +527,9 @@ void main() {
     waterGgxSunSpecular(n, viewDir, skySunDir, roughness),
     8.0
   );
-  vec3 sunSpecularTerm = uSkySunColor
-    * uSkyLightIntensity
+  vec3 sunSpecularTerm = waterResolveSunLight(
+    uSkySunColor * uSkyLightIntensity
+  )
     * sunSpecular
     * uSpecularStrength
     * reflectionScale;
@@ -523,9 +538,15 @@ void main() {
   // tiers overwrite the water pixel with a complete refracted volume composite,
   // because the same opaque scene is already behind the transparent surface.
   float diff = max(dot(n, uSunDir), 0.0);
+  vec3 waterLight = waterResolveLighting(
+    n,
+    vec3(0.0, 1.0, 0.0),
+    diff,
+    vec3(0.62 + 0.38 * diff)
+  );
   vec3 bodyPremultiplied = scatteringColor
     * (vec3(1.0) - transmittance)
-    * (0.62 + 0.38 * diff)
+    * waterLight
     * (1.0 - fres);
   vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
   float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
@@ -545,7 +566,7 @@ void main() {
   vec3 refractedVolume = refractedSceneLinear * sceneTransmittance
     + scatteringColor
       * (vec3(1.0) - transmittance)
-      * (0.62 + 0.38 * diff);
+      * waterLight;
   vec3 sceneComposite = refractedVolume * (1.0 - fres)
     + reflectionTerm
     + sunSpecularTerm;
@@ -633,7 +654,8 @@ void main() {
     0.0,
     1.0
   );
-  premultipliedColor = mix(premultipliedColor, uColFoam, foam);
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
+  premultipliedColor = mix(premultipliedColor, litFoamColor, foam);
   alpha = mix(alpha, 1.0, foam);
 
   vec3 refractionTerm = mix(
@@ -741,6 +763,7 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSkyReflectionEnabled: { value: 1.0 },
     uBiomeColorEnabled: { value: 1.0 },
     uBiomeColorStrength: { value: 0.55 },
+    ...createWaterLightingUniforms(),
     uWaterAnim: { value: 1.0 },
     uWaterFadeStart: { value: 99999.0 },
     uWaterFadeEnd: { value: 100000.0 },
@@ -801,7 +824,7 @@ export function createRealisticWaterMaterial(
 ) {
   const mat = new THREE.ShaderMaterial({
     uniforms: realisticUniforms(sharedUniforms, environmentUniforms),
-    defines: {},
+    defines: { OCTAVES: octaves },
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,

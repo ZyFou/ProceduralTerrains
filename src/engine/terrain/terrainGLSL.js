@@ -232,7 +232,7 @@ float assemblyFalloff(vec2 xz) {
 }
 `;
 
-// Baked studio height/normal texture sampling. Studio terrain + water fragment
+// Baked studio height texture sampling. Studio terrain + water fragment
 // shaders include this so they can replace the per-pixel ~46-octave height
 // field with a single texture2D fetch when the engine's bake is active. Infinite
 // terrain includes the same declarations so both modes share one GPU program;
@@ -243,7 +243,97 @@ uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
 vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
-  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
+  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).r * uHeightScale;
+}
+`;
+
+// Camera-centred Infinite World field cache. Three nested levels cover the
+// near, middle and far terrain. Each texel packs:
+//   R = normalized height, G = temperature, B = moisture, A = continentalness.
+// Erosion and region remain cheap low-frequency evaluations in the fragment.
+export const INFINITE_FIELD_CACHE_GLSL = /* glsl */ `
+uniform sampler2D uInfiniteFieldTex0;
+uniform sampler2D uInfiniteFieldTex1;
+uniform sampler2D uInfiniteFieldTex2;
+uniform vec2 uInfiniteFieldOrigin0;
+uniform vec2 uInfiniteFieldOrigin1;
+uniform vec2 uInfiniteFieldOrigin2;
+uniform vec2 uInfiniteFieldSpan0;
+uniform vec2 uInfiniteFieldSpan1;
+uniform vec2 uInfiniteFieldSpan2;
+uniform vec3 uInfiniteFieldReady;
+uniform float uUseInfiniteFieldCache;
+
+bool infiniteFieldUv(vec2 xz, vec2 origin, vec2 span, out vec2 uv) {
+  uv = (xz - origin) / max(span, vec2(1.0));
+  return all(greaterThanEqual(uv, vec2(0.001)))
+    && all(lessThanEqual(uv, vec2(0.999)));
+}
+
+vec4 infiniteFieldSampleAt(vec2 xz, out float available) {
+  vec2 uv;
+  vec4 field = vec4(0.0);
+  available = 0.0;
+  if (uUseInfiniteFieldCache > 0.5) {
+    if (uInfiniteFieldReady.x > 0.5
+        && infiniteFieldUv(xz, uInfiniteFieldOrigin0, uInfiniteFieldSpan0, uv)) {
+      available = 1.0;
+      field = texture2D(uInfiniteFieldTex0, uv);
+    } else if (uInfiniteFieldReady.y > 0.5
+        && infiniteFieldUv(xz, uInfiniteFieldOrigin1, uInfiniteFieldSpan1, uv)) {
+      available = 1.0;
+      field = texture2D(uInfiniteFieldTex1, uv);
+    } else if (uInfiniteFieldReady.z > 0.5
+        && infiniteFieldUv(xz, uInfiniteFieldOrigin2, uInfiniteFieldSpan2, uv)) {
+      available = 1.0;
+      field = texture2D(uInfiniteFieldTex2, uv);
+    }
+  }
+  return field;
+}
+
+float terrainCachedHeightAt(vec2 xz) {
+  float available = 0.0;
+  vec4 field = infiniteFieldSampleAt(xz, available);
+  return available > 0.5 ? field.r * uHeightScale : heightAt(xz);
+}
+`;
+
+// Shared climate lookup used by the visible terrain fragment. Studio consumes
+// its existing biome bake; Infinite consumes the rolling field cache.
+export const TERRAIN_CLIMATE_CACHE_GLSL = /* glsl */ `
+uniform sampler2D uTerrainBiomeTex;
+uniform float uUseTerrainBiomeTex;
+
+Climate terrainCachedClimateAt(vec2 xz) {
+  vec2 p = xz * uFrequency + uSeedOffset;
+  if (uInfiniteMode < 0.5 && uUseTerrainBiomeTex > 0.5) {
+    vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+    Climate c;
+    c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
+    c.temp = baked.r;
+    c.moist = baked.g;
+    c.cont = baked.b;
+    c.erosion = baked.a;
+    c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+    return c;
+  }
+  if (uInfiniteMode > 0.5) {
+    float available = 0.0;
+    vec4 field = infiniteFieldSampleAt(xz, available);
+    if (available > 0.5) {
+      Climate c;
+      c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
+      c.temp = field.g;
+      c.moist = field.b;
+      c.cont = field.a;
+      vec2 b = p * uBiomeScale;
+      c.erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
+      c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+      return c;
+    }
+  }
+  return climateAt(p);
 }
 `;
 
@@ -548,10 +638,14 @@ float erosionOffsetAt(vec2 xz) {
   return texture2D(uErosionOffsetTex, uv).r;
 }
 
-float heightAt(vec2 xz) {
-  return shapeHeight(xz, climateAt(xz * uFrequency + uSeedOffset)) * uPaintBaseMult
+float heightAtWithClimate(vec2 xz, Climate climate) {
+  return shapeHeight(xz, climate) * uPaintBaseMult
     + paintHeightOffsetAt(xz) + manualHeightOffsetAt(xz)
     + splineHeightOffsetAt(xz) + erosionOffsetAt(xz);
+}
+
+float heightAt(vec2 xz) {
+  return heightAtWithClimate(xz, climateAt(xz * uFrequency + uSeedOffset));
 }
 
 // Moisture field for biome blending — now sourced from the climate system.

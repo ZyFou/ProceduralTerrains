@@ -4,7 +4,7 @@ import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
 import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
-import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_VARIANTS } from '../../engine/sky/CloudSettings.js';
+import { CLOUD_DEFAULT_PARAMS } from '../../engine/sky/CloudSettings.js';
 
 const SHAPE_SLIDERS = [
   { key: 'cloudCoverage', label: 'Coverage', min: 0, max: 1, step: 0.01, digits: 2, info: 'Fraction of the sky covered by clouds.' },
@@ -86,6 +86,11 @@ export default function CloudPanel({
   const distInfo = worldMode === 'planet'
     ? 'Hide clouds when the camera is farther than this many planet radii.'
     : 'Hide clouds when the camera is farther than this many board widths.';
+  const enableInfo = worldMode === 'planet'
+    ? 'Show the volumetric cloud shell around the planet.'
+    : (worldMode === 'infinite'
+      ? 'Show a bounded volumetric cloud layer that follows the camera across the infinite world.'
+      : 'Show the volumetric cloud slab above the tile assembly.');
   const p = perf ?? {};
   const currentSteps = p.cloudSteps ?? 12;
   let resolutionName = 'custom';
@@ -113,7 +118,7 @@ export default function CloudPanel({
         label="Enable Clouds"
         value={enabled}
         onChange={(v) => onParam('cloudsEnabled', v)}
-        info="Show the volumetric cloud shell around the planet (planet mode)."
+        info={enableInfo}
         settingId="clouds.cloudsEnabled"
       />
 
@@ -148,16 +153,8 @@ export default function CloudPanel({
             title="Noise"
             defaultOpen={false}
             settingId="clouds.section.noise"
-            forceOpen={forceSection('clouds.section.noise', 'Noise', ['clouds.cloudNoiseVariant', 'clouds.cloudScale', 'clouds.cloudDetail', 'clouds.cloudErosion'])}
+            forceOpen={forceSection('clouds.section.noise', 'Noise', ['clouds.cloudScale', 'clouds.cloudDetail', 'clouds.cloudErosion'])}
           >
-            <SelectRow
-              label="Noise Variant"
-              value={val(params, 'cloudNoiseVariant')}
-              options={CLOUD_NOISE_VARIANTS}
-              onChange={(v) => onParam('cloudNoiseVariant', v)}
-              info="Changes the cloud density field shape without changing raymarch quality."
-              settingId="clouds.cloudNoiseVariant"
-            />
             {NOISE_SLIDERS.map((def) => (
               <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`clouds.${def.key}`} />
             ))}
@@ -236,12 +233,14 @@ export default function CloudPanel({
               info="Safe modes for weaker devices: Lite caps steps and disables self-shadowing; Off hides clouds."
               settingId="performance.cloudFallback"
             />
-            <SliderCtl
-              def={{ key: 'cloudMaxDistance', label: 'Max Distance', min: 1.5, max: 12, step: 0.5, digits: 1, unit: '×', info: distInfo }}
-              value={p.cloudMaxDistance ?? 6.0}
-              onChange={(v) => onPerfSetting('cloudMaxDistance', v)}
-              settingId="performance.cloudMaxDistance"
-            />
+            {worldMode !== 'infinite' && (
+              <SliderCtl
+                def={{ key: 'cloudMaxDistance', label: 'Max Distance', min: 1.5, max: 12, step: 0.5, digits: 1, unit: '×', info: distInfo }}
+                value={p.cloudMaxDistance ?? 6.0}
+                onChange={(v) => onPerfSetting('cloudMaxDistance', v)}
+                settingId="performance.cloudMaxDistance"
+              />
+            )}
           </ControlSection>
         </>
       )}

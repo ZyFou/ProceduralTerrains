@@ -187,6 +187,33 @@ describe('WaterPlanarReflectionPass', () => {
     pass.dispose();
   });
 
+  it('keeps a static reflection until its scene revision changes', () => {
+    const pass = new WaterPlanarReflectionPass();
+    const renderer = createRenderer();
+    const material = createReflectionMaterial();
+    const camera = createCamera();
+    const params = { ...cinematicParams, waterUpdateFrequency: 1 };
+    const options = {
+      params,
+      mode: 'cinematic',
+      worldMode: 'studio',
+      materials: [material],
+      revision: 'camera:1|terrain:4',
+    };
+
+    pass.capture(renderer, {}, camera, options);
+    pass.capture(renderer, {}, camera, options);
+    pass.capture(renderer, {}, camera, options);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    pass.capture(renderer, {}, camera, {
+      ...options,
+      revision: 'camera:2|terrain:4',
+    });
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    pass.dispose();
+  });
+
   it('restores renderer and object state after a reflection render error', () => {
     const previousTarget = {};
     const water = { visible: true };

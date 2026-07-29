@@ -81,12 +81,22 @@ const WAVE_SLIDERS = [
 
 const FOAM_SLIDERS = [
   { key: 'waterFoamStrength', label: 'Shoreline Foam Strength', min: 0, max: 1.5, step: 0.02, digits: 2 },
-  { key: 'waterFoamWidth', label: 'Foam Width', min: 0.5, max: 12, step: 0.1, digits: 1, unit: ' u' },
   { key: 'waterFoamSoftness', label: 'Foam Softness', min: 0.1, max: 4, step: 0.1, digits: 1 },
   { key: 'waterFoamAnimSpeed', label: 'Foam Animation', min: 0, max: 3, step: 0.05, digits: 2 },
   { key: 'waterSlopeFoam', label: 'Slope-Based Foam', min: 0, max: 1.5, step: 0.05, digits: 2 },
   { key: 'waterCliffFoam', label: 'Cliff / Rock Foam', min: 0, max: 1.5, step: 0.05, digits: 2 },
 ];
+
+const SHORE_DISTANCE_SLIDER = {
+  key: 'waterFoamWidth',
+  label: 'Shore Distance',
+  min: 0.5,
+  max: 12,
+  step: 0.1,
+  digits: 1,
+  unit: ' u',
+  info: 'How far the visible shoreline band extends into the water.',
+};
 
 // Apply to both Lite and High underwater modes.
 const UNDERWATER_SLIDERS = [
@@ -459,23 +469,33 @@ export default function WaterPanelInner({
         </ControlSection>
       )}
 
-      {selectedRealistic && (
+      {enabled && (
         <ControlSection
           id={`${id}-foam`}
-          title="Foam"
+          title="Shoreline"
           defaultOpen={false}
           settingId="water.section.foam"
-          forceOpen={forceSection('water.section.foam', 'Foam', ['water.waterFoam'])}
+          forceOpen={forceSection('water.section.foam', 'Shoreline', ['water.waterFoam'])}
         >
-          <ToggleRow
-            label="Enable Foam"
-            value={!!val(params, 'waterFoamEnabled')}
-            onChange={(v) => onParam('waterFoamEnabled', v)}
-            settingId="water.waterFoamEnabled"
+          <SliderCtl
+            def={SHORE_DISTANCE_SLIDER}
+            value={val(params, SHORE_DISTANCE_SLIDER.key)}
+            onChange={(v) => onParam(SHORE_DISTANCE_SLIDER.key, v)}
+            settingId="water.waterFoamWidth"
           />
-          {FOAM_SLIDERS.map((def) => (
-            <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
-          ))}
+          {selectedRealistic && (
+            <>
+              <ToggleRow
+                label="Enable Foam"
+                value={!!val(params, 'waterFoamEnabled')}
+                onChange={(v) => onParam('waterFoamEnabled', v)}
+                settingId="water.waterFoamEnabled"
+              />
+              {FOAM_SLIDERS.map((def) => (
+                <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
+              ))}
+            </>
+          )}
         </ControlSection>
       )}
 

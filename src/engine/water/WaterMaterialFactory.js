@@ -7,6 +7,7 @@ import {
   setWaterDebugMode,
 } from './RealisticWaterMaterial.js';
 import { isRealisticWaterMode } from './WaterSettings.js';
+import { applyWaterLightingUniforms } from './waterLightingGLSL.js';
 
 // ============================================================================
 // WaterMaterialFactory — creates the correct water material for a mode.
@@ -48,6 +49,10 @@ export function applyWaterMaterialSettings(mat, params, mode, debugView = 'off')
   if (!mat?.uniforms) return;
   if (mat.uniforms.uWaterAnim) {
     mat.uniforms.uWaterAnim.value = params.waterAnim ? 1 : 0;
+  }
+  applyWaterLightingUniforms(mat.uniforms, params);
+  if (mat.uniforms.uFoamWidth) {
+    mat.uniforms.uFoamWidth.value = params.waterFoamWidth ?? 3.2;
   }
   if (isRealisticWaterMode(mode)) {
     applyRealisticWaterUniforms(mat, params, mode);

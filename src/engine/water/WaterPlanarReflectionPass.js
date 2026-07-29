@@ -152,6 +152,7 @@ export class WaterPlanarReflectionPass {
     this._frame = 0;
     this._cadence = 1;
     this._lastSeaLevel = null;
+    this._lastRevision = null;
     this._disposed = false;
   }
 
@@ -188,6 +189,7 @@ export class WaterPlanarReflectionPass {
     this._camera = null;
     this._captureMs = 0;
     this._lastSeaLevel = null;
+    this._lastRevision = null;
   }
 
   capture(renderer, scene, camera, {
@@ -198,6 +200,7 @@ export class WaterPlanarReflectionPass {
     hiddenObjects = [],
     materials = [],
     enabled = true,
+    revision = null,
   } = {}) {
     if (!this.shouldCapture(params, mode, worldMode, camera, enabled)) {
       this.deactivate(materials);
@@ -221,10 +224,11 @@ export class WaterPlanarReflectionPass {
     this._frame += 1;
     const seaLevel = params?.seaLevel ?? 0;
     const planeChanged = this._lastSeaLevel !== seaLevel;
+    const revisionChanged = revision == null || revision !== this._lastRevision;
     const due = targetChanged
       || planeChanged
       || this._captureCount === 0
-      || (this._frame - 1) % this._cadence === 0;
+      || (revisionChanged && (this._frame - 1) % this._cadence === 0);
 
     if (!due) {
       this._active = true;
@@ -269,6 +273,7 @@ export class WaterPlanarReflectionPass {
     this._captureMs = Math.max(0, ended - started);
     this._captureCount += 1;
     this._lastSeaLevel = seaLevel;
+    this._lastRevision = revision;
     this._active = true;
     this._updatedThisFrame = true;
     this._bind(materials);

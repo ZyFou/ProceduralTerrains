@@ -1,5 +1,7 @@
 // Flight instruments overlay for plane explore mode — artificial horizon + throttle quadrant.
 
+import { useLiveMetrics } from '../state/LiveMetricsStore.js';
+
 const PX_PER_DEG = 2.1;
 const PITCH_LADDER = [10, 20, 30, 40, 50];
 
@@ -120,7 +122,8 @@ function ThrottleQuadrant({ throttle = 0 }) {
   );
 }
 
-export default function PlaneHUD({ stats }) {
+export default function PlaneHUD({ liveMetrics }) {
+  const { infiniteStats: stats } = useLiveMetrics(liveMetrics);
   const plane = stats?.plane;
   if (!plane) return null;
 

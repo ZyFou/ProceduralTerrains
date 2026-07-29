@@ -33,6 +33,7 @@ import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 import SplinesPanel from './SplinesPanel.jsx';
 import { AnalysisContent } from './AnalysisPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
+import { useLiveMetrics } from '../../state/LiveMetricsStore.js';
 
 // ---------------------------------------------------------------- helpers
 function SeedRow({ seed, onParam, onRandomizeSeed }) {
@@ -319,6 +320,7 @@ function BiomesPanel({ ctx }) {
 }
 
 function WaterPanel({ ctx }) {
+  const { stats } = useLiveMetrics(ctx.liveMetrics);
   return (
     <SidePanel title="Water" description="Ocean surface, quality modes and volumetric settings." onClose={ctx.onClose}>
       <WaterPanelInner
@@ -326,7 +328,7 @@ function WaterPanel({ ctx }) {
         onParam={ctx.onParam}
         worldMode={ctx.worldMode}
         perf={ctx.perf}
-        perfStats={ctx.stats}
+        perfStats={stats}
         gpu={ctx.gpu}
         onPerfSetting={ctx.onPerfSetting}
         planetStyleProps={ctx.planetStyleProps}
@@ -496,9 +498,10 @@ function VisualsPanel({ ctx }) {
 }
 
 function PerformancePanel({ ctx }) {
+  const { stats } = useLiveMetrics(ctx.liveMetrics);
   return (
     <SidePanel title="Performance" description="GPU, water, fog and cloud budgets." onClose={ctx.onClose}>
-      <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
+      <PerformanceStats stats={stats} gpu={ctx.gpu} />
       <PerfSettings perf={ctx.perf} rendererInfo={ctx.rendererInfo} onPerfPreset={ctx.onPerfPreset}
         onPerfSetting={ctx.onPerfSetting} onPerfReset={ctx.onPerfReset}
         settingsTarget={ctx.settingsTarget}
@@ -511,6 +514,7 @@ function PerformancePanel({ ctx }) {
 function DebugPanel({ ctx }) {
   const [tab, setTab] = useState('monitor');
   const isStudio = ctx.worldMode === 'studio';
+  const live = useLiveMetrics(ctx.liveMetrics);
 
   useEffect(() => {
     const targetTab = ctx.settingsTarget?.tabId;
@@ -532,7 +536,7 @@ function DebugPanel({ ctx }) {
 
       {tab === 'monitor' && (
         <>
-          <PerformanceStats stats={ctx.stats} gpu={ctx.gpu} />
+          <PerformanceStats stats={live.stats} gpu={ctx.gpu} />
           <SessionInfo ctx={ctx} />
         </>
       )}
@@ -540,7 +544,7 @@ function DebugPanel({ ctx }) {
       {tab === 'viewport' && (
         <>
           <CameraPanel
-            camInfo={ctx.camInfo}
+            camInfo={live.camInfo}
             camMode={ctx.camMode}
             onMode={ctx.onMode}
             onFov={ctx.onFov}
@@ -549,10 +553,10 @@ function DebugPanel({ ctx }) {
           />
           {ctx.worldMode !== 'planet' && ctx.worldMode !== 'infinite' && (
             <LodPanel
-              lodCounts={ctx.lodCounts}
-              chunkCount={ctx.chunkCount}
-              visibleChunks={ctx.visibleChunks}
-              culledChunks={ctx.culledChunks}
+              lodCounts={live.lodCounts}
+              chunkCount={live.chunkCount}
+              visibleChunks={live.visibleChunks}
+              culledChunks={live.culledChunks}
               cullingEnabled={ctx.cullingEnabled}
               behindCameraCulling={ctx.behindCameraCulling}
               onCullingEnabled={ctx.onCullingEnabled}

@@ -109,7 +109,7 @@ export const PERF_PRESETS = {
   },
   high: {
     label: 'High',
-    onDemandStudio: false,
+    onDemandStudio: true,
     renderScale: 1.0, resolutionScale: 1.0, lodDistanceScale: 1.0,
     viewRadius: 12, maxCreatesPerFrame: 0, triangleBudget: 1_600_000,
     cullingAggressiveness: 1.0,
@@ -127,7 +127,7 @@ export const PERF_PRESETS = {
   },
   ultra: {
     label: 'Ultra',
-    onDemandStudio: false,
+    onDemandStudio: true,
     renderScale: 1.0, resolutionScale: 1.25, lodDistanceScale: 1.4,
     viewRadius: 16, maxCreatesPerFrame: 0, triangleBudget: 2_600_000,
     cullingAggressiveness: 0.8,

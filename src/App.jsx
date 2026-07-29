@@ -9,6 +9,7 @@ import { normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
+import { createLiveMetricsStore } from './state/LiveMetricsStore.js';
 import { panelAvailable, PANEL_ORDER, getPanelDisplay } from './components/panels/panelMeta.js';
 import { searchSettings } from './components/panels/settingsSearch.js';
 import TopBar from './components/TopBar.jsx';
@@ -109,6 +110,15 @@ export default function App() {
   const templatePreviewQueueRef = useRef(Promise.resolve());
   const landingPreviewActiveRef = useRef(true);
   const landingPreviewSessionRef = useRef(0);
+  const liveMetricsRef = useRef(null);
+  if (!liveMetricsRef.current) {
+    const count = DEFAULT_PARAMS.chunkCount;
+    liveMetricsRef.current = createLiveMetricsStore({
+      chunkCount: count,
+      visibleChunks: count * count,
+    });
+  }
+  const liveMetrics = liveMetricsRef.current;
 
   const loading = useLoading();
   const landing = useLanding();
@@ -126,11 +136,7 @@ export default function App() {
   const [status, setStatus] = useState({ text: 'Booting…', busy: true });
   const [bgWork, setBgWork] = useState(null);   // background shader-compile label
   const [compileProgress, setCompileProgress] = useState(null);
-  const [stats, setStats] = useState({ fps: 0, triangles: 0, drawCalls: 0 });
-  const [lodCounts, setLodCounts] = useState([0, 0, 0, 0]);
-  const [chunkCount, setChunkCount] = useState(DEFAULT_PARAMS.chunkCount);
   const [boardSize, setBoardSize] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkSize);
-  const [camInfo, setCamInfo] = useState({ angle: '–', distance: '–' });
   const [gpu, setGpu] = useState('–');
 
   const [camMode, setCamMode] = useState('orbit');
@@ -191,18 +197,14 @@ export default function App() {
   const [realWorldImageryStyle, setRealWorldImageryStyle] = useState('satellite');
 
   const [worldMode, setWorldMode] = useState('studio');
-  const [infiniteStats, setInfiniteStats] = useState(null);
   const [exploreMode, setExploreMode] = useState('none');
   const [playerMode, setPlayerMode] = useState(false);
-  const [playerState, setPlayerState] = useState(null);
 
   const [qualityPreset, setQualityPreset] = useState('high');
   const [timeOfDay, setTimeOfDay] = useState(0.38);
   const [cullingEnabled, setCullingEnabled] = useState(true);
   const [behindCameraCulling, setBehindCameraCulling] = useState(true);
   const [debugFlags, setDebugFlags] = useState({ ...DEFAULT_DEBUG_FLAGS });
-  const [visibleChunks, setVisibleChunks] = useState(DEFAULT_PARAMS.chunkCount * DEFAULT_PARAMS.chunkCount);
-  const [culledChunks, setCulledChunks] = useState(0);
   const [perf, setPerf] = useState(null);
   const [settingsSearchOpen, setSettingsSearchOpen] = useState(false);
   const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
@@ -296,15 +298,14 @@ export default function App() {
     let bootTimer = null;
     let cancelled = false;
 
-    // Install the escape hatch before engine construction. The constructor
-    // begins shader preparation immediately, so the initial proxy await is part
-    // of the window that needs protection.
+    // Keep the cover up for slow drivers too. This timer only refreshes the
+    // message; it must never reveal the canvas while terrain/water quality is
+    // still being prepared.
     bootTimer = setTimeout(() => {
       if (bootedRef.current || cancelled) return;
-      engine?._releaseBootFallback?.('15s app watchdog');
-      bootedRef.current = true;
-      loadingRef.current.done('boot');
-      landingRef.current?.setBootReady(true);
+      loadingRef.current.update('boot', {
+        detail: 'Finalizing terrain mesh, materials and water…',
+      });
     }, 15000);
 
     const init = async () => {
@@ -328,24 +329,26 @@ export default function App() {
             setStatus({ text, busy });
             // feed the active blocking task's detail line
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
-            // clear the initial boot overlay once the full-detail terrain
-            // material is compiled, swapped in, and rendered once
+            // The engine only reports Ready after the final terrain variant,
+            // bake, water and board have all produced a complete frame.
             if (!busy && !bootedRef.current) {
               bootedRef.current = true;
               loadingRef.current.done('boot');
             }
           },
           onBootComplete: () => landingRef.current?.setBootReady(true),
-          onStats: setStats,
+          onStats: (stats) => liveMetrics.update({ stats }),
           onBackgroundWork: setBgWork,
           onCompileProgress: setCompileProgress,
           onLod: (counts, count, visible, culled) => {
-            setLodCounts(counts);
-            setChunkCount(count);
-            setVisibleChunks(visible !== undefined ? visible : count * count);
-            setCulledChunks(culled !== undefined ? culled : 0);
+            liveMetrics.update({
+              lodCounts: counts,
+              chunkCount: count,
+              visibleChunks: visible !== undefined ? visible : count * count,
+              culledChunks: culled !== undefined ? culled : 0,
+            });
           },
-          onCamera: setCamInfo,
+          onCamera: (camInfo) => liveMetrics.update({ camInfo }),
           onBoard: setBoardSize,
           onToast: (msg) => {
             const type = classifyToast(msg);
@@ -355,10 +358,13 @@ export default function App() {
             pushToastRef.current(msg, type);
           },
           onFirstInteract: () => setHelpVisible(false),
-          onInfiniteStats: setInfiniteStats,
+          onInfiniteStats: (infiniteStats) => liveMetrics.update({
+            infiniteStats,
+            playerState: infiniteStats?.playerState ?? liveMetrics.getSnapshot().playerState,
+          }),
           onExploreMode: setExploreMode,
           onPlayerMode: setPlayerMode,
-          onPlayerState: setPlayerState,
+          onPlayerState: (playerState) => liveMetrics.update({ playerState }),
           onQualityChange: setQualityPreset,
           onTimeOfDayChange: (v) => { setTimeOfDay(v); scheduleRecordRef.current?.(); },
           onPerfChange: (p) => { setPerf(p); scheduleRecordRef.current?.(); },
@@ -1704,17 +1710,17 @@ export default function App() {
     onRegenerate,
     planetStyleProps,
     onStyleTuning: (key, v) => engine().setPlanetStyleTuning(key, v),
-    camInfo, camMode,
+    liveMetrics, camMode,
     onMode: (mode) => { engine().setCameraMode(mode); setCamMode(mode); },
     onFov: (fov) => engine().setFov(fov),
     onFocusCenter: () => engine().focusCenter(),
-    lodCounts, chunkCount, boardSize, visibleChunks, culledChunks,
+    boardSize,
     cullingEnabled, behindCameraCulling,
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
     debugFlags, onDebugFlag: handleDebugFlag,
     onResetPanel: handleResetPanel,
     onApplySurfaceTextures: applySurfaceTextures,
-    stats, gpu, perf,
+    gpu, perf,
     rendererInfo: engineRef.current ? {
       ...(engineRef.current.rendererConfig || {}),
       capabilities: engineRef.current.rendererCapabilities,
@@ -1999,7 +2005,7 @@ export default function App() {
           {fpsView && (
             <>
               <InfiniteHUD
-                stats={infiniteStats}
+                liveMetrics={liveMetrics}
                 isPlanet={isPlanet}
                 onReturn={() => selectWorldMode('studio')}
                 exploreMode={exploreMode}
@@ -2020,7 +2026,6 @@ export default function App() {
                   capabilities: engineRef.current.rendererCapabilities,
                 } : null}
                 gpu={gpu}
-                perfStats={stats}
                 onPerfPreset={(key) => engine().setPerfPreset(key)}
                 onPerfSetting={(key, value) => engine().setPerfSetting(key, value)}
                 onPerfReset={() => engine().resetPerfSettings()}
@@ -2030,7 +2035,7 @@ export default function App() {
 
           {touchExplore && <TouchControls mode={exploreMode} onInput={handleTouchInput} />}
 
-          {exploreMode === 'plane' && <PlaneHUD stats={infiniteStats} />}
+          {exploreMode === 'plane' && <PlaneHUD liveMetrics={liveMetrics} />}
 
           {nodesWorkspaceActive && terrainGraph ? (
             <Suspense fallback={<div className="nodes-workspace-loading">Loading node editor…</div>}>
@@ -2104,13 +2109,11 @@ export default function App() {
         status={status}
         bgWork={bgWork}
         gpu={gpu}
-        stats={stats}
+        liveMetrics={liveMetrics}
         worldMode={worldMode}
-        infiniteStats={infiniteStats}
         qualityPreset={fpsView ? qualityPreset : null}
         exploreMode={exploreMode}
         playerMode={playerMode}
-        playerState={fpsView ? infiniteStats?.playerState : playerState}
         perfOpen={perfOverlay.settings.open}
         onPerfToggle={perfOverlay.toggleOpen}
       />

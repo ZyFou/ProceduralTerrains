@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
-import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
+import { resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyOctahedral } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
+import { CloudOccupancyPass } from './CloudOccupancyPass.js';
 
 // Resolution of the directional occupancy grid (octahedral). Low-res + dilated
 // is enough: it only needs to say "this column has some cloud" so the shader can
@@ -52,6 +53,9 @@ export class PlanetCloudLayer {
     this._useErosion = true;
     this._lightMode = 0;
     this._stepLOD = false;
+    this._adaptiveScaleMultiplier = 1;
+    this._adaptiveStepScale = 1;
+    this._baseRenderScale = 1;
     this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
     this._lowResPass = new CloudLowResPass();
     this._enabled = false;
@@ -81,8 +85,16 @@ export class PlanetCloudLayer {
     this._occTex.generateMipmaps = false;
     this._occTex.needsUpdate = true;
     this._occBuiltAt = 0;
+    this._occupancyPass = null;
 
     this.material = createCloudMaterial(this._steps, this._lightSteps, this._octaves, this._detailOctaves, this._useErosion, this._lightMode);
+    if (opts.renderer) {
+      this._occupancyPass = new CloudOccupancyPass(
+        opts.renderer,
+        this.material.uniforms,
+        { size: OCC_SIZE, planet: true },
+      );
+    }
     this._applyOccupancyUniforms();
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), this.material);
     this.mesh.frustumCulled = false;
@@ -151,15 +163,12 @@ export class PlanetCloudLayer {
     u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
     u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
-    u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
     if (!this._stepLOD) u.uCloudStepScale.value = 1.0;
 
     // low-res cloud render + depth-aware upscale (perf). scale 1.0 = off.
-    const lowResScale = config.cloudRenderScale ?? 1.0;
-    this._lowRes = lowResScale < 0.999 && !q.disabled;
-    this._lowResPass.scale = Math.max(0.25, Math.min(1.0, lowResScale));
-    this._lowResPass.setMeshLayer(this.mesh, this._lowRes);
+    this._baseRenderScale = config.cloudRenderScale ?? 1.0;
+    this.setAdaptiveQuality(this._adaptiveScaleMultiplier, this._adaptiveStepScale);
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -195,6 +204,22 @@ export class PlanetCloudLayer {
 
   setLighting(lightingState) {
     applyCloudLightingState(this.material?.uniforms, lightingState);
+  }
+
+  setAdaptiveQuality(scaleMultiplier = 1, stepMultiplier = 1) {
+    this._adaptiveScaleMultiplier = Math.max(0, Math.min(1, scaleMultiplier));
+    this._adaptiveStepScale = Math.max(0.5, Math.min(1, stepMultiplier));
+    const scale = Math.max(
+      0.25,
+      Math.min(1, this._baseRenderScale * this._adaptiveScaleMultiplier),
+    );
+    this._lowRes = scale < 0.999 && this._enabled;
+    this._lowResPass.scale = scale;
+    this._lowResPass.setMeshLayer(this.mesh, this._lowRes);
+  }
+
+  get effectiveRenderScale() {
+    return this._lowResPass?.scale ?? 1;
   }
 
   _compileMaterial(material) {
@@ -240,13 +265,23 @@ export class PlanetCloudLayer {
   /** Point the current material at the occupancy texture (after create/rebuild). */
   _applyOccupancyUniforms() {
     const u = this.material.uniforms;
-    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+    if (this._occupancyPass) this._occupancyPass.setUniforms(u);
+    if (u.uCloudOccupancy) {
+      u.uCloudOccupancy.value = this._occupancyPass?.texture || this._occTex;
+    }
   }
 
   /** Rebuild the directional occupancy grid from the current field params. Cheap
    *  (one FBM sample per texel of a 48² map) and throttled by the caller. */
   _rebuildOccupancy() {
     const u = this.material.uniforms;
+    if (this._occupancyPass) {
+      this._occupancyPass.render();
+      this._occupancyRatio = null;
+      this._occupancyUseful = true;
+      u.uUseOccupancy.value = 1.0;
+      return;
+    }
     const inner = u.uCloudInner.value, outer = u.uCloudOuter.value;
     const w = u.uCloudWind.value;
     const occupancyRatio = buildOccupancyOctahedral(this._occData, OCC_SIZE, inner, outer, {
@@ -316,12 +351,14 @@ export class PlanetCloudLayer {
     const u = this.material.uniforms;
     // step-LOD: full quality near the surface, ramping down to 0.4 at the cull
     // distance so distant frames cost far fewer marched samples.
+    let distanceStepScale = 1.0;
     if (this._stepLOD && Number.isFinite(this._maxDistance)) {
       const near = this.planetRadius;
       const far = this._maxDistance;
       const f = far > near ? (dist - near) / (far - near) : 0;
-      u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+      distanceStepScale = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
     }
+    u.uCloudStepScale.value = distanceStepScale * this._adaptiveStepScale;
     u.uCloudTime.value += dt;
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;
@@ -431,6 +468,10 @@ export class PlanetCloudLayer {
       this._depthTexture = null;
     }
     if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
+    if (this._occupancyPass) {
+      this._occupancyPass.dispose();
+      this._occupancyPass = null;
+    }
     if (this._lowResPass) { this._lowResPass.dispose(); this._lowResPass = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();

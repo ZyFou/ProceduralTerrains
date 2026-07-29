@@ -1,4 +1,8 @@
-import { NOISE_GLSL, buildHeightGLSL } from '../terrain/terrainGLSL.js';
+import {
+  NOISE_GLSL,
+  buildHeightGLSL,
+  INFINITE_FIELD_CACHE_GLSL,
+} from '../terrain/terrainGLSL.js';
 import { BIOME_GLSL } from '../terrain/biomeGLSL.js';
 
 // The water surface only needs value noise for ripples and foam. Studio depth
@@ -23,13 +27,30 @@ float vnoise(vec2 p) {
 }
 `;
 
+// Studio water owns a separate preview cache so a fast, low-resolution shore
+// mask can be published immediately without changing terrain normals/colors.
+// The terrain keeps its live procedural shading until the final bake commits.
+export const WATER_TERRAIN_CACHE_GLSL = /* glsl */ `
+uniform sampler2D uWaterTerrainHeightTex;
+uniform sampler2D uWaterTerrainBiomeTex;
+uniform float uUseWaterTerrainBiomeTex;
+
+vec2 waterBakedUvAt(vec2 xz) {
+  return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0));
+}
+
+float waterBakedHeightAt(vec2 xz) {
+  return texture2D(uWaterTerrainHeightTex, waterBakedUvAt(xz)).r * uHeightScale;
+}
+`;
+
 export function buildWaterHeightShaderParts(stackGLSL, infinite) {
   if (infinite) {
     return {
-      dependencies: `${NOISE_GLSL}\n${BIOME_GLSL}\n${buildHeightGLSL(stackGLSL.body2d)}`,
+      dependencies: `${NOISE_GLSL}\n${BIOME_GLSL}\n${buildHeightGLSL(stackGLSL.body2d)}\n${INFINITE_FIELD_CACHE_GLSL}`,
       terrainHeightFunction: /* glsl */ `
 float waterTerrainHeightAt(vec2 xz) {
-  return heightAt(xz);
+  return terrainCachedHeightAt(xz);
 }
 `,
     };
@@ -39,7 +60,7 @@ float waterTerrainHeightAt(vec2 xz) {
     dependencies: WATER_RIPPLE_NOISE_GLSL,
     terrainHeightFunction: /* glsl */ `
 float waterTerrainHeightAt(vec2 xz) {
-  return bakedHeightAt(xz);
+  return waterBakedHeightAt(xz);
 }
 `,
   };

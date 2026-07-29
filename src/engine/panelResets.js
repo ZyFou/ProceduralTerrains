@@ -4,7 +4,10 @@
 
 import { DEFAULT_PARAMS } from './presets.js';
 import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
-import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
+import {
+  WATER_DEFAULT_PARAMS,
+  WATER_LIGHTING_PARAM_KEYS,
+} from './water/WaterSettings.js';
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
 import { VISUAL_DEFAULT_PARAMS, VISUAL_RESET_KEYS } from './render/VisualSettings.js';
@@ -42,6 +45,7 @@ export const WORLD_RESET_KEYS = [
 export const LIGHTING_PARAM_KEYS = [
   'sunAzimuth', 'sunElevation', 'fogDensity',
   'cloudShadowsEnabled', 'cloudShadowOpacity', 'visualsSunRaysStrength',
+  ...WATER_LIGHTING_PARAM_KEYS,
 ];
 
 export const LIGHTING_STYLE_KEYS = ['sunColor', 'sunIntensity', 'skyAmbient', 'groundBounce'];

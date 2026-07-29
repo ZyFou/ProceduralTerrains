@@ -151,11 +151,12 @@ uniform float uCloudSunResponse;
 uniform float uCloudAmbientResponse;
 uniform float uCloudSilverLining;
 uniform vec3  uCloudWind;          // domain drift vector (already × speed)
+uniform vec3  uCloudNoiseOffset;   // accumulated noise-space offset for rebasing
+uniform vec3  uCloudDomainOrigin;  // world-space origin subtracted before domain rotation
 uniform float uCloudRotation;      // domain rotation angle (radians)
 uniform float uCloudTime;
 uniform float uCloudSelfShadow;    // 0/1 toggle
 uniform vec3  uCloudSunDir;        // normalized, surface -> sun
-uniform float uCloudNoiseVariant;  // 0 soft, 1 billowy, 2 wispy, 3 cellular
 uniform float uCloudStepScale;     // 0.4..1 — distance LOD on the primary march
 uniform float uCloudEvolve;        // noise-space units/sec: scroll through the
                                    // field so clouds FORM / MORPH / DISSIPATE in
@@ -177,23 +178,9 @@ float cloudShape(vec3 q) {
   // The falloff in cloudDensity uses the REAL altitude, so this only morphs the
   // shape — it never moves the shell.
   float evoT = uCloudTime * uCloudEvolve;
-  vec3 baseP = q * uCloudScale + drift + vec3(0.0, evoT, 0.0);
+  vec3 baseP = q * uCloudScale + uCloudNoiseOffset
+    + drift + vec3(0.0, evoT, 0.0);
   float base = cl_fbm_base(baseP);
-  float variant = floor(uCloudNoiseVariant + 0.5);
-
-  if (variant > 0.5 && variant < 1.5) {
-    float billow = 1.0 - abs(base * 2.0 - 1.0);
-    base = mix(base, pow(clamp(billow, 0.0, 1.0), 0.65), 0.85);
-  } else if (variant > 1.5 && variant < 2.5) {
-    vec3 streakP = vec3(q.x * 0.42 + q.z * 0.18, q.y * 0.72, q.z * 2.65) * uCloudScale + drift;
-    float streak = cl_fbm_base(streakP);
-    float shear = cl_fbm_base((q + vec3(streak * 36.0, 0.0, -streak * 18.0)) * uCloudScale * 0.72 + drift * 1.35);
-    base = mix(streak, shear, 0.45);
-  } else if (variant > 2.5) {
-    float cell = 1.0 - cl_worley(baseP * 1.55);
-    float filler = cl_fbm_base(baseP * 0.72 + vec3(19.7, 4.1, 31.3));
-    base = mix(filler, clamp(cell, 0.0, 1.0), 0.72);
-  }
 
   // Soft base coverage from the LARGE-scale shape first. This is the smooth
   // volume; detail/erosion below are folded in only across the transition band
@@ -218,11 +205,17 @@ float cloudShape(vec3 q) {
   float carve = 0.0;
   #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
   // centered (detail - 0.5): redistributes density instead of biasing brightness
-  float detail = cl_fbm_detail(q * uCloudDetailScale + drift * 1.7 + vec3(0.0, evoD, 0.0));
+  float detailRatio = uCloudDetailScale / max(uCloudScale, 1e-6);
+  float detail = cl_fbm_detail(q * uCloudDetailScale
+    + uCloudNoiseOffset * detailRatio
+    + drift * 1.7 + vec3(0.0, evoD, 0.0));
   carve += (detail - 0.5) * uCloudDetailStrength;
   #endif
   #if defined(CLOUD_USE_EROSION) && CLOUD_USE_EROSION > 0
-  float ero = cl_worley(q * uCloudErosionScale + vec3(0.0, evoD, 0.0));
+  float erosionRatio = uCloudErosionScale / max(uCloudScale, 1e-6);
+  float ero = cl_worley(q * uCloudErosionScale
+    + uCloudNoiseOffset * erosionRatio
+    + vec3(0.0, evoD, 0.0));
   carve -= ero * uCloudErosionStrength;
   #endif
 
@@ -234,7 +227,8 @@ float cloudShape(vec3 q) {
 float cloudShapeForLight(vec3 q) {
   vec3 drift = uCloudWind * uCloudTime;
   float evoT = uCloudTime * uCloudEvolve;
-  vec3 baseP = q * uCloudScale + drift + vec3(0.0, evoT, 0.0);
+  vec3 baseP = q * uCloudScale + uCloudNoiseOffset
+    + drift + vec3(0.0, evoT, 0.0);
   float base = cl_fbm_light(baseP);
   float threshold = 1.0 - uCloudCoverage;
   float soft = max(uCloudSoftness, 0.08);
@@ -329,7 +323,7 @@ vec2 cloudSample(vec3 P) {
   float rad = length(P.xz - uCloudCenter.xz);
   float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
   if (edge <= 0.0) return vec2(0.0, hf);
-  return vec2(cloudShape(cl_domain(P)) * fall * edge, hf);
+  return vec2(cloudShape(cl_domain(P - uCloudDomainOrigin)) * fall * edge, hf);
 }
 float cloudDensity(vec3 P) {
   return cloudSample(P).x;
@@ -343,7 +337,7 @@ float cloudDensityForLight(vec3 P) {
   float fall = smoothstep(0.0, 0.18, hf) * smoothstep(1.0, 0.78, hf);
   float rad = length(P.xz - uCloudCenter.xz);
   float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
-  return cloudShapeForLight(cl_domain(P)) * fall * max(edge, 0.0);
+  return cloudShapeForLight(cl_domain(P - uCloudDomainOrigin)) * fall * max(edge, 0.0);
 }
 
 

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { createCloudSlabMaterial } from './CloudSlabShader.js';
-import { resolveCloudNoiseVariant, resolveCloudQuality } from './CloudSettings.js';
+import { resolveCloudQuality } from './CloudSettings.js';
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
+import { CloudOccupancyPass } from './CloudOccupancyPass.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
@@ -56,6 +57,9 @@ export class CloudSlabLayer {
     this._useErosion = BOOT_CONFIG.useErosion;
     this._lightMode = BOOT_CONFIG.lightMode;
     this._stepLOD = false;
+    this._adaptiveScaleMultiplier = 1;
+    this._adaptiveStepScale = 1;
+    this._baseRenderScale = 1;
     this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
     this._lowResPass = new CloudLowResPass();
     this._enabled = false;
@@ -88,6 +92,7 @@ export class CloudSlabLayer {
     this._occTex.generateMipmaps = false;
     this._occTex.needsUpdate = true;
     this._occBuiltAt = 0;
+    this._occupancyPass = null;
 
     this.material = createCloudSlabMaterial(
       this._steps,
@@ -97,6 +102,13 @@ export class CloudSlabLayer {
       this._useErosion,
       this._lightMode
     );
+    if (opts.renderer) {
+      this._occupancyPass = new CloudOccupancyPass(
+        opts.renderer,
+        this.material.uniforms,
+        { size: OCC_SIZE, planet: false },
+      );
+    }
     this._applyOccupancyUniforms();
 
     // a unit box that ENCLOSES the slab volume (scaled in applyParams). Drawn
@@ -193,15 +205,12 @@ export class CloudSlabLayer {
     u.uCloudAmbientResponse.value = params.cloudAmbientResponse ?? 1.0;
     u.uCloudSilverLining.value = params.cloudSilverLining ?? 0.25;
     u.uCloudSelfShadow.value = q.selfShadow ? 1.0 : 0.0;
-    u.uCloudNoiseVariant.value = resolveCloudNoiseVariant(params.cloudNoiseVariant);
     this._stepLOD = q.stepLOD;
     if (!this._stepLOD) u.uCloudStepScale.value = 1.0;
 
     // low-res cloud render + depth-aware upscale (perf). scale 1.0 = off.
-    const lowResScale = config.cloudRenderScale ?? 1.0;
-    this._lowRes = lowResScale < 0.999 && !q.disabled;
-    this._lowResPass.scale = Math.max(0.25, Math.min(1.0, lowResScale));
-    this._lowResPass.setMeshLayer(this.mesh, this._lowRes);
+    this._baseRenderScale = config.cloudRenderScale ?? 1.0;
+    this.setAdaptiveQuality(this._adaptiveScaleMultiplier, this._adaptiveStepScale);
 
     if (params.cloudColor) u.uCloudColor.value.setRGB(...params.cloudColor);
     if (params.cloudShadowColor) u.uCloudShadowColor.value.setRGB(...params.cloudShadowColor);
@@ -253,6 +262,22 @@ export class CloudSlabLayer {
 
   setLighting(lightingState) {
     applyCloudLightingState(this.material?.uniforms, lightingState);
+  }
+
+  setAdaptiveQuality(scaleMultiplier = 1, stepMultiplier = 1) {
+    this._adaptiveScaleMultiplier = Math.max(0, Math.min(1, scaleMultiplier));
+    this._adaptiveStepScale = Math.max(0.5, Math.min(1, stepMultiplier));
+    const scale = Math.max(
+      0.25,
+      Math.min(1, this._baseRenderScale * this._adaptiveScaleMultiplier),
+    );
+    this._lowRes = scale < 0.999 && this._enabled;
+    this._lowResPass.scale = scale;
+    this._lowResPass.setMeshLayer(this.mesh, this._lowRes);
+  }
+
+  get effectiveRenderScale() {
+    return this._lowResPass?.scale ?? 1;
   }
 
   _configMatches(config) {
@@ -332,13 +357,23 @@ export class CloudSlabLayer {
   /** Point the current material at the occupancy texture (after create/rebuild). */
   _applyOccupancyUniforms() {
     const u = this.material.uniforms;
-    if (u.uCloudOccupancy) u.uCloudOccupancy.value = this._occTex;
+    if (this._occupancyPass) this._occupancyPass.setUniforms(u);
+    if (u.uCloudOccupancy) {
+      u.uCloudOccupancy.value = this._occupancyPass?.texture || this._occTex;
+    }
   }
 
   /** Rebuild the planar occupancy grid from the current field params (cheap,
    *  throttled by the caller). */
   _rebuildOccupancy() {
     const u = this.material.uniforms;
+    if (this._occupancyPass) {
+      this._occupancyPass.render();
+      this._occupancyRatio = null;
+      this._occupancyUseful = true;
+      u.uUseOccupancy.value = 1.0;
+      return;
+    }
     const w = u.uCloudWind.value;
     const occupancyRatio = buildOccupancyPlanar(
       this._occData, OCC_SIZE,
@@ -448,15 +483,18 @@ export class CloudSlabLayer {
 
     const u = this.material.uniforms;
     // step-LOD: ramp the effective march steps down to 0.4 toward the cull edge
+    let distanceStepScale = 1.0;
     if (this._stepLOD && Number.isFinite(this._maxDistance)) {
       const near = this._coverSize || this._boardSize;
       const far = this._maxDistance;
       const f = far > near ? (dist - near) / (far - near) : 0;
-      u.uCloudStepScale.value = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
+      distanceStepScale = Math.max(0.4, Math.min(1.0, 1.0 - f * 0.6));
     }
+    u.uCloudStepScale.value = distanceStepScale * this._adaptiveStepScale;
     u.uCloudTime.value += dt;
     this._rotation += dt * (this._rotSpeed || 0);
     u.uCloudRotation.value = this._rotation;
+    this._syncDomainRebase();
     if (sunDir) u.uCloudSunDir.value.copy(sunDir);
 
     // refresh the empty-space-skip occupancy grid on a throttle
@@ -467,6 +505,10 @@ export class CloudSlabLayer {
       this._rebuildOccupancy();
     }
   }
+
+  // InfiniteCloudLayer overrides this to keep its camera-local sample domain
+  // continuous while the bounded render volume recenters.
+  _syncDomainRebase() {}
 
   /** Bind depth produced by the real scene render (no duplicate scene pass). */
   useSceneDepth(depthTexture, camera, baseSize = null) {
@@ -563,6 +605,10 @@ export class CloudSlabLayer {
       this._depthTexture = null;
     }
     if (this._occTex) { this._occTex.dispose(); this._occTex = null; }
+    if (this._occupancyPass) {
+      this._occupancyPass.dispose();
+      this._occupancyPass = null;
+    }
     if (this._lowResPass) { this._lowResPass.dispose(); this._lowResPass = null; }
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
