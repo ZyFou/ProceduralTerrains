@@ -83,7 +83,6 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
     heightOffset: 0,
   };
   const set = (key, value) => ctx.onTileMapSetting(type, key, value);
-  const active = settings.mode !== 'disabled' && !!map;
   const isImagery = type === 'imagery';
 
   return (
@@ -92,7 +91,6 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
       icon={meta.icon}
       defaultOpen={meta.defaultOpen || !!map}
       forceOpen={forceOpen}
-      statusDot={active ? 'active' : undefined}
       settingId={`terrain.${type}Map`}
     >
       {meta.filePick ? (

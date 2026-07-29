@@ -254,7 +254,6 @@ export default function CloudPanel({
       id={id}
       title="CLOUDS"
       defaultOpen={defaultOpen}
-      statusDot={enabled ? 'active' : null}
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
           <path d="M4 11.5a2.5 2.5 0 0 1 .4-4.95A3.5 3.5 0 0 1 11.3 6.6a2.5 2.5 0 0 1-.3 4.9H4z" stroke="currentColor" strokeWidth="1.1" />

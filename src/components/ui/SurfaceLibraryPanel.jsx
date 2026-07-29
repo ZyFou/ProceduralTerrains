@@ -369,7 +369,6 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
         defaultOpen={false}
         forceOpen={targetId?.startsWith(`surface.${role.id}.`) || forceOpenAfterDrop}
         settingId={`surface.${role.id}`}
-        statusDot={layerStatus === 'ready' ? 'active' : null}
         onToggle={(nextOpen) => {
           setOpen(nextOpen);
           if (!nextOpen) setForceOpenAfterDrop(false);

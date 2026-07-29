@@ -5,7 +5,6 @@ export default function CollapsibleGroup({
   icon,
   defaultOpen = false,
   forceOpen = false,
-  statusDot,
   settingId,
   onToggle,
   children,
@@ -16,7 +15,6 @@ export default function CollapsibleGroup({
       icon={icon}
       defaultOpen={defaultOpen}
       forceOpen={forceOpen}
-      statusDot={statusDot}
       settingId={settingId}
       onToggle={onToggle}
     >

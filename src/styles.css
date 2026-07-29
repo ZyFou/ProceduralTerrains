@@ -928,14 +928,11 @@ body {
 
 .collapsible-group .panel-group-header {
   width: 100%;
+  padding: 0;
   border: none;
   background: transparent;
-  cursor: var(--cursor-pointer);
-  font-family: var(--font);
-  text-align: left;
-  transition: background 0.12s ease;
 }
-.collapsible-group .panel-group-toggle:hover { background: var(--bg-control); }
+.collapsible-group .panel-group-header-button:hover { background: var(--bg-control); }
 .collapsible-group .panel-group-toggle {
   justify-content: flex-start;
   border-bottom: none;
@@ -1103,7 +1100,8 @@ body {
   justify-content: space-between;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0;
+  min-height: 36px;
+  padding: 9px 12px;
   background: transparent;
   border: 0;
   color: inherit;
@@ -1111,8 +1109,17 @@ body {
   text-align: left;
   cursor: var(--cursor-pointer);
 }
+.panel-group-header-button { gap: 8px; }
+.control-section-header-button:focus-visible,
+.panel-group-header-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
 .section-enable-toggle { flex: 0 0 auto; margin-left: 10px; }
-.control-section-header:hover { background: var(--bg-control); }
+.control-section-header { padding: 0; cursor: default; }
+.control-section-header-button:hover { background: var(--bg-control); }
 .control-section-left {
   display: flex;
   align-items: center;
@@ -1132,14 +1139,6 @@ body {
   letter-spacing: 1.3px;
   color: var(--text-muted);
 }
-.control-section-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-dim);
-  flex-shrink: 0;
-}
-.control-section-dot.active { background: var(--accent); }
 .control-section-chevron {
   display: flex;
   color: var(--text-dim);
