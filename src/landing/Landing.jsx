@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, EllipsisVertical, Eye, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
+import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, projectSyncStore, normalizeProject } from '../project/ProjectStore.js';
 import { projectApi } from '../project/projectApi.js';
@@ -496,6 +497,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
           <footer className="lp-footer">
             <div className="lp-footer-socials">
+              <a className="lp-footer-donation" href="https://ko-fi.com/zyfod" target="_blank" rel="noopener noreferrer" aria-label="Donate on Ko-fi" title="Donate on Ko-fi"><SiKofi size={15} aria-hidden="true" /><span>Donation</span></a>
               <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open GitHub repository" title="GitHub"><FaGithub size={17} /></a>
               <a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer" aria-label="Open X profile" title="X"><FaXTwitter size={15} /></a>
               <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={16} /></a>
