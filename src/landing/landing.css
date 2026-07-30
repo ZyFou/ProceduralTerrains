@@ -1176,14 +1176,16 @@ body:has(.landing-overlay) {
   .lp-content { padding: 0 16px; }
   .lp-content-scroll { gap: 32px; padding: 22px 0; }
   .lp-footer { padding-bottom: 30px; }
-  .lp-hero h1 { font-size: clamp(30px, 9.5vw, 40px); }
+  .lp-hero h1 { font-size: clamp(27px, 8.5vw, 34px); }
   .lp-hero p { font-size: 14px; }
   .lp-hero-actions { margin-top: 22px; }
   .lp-hero-actions .lp-primary,
   .lp-hero-actions .lp-secondary { flex: 1; min-width: 150px; }
   .lp-version-pill { gap: 8px; font-size: 11.5px; }
   .lp-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .lp-footer { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .lp-footer { flex-direction: column; align-items: stretch; gap: 10px; }
+  .lp-footer-socials { align-self: flex-start; }
+  .lp-footer-meta { justify-content: space-between; width: 100%; }
   .lp-head-actions .lp-secondary.sm span { display: none; }
   .lp-template-create { width: 100%; }
   .profile-grid { grid-template-columns: 1fr; }

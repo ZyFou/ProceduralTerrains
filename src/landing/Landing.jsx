@@ -504,7 +504,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <a href="mailto:zyfodexe@gmail.com" aria-label="Email zyfodexe@gmail.com" title="Email zyfodexe@gmail.com"><Mail size={16} /></a>
             </div>
             <div className="lp-footer-meta">
-              <span>© {new Date().getFullYear()} {APP_NAME}. Open source software.</span>
+              <span>© {new Date().getFullYear()} {APP_NAME}.</span>
               <button type="button" className="lp-link" onClick={() => showView('confidentiality')}>Confidentiality</button>
             </div>
           </footer>
