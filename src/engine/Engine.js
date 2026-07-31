@@ -163,16 +163,24 @@ function yieldFrame() {
   return new Promise((resolve) => setTimeout(resolve, 16));
 }
 
-// Parameter keys that change the terrain shape (deferred when Auto Update is
-// off). Everything else (debug toggles, sun, fog…) always applies instantly.
-const SHAPE_KEYS = new Set([
-  'seed', 'heightScale', 'seaLevel', 'noiseScale', 'noiseStrength', 'octaves',
+// Parameter keys that change the baked terrain height/climate field. Sea level
+// and snow line are presentation thresholds, not terrain generation inputs:
+// keeping them out of this set lets water and biome appearance update live
+// without throwing away a full-resolution height/climate bake.
+const TERRAIN_FIELD_KEYS = new Set([
+  'seed', 'heightScale', 'noiseScale', 'noiseStrength', 'octaves',
   'terrainSmoothing', 'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
-  'moistScale', 'moistBias', 'biomeScale', 'tempBias', 'snowLine',
-  'chunkCount', 'chunkSize', 'planetFaceGrid',
+  'moistScale', 'moistBias', 'biomeScale', 'tempBias',
+  'chunkCount', 'chunkSize',
 ]);
 
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize', 'planetFaceGrid']);
+const DEFERRED_TERRAIN_KEYS = new Set(
+  [...TERRAIN_FIELD_KEYS].filter((key) => !REBUILD_KEYS.has(key)),
+);
+const STACK_COMPAT_PARAM_KEYS = new Set([
+  'warp', 'ridge', 'persistence', 'lacunarity', 'octaves',
+]);
 
 export class Engine {
   constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
@@ -188,10 +196,16 @@ export class Engine {
     // get the default single Classic-Terrain layer == bit-identical to before.
     this.noiseStack = migrateStack(this.params.noiseStack);
     this.params.noiseStack = this.noiseStack;
+    this._liveNoiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
     this._liveHeightSig = this._stackSig;
     this._liveHeightSourceSig = this._stackSig;
+    this._liveGenerationSource = 'classic';
+    this._liveGraphProgram = null;
+    this._terrainSourcePendingToken = null;
+    this._octaveTransitionTarget = null;
+    this._octaveTransitionPromise = null;
     this.projectMode = 'procedural';
     this.generationSource = 'classic';
     this.terrainGraph = null;
@@ -203,6 +217,7 @@ export class Engine {
     this._pendingGraphCompileNodeIds = new Set();
     this._pendingGraphFallbackProgram = null;
     this._soloLayerId = null;       // solo-preview gate (uniform-only, no recompile)
+    this._liveSoloLayerId = null;
     this.appliedChunkCount = 0;
     this.appliedChunkSize = 0;
     this._minimapDirtyAt = 0;
@@ -237,6 +252,8 @@ export class Engine {
     this._waterWarmFailed = false;
     this._terrainHeightBakeDeferred = true;
     this._terrainHeightBakeFailed = false;
+    this._terrainHeightBakeRetryTimer = null;
+    this._terrainHeightBakeRetryCount = 0;
     this._postFirstPaintWarmupsStarted = false;
     this._postFirstPaintWarmTimer = null;
     this._postFirstPaintWaterTimer = null;
@@ -337,6 +354,9 @@ export class Engine {
     this._freeCamRestore = null;
     this._debugFreeCamOwnsFps = false;
     this._terrainGen = 0;   // bumped whenever the height field changes
+    this._pendingTerrainParams = {};
+    this._pendingNoiseStack = null;
+    this._pendingNoiseSolo = null;
     this._infiniteTerrainMat = null;
     this._infiniteWaterMat = null;
 
@@ -415,7 +435,7 @@ export class Engine {
     this.applyAll({ force: true });
     this._applyPerformance();
     this._syncPlanetStyleToParams();
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
 
     this._resizeObserver = new ResizeObserver(() => this._onResize());
@@ -645,13 +665,9 @@ export class Engine {
           this.minimap.requestRedraw();
         }
         if (meta.terrainChanged) {
-          this._terrainGen++;
-          this._bakedStudioGen = -1;
-          this.heightSampler?.invalidate?.();
-          this.propSurfaceField?.invalidate?.();
+          this._markTerrainFieldDirty();
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
-          this._needsRender = true;
         }
         this.cb.onManualTerrainState?.(state, meta);
       },
@@ -687,9 +703,7 @@ export class Engine {
   _syncManualTerrainBounds() {
     const changed = this.manualTerrain?.syncBounds();
     if (changed?.terrainChanged) {
-      this._terrainGen++;
-      this.heightSampler?.invalidate?.();
-      this.propSurfaceField?.invalidate?.();
+      this._markTerrainFieldDirty();
     }
     return changed;
   }
@@ -701,7 +715,11 @@ export class Engine {
     });
     this.splineManager = new SplineManager({ scene: this.scene, camera: this.camera, domElement: this.canvas, controls: this.controls, uniforms: this.uniforms,
       getBounds: () => this._creatorBounds(), getBaseHeight: (x, z) => this._getHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1), picker, gpuTier: this.gpuTier,
-      onChange: (state) => { this.splineState = state; this._bakedStudioGen = -1; this._terrainGen++; this._needsRender = true; this.cb.onSplineState?.(state); },
+      onChange: (state) => {
+        this.splineState = state;
+        this._markTerrainFieldDirty();
+        this.cb.onSplineState?.(state);
+      },
       onStableAction: (label) => { this.projectHistory?.record('splines', label); }, onToast: (message) => this.cb.onToast(message),
     });
     this.terrainAnalysis = new TerrainAnalysisManager({ uniforms: this.uniforms, getParams: () => this.params, onChange: (state) => { this.analysisState = state; this._needsRender = true; this.cb.onAnalysisState?.(state); } });
@@ -1316,6 +1334,7 @@ export class Engine {
         }
       }
       this._rebuildImportedTexture(type);
+      this.applyAll({ force: false, terrainDirty: type !== 'imagery' });
       this.cb.onToast(`${type[0].toUpperCase() + type.slice(1)} map imported`);
       if (warning) this.cb.onToast(warning);
     } catch (e) {
@@ -1658,7 +1677,7 @@ export class Engine {
     if (key === 'invert' || key === 'normalize') this._rebuildImportedTexture(type);
     this._syncImportedMapUniforms();
     this._setImportState(type);
-    this.applyAll({ force: false });
+    this.applyAll({ force: false, terrainDirty: type !== 'imagery' });
   }
 
   _setImportState(type, patch = {}) {
@@ -1755,24 +1774,50 @@ export class Engine {
       if (b) region.set((b.minX - 0.5) * cs, (b.minZ - 0.5) * cs, b.cols * cs, b.rows * cs);
       else region.set(-cs / 2, -cs / 2, cs, cs);
     }
-    this._bakedStudioGen = -1;
-    this._terrainGen++;
     this._needsRender = true;
   }
 
   setParam(key, value) {
+    this._pendingTerrainParams ||= {};
+    if (DEFERRED_TERRAIN_KEYS.has(key) && !this.params.autoUpdate) {
+      const current = Object.hasOwn(this._pendingTerrainParams, key)
+        ? this._pendingTerrainParams[key]
+        : this.params[key];
+      if (Object.is(current, value)) return;
+      if (Object.is(this.params[key], value)) {
+        delete this._pendingTerrainParams[key];
+      } else {
+        this._pendingTerrainParams[key] = value;
+      }
+      this.cb.onParams(this._paramsSnapshot());
+      const hasPending = Object.keys(this._pendingTerrainParams).length > 0
+        || !!this._pendingNoiseStack;
+      this.cb.onStatus(
+        hasPending ? 'Pending changes — enable Auto Update to apply' : 'Ready',
+        hasPending,
+      );
+      return;
+    }
+
     if (key === 'surfaceTextureSource') {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: value });
+      if (this.params.surfaceTextureSource === surfaceTextureSource
+          && this.params.surfaceTextureMode
+            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
       this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
     } else if (key === 'surfaceTextureMode') {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureMode: !!value });
+      if (this.params.surfaceTextureSource === surfaceTextureSource
+          && this.params.surfaceTextureMode
+            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
       this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
     } else {
+      if (Object.is(this.params[key], value)) return;
       this.params[key] = value;
     }
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     this._needsRender = true;   // any param change → redraw (on-demand studio)
 
     // erosion params: erosionEnabled is the live before/after toggle (applies
@@ -1792,52 +1837,15 @@ export class Engine {
     // Dynamic Noise Modifier Addition:
     // If the active noise stack doesn't have any enabled legacy layer, intercept adjustments
     // to classic sliders and inject/update appropriate modifier/height layers.
-    const hasLegacy = this.noiseStack && this.noiseStack.layers.some((l) => l.type === 'legacy' && l.enabled);
-    const legacyOnlyKeys = new Set(['warp', 'ridge', 'persistence', 'lacunarity', 'octaves']);
-
-    if (!hasLegacy && legacyOnlyKeys.has(key)) {
-      const defaultStack = cloneStack(this.noiseStack);
-      let updated = false;
-
-      if (key === 'warp') {
-        const layer = defaultStack.layers.find(x => x.type === 'domainWarp');
-        if (layer) {
-          layer.strength = value;
-          updated = true;
-        } else if (value > 0.05) {
-          const newLayer = makeLayer('domainWarp', { name: 'Domain Warp (Auto)', strength: value });
-          defaultStack.layers.unshift(newLayer); // insert at top to affect subsequent layers
-          this.cb.onToast('Domain Warp layer added to stack');
-          updated = true;
-        }
-      } else if (key === 'ridge') {
-        const layer = defaultStack.layers.find(x => x.type === 'ridged');
-        if (layer) {
-          layer.strength = value;
-          updated = true;
-        } else if (value > 0.05) {
-          const newLayer = makeLayer('ridged', { name: 'Ridged Mountains (Auto)', strength: value });
-          defaultStack.layers.push(newLayer);
-          this.cb.onToast('Ridged Mountains layer added to stack');
-          updated = true;
-        }
-      } else if (key === 'persistence' || key === 'lacunarity' || key === 'octaves') {
-        let layer = defaultStack.layers.find(x => x.params && key in x.params);
-        if (layer) {
-          layer.params[key] = value;
-          updated = true;
-        } else {
-          const newLayer = makeLayer('fbm', { name: 'FBM Detail (Auto)' });
-          newLayer.params[key] = value;
-          defaultStack.layers.push(newLayer);
-          this.cb.onToast('FBM Detail layer added to stack');
-          updated = true;
-        }
-      }
-
-      if (updated) {
-        this.setNoiseStack(defaultStack);
-      }
+    const stackCompat = this._stackWithCompatParam(
+      this.noiseStack,
+      key,
+      value,
+      { notify: true },
+    );
+    if (stackCompat.updated) {
+      this.setNoiseStack(stackCompat.stack);
+      return;
     }
 
     // cloud params: live shader updates only (never rebuild terrain/planet,
@@ -1881,24 +1889,34 @@ export class Engine {
     if (key === 'autoUpdate') {
       // Replacing the old Regenerate footer: turning Auto Update back on
       // applies any shape edits that were deferred while it was off.
-      if (value) this.applyAll({ force: false });
+      const committed = value
+        ? this._commitPendingTerrainParams()
+        : { paramsChanged: false };
+      if (committed.paramsChanged && !committed.stackChanged) {
+        this.applyAll({ force: false, terrainDirty: true });
+      }
       return;
     }
 
-    if (SHAPE_KEYS.has(key) && !this.params.autoUpdate) {
-      this.cb.onStatus('Pending changes — enable Auto Update to apply', true);
-      return;
-    }
     if (key === 'waterEnabled' && value && this._waterDeferred) {
       this._warmDeferredWater();
     }
-    this._afterParamChange(REBUILD_KEYS.has(key));
+    if (key === 'octaves' && this.worldMode !== 'planet') {
+      this._afterParamChange(false, false);
+      return;
+    }
+    this._afterParamChange(REBUILD_KEYS.has(key), TERRAIN_FIELD_KEYS.has(key));
   }
 
   applyPresetByKey(presetKey) {
+    this._clearPendingTerrainParams(
+      [...TERRAIN_FIELD_KEYS].filter((key) => key !== 'seed'),
+    );
+    this._pendingNoiseStack = null;
+    this._pendingNoiseSolo = null;
     this.params = applyPreset(this.params, presetKey);
     const defaultStack = migrateStack(undefined);
-    this.setNoiseStack(defaultStack);
+    this.setNoiseStack(defaultStack, { force: true });
     // A preset may also carry a colour palette (e.g. Cartoon) — switch the
     // terrain colours together with the shape so it's a single click.
     const preset = PRESETS[presetKey];
@@ -1907,10 +1925,15 @@ export class Engine {
       this._notifyPlanetStyle();
     }
     this.cb.onParams({ ...this.params });
-    this._afterParamChange(true);
+    this._afterParamChange(true, true);
   }
 
-  regenerate() { this.applyAll({ force: false }); }
+  regenerate() {
+    const committed = this._commitPendingTerrainParams();
+    if (!committed.stackChanged) {
+      this.applyAll({ force: false, terrainDirty: true });
+    }
+  }
 
   randomizeSeed() {
     this.setParam('seed', (Math.random() * 0xffffffff) >>> 0);
@@ -1918,6 +1941,7 @@ export class Engine {
 
   newProject({ silent = false, projectMode = 'procedural' } = {}) {
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
+    this._clearPendingTerrainParams();
     this.params = { ...DEFAULT_PARAMS };
     this.planetStyle.reset();
     if (this.projectMode === 'nodes' || this.projectMode === 'manual') {
@@ -1964,6 +1988,8 @@ export class Engine {
     this.paintMode?.setEnabled(false);
     this.paintMode?.clear({ silent });
     this.paintMode?.setBaseMode(this.projectMode === 'manual' ? 'flat' : 'generated');
+    this.paintMode?.setState({ layerOpacity: 1 });
+    this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.clear({ emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
@@ -1998,7 +2024,7 @@ export class Engine {
     this._notifyTiles();
 
     const defaultStack = migrateStack(undefined);
-    this.setNoiseStack(defaultStack);
+    this.setNoiseStack(defaultStack, { force: true });
     this._syncCpuHeightProgram();
 
     this.controls.reset(this.boardSize);
@@ -2024,9 +2050,11 @@ export class Engine {
 
   /** Fresh params object for React — avoids shared nested references. */
   _paramsSnapshot() {
-    const style = this.planetStyle.getStyle();
+    const style = this.planetStyle?.getStyle?.() ?? this.params.planetStyle ?? {};
     return {
       ...this.params,
+      ...this._pendingTerrainParams,
+      noiseStack: this._pendingNoiseStack ?? this.params.noiseStack,
       planetPreset: style.planetPreset,
       palettePreset: style.palettePreset,
       noisePreset: style.noisePreset,
@@ -2087,6 +2115,7 @@ export class Engine {
 
   applyPlanetPresetByKey(key) {
     const { style, params, perf } = this.planetStyle.applyPlanetPreset(key);
+    this._clearPendingTerrainParams(Object.keys(params));
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
     if (perf && Object.keys(perf).length) {
       this.perf = sanitizePerfSettings({ ...this.perf, ...perf, preset: 'custom' });
@@ -2098,8 +2127,12 @@ export class Engine {
     this.params.palettePreset = style.palettePreset;
     this.params.noisePreset = style.noisePreset;
     this.params.planetStyle = style;
-    this.cb.onParams({ ...this.params });
-    this._afterParamChange(Object.keys(params).some((k) => REBUILD_KEYS.has(k)));
+    this.cb.onParams(this._paramsSnapshot());
+    const changedKeys = Object.keys(params);
+    this._afterParamChange(
+      changedKeys.some((k) => REBUILD_KEYS.has(k)),
+      changedKeys.some((k) => TERRAIN_FIELD_KEYS.has(k)),
+    );
     this.planetStyle.applyToUniforms(this.uniforms);
     this._applyStudioFogFromStyle();
     this.cb.onToast(`Planet: ${key}`);
@@ -2114,10 +2147,14 @@ export class Engine {
 
   applyNoisePresetByKey(key) {
     const { params } = this.planetStyle.applyNoisePreset(key);
+    this._clearPendingTerrainParams(Object.keys(params));
     this.params.noisePreset = key;
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
-    this.cb.onParams({ ...this.params });
-    this._afterParamChange(false);
+    this.cb.onParams(this._paramsSnapshot());
+    this._afterParamChange(
+      false,
+      Object.keys(params).some((k) => TERRAIN_FIELD_KEYS.has(k)),
+    );
     this.cb.onToast(`Noise: ${key}`);
   }
 
@@ -2132,13 +2169,17 @@ export class Engine {
 
   randomizePlanetPreset() {
     const { style, params } = this.planetStyle.randomizePlanetPreset();
+    this._clearPendingTerrainParams(Object.keys(params));
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
     this.params.planetPreset = style.planetPreset;
     this.params.palettePreset = style.palettePreset;
     this.params.noisePreset = style.noisePreset;
     this.params.planetStyle = style;
-    this.cb.onParams({ ...this.params });
-    this._afterParamChange(false);
+    this.cb.onParams(this._paramsSnapshot());
+    this._afterParamChange(
+      false,
+      Object.keys(params).some((k) => TERRAIN_FIELD_KEYS.has(k)),
+    );
     this.planetStyle.applyToUniforms(this.uniforms);
     this._applyStudioFogFromStyle();
     this.cb.onToast(`Random planet: ${style.planetPreset}`);
@@ -2169,9 +2210,114 @@ export class Engine {
     this.cb.onToast('Planet style imported');
   }
 
-  _afterParamChange(needsRebuild) {
-    if (needsRebuild) this.applyAll({ force: false });
-    else this._applyUniforms();
+  _markTerrainFieldDirty() {
+    this._terrainGen++;
+    this._bakedStudioGen = -1;
+    this._bakedTerrainGen = -1;
+    this.heightSampler?.invalidate?.();
+    this.propSurfaceField?.invalidate?.();
+    this._needsRender = true;
+  }
+
+  /**
+   * Keep the classic terrain sliders meaningful for stacks that no longer have
+   * an enabled Legacy layer. The same transform is used for live and staged
+   * Auto Update edits so applying a staged value cannot silently skip it.
+   */
+  _stackWithCompatParam(stack, key, value, { notify = false } = {}) {
+    if (!stack
+        || !STACK_COMPAT_PARAM_KEYS.has(key)
+        || stack.layers?.some((layer) => layer.type === 'legacy' && layer.enabled)) {
+      return { stack, updated: false };
+    }
+    const next = cloneStack(stack);
+    let updated = false;
+    let toast = null;
+    if (key === 'warp') {
+      const layer = next.layers.find((entry) => entry.type === 'domainWarp');
+      if (layer) {
+        layer.strength = value;
+        updated = true;
+      } else if (value > 0.05) {
+        next.layers.unshift(makeLayer('domainWarp', {
+          name: 'Domain Warp (Auto)',
+          strength: value,
+        }));
+        toast = 'Domain Warp layer added to stack';
+        updated = true;
+      }
+    } else if (key === 'ridge') {
+      const layer = next.layers.find((entry) => entry.type === 'ridged');
+      if (layer) {
+        layer.strength = value;
+        updated = true;
+      } else if (value > 0.05) {
+        next.layers.push(makeLayer('ridged', {
+          name: 'Ridged Mountains (Auto)',
+          strength: value,
+        }));
+        toast = 'Ridged Mountains layer added to stack';
+        updated = true;
+      }
+    } else {
+      let layer = next.layers.find((entry) => entry.params && key in entry.params);
+      if (!layer) {
+        layer = makeLayer('fbm', { name: 'FBM Detail (Auto)' });
+        next.layers.push(layer);
+        toast = 'FBM Detail layer added to stack';
+      }
+      layer.params[key] = value;
+      updated = true;
+    }
+    if (notify && toast) this.cb.onToast?.(toast);
+    return { stack: next, updated };
+  }
+
+  _commitPendingTerrainParams() {
+    const entries = Object.entries(this._pendingTerrainParams || {});
+    let pendingStack = this._pendingNoiseStack;
+    const pendingSolo = pendingStack
+      ? this._pendingNoiseSolo
+      : this._soloLayerId;
+    for (const [key, value] of entries) {
+      const transformed = this._stackWithCompatParam(
+        pendingStack ?? this.noiseStack,
+        key,
+        value,
+        { notify: true },
+      );
+      if (transformed.updated) pendingStack = transformed.stack;
+    }
+    if (entries.length) Object.assign(this.params, Object.fromEntries(entries));
+    this._pendingTerrainParams = {};
+    this._pendingNoiseStack = null;
+    this._pendingNoiseSolo = null;
+    if (pendingStack) {
+      this.setNoiseStack(pendingStack, { solo: pendingSolo, force: true });
+    }
+    this.cb.onParams(this._paramsSnapshot());
+    return {
+      paramsChanged: entries.length > 0,
+      stackChanged: !!pendingStack,
+    };
+  }
+
+  _clearPendingTerrainParams(keys = null) {
+    if (!keys) {
+      this._pendingTerrainParams = {};
+      this._pendingNoiseStack = null;
+      this._pendingNoiseSolo = null;
+      return;
+    }
+    for (const key of keys) delete this._pendingTerrainParams[key];
+  }
+
+  _afterParamChange(needsRebuild, terrainDirty = false) {
+    if (needsRebuild) this.applyAll({ force: false, terrainDirty });
+    else {
+      if (terrainDirty) this._markTerrainFieldDirty();
+      this._applyUniforms();
+    }
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
   }
@@ -2180,11 +2326,15 @@ export class Engine {
 
   _packNoiseUniforms() {
     const u = this.uniforms;
-    const graphActive = this.worldMode === 'studio' && this.generationSource === 'graph' && this._graphProgram;
-    const graphPack = graphActive ? this._graphProgram.packUniforms() : null;
-    const normalize = graphPack ? graphPack.normalize : this.noiseStack?.normalizeOutput;
-    const outputMin = graphPack ? graphPack.outMin : this.noiseStack?.outputMin;
-    const outputMax = graphPack ? graphPack.outMax : this.noiseStack?.outputMax;
+    const liveStack = this._liveNoiseStack ?? this.noiseStack;
+    const liveGraph = this._liveGenerationSource === 'graph'
+      ? this._liveGraphProgram
+      : null;
+    const graphActive = this.worldMode === 'studio' && liveGraph;
+    const graphPack = graphActive ? liveGraph.packUniforms() : null;
+    const normalize = graphPack ? graphPack.normalize : liveStack?.normalizeOutput;
+    const outputMin = graphPack ? graphPack.outMin : liveStack?.outputMin;
+    const outputMax = graphPack ? graphPack.outMax : liveStack?.outputMax;
     if (u.uStackNormalize) u.uStackNormalize.value = normalize ? 1.0 : 0.0;
     if (u.uStackOutMin) u.uStackOutMin.value = Number.isFinite(outputMin) ? outputMin : 0.0;
     if (u.uStackOutMax) {
@@ -2193,7 +2343,10 @@ export class Engine {
       u.uStackOutMax.value = Math.max(outMin + 0.0001, outMax);
     }
 
-    const p = graphPack || packStackUniforms(this.noiseStack, { solo: this._soloLayerId });
+    const p = graphPack || packStackUniforms(
+      liveStack,
+      { solo: this._liveSoloLayerId },
+    );
     for (let i = 0; i < p.strength.length; i++) {
       u.uLayerStrength.value[i] = p.strength[i];
       u.uLayerScale.value[i] = p.scale[i];
@@ -2220,46 +2373,131 @@ export class Engine {
    * Structural edits (add/remove/reorder/type/blend/mask/octave) regenerate the
    * GLSL and recompile materials in the background, mirroring _setOctavesAsync.
    */
-  setNoiseStack(stack, { solo = this._soloLayerId } = {}) {
+  setNoiseStack(stack, { solo = this._soloLayerId, force = false } = {}) {
+    if (!this.params.autoUpdate && !force) {
+      const pending = this._pendingNoiseStack ?? this.noiseStack;
+      if (JSON.stringify(stack) === JSON.stringify(pending)
+          && solo === (this._pendingNoiseSolo ?? this._soloLayerId)) return;
+      this._soloLayerId = solo;
+      if (JSON.stringify(stack) === JSON.stringify(this.noiseStack)
+          && solo === this._liveSoloLayerId) {
+        this._pendingNoiseStack = null;
+        this._pendingNoiseSolo = null;
+      } else {
+        this._pendingNoiseStack = cloneStack(stack);
+        this._pendingNoiseSolo = solo;
+      }
+      this.cb.onParams(this._paramsSnapshot());
+      const hasPending = !!this._pendingNoiseStack
+        || Object.keys(this._pendingTerrainParams || {}).length > 0;
+      this.cb.onStatus(
+        hasPending ? 'Pending changes — enable Auto Update to apply' : 'Ready',
+        hasPending,
+      );
+      return Promise.resolve({ pending: true, swapped: false });
+    }
+
+    if (JSON.stringify(stack) === JSON.stringify(this.noiseStack)
+        && solo === this._soloLayerId
+        && solo === this._liveSoloLayerId) return;
+    const previousLiveStack = this._liveNoiseStack ?? this.noiseStack;
+    const previousLiveSolo = this._liveSoloLayerId;
     this.noiseStack = stack;
     this.params.noiseStack = stack;
     this._soloLayerId = solo;
-    if (this.cpuHeightSampler?.setStack) this.cpuHeightSampler.setStack(stack);
-    if (this.heightSampler?.cpu?.setStack) this.heightSampler.cpu.setStack(stack);
-    if (this.planetSampler) this.planetSampler.setStack(stack);
-    if (this._minimapSampler?.setStack) this._minimapSampler.setStack(stack);
 
     const next = generateStackGLSL(stack);
-    const structural = next.sig !== this._stackSig;
     this._stackGLSL = next;
     this._stackSig = next.sig;
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
 
-    if (structural) {
-      if (this.worldMode === 'planet') {
-        // Planet chunks each own a material built from a factory; rebuild the
-        // whole planet (and re-bake the height cubemap) with the new stack.
-        this._rebuildPlanet();
-      } else if (this.worldMode !== 'studio' || this.generationSource !== 'graph') {
-        this._rebuildStackMaterialsAsync();
-      } else {
-        this._applyUniforms();
-      }
-    } else {
+    if (this.worldMode === 'studio' && this.generationSource === 'graph') {
+      // Nodes own the visible Studio field. Keep Classic ready for a later
+      // source switch without invalidating the active graph bake.
+      this._liveNoiseStack = stack;
+      this._liveSoloLayerId = solo;
+      this._syncNoiseStackSamplers(stack);
       this._applyUniforms();
-      this._minimapDirtyAt = performance.now();
-      this.minimap.requestRedraw();
-      if (this.worldMode === 'planet') this._bakedTerrainGen = -1; // force re-bake
-      this._needsRender = true;
+      return Promise.resolve({ swapped: false, inactive: true });
     }
+
+    if (this.worldMode === 'planet') {
+      this._liveNoiseStack = stack;
+      this._liveSoloLayerId = solo;
+      this._syncNoiseStackSamplers(stack);
+      this._liveHeightSig = next.sig;
+      this._liveHeightSourceSig = next.heightSig || next.sig;
+      this._markTerrainFieldDirty();
+      this._rebuildPlanet();
+      return Promise.resolve({ swapped: true });
+    }
+
+    const liveMaterial = this.worldMode === 'infinite'
+      ? this._infiniteTerrainMat
+      : this.terrainMaterial;
+    const needsCompile = next.sig !== this._liveHeightSig
+      || liveMaterial?.defines?.OCTAVES !== Math.round(this.params.octaves);
+    if (needsCompile) {
+      return this._rebuildStackMaterialsAsync(next, {
+        terrainDirtyOnSwap: true,
+      }).then((result) => {
+        if (result?.error && this.noiseStack === stack) {
+          const rollback = previousLiveStack;
+          const rollbackGLSL = generateStackGLSL(rollback);
+          this.noiseStack = rollback;
+          this.params.noiseStack = rollback;
+          this._liveNoiseStack = rollback;
+          this._soloLayerId = previousLiveSolo;
+          this._liveSoloLayerId = previousLiveSolo;
+          this._stackGLSL = rollbackGLSL;
+          this._stackSig = rollbackGLSL.sig;
+          this._syncNoiseStackSamplers(rollback);
+          this.cb.onParams(this._paramsSnapshot());
+          this.cb.onToast?.('Terrain change could not be compiled; previous settings restored');
+        }
+        return result;
+      });
+    }
+
+    if (this._terrainSourcePendingToken != null) {
+      this._octToken++;
+      this._terrainSourcePendingToken = null;
+    }
+    this._liveNoiseStack = stack;
+    this._liveSoloLayerId = solo;
+    this._syncNoiseStackSamplers(stack);
+    this._markTerrainFieldDirty();
+    this._applyUniforms();
+    this._minimapDirtyAt = performance.now();
+    this.minimap.requestRedraw();
+    this._needsRender = true;
+    this.cb.onStatus('Ready', false);
+    return Promise.resolve({ swapped: false, cached: true });
   }
 
   setSoloLayer(id) {
-    this._soloLayerId = id || null;
-    this._packNoiseUniforms();
-    this._needsRender = true;
-    this._minimapDirtyAt = performance.now();
-    this.minimap.requestRedraw();
+    const solo = id || null;
+    if (!this.params.autoUpdate) {
+      this._soloLayerId = solo;
+      const stagedStack = this._pendingNoiseStack ?? this.noiseStack;
+      if (JSON.stringify(stagedStack) === JSON.stringify(this.noiseStack)
+          && solo === this._liveSoloLayerId) {
+        this._pendingNoiseStack = null;
+        this._pendingNoiseSolo = null;
+      } else {
+        this._pendingNoiseStack ??= cloneStack(this.noiseStack);
+        this._pendingNoiseSolo = solo;
+      }
+      this.cb.onParams(this._paramsSnapshot());
+      const hasPending = !!this._pendingNoiseStack
+        || Object.keys(this._pendingTerrainParams || {}).length > 0;
+      this.cb.onStatus(
+        hasPending ? 'Pending changes — enable Auto Update to apply' : 'Ready',
+        hasPending,
+      );
+      return;
+    }
+    return this.setNoiseStack(this.noiseStack, { solo, force: true });
   }
 
   _activeHeightProgram(mode = this.worldMode) {
@@ -2269,10 +2507,35 @@ export class Engine {
   }
 
   _syncCpuHeightProgram() {
-    const program = this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null;
+    const program = this.worldMode === 'studio'
+      && this._liveGenerationSource === 'graph'
+      ? this._liveGraphProgram
+      : null;
     for (const sampler of [this.cpuHeightSampler, this.heightSampler?.cpu, this._minimapSampler, this._propCpuSampler]) {
       sampler?.setHeightProgram?.(program);
     }
+  }
+
+  _syncNoiseStackSamplers(stack = this.noiseStack) {
+    this.cpuHeightSampler?.setStack?.(stack);
+    this.heightSampler?.cpu?.setStack?.(stack);
+    this.planetSampler?.setStack?.(stack);
+    this._minimapSampler?.setStack?.(stack);
+  }
+
+  _commitLiveHeightSource(program = this._activeHeightProgram()) {
+    const desired = this._activeHeightProgram();
+    if (program?.sig && desired?.sig && desired.sig !== program.sig) return false;
+    this._liveGenerationSource = this.generationSource;
+    if (this.generationSource === 'graph') {
+      this._liveGraphProgram = this._graphProgram;
+    } else {
+      this._liveNoiseStack = this.noiseStack;
+      this._liveSoloLayerId = this._soloLayerId;
+      this._syncNoiseStackSamplers(this.noiseStack);
+    }
+    this._syncCpuHeightProgram();
+    return true;
   }
 
   setTerrainGraph(graph, {
@@ -2287,8 +2550,12 @@ export class Engine {
     this.cb.onTerrainGraph?.(structuredClone(this.terrainGraph));
 
     if (!compiled.ok) {
+      if (this._liveGenerationSource === 'graph') {
+        this._graphProgram = this._liveGraphProgram;
+      }
       if (this._pendingGraphCompileSig) {
         this._octToken++;
+        this._terrainSourcePendingToken = null;
         this._pendingGraphCompileSig = null;
         this._pendingGraphCompileReady = null;
         this._pendingGraphCompileNodeIds.clear();
@@ -2305,7 +2572,6 @@ export class Engine {
       return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
 
-    this._syncCpuHeightProgram();
     const liveOctaves = this.terrainMaterial?.defines?.OCTAVES;
     const needsCompile = this._liveHeightSig !== compiled.program.sig
       || (this.projectMode !== 'nodes' && this.terrainMaterial?.userData?.minimalFragment)
@@ -2323,6 +2589,7 @@ export class Engine {
         }
 
         const fallbackProgram = this._pendingGraphFallbackProgram
+          || this._liveGraphProgram
           || (previousProgram?.sig === this._liveHeightSig ? previousProgram : null);
         const pendingNodeIds = new Set(this._pendingGraphCompileNodeIds);
         this._pendingGraphCompileSig = compiled.program.sig;
@@ -2332,7 +2599,11 @@ export class Engine {
           valid: true, compiling: true, compilingNodeIds: [...this._pendingGraphCompileNodeIds], diagnostics: [],
           slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
         });
-        ready = this._rebuildStackMaterialsAsync(compiled.program, { label: 'Compiling terrain graph', atomic }).then((result) => {
+        ready = this._rebuildStackMaterialsAsync(compiled.program, {
+          label: 'Compiling terrain graph',
+          atomic,
+          terrainDirtyOnSwap: true,
+        }).then((result) => {
           if (this._pendingGraphCompileSig !== compiled.program.sig) return result;
           if (result?.error) {
             this._graphProgram = this._pendingGraphFallbackProgram;
@@ -2356,19 +2627,17 @@ export class Engine {
       else {
         if (this._pendingGraphCompileSig) {
           this._octToken++;
+          this._terrainSourcePendingToken = null;
           this._pendingGraphCompileSig = null;
           this._pendingGraphCompileReady = null;
           this._pendingGraphCompileNodeIds.clear();
           this._pendingGraphFallbackProgram = null;
           this.cb.onCompileProgress?.(null);
         }
+        this._commitLiveHeightSource();
+        this._markTerrainFieldDirty();
         this._applyUniforms();
-        this._terrainGen++;
-        this._bakedStudioGen = -1;
-        this.heightSampler?.invalidate?.();
-        this.propSurfaceField?.invalidate?.();
         this.minimap.requestRedraw();
-        this._needsRender = true;
         this.cb.onGraphState?.({
           valid: true, compiling: false, compilingNodeIds: [], diagnostics: [],
           slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
@@ -2385,6 +2654,8 @@ export class Engine {
 
   setGenerationSource(source, { silent = false } = {}) {
     const next = source === 'graph' ? 'graph' : 'classic';
+    if (next === this.generationSource) return;
+    const previousSource = this.generationSource;
     if (next === 'graph' && !this.terrainGraph) this.terrainGraph = createBlankGraph();
     if (next === 'graph' && !this._graphProgram) {
       const compiled = compileTerrainGraph(this.terrainGraph);
@@ -2395,19 +2666,34 @@ export class Engine {
     this.cb.onGenerationSource?.(next);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
     this.cb.onGraphState?.({ valid: !!this._graphProgram && this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
-    this._syncCpuHeightProgram();
     if (this.worldMode === 'studio') {
-      this._applyUniforms();
       const candidate = this._activeHeightProgram();
-      this._rebuildStackMaterialsAsync(candidate, { label: next === 'graph' ? 'Compiling terrain graph' : 'Restoring Classic terrain' }).then((result) => {
-        if (next !== 'graph' || !result?.error || this._graphProgram !== candidate) return;
-        this._graphProgram = null;
-        this._graphDiagnostics = [{ code: 'shader-compile', message: 'Terrain graph shader compilation failed. Classic terrain remains active.' }];
+      this._rebuildStackMaterialsAsync(candidate, {
+        label: next === 'graph' ? 'Compiling terrain graph' : 'Restoring Classic terrain',
+        terrainDirtyOnSwap: true,
+      }).then((result) => {
+        if (!result?.error || this.generationSource !== next) return;
+        this.generationSource = previousSource;
+        this.cb.onGenerationSource?.(previousSource);
+        this._graphDiagnostics = [{
+          code: 'shader-compile',
+          message: 'Terrain source could not be compiled. The previous terrain remains active.',
+        }];
         this._syncCpuHeightProgram();
         this._applyUniforms();
-        this.cb.onGraphState?.({ valid: false, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: 0, colorSlotCount: 0 });
+        this.cb.onGraphState?.({
+          valid: false,
+          compiling: false,
+          diagnostics: structuredClone(this._graphDiagnostics),
+          slotCount: this._graphProgram?.slotCount || 0,
+          colorSlotCount: this._graphProgram?.colorSlotCount || 0,
+        });
         if (!silent) this.cb.onToast?.(this._graphDiagnostics[0].message);
       });
+    } else {
+      this._syncCpuHeightProgram();
+      this._markTerrainFieldDirty();
+      this._applyUniforms();
     }
     if (!silent) this.cb.onToast?.(next === 'graph' ? 'Nodes now drive Tile terrain' : 'Classic Noise Stack restored');
   }
@@ -2421,9 +2707,16 @@ export class Engine {
     this.cb.onGraphView?.({ ...this.graphView });
   }
 
-  rebuildActiveHeightProgram({ label = 'Compiling terrain', atomic = false } = {}) {
-    this._syncCpuHeightProgram();
-    return this._rebuildStackMaterialsAsync(this._activeHeightProgram(), { label, atomic });
+  rebuildActiveHeightProgram({
+    label = 'Compiling terrain',
+    atomic = false,
+    terrainDirtyOnSwap = false,
+  } = {}) {
+    return this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
+      label,
+      atomic,
+      terrainDirtyOnSwap,
+    });
   }
 
   /**
@@ -2432,11 +2725,17 @@ export class Engine {
    * place once the identical programs are cached (no freeze, no mesh swap).
    * Same warm-then-swap pattern as _setOctavesAsync.
    */
-  async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), { label = 'Compiling noise stack', atomic = false } = {}) {
+  async _rebuildStackMaterialsAsync(program = this._activeHeightProgram(), {
+    label = 'Compiling noise stack',
+    atomic = false,
+    terrainDirtyOnSwap = false,
+    onBeforeSwap = null,
+  } = {}) {
     const oct = Math.round(this.params.octaves);
     const sg = program || this._stackGLSL;
     const heightSourceSig = sg.heightSig || sg.sig;
     const heightSourceChanged = this._liveHeightSourceSig !== heightSourceSig;
+    const octavesChanged = this.terrainMaterial?.defines?.OCTAVES !== oct;
     const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
     const terrainVariant = this._targetTerrainVariant();
     // Presets commonly change only uniforms. Do not touch WebGL when the live
@@ -2448,6 +2747,19 @@ export class Engine {
           || (!this.terrainMaterial?.userData?.minimalFragment
             && (!this.terrainMaterial?.userData?.terrainVariant
               || this.terrainMaterial.userData.terrainVariant === terrainVariant)))) {
+      if (this._terrainSourcePendingToken != null) {
+        // Reverting to the already-live source must supersede an in-flight
+        // compile just like starting another compile would. Otherwise the stale
+        // job keeps bakes and variant upgrades blocked until it eventually ends.
+        this._octToken++;
+        this._terrainSourcePendingToken = null;
+        this.cb.onCompileProgress?.(null);
+      }
+      if (!this._commitLiveHeightSource(sg)) {
+        return { swapped: false, error: null, stale: true };
+      }
+      onBeforeSwap?.();
+      if (terrainDirtyOnSwap) this._markTerrainFieldDirty();
       this._applyUniforms();
       this._needsRender = true;
       this.cb.onStatus('Ready', false);
@@ -2455,6 +2767,7 @@ export class Engine {
     }
 
     const token = ++this._octToken;
+    if (terrainDirtyOnSwap) this._terrainSourcePendingToken = token;
     if (atomic) this._compiling++;
     this.cb.onStatus(`${label}…`, true);
     let warm = [];
@@ -2463,8 +2776,12 @@ export class Engine {
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
         : createTerrainMaterial(this.uniforms, oct, sg, { variant: terrainVariant })];
       const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
-      if (heightSourceChanged && waterActive && this.worldMode === 'infinite') {
-        warm.push(createInfiniteWaterMaterial(this.uniforms, oct, sg));
+      if ((heightSourceChanged || octavesChanged)
+          && waterActive && this.worldMode === 'infinite') {
+        warm.push(
+          this.waterSystem?.createInfiniteStackWarmMaterial?.(sg, oct)
+          ?? createInfiniteWaterMaterial(this.uniforms, oct, sg),
+        );
       }
 
       const emitProgress = (payload) => {
@@ -2482,7 +2799,7 @@ export class Engine {
       let compileError = null;
       try {
         // stagger: one program per yielded task so editing the noise stack never freezes.
-        await this._compileMaterialVariants(warm, {
+        const compileResult = await this._compileMaterialVariants(warm, {
           canvasOnly: true,
           stagger: true,
           onProgress: (done, total) => emitProgress({
@@ -2492,12 +2809,32 @@ export class Engine {
             total,
           }),
         });
+        if (compileResult?.ready === false) {
+          compileError = new Error('Terrain shader did not become ready');
+        }
       } catch (e) {
         console.warn('Noise stack shader compile failed', e);
         compileError = e;
       }
       let swapped = false;
       if (!compileError && token === this._octToken && !this._disposed) {
+        if (Math.round(this.params.octaves) !== oct
+            || this._targetTerrainVariant() !== terrainVariant) {
+          return this._rebuildStackMaterialsAsync(
+            this._activeHeightProgram(),
+            {
+              label,
+              atomic,
+              terrainDirtyOnSwap,
+              onBeforeSwap,
+            },
+          );
+        }
+        if (!this._commitLiveHeightSource(sg)) {
+          emitProgress(null);
+          return { swapped: false, error: null, stale: true };
+        }
+        onBeforeSwap?.();
         // update live materials in place (programs already cached from `warm`).
         // Project loads can change OCTAVES and the generated height source in the
         // same transaction. The earlier octave warmup is intentionally cancelled
@@ -2517,12 +2854,18 @@ export class Engine {
         }
         this._liveHeightSig = sg.sig;
         this._liveHeightSourceSig = heightSourceSig;
+        if (this._terrainSourcePendingToken === token) {
+          this._terrainSourcePendingToken = null;
+        }
+        if (terrainDirtyOnSwap) this._markTerrainFieldDirty();
         // The editor warms only canvas programs. Re-arm the existing lazy
         // near-water path for the new render-target shader variants.
         this._underwaterWarmed = false;
         if (this._waterDeferred) this._waterMaterialWarmed = false;
         this.waterSystem?.onStackRebuilt(sg, oct);
-        if (heightSourceChanged) this.infiniteTerrainClipmap?.setProgram(oct, sg);
+        if (heightSourceChanged || octavesChanged) {
+          this.infiniteTerrainClipmap?.setProgram(oct, sg);
+        }
         if (this.heightSampler) this.heightSampler.invalidate();
         if (this.propSurfaceField) this.propSurfaceField.invalidate();
         this._applyUniforms();
@@ -2537,6 +2880,9 @@ export class Engine {
       emitProgress(null);
       return { swapped, error: compileError };
     } finally {
+      if (this._terrainSourcePendingToken === token) {
+        this._terrainSourcePendingToken = null;
+      }
       if (warm.length) this._matTrash.push({ mats: warm, at: performance.now() + 2000 });
       if (atomic) {
         this._compiling = Math.max(0, this._compiling - 1);
@@ -2582,7 +2928,7 @@ export class Engine {
 
   _applyTileLayout() {
     this._needsRender = true;
-    this._bakedStudioGen = -1;   // union bounds changed — re-bake height texture
+    this._markTerrainFieldDirty();
     const p = this.params;
     const maxHeight = this._maxHeight();
     const result = this.board.syncCells({
@@ -2621,8 +2967,9 @@ export class Engine {
 
   // Push every parameter into uniforms; rebuild the chunk grid if the world
   // layout changed.
-  applyAll({ force }) {
+  applyAll({ force, terrainDirty = true }) {
     this._needsRender = true;
+    if (terrainDirty) this._markTerrainFieldDirty();
     const p = this.params;
     const rebuildNeeded = force
       || p.chunkCount !== this.appliedChunkCount
@@ -2765,7 +3112,6 @@ export class Engine {
 
   _applyUniforms({ updatePlinth = true } = {}) {
     this._needsRender = true;
-    this._terrainGen++;   // height field may have changed — refresh collision tile
     const p = this.params;
     const u = this.uniforms;
     u.uInfiniteMode.value = this.worldMode === 'infinite' ? 1.0 : 0.0;
@@ -2997,7 +3343,11 @@ export class Engine {
     const requireSharedOpaque = cloudsNeedDepth
       || !!this.waterSystem?.needsSceneRefraction?.();
     return this.visualPost.prepare(this.renderer, {
-      params: this.params,
+      params: {
+        ...this.params,
+        ...this._pendingTerrainParams,
+        noiseStack: this._pendingNoiseStack ?? this.params.noiseStack,
+      },
       perf: this.perf,
       worldMode: this.worldMode,
       renderScale: this._effectiveRenderScale(),
@@ -3072,14 +3422,68 @@ export class Engine {
     const cloudTick = includeCloudMotion && this.params?.cloudsEnabled
       ? Math.floor((this.uniforms?.uTime?.value || 0) * 4)
       : 0;
+    // Shared opaque refraction contains the terrain itself. Its caustic shader
+    // animates with uTime even on a static camera, so include a modest 4 Hz
+    // revision only while animated caustics and scene refraction are active.
+    // This keeps the cache effective without freezing the illuminated seabed.
+    const causticTick = !includeCloudMotion
+      && this.waterSystem?.needsSceneRefraction?.()
+      && (this.uniforms?.uCausticBlend?.value ?? 0) > 0.001
+      && (this.uniforms?.uCausticStrength?.value ?? 0) > 0.001
+      && (this.uniforms?.uCausticWaterAnim?.value ?? 0) > 0.5
+      ? Math.floor((this.uniforms?.uTime?.value || 0) * 4)
+      : 0;
+    const boardState = this.board
+      ? [
+        this.board.activeChunkCount ?? 0,
+        this.board.targetChunkCount ?? 0,
+        this.board.isBuilding ? 1 : 0,
+        this.board._lodRebuildQueue?.length ?? 0,
+        ...(this.board.lodCounts ?? []),
+        this.board.mergedGroupCount ?? 0,
+        this.board.visibleChunkCount ?? 0,
+      ].join(',')
+      : '';
+    const terrainTexture = this.uniforms?.uTerrainHeightTex?.value;
+    const terrainBakeState = [
+      this._bakedStudioGen ?? -1,
+      this._bakedStudioLayout ?? '',
+      this.uniforms?.uUseTerrainHeightTex?.value ?? 0,
+      this.uniforms?.uUseTerrainBiomeTex?.value ?? 0,
+      terrainTexture?.uuid ?? '',
+      terrainTexture?.version ?? 0,
+    ].join(',');
+    const importedState = ['noise', 'height', 'biome', 'imagery']
+      .map((type) => {
+        const entry = this.importedMaps?.[type];
+        return [
+          type,
+          entry?.texture?.uuid ?? '',
+          entry?.texture?.version ?? 0,
+          JSON.stringify(entry?.settings ?? null),
+        ].join(':');
+      })
+      .join(',');
+    const authoringState = [
+      this.paintMode?.layers?.revision ?? 0,
+      this.manualTerrain?.field?.revision ?? 0,
+      this.manualTerrain?.surfaceField?.revision ?? 0,
+      this.splineManager?.baker?.revision ?? 0,
+    ].join(',');
     return [
       this.worldMode,
       sceneSize.x ?? sceneSize.width,
       sceneSize.y ?? sceneSize.height,
       this._terrainGen,
+      this.terrainMaterial?.version ?? 0,
+      boardState,
+      terrainBakeState,
+      importedState,
+      authoringState,
       camera,
       sun ? `${sun.x.toFixed(4)},${sun.y.toFixed(4)},${sun.z.toFixed(4)}` : '',
       cloudTick,
+      causticTick,
       JSON.stringify(this.params || {}),
     ].join('|');
   }
@@ -3521,8 +3925,9 @@ export class Engine {
     try {
       if (!this._disposed && this._compiling === 1) {
         const paintMs = this._renderInitialStudioFrame();
-        this._bootFallbackFrameReady = true;
-        this._startBootWatchdog();
+        this._bootFallbackFrameReady =
+          firstFrameResult?.ready !== false && paintMs != null;
+        if (this._bootFallbackFrameReady) this._startBootWatchdog();
         console.info(
           `[boot] first hidden fallback frame ${(paintMs ?? 0).toFixed(0)}ms after lightweight warmup `
           + `${(performance.now() - startedAt).toFixed(0)}ms `
@@ -3585,10 +3990,9 @@ export class Engine {
     this._bootWatchdogTimer = setTimeout(() => {
       this._bootWatchdogTimer = null;
       if (this._disposed || !this._bootPending || !this._bootFallbackFrameReady) return;
-      console.warn('[boot] degraded interactive release', this._bootReadinessSnapshot());
-      if (this._releaseBootFallback('degraded interactive watchdog')) {
-        this.cb.onToast?.('Terrain editor opened in reduced quality; visual improvements are continuing.');
-      }
+      console.warn('[boot] full-quality startup is still pending', this._bootReadinessSnapshot());
+      this.cb.onStatus?.('Still preparing full-quality terrain and water…', true);
+      this._completeBootIfQualityReady();
     }, delayMs);
   }
 
@@ -3620,42 +4024,45 @@ export class Engine {
       return false;
     }
 
-    return this._releaseBootFallback(reason);
+    this._bootInteractiveReady = true;
+    this._logBootGate(reason);
+    return true;
   }
 
   _completeBootIfQualityReady(reason = 'quality upgrades ready') {
-    if (this._qualityPending === false || this._disposed) return false;
+    if (!this._bootPending || this._qualityPending === false || this._disposed) return false;
 
     const nodeMode = this.projectMode === 'nodes';
     const targetVariant = this._targetTerrainVariant();
     const terrainReady = nodeMode
       || (!this.terrainMaterial?.userData?.minimalFragment
-        && (this.terrainMaterial?.userData?.terrainVariant === targetVariant
-          || this._terrainVariantFailed));
+        && this.terrainMaterial?.userData?.terrainVariant === targetVariant);
     const bakeReady = nodeMode
       || this._debug?.disableHeightBake
-      || this._terrainHeightBakeFailed
-      || (this.uniforms.uUseTerrainHeightTex.value > 0.5
-        && this.uniforms.uUseTerrainBiomeTex.value > 0.5
+      || (this._bakedStudioGen === this._terrainGen
+        && this._bakedStudioLayout === this._studioBakeLayoutKey()
+        && (this.uniforms?.uUseTerrainHeightTex?.value ?? 0) > 0.5
+        && (this.uniforms?.uUseTerrainBiomeTex?.value ?? 0) > 0.5
         && !this.terrainHeightBaker?.isBaking);
     const waterReady = nodeMode
       || this.params.waterEnabled === false
       || !this.waterMaterial
-      || !this._waterDeferred
-      || this._waterWarmFailed;
+      || (!this._waterDeferred
+        && !this.waterSystem?.isMaterialTransitionPending?.()
+        && this.waterSystem?.isRequestedMaterialReady?.() !== false);
+    const targetChunks = this.board?.targetChunkCount ?? 0;
+    const activeChunks = this.board?.activeChunkCount ?? targetChunks;
     const boardReady = !this.board?.isBuilding
-      && !(this.board?._lodRebuildQueue?.length > 0);
-    if (!terrainReady || !bakeReady || !waterReady || !boardReady) {
+      && (this._debug?.freezeLod
+        || !(this.board?._lodRebuildQueue?.length > 0))
+      && (!targetChunks || activeChunks >= targetChunks);
+    const sourceReady = this._terrainSourcePendingToken == null
+      && !this._compiling;
+    if (!terrainReady || !bakeReady || !waterReady || !boardReady || !sourceReady) {
       if (this._bootPending) this._logBootGate('waiting for quality upgrades');
       return false;
     }
 
-    this._qualityPending = false;
-    if (this._qualityWatchdogTimer) {
-      clearTimeout(this._qualityWatchdogTimer);
-      this._qualityWatchdogTimer = null;
-    }
-    this._bgWorkEnd('boot-quality');
     let paintMs = null;
     if (!this._contextLost) {
       try {
@@ -3664,14 +4071,77 @@ export class Engine {
         console.warn('Final boot frame render failed', error);
       }
     }
+    if (paintMs == null && !this._contextLost) {
+      this._logBootGate('waiting for final rendered frame');
+      return false;
+    }
+    this._qualityPending = false;
+    if (this._qualityWatchdogTimer) {
+      clearTimeout(this._qualityWatchdogTimer);
+      this._qualityWatchdogTimer = null;
+    }
+    this._bgWorkEnd('boot-quality');
     console.info(
       `[boot] final quality frame ${(paintMs ?? 0).toFixed(0)}ms `
       + `(terrain ready=${terrainReady}, bake ready=${bakeReady}, `
-      + `water ready=${waterReady}, board ready=${boardReady}); `
+      + `water ready=${waterReady}, board ready=${boardReady}, `
+      + `source ready=${sourceReady}); `
       + `elapsed ${(performance.now() - this._bootStart).toFixed(0)}ms`
     );
     if (this._bootPending) return this._releaseBootFallback(reason, { render: false });
     return true;
+  }
+
+  /**
+   * Resolve only when a blocking project/template transition has produced the
+   * same complete Studio frame required at first boot. Rendering and baking
+   * continue through the normal frame loop; this merely keeps the UI overlay
+   * aligned with the real readiness state.
+   */
+  async waitForTerrainReady({ timeoutMs = 120000 } = {}) {
+    if (this.worldMode !== 'studio') return !this._disposed;
+    const startedAt = performance.now();
+    while (!this._disposed) {
+      if (this._contextLost) {
+        throw new Error('Graphics context was lost while loading terrain');
+      }
+      if (performance.now() - startedAt > timeoutMs) {
+        throw new Error('Terrain did not become ready before the loading timeout');
+      }
+      const nodeMode = this.projectMode === 'nodes';
+      const targetVariant = this._targetTerrainVariant();
+      const terrainReady = nodeMode
+        || (!this.terrainMaterial?.userData?.minimalFragment
+          && this.terrainMaterial?.userData?.terrainVariant === targetVariant);
+      const bakeReady = nodeMode
+        || this._debug?.disableHeightBake
+        || (this._bakedStudioGen === this._terrainGen
+          && (this.uniforms?.uUseTerrainHeightTex?.value ?? 0) > 0.5
+          && (this.uniforms?.uUseTerrainBiomeTex?.value ?? 0) > 0.5
+          && !this.terrainHeightBaker?.isBaking);
+      const waterReady = nodeMode
+        || this.params.waterEnabled === false
+        || !this.waterMaterial
+        || (!this._waterDeferred
+          && !this.waterSystem?.isMaterialTransitionPending?.()
+          && this.waterSystem?.isRequestedMaterialReady?.() !== false);
+      const targetChunks = this.board?.targetChunkCount ?? 0;
+      const activeChunks = this.board?.activeChunkCount ?? targetChunks;
+      const boardReady = !this.board?.isBuilding
+        && (this._debug?.freezeLod
+          || !(this.board?._lodRebuildQueue?.length > 0))
+        && (!targetChunks || activeChunks >= targetChunks);
+      const sourceReady = this._terrainSourcePendingToken == null
+        && !this._compiling;
+      if (terrainReady && bakeReady && waterReady && boardReady && sourceReady) {
+        const paintMs = this._contextLost
+          ? null
+          : this._renderInitialStudioFrame();
+        if (paintMs != null) return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 32));
+    }
+    throw new Error('Terrain engine was disposed while loading');
   }
 
   _releaseBootFallback(reason = 'fallback', { render = true } = {}) {
@@ -3824,18 +4294,23 @@ export class Engine {
         this._bgWorkEnd(workId);
       }
       this._matTrash.push({ mats: [warm], at: performance.now() + 2000 });
-      if (!ready && !this._disposed && this._terrainUpgradeRetryCount < 1) {
+      if (!ready && !this._disposed) {
+        this._terrainVariantFailed = true;
+        const delay = Math.min(
+          15000,
+          3000 * (2 ** Math.min(this._terrainUpgradeRetryCount, 2)),
+        );
         this._terrainUpgradeRetryTimer = setTimeout(() => {
           this._terrainUpgradeRetryTimer = null;
           if (this._disposed || !this.terrainMaterial?.userData?.minimalFragment) return;
           this._terrainUpgradeRetryCount++;
           void this._upgradeMinimalTerrain(renderTarget, variant);
-        }, 3000);
-      } else if (!ready && !this._disposed) {
-        this._terrainVariantFailed = true;
-        this._completeBootIfQualityReady();
+        }, delay);
       }
-      if (swapped) this._terrainVariantFailed = false;
+      if (swapped) {
+        this._terrainUpgradeRetryCount = 0;
+        this._terrainVariantFailed = false;
+      }
       return { ready, swapped, compileWaitMs, swapMs };
     })();
     this._terrainUpgradePromise = promise;
@@ -3920,9 +4395,7 @@ export class Engine {
           this._ensureTerrainHeightTex();
           return true;
         } catch (e) {
-          this._terrainHeightBakeDeferred = true;
-          this._terrainHeightBakeFailed = true;
-          console.warn('Deferred height bake failed', e);
+          this._handleTerrainHeightBakeFailure(e);
           this._completeBootIfInteractiveReady();
           this._completeBootIfQualityReady();
           return false;
@@ -3970,8 +4443,10 @@ export class Engine {
     if (this._disposed || !this._waterDeferred || this._waterWarmRetryTimer) return false;
     if (this._waterWarmRetryCount >= 3) {
       this._waterWarmFailed = true;
-      this._completeBootIfQualityReady();
-      return false;
+      delayMs = Math.max(delayMs, Math.min(
+        15000,
+        3000 * (2 ** Math.min(this._waterWarmRetryCount - 3, 2)),
+      ));
     }
     this._waterWarmRetryTimer = setTimeout(() => {
       this._waterWarmRetryTimer = null;
@@ -3982,6 +4457,49 @@ export class Engine {
     return true;
   }
 
+  _scheduleTerrainHeightBakeRetry(delayMs = 1000) {
+    if (this._disposed || this._terrainHeightBakeRetryTimer) return false;
+    this._terrainHeightBakeFailed = true;
+    const retryDelay = Math.max(delayMs, Math.min(
+      15000,
+      1000 * (2 ** Math.min(this._terrainHeightBakeRetryCount, 3)),
+    ));
+    this._terrainHeightBakeRetryTimer = setTimeout(() => {
+      this._terrainHeightBakeRetryTimer = null;
+      if (this._disposed) return;
+      this._terrainHeightBakeRetryCount++;
+      this._terrainHeightBakeDeferred = false;
+      this._ensureTerrainHeightTexSafely();
+      this._needsRender = true;
+    }, retryDelay);
+    return true;
+  }
+
+  _handleTerrainHeightBakeFailure(error) {
+    this.terrainHeightBaker?.cancel?.();
+    this._terrainBakeJobKey = null;
+    this._terrainHeightBakeDeferred = true;
+    this._terrainHeightBakeFailed = true;
+    if (this.uniforms?.uUseTerrainHeightTex) {
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+    }
+    if (this.uniforms?.uUseTerrainBiomeTex) {
+      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
+    }
+    console.warn('Terrain height bake failed', error);
+    this._scheduleTerrainHeightBakeRetry();
+  }
+
+  _ensureTerrainHeightTexSafely() {
+    try {
+      this._ensureTerrainHeightTex();
+      return true;
+    } catch (error) {
+      this._handleTerrainHeightBakeFailure(error);
+      return false;
+    }
+  }
+
   async _warmDeferredWaterImpl(renderTarget = null) {
     const t0 = performance.now();
     if (!this._bootPending) this.cb.onStatus('Preparing water...', false);
@@ -3990,9 +4508,7 @@ export class Engine {
       this._terrainHeightBakeDeferred = false;
       this._ensureTerrainHeightTex();
     } catch (e) {
-      this._terrainHeightBakeDeferred = true;
-      this._terrainHeightBakeFailed = true;
-      console.warn('Water height bake failed', e);
+      this._handleTerrainHeightBakeFailure(e);
     }
 
     if (!this._isStudioWaterPreviewReady()) {
@@ -4035,6 +4551,7 @@ export class Engine {
       return false;
     }
     this._waterDeferred = false;
+    this._waterWarmRetryCount = 0;
     this._waterWarmFailed = false;
     this.waterSystem?.activateInitialMaterials(this.params, this.worldMode);
     this._needsRender = true;
@@ -4121,6 +4638,45 @@ export class Engine {
    * the programs are already in three's cache, so the swap is instant.
    */
   async _setOctavesAsync(oct) {
+    if (this.worldMode !== 'planet') {
+      if (this._octaveTransitionTarget === oct
+          && this._octaveTransitionPromise) {
+        return this._octaveTransitionPromise;
+      }
+      const liveOctaves = this.terrainMaterial?.defines?.OCTAVES ?? oct;
+      const rebuildJob = this._rebuildStackMaterialsAsync(
+        this._activeHeightProgram(),
+        {
+          label: 'Compiling shaders',
+          terrainDirtyOnSwap: true,
+        },
+      );
+      const job = rebuildJob.then((result) => {
+        if (result?.error
+            && !this._disposed
+            && Math.round(this.params.octaves) === oct) {
+          // Keep params, UI, CPU sampling and the visible shader on one octave
+          // count after a link failure. The same value can then be selected
+          // again to retry instead of becoming a silent no-op.
+          this.params.octaves = liveOctaves;
+          this.cb.onParams(this._paramsSnapshot());
+          this._applyUniforms();
+          this.cb.onStatus('Ready', false);
+          this.cb.onToast?.('Octave change could not be compiled; previous value restored');
+        }
+        return result;
+      });
+      this._octaveTransitionTarget = oct;
+      this._octaveTransitionPromise = job;
+      job.finally(() => {
+        if (this._octaveTransitionPromise === job) {
+          this._octaveTransitionPromise = null;
+          this._octaveTransitionTarget = null;
+        }
+      });
+      return job;
+    }
+
     const token = ++this._octToken;
     this.cb.onStatus('Compiling shaders…', true);
 
@@ -4528,7 +5084,7 @@ export class Engine {
 
       if (this.params.erosionEnabled !== true) {
         this.params.erosionEnabled = true;
-        this.cb.onParams?.({ ...this.params });
+        this.cb.onParams?.(this._paramsSnapshot());
       }
       this._onErosionChanged();
       onProgress?.(1, 'done');
@@ -4671,7 +5227,7 @@ export class Engine {
     const preset = getErosionPreset(key);
     this.params.erosionPreset = key;
     Object.assign(this.params, preset.params);
-    this.cb.onParams?.({ ...this.params });
+    this.cb.onParams?.(this._paramsSnapshot());
   }
 
   /** Live before/after toggle — only applies if a bake exists. */
@@ -4687,7 +5243,7 @@ export class Engine {
     this.erosionField.applyTo(this.uniforms);
     if (this.params.erosionEnabled !== false) {
       this.params.erosionEnabled = false;
-      this.cb.onParams?.({ ...this.params });
+      this.cb.onParams?.(this._paramsSnapshot());
     }
     this._onErosionChanged();
   }
@@ -4695,11 +5251,7 @@ export class Engine {
   /** Erosion edits change the height field: invalidate the studio bake + GPU
    *  height readbacks and force a redraw, exactly like an import/paint edit. */
   _onErosionChanged() {
-    this._bakedStudioGen = -1;
-    this._terrainGen++;
-    this.heightSampler?.invalidate?.();
-    this.propSurfaceField?.invalidate?.();
-    this._needsRender = true;
+    this._markTerrainFieldDirty();
   }
 
   _waterLevel() {
@@ -4901,24 +5453,21 @@ export class Engine {
   clearPaintLayers() {
     this.projectHistory?.createSnapshot('Before clearing paint', { automatic: true });
     this.paintMode?.clear();
-    this._bakedStudioGen = -1;   // paint changed the height field → refresh the bake
-    this._needsRender = true;
+    this._markTerrainFieldDirty();
   }
 
   // Non-destructive: swap between painting on top of the generated terrain
   // and a flat Empty Terrain base, keeping any existing paint strokes.
   setPaintBaseMode(mode) {
     this.paintMode?.setBaseMode(mode);
-    this._bakedStudioGen = -1;
-    this._needsRender = true;
+    this._markTerrainFieldDirty();
   }
 
   // Destructive "start fresh": flatten the base AND clear paint layers.
   startEmptyTerrain() {
     this.projectHistory?.createSnapshot('Before empty terrain', { automatic: true });
     this.paintMode?.startEmpty();
-    this._bakedStudioGen = -1;
-    this._needsRender = true;
+    this._markTerrainFieldDirty();
   }
 
   // ----------------------------------------------------- manual terrain mode
@@ -4991,7 +5540,7 @@ export class Engine {
     this._cloudAdaptive?.suspend(performance.now(), 6000);
     this.uniforms.uInfiniteMode.value = mode === 'infinite' ? 1.0 : 0.0;
     this.uniforms.uTileDebugView.value = mode === 'studio' ? (this.tileDebug.view === 'noise' ? 1 : this.tileDebug.view === 'height' ? 2 : this.tileDebug.view === 'biome' ? 3 : 0) : 0;
-    this._terrainGen++;   // uFrequency / falloff change with the mode
+    this._markTerrainFieldDirty();   // uFrequency / falloff change with the mode
     // The new mode's materials need their own underwater RT-variant programs;
     // re-arm the lazy warm so they compile on first approach to water (three's
     // program cache makes the recompile instant if already built this session).
@@ -5323,6 +5872,10 @@ export class Engine {
    */
   _ensureTerrainHeightTex() {
     if (this.worldMode !== 'studio') return;
+    // Keep the last coherent full-resolution bake visible while a structural
+    // height program is compiling. The matching generation is invalidated
+    // atomically when the new terrain shader is ready to publish.
+    if (this._terrainSourcePendingToken != null) return;
     if (this._terrainHeightBakeDeferred) {
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       return;
@@ -5364,6 +5917,7 @@ export class Engine {
         b.rows,
       );
       this._terrainHeightBakeFailed = false;
+      this._terrainHeightBakeRetryCount = 0;
       // Water gets the complete low-resolution union immediately. Terrain
       // shading deliberately stays procedural during the bake: sharing this
       // preview with its normals/biomes caused the visible coarse -> sharp pop.
@@ -6002,6 +6556,10 @@ export class Engine {
 
   async _ensureTerrainShaderVariantAsync(renderTarget = null) {
     if (this._disposed || this.worldMode === 'planet') return false;
+    if (this._terrainSourcePendingToken != null) {
+      this._scheduleTerrainVariantRetry(renderTarget, 100);
+      return false;
+    }
     const live = this.worldMode === 'infinite'
       ? this._infiniteTerrainMat
       : this.terrainMaterial;
@@ -6011,10 +6569,13 @@ export class Engine {
 
     const token = (this._terrainVariantToken || 0) + 1;
     this._terrainVariantToken = token;
+    const mode = this.worldMode;
+    const liveAtStart = live;
     const oct = Math.round(this.params.octaves);
-    const program = this.worldMode === 'studio'
+    const program = mode === 'studio'
       ? this._activeHeightProgram('studio')
       : this._stackGLSL;
+    const programSig = program?.sig;
     const warm = createTerrainMaterial(
       this.uniforms,
       oct,
@@ -6029,14 +6590,28 @@ export class Engine {
         timeoutMs: 120000,
         renderTarget,
       });
-      if (result?.ready !== true || token !== this._terrainVariantToken || this._disposed) {
+      const currentLive = mode === 'infinite'
+        ? this._infiniteTerrainMat
+        : this.terrainMaterial;
+      const currentProgram = mode === 'studio'
+        ? this._activeHeightProgram('studio')
+        : this._stackGLSL;
+      const snapshotIsCurrent = this.worldMode === mode
+        && currentLive === liveAtStart
+        && currentProgram?.sig === programSig
+        && Math.round(this.params.octaves) === oct
+        && this._targetTerrainVariant() === variant;
+      if (result?.ready !== true || token !== this._terrainVariantToken
+          || this._disposed || !snapshotIsCurrent) {
         if (result?.ready !== true && token === this._terrainVariantToken) {
           this._scheduleTerrainVariantRetry(renderTarget);
+        } else if (!snapshotIsCurrent && token === this._terrainVariantToken) {
+          this._scheduleTerrainVariantRetry(renderTarget, 0);
         }
         return false;
       }
-      this.infiniteTerrainClipmap?.setProgram(oct, this._stackGLSL);
-      const target = this.worldMode === 'infinite'
+      this.infiniteTerrainClipmap?.setProgram(oct, program);
+      const target = mode === 'infinite'
         ? this._infiniteTerrainMat
         : this.terrainMaterial;
       if (!target || target.userData?.minimalFragment) return false;
@@ -6060,8 +6635,10 @@ export class Engine {
     if (this._disposed || this._terrainVariantRetryTimer) return false;
     if (this._terrainVariantRetryCount >= 2) {
       this._terrainVariantFailed = true;
-      this._completeBootIfQualityReady();
-      return false;
+      delayMs = Math.max(delayMs, Math.min(
+        15000,
+        3000 * (2 ** Math.min(this._terrainVariantRetryCount - 2, 2)),
+      ));
     }
     this._terrainVariantRetryTimer = setTimeout(() => {
       this._terrainVariantRetryTimer = null;
@@ -6389,11 +6966,30 @@ export class Engine {
 
   createProjectPayload() {
     this._syncPlanetStyleToParams();
+    // A project save represents what the editor controls currently show. When
+    // Auto Update is off, terrain-field edits deliberately remain staged until
+    // the user applies them; folding that staging layer into the document keeps
+    // those visible settings from reverting after a save/reload.
+    let projectNoiseStack = this._pendingNoiseStack ?? this.params.noiseStack;
+    for (const [key, value] of Object.entries(this._pendingTerrainParams || {})) {
+      const transformed = this._stackWithCompatParam(
+        projectNoiseStack,
+        key,
+        value,
+      );
+      if (transformed.updated) projectNoiseStack = transformed.stack;
+    }
+    const projectParams = {
+      ...this.params,
+      ...this._pendingTerrainParams,
+      noiseStack: projectNoiseStack,
+    };
+    const paintOpacity = Number(this.paintMode?.state?.layerOpacity);
     const data = {
       app: 'terrain-studio',
       version: 2,
       savedAt: new Date().toISOString(),
-      params: this.params,
+      params: structuredClone(projectParams),
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
@@ -6401,8 +6997,18 @@ export class Engine {
       historyMetadata: this.projectHistory?.serializeMetadata?.(),
       editorMode: this.projectMode,
       generationSource: this.generationSource,
+      worldMode: this.worldMode,
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
+      timeOfDay: Number.isFinite(Number(this.timeOfDay))
+        ? Math.max(0, Math.min(1, Number(this.timeOfDay)))
+        : DEFAULT_TIME_OF_DAY,
+      paintState: {
+        baseMode: this.paintMode?.state?.baseMode === 'flat' ? 'flat' : 'generated',
+        layerOpacity: Number.isFinite(paintOpacity)
+          ? Math.max(0, Math.min(1, paintOpacity))
+          : 1,
+      },
     };
     if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 3, shapes: [], sculpt: null, surfacePaint: null };
     const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
@@ -6412,13 +7018,15 @@ export class Engine {
     // bloat the file with ~3M neutral values.
     const paint = this.paintMode?.serialize();
     if (paint) data.paint = paint;
+    const erosion = this.erosionField?.serialize({ jsonSafe: true });
+    if (erosion) data.erosion = erosion;
     return data;
   }
 
   saveSeed() {
     const data = this.createProjectPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    this._download(URL.createObjectURL(blob), `terrain-seed-${this.params.seed}.json`);
+    this._download(URL.createObjectURL(blob), `terrain-seed-${data.params.seed}.json`);
     this.cb.onToast('Seed saved as JSON');
   }
 
@@ -6426,19 +7034,20 @@ export class Engine {
     const src = json?.params && typeof json.params === 'object' ? json.params : json;
     if (!src || typeof src !== 'object' || !('seed' in src)) {
       this.cb.onToast('Not a valid terrain seed file');
-      return Promise.resolve({ swapped: false, error: new Error('Invalid terrain seed') });
+      return Promise.reject(new Error('Invalid terrain seed'));
     }
+    const rollbackState = {
+      ...this.serializeState(),
+      paint: this.serializePaint(),
+      erosion: this.serializeErosion(),
+      manualSculpt: this.serializeManualSculpt(),
+      manualSurface: this.serializeManualSurface(),
+    };
+    // Freeze bake publication while the desired params, authored fields and
+    // generated shader source are installed as one transaction.
+    this._terrainSourcePendingToken = 'project-load';
     if (!silent) this.projectHistory?.createSnapshot('Before loading project', { automatic: true });
     const realWorldSource = normalizeRealWorldSource(json?.realWorldSource);
-    // Imported pixel data is deliberately not part of project documents.
-    // Always clear the previous project's maps, then retain only the validated
-    // geographic descriptor so it can be refetched after base terrain setup.
-    this._clearImportedMaps();
-    if (realWorldSource) {
-      this.realWorldSource = realWorldSource;
-      this.realWorldImageryStyle = realWorldSource.imageryStyle;
-      this.cb.onRealWorldImageryStyle?.(realWorldSource.imageryStyle);
-    }
     const next = { ...DEFAULT_PARAMS };
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
@@ -6452,6 +7061,7 @@ export class Engine {
         next.waterEnabled = true;
       }
     }
+    this._clearPendingTerrainParams();
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(next, src));
     this.noiseStack = migrateStack(src.noiseStack);
     this.params.noiseStack = this.noiseStack;
@@ -6494,35 +7104,94 @@ export class Engine {
       ? this._circleTiles(this.circleRadiusCells)
       : this._sanitizeTiles(json?.tiles);
     this.paintMode?.setEnabled(false);
-    this.paintMode?.setBaseMode(this.projectMode === 'manual' ? 'flat' : 'generated');
+    // Project documents omit paint data when no stroke exists. Clear the
+    // previous project's textures first so an unpainted project cannot inherit
+    // height/biome masks from the project that was open before it.
+    this.paintMode?.clear({ silent: true });
+    const savedPaintBase = json?.paintState?.baseMode === 'flat'
+      ? 'flat'
+      : 'generated';
+    this.paintMode?.setBaseMode(
+      this.projectMode === 'manual' ? 'flat' : savedPaintBase,
+    );
+    const savedPaintOpacity = Number(json?.paintState?.layerOpacity);
+    this.paintMode?.setState({
+      layerOpacity: Number.isFinite(savedPaintOpacity)
+        ? Math.max(0, Math.min(1, savedPaintOpacity))
+        : 1,
+    });
+    if (json?.paint) this.paintMode?.load(json.paint);
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual' ? json?.manualTerrain : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
+    // Install all authored height sources before invalidating and starting the
+    // replacement bake; consumers never see a bake from the previous project.
+    this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
+    this.terrainAnalysis?.load(json?.creatorTools?.analysis);
+    if (this.erosionField) {
+      if (json?.erosion) this.erosionField.restore(json.erosion);
+      else this.erosionField.clear();
+      this.erosionField.setEnabled(this.params.erosionEnabled === true);
+      this.erosionField.applyTo(this.uniforms);
+    }
+    this.setTimeOfDay(
+      Number.isFinite(Number(json?.timeOfDay))
+        ? Number(json.timeOfDay)
+        : DEFAULT_TIME_OF_DAY,
+    );
     this.cb.onParams({ ...this.params });
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
     this.cb.onGraphState?.({ valid: !!this._graphProgram || this.generationSource === 'classic', compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
     this.cb.onGraphView?.({ ...this.graphView });
-    this.applyAll({ force: true });
-    this._syncCpuHeightProgram();
+    this.applyAll({
+      force: true,
+      terrainDirty: this.worldMode === 'planet',
+    });
+    if (this.params.waterEnabled !== false && this._waterDeferred) {
+      void this._warmDeferredWater();
+    }
     const ready = this.worldMode === 'planet'
-      ? Promise.resolve(this._rebuildPlanet())
-      : this.rebuildActiveHeightProgram({ label: 'Loading terrain', atomic: true });
+      ? Promise.resolve(this._rebuildPlanet()).then((result) => {
+        this._terrainSourcePendingToken = null;
+        return result;
+      })
+      : this.rebuildActiveHeightProgram({
+        label: 'Loading terrain',
+        atomic: true,
+        terrainDirtyOnSwap: true,
+      });
     const loadedSeed = this.params.seed;
     const c = this._unionCenter();
     this.controls.goalTarget.set(c.x, 0, c.z);
     this._notifyTiles();
-    if (json?.paint) this.paintMode?.load(json.paint);
-    this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
-    this.terrainAnalysis?.load(json?.creatorTools?.analysis);
     return ready.then(async (result) => {
+      if (result?.error) throw result.error;
+      // Imported pixels are not embedded in project documents. Keep the
+      // current project's textures intact until the replacement source has
+      // compiled successfully, then clear/refetch behind the blocking overlay.
+      // A failed load can therefore roll back without losing its maps.
+      this._clearImportedMaps();
+      if (realWorldSource) {
+        this.realWorldSource = realWorldSource;
+        this.realWorldImageryStyle = realWorldSource.imageryStyle;
+        this.cb.onRealWorldImageryStyle?.(realWorldSource.imageryStyle);
+      }
       if (realWorldSource) {
         await this._restoreRealWorldSource(realWorldSource, { onProgress: onRealWorldProgress });
       }
+      await this.waitForTerrainReady();
       if (!silent) this.cb.onToast(`Loaded seed ${loadedSeed}`);
       return result;
+    }).catch(async (error) => {
+      try {
+        await this.restoreState(rollbackState, { rollbackOnError: false });
+      } catch (rollbackError) {
+        console.warn('Project load rollback failed', rollbackError);
+      }
+      throw error;
     });
   }
 
@@ -6540,6 +7209,13 @@ export class Engine {
     this._syncPlanetStyleToParams();
     return {
       params: JSON.parse(JSON.stringify(this.params)),
+      pendingTerrainParams: JSON.parse(JSON.stringify(
+        this._pendingTerrainParams || {},
+      )),
+      pendingNoiseStack: this._pendingNoiseStack
+        ? structuredClone(this._pendingNoiseStack)
+        : null,
+      pendingNoiseSolo: this._pendingNoiseSolo,
       perf: { ...this.perf },
       timeOfDay: this.timeOfDay,
       worldMode: this.worldMode,
@@ -6549,6 +7225,7 @@ export class Engine {
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
       paintBaseMode: this.paintMode?.state?.baseMode ?? 'generated',
+      paintLayerOpacity: this.paintMode?.state?.layerOpacity ?? 1,
       erosionRev: this.erosionField?.revision ?? 0,
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
@@ -6592,11 +7269,23 @@ export class Engine {
    * toggles and paint, then fires the React mirror callbacks so the panels
    * reflect the restored values.
    */
-  restoreState(snap) {
-    if (!snap || !snap.params) return;
+  async restoreState(snap, { rollbackOnError = true } = {}) {
+    if (!snap || !snap.params) return { swapped: false };
+    const rollbackState = rollbackOnError
+      ? {
+        ...this.serializeState(),
+        paint: this.serializePaint(),
+        erosion: this.serializeErosion(),
+        manualSculpt: this.serializeManualSculpt(),
+        manualSurface: this.serializeManualSurface(),
+      }
+      : null;
+    try {
+    this._terrainSourcePendingToken = 'history-restore';
 
     // params: full replacement, but keep any newer default keys the snapshot
     // predates so we never end up with undefined settings.
+    this._clearPendingTerrainParams();
     this.params = normalizeCloudFormation(
       normalizeSurfaceTextureParams({ ...DEFAULT_PARAMS, ...snap.params }, snap.params),
     );
@@ -6634,16 +7323,20 @@ export class Engine {
 
     // push params → uniforms and rebuild board geometry (chunk layout may differ)
     this.cb.onParams(this._paramsSnapshot());
-    this.applyAll({ force: true });
+    this.applyAll({ force: true, terrainDirty: false });
     const uc = this._unionCenter();
     this.controls.goalTarget.set(uc.x, 0, uc.z);
     this._notifyTiles();
     this._applyPerformance();
     this._notifyPerf();
 
-    // noise stack: structural edits recompile in the background, continuous
-    // edits just repack uniforms (setNoiseStack handles both + fires onParams).
-    this.setNoiseStack(migrateStack(snap.params.noiseStack));
+    // Install the desired stack model without publishing it to live samplers or
+    // materials yet. One transaction at the end warms and commits the matching
+    // GPU/CPU source after every authored height field has also been restored.
+    this.noiseStack = migrateStack(snap.params.noiseStack);
+    this.params.noiseStack = this.noiseStack;
+    this._stackGLSL = generateStackGLSL(this.noiseStack);
+    this._stackSig = this._stackGLSL.sig;
     this.terrainGraph = snap.terrainGraph ? migrateGraphDocument(snap.terrainGraph, this.noiseStack) : null;
     this.graphView = { ...this.graphView, ...(snap.graphView || {}) };
     if (this.terrainGraph) {
@@ -6663,9 +7356,6 @@ export class Engine {
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onGraphState?.({ valid: this._graphDiagnostics.length === 0, compiling: false, diagnostics: structuredClone(this._graphDiagnostics), slotCount: this._graphProgram?.slotCount || 0, colorSlotCount: this._graphProgram?.colorSlotCount || 0 });
-    this._syncCpuHeightProgram();
-    if (this.worldMode === 'studio') this._rebuildStackMaterialsAsync(this._activeHeightProgram());
-
     // global culling toggles live on the board / world objects, not in params.
     this.setCullingEnabled(snap.cullingEnabled !== false);
     this.setBehindCameraCulling(snap.behindCameraCulling !== false);
@@ -6685,6 +7375,11 @@ export class Engine {
       if (snap.paint) this.paintMode.load(snap.paint);
       else this.paintMode.layers.clear();
       this.paintMode.setBaseMode(this.projectMode === 'manual' ? 'flat' : (snap.paintBaseMode ?? 'generated'));
+      this.paintMode.setState({
+        layerOpacity: Number.isFinite(Number(snap.paintLayerOpacity))
+          ? Math.max(0, Math.min(1, Number(snap.paintLayerOpacity)))
+          : 1,
+      });
     }
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual'
@@ -6707,10 +7402,43 @@ export class Engine {
       else this.erosionField.clear();
       this.erosionField.setEnabled(this.params.erosionEnabled === true);
       this.erosionField.applyTo(this.uniforms);
-      this._onErosionChanged();
     }
 
+    this._pendingTerrainParams = { ...(snap.pendingTerrainParams || {}) };
+    this._pendingNoiseStack = snap.pendingNoiseStack
+      ? migrateStack(snap.pendingNoiseStack)
+      : null;
+    this._pendingNoiseSolo = snap.pendingNoiseSolo ?? null;
+    this.cb.onParams(this._paramsSnapshot());
     this._needsRender = true;
+    let result;
+    if (this.worldMode === 'planet') {
+      this._terrainSourcePendingToken = null;
+      this._markTerrainFieldDirty();
+      result = await Promise.resolve(this._rebuildPlanet());
+    } else {
+      result = await this._rebuildStackMaterialsAsync(
+        this._activeHeightProgram(),
+        {
+          label: 'Restoring terrain',
+          atomic: true,
+          terrainDirtyOnSwap: true,
+        },
+      );
+      if (result?.error) throw result.error;
+      await this.waitForTerrainReady();
+    }
+    return result;
+    } catch (error) {
+      if (rollbackState) {
+        try {
+          await this.restoreState(rollbackState, { rollbackOnError: false });
+        } catch (rollbackError) {
+          console.warn('History restore rollback failed', rollbackError);
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -6741,7 +7469,7 @@ export class Engine {
 
   applyWaterPreset(presetKey) {
     this.params = this.waterSystem.applyPreset(presetKey);
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     this._afterParamChange(false);
     this.cb.onToast(`Water preset: ${presetKey}`);
   }
@@ -6752,7 +7480,7 @@ export class Engine {
       this.planetStyle.setPaletteColor(key, [...EARTH_PALETTE[key]]);
     }
     this._syncPlanetStyleToParams();
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     this._afterParamChange(false);
     this.cb.onToast('Water settings reset');
   }
@@ -6761,6 +7489,7 @@ export class Engine {
     const toast = (msg) => this.cb.onToast(msg);
     switch (panelId) {
       case 'terrain': {
+        this._clearPendingTerrainParams();
         const keepSeed = this.params.seed;
         this.params = patchParamsFromDefaults(this.params, [...TERRAIN_RESET_KEYS, ...EROSION_RESET_KEYS]);
         this.params.seed = keepSeed;
@@ -6773,8 +7502,8 @@ export class Engine {
         // can't linger over the reset (default-size) terrain.
         this.erosionField?.clear();
         this.erosionField?.applyTo(this.uniforms);
-        this.cb.onParams({ ...this.params });
-        this._afterParamChange(true);
+        this.cb.onParams(this._paramsSnapshot());
+        this._afterParamChange(true, true);
         this._onErosionChanged();
         toast('Terrain settings reset');
         break;
@@ -6784,9 +7513,10 @@ export class Engine {
         toast('Noise layers reset');
         break;
       case 'biomes': {
+        this._clearPendingTerrainParams(BIOME_RESET_KEYS);
         this.params = patchParamsFromDefaults(this.params, BIOME_RESET_KEYS);
-        this.cb.onParams({ ...this.params });
-        this._afterParamChange(false);
+        this.cb.onParams(this._paramsSnapshot());
+        this._afterParamChange(false, true);
         toast('Biome settings reset');
         break;
       }
@@ -6795,14 +7525,14 @@ export class Engine {
         break;
       case 'props': {
         this.params = patchParamsFromDefaults(this.params, PROPS_RESET_KEYS);
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         toast('Props settings reset');
         break;
       }
       case 'clouds': {
         this.params = resetCloudParams(this.params);
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         toast('Cloud settings reset');
         break;
@@ -6810,7 +7540,7 @@ export class Engine {
       case 'skybox': {
         this.params = resetSkyboxParams(this.params);
         this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         toast('Skybox settings reset');
         break;
@@ -6821,14 +7551,14 @@ export class Engine {
           this.setPlanetStyleTuning(key, val);
         }
         this._syncPlanetStyleToParams();
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         toast('Lighting settings reset');
         break;
       }
       case 'visuals': {
         this.params = resetVisualParams(this.params);
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         toast('Visual settings reset');
         break;
@@ -6838,9 +7568,10 @@ export class Engine {
         toast('Planet style reset');
         break;
       case 'world': {
+        this._clearPendingTerrainParams(WORLD_RESET_KEYS);
         this.params = patchParamsFromDefaults(this.params, WORLD_RESET_KEYS);
-        this.cb.onParams({ ...this.params });
-        this._afterParamChange(true);
+        this.cb.onParams(this._paramsSnapshot());
+        this._afterParamChange(true, true);
         toast('World settings reset');
         break;
       }
@@ -6848,12 +7579,15 @@ export class Engine {
         this.resetPerfSettings();
         break;
       case 'debug': {
+        // Debug defaults include Auto Update=true; discard any staged terrain
+        // values so they cannot remain hidden behind an enabled toggle.
+        this._clearPendingTerrainParams();
         this.params = patchParamsFromDefaults(this.params, DEBUG_PARAM_KEYS);
         if (this._debug.freeCamNoClip) this._setDebugFreeCam(false);
         this._debug = { ...DEFAULT_DEBUG_FLAGS };
         this.uniforms.uTerrainDetailDebug.value = 0.0;
         this.board.setMergeDebug(this._debug.mergeDebug);
-        this.cb.onParams({ ...this.params });
+        this.cb.onParams(this._paramsSnapshot());
         this._afterParamChange(false);
         if (this.cb.onDebugReset) this.cb.onDebugReset();
         toast('Debug settings reset');
@@ -6887,18 +7621,17 @@ export class Engine {
     // Baselines deliberately use the classic deterministic field. Keeping the
     // seed, terrain preset and water preset fixed makes captures comparable
     // across shader revisions and across machines.
+    this._clearPendingTerrainParams();
     this.params = applyPreset(this.params, scene.terrainPreset);
     this.params = this.waterSystem.applyPreset(scene.waterPreset);
     this.params = waterBaselineParams(scene, this.params);
     this.params.autoUpdate = true;
     this.setNoiseStack(migrateStack(undefined));
 
-    this._terrainGen++;
-    this._bakedStudioGen = -1;
-    this._bakedTerrainGen = -1;
+    this._markTerrainFieldDirty();
     this._activeWaterBaseline = scene.value;
     this.profiler.setMetric('waterBaselineScene', scene.value);
-    this.cb.onParams({ ...this.params });
+    this.cb.onParams(this._paramsSnapshot());
     this.setTimeOfDay(scene.timeOfDay);
     this.applyAll({ force: true });
     this._applyWaterBaselineCamera(scene);
@@ -7606,7 +8339,7 @@ export class Engine {
       // refresh the baked height/normal texture if the field changed (no-op on a
       // steady frame); the studio terrain + water shaders then sample it per
       // pixel instead of re-evaluating the full height field.
-      this._ensureTerrainHeightTex();
+      this._ensureTerrainHeightTexSafely();
 
       this._maybeWarmUnderwater();
       this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
@@ -8063,6 +8796,10 @@ export class Engine {
     if (this._terrainUpgradeRetryTimer) {
       clearTimeout(this._terrainUpgradeRetryTimer);
       this._terrainUpgradeRetryTimer = null;
+    }
+    if (this._terrainHeightBakeRetryTimer) {
+      clearTimeout(this._terrainHeightBakeRetryTimer);
+      this._terrainHeightBakeRetryTimer = null;
     }
     if (this._terrainVariantRetryTimer) {
       clearTimeout(this._terrainVariantRetryTimer);

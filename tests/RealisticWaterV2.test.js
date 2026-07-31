@@ -59,6 +59,16 @@ describe('Realistic Water Surface V2', () => {
     expect(material.fragmentShader).toContain(
       'vec3 sceneTransmittance = mix',
     );
+    expect(material.fragmentShader).toContain(
+      'float depth = uSeaLevel - floorH',
+    );
+    expect(material.fragmentShader).not.toContain(
+      'uGeometryDisplacementEnabled * step(2.5, uWaterTier)',
+    );
+    expect(material.fragmentShader).toContain(
+      'vec2 screenUv = gl_FragCoord.xy * uSceneViewportInv',
+    );
+    expect(material.fragmentShader).not.toContain('vClipPosition');
 
     applyRealisticWaterUniforms(material, {
       waterRefractionQuality: 0.8,

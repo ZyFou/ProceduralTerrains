@@ -534,10 +534,22 @@ export default function App() {
       detail: 'Preparing terrain…',
     }, async (update) => {
       blockingUpdateRef.current = update;
+      const previousWorldMode = worldModeRef.current;
+      histSuppressRef.current = true;
+      if (histTimerRef.current) {
+        clearTimeout(histTimerRef.current);
+        histTimerRef.current = null;
+      }
       try {
-        if ((terrain.editorMode === 'nodes' || terrain.editorMode === 'manual' || terrain.realWorldSource)
-            && worldModeRef.current !== 'studio') {
-          await runModeSwitchRef.current('studio', { silent: true });
+        const targetWorldMode = terrain.editorMode === 'nodes'
+          || terrain.editorMode === 'manual'
+          || terrain.realWorldSource
+          ? 'studio'
+          : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
+            ? terrain.worldMode
+            : 'studio');
+        if (worldModeRef.current !== targetWorldMode) {
+          await runModeSwitchRef.current(targetWorldMode, { silent: true });
           blockingUpdateRef.current = update;
         }
         update({
@@ -555,10 +567,60 @@ export default function App() {
             })
             : undefined,
         });
+        const eng = engineRef.current;
+        if (eng) {
+          const baseline = eng.serializeState();
+          historyRef.current = {
+            past: [],
+            future: [],
+            present: JSON.stringify(baseline),
+          };
+          paintBlobsRef.current.clear();
+          erosionBlobsRef.current.clear();
+          manualSculptBlobsRef.current.clear();
+          manualSurfaceBlobsRef.current.clear();
+          // The compact history snapshot stores only heavy-field revision IDs.
+          // Seed the newly loaded document's corresponding blobs before history
+          // resumes, otherwise its first paint/sculpt edit would Undo to null.
+          if ((baseline.paintRev ?? 0) > 0) {
+            const blob = eng.serializePaint();
+            if (blob) paintBlobsRef.current.set(baseline.paintRev, blob);
+          }
+          if ((baseline.erosionRev ?? 0) > 0) {
+            const blob = eng.serializeErosion();
+            if (blob) erosionBlobsRef.current.set(baseline.erosionRev, blob);
+          }
+          if ((baseline.manualSculptRev ?? 0) > 0) {
+            const blob = eng.serializeManualSculpt();
+            if (blob) {
+              manualSculptBlobsRef.current.set(baseline.manualSculptRev, blob);
+            }
+          }
+          if ((baseline.manualSurfaceRev ?? 0) > 0) {
+            const blob = eng.serializeManualSurface();
+            if (blob) {
+              manualSurfaceBlobsRef.current.set(baseline.manualSurfaceRev, blob);
+            }
+          }
+          nativeHistoryActionsRef.current = [];
+          nativeHistoryCursorRef.current = -1;
+          setNativeHistoryActions([]);
+          setHistState({ canUndo: false, canRedo: false });
+        }
         setCurrentProject(project);
         if (project) showToast(`Opened ${name}`, 'success');
+      } catch (error) {
+        if (worldModeRef.current !== previousWorldMode) {
+          await runModeSwitchRef.current(previousWorldMode, { silent: true });
+        }
+        showToast(`Could not open ${name}`, 'error');
+        throw error;
       } finally {
         if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+        // Structural shader callbacks can settle on the following task. Keep
+        // history suppressed through that hand-off so no half-loaded snapshot
+        // becomes the first Undo target.
+        setTimeout(() => { histSuppressRef.current = false; }, 60);
       }
     });
   }, [setCurrentProject, showToast]);
@@ -664,11 +726,27 @@ export default function App() {
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
           const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
-          await graphResult?.ready;
+          const result = await graphResult?.ready;
+          if (!graphResult?.ok || result?.error) {
+            throw result?.error ?? new Error('Terrain graph could not be compiled');
+          }
         } else if (nextMode === 'procedural') {
           if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-          await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
+          const result = await eng.rebuildActiveHeightProgram({
+            label: 'Loading procedural terrain',
+            atomic: true,
+            terrainDirtyOnSwap: true,
+          });
+          if (result?.error) throw result.error;
+        } else {
+          const result = await eng.rebuildActiveHeightProgram({
+            label: 'Loading manual terrain',
+            atomic: true,
+            terrainDirtyOnSwap: true,
+          });
+          if (result?.error) throw result.error;
         }
+        await eng.waitForTerrainReady();
         // A freshly-created project owns a fresh undo timeline. Without this
         // baseline, the first edit could undo into the landing preview/default
         // procedural document — especially visible when the first Manual edit
@@ -983,6 +1061,11 @@ export default function App() {
     h.past.forEach(collect);
     h.future.forEach(collect);
     if (h.present) collect(h.present);
+    // History-panel jump targets carry their own snapshots and can outlive a
+    // branch in the linear undo stack. Keep their referenced heavy blobs too.
+    nativeHistoryActionsRef.current.forEach((action) => {
+      if (action.snapshot) collect(action.snapshot);
+    });
     for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
     for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
     for (const key of sculptMap.keys()) if (!liveSculpt.has(key)) sculptMap.delete(key);
@@ -1037,6 +1120,7 @@ export default function App() {
   const applySnapshot = useCallback(async (snapStr) => {
     const eng = engineRef.current;
     if (!eng || !snapStr) return;
+    const previousWorldMode = worldModeRef.current;
     let snap;
     try { snap = JSON.parse(snapStr); } catch { return; }
     histSuppressRef.current = true;
@@ -1060,7 +1144,7 @@ export default function App() {
       if (snap.worldMode && snap.worldMode !== worldModeRef.current) {
         await runModeSwitchRef.current(snap.worldMode, { silent: true });
       }
-      eng.restoreState(snap);
+      await eng.restoreState(snap);
       // sync the React mirrors the engine has no callback for
       setDebugFlags({ ...DEFAULT_DEBUG_FLAGS, ...(snap.debug || {}) });
       setCullingEnabled(snap.cullingEnabled !== false);
@@ -1071,11 +1155,16 @@ export default function App() {
       // against it (and we don't log a spurious "paintRev-only" history entry).
       const live = captureSnapshot();
       if (live) historyRef.current.present = live;
+      return true;
     } catch (err) {
       console.warn('History restore failed', err);
+      if (worldModeRef.current !== previousWorldMode) {
+        await runModeSwitchRef.current(previousWorldMode, { silent: true });
+      }
+      return false;
     } finally {
-      // release after the synchronous callbacks settle (a structural noise-stack
-      // change may fire onParams again on the next frame — keep it suppressed).
+      // The engine promise includes structural compilation and the final
+      // full-resolution terrain frame; leave one task for React callbacks.
       setTimeout(() => { histSuppressRef.current = false; }, 60);
     }
   }, [captureSnapshot]);
@@ -1087,13 +1176,31 @@ export default function App() {
     const index = actions.findIndex((action) => action.id === id);
     if (index < 0) return;
     const h = historyRef.current;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.past = actions.slice(0, index).map((action) => action.snapshot);
     h.present = actions[index].snapshot;
     // Redo pops from the end, so keep the next action at the end of the stack.
     h.future = actions.slice(index + 1).reverse().map((action) => action.snapshot);
     nativeHistoryCursorRef.current = index;
     setHistState({ canUndo: h.past.length > 0, canRedo: h.future.length > 0 });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [applySnapshot, flushRecord]);
 
   const undo = useCallback(() => {
@@ -1101,11 +1208,29 @@ export default function App() {
     flushRecord();
     const h = historyRef.current;
     if (!h.past.length) return;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.future.push(h.present);
     h.present = h.past.pop();
     nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: h.past.length > 0, canRedo: true });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [flushRecord, applySnapshot]);
 
   const redo = useCallback(() => {
@@ -1113,11 +1238,29 @@ export default function App() {
     flushRecord();
     const h = historyRef.current;
     if (!h.future.length) return;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.past.push(h.present);
     h.present = h.future.pop();
     nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: true, canRedo: h.future.length > 0 });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [flushRecord, applySnapshot]);
 
   useEffect(() => {
@@ -1564,9 +1707,7 @@ export default function App() {
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
-  const showBlockingOverlay = block
-    && !landing?.visible
-    && !(block.id === 'boot' && landing?.bootReady);
+  const showBlockingOverlay = block && !landing?.visible;
 
   useLayoutEffect(() => {
     if (!showStudioUI || !isStudio || !engineRef.current) return;

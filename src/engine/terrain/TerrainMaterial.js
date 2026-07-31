@@ -138,12 +138,11 @@ void main() {
           skirt = 0.0;
         } else {
           // Disk chunk: the curved perimeter is the radial wall's job, so chunk
-          // skirts survive ONLY as LOD crack fillers — full depth, terrain
-          // coloured, no darkening, no wall shading. Suppress the drop on cell
-          // boundaries between two occupied cells (interior seams), otherwise the
-          // vertical flap reads as a dark line between tiles.
-          float interiorSeam = tileInteriorSeam(wp.xz);
-          skirt = aSkirt * (1.0 - interiorSeam);
+          // Skirts survive only as LOD crack fillers — full depth, terrain
+          // coloured, no darkening and no wall shading. They must also remain
+          // on occupied cell boundaries: neighbouring chunks can temporarily
+          // use different LODs, and suppressing both skirts exposes a long cut.
+          skirt = aSkirt;
           wall = 0.0;
         }
       } else {
@@ -151,8 +150,9 @@ void main() {
         // space become the plinth wall; shared seams stay continuous terrain.
         vec3 tw = tileWall(wp.xz);
         float onOuter = step(0.5, tw.x);
-        float interiorSeam = tileInteriorSeam(wp.xz);
-        skirt = aSkirt * (1.0 - interiorSeam);
+        // Keep the drop at shared cell boundaries as a terrain-coloured crack
+        // filler. Only outer skirts become the visible plinth wall.
+        skirt = aSkirt;
         wall = aSkirt * onOuter;
         skirt *= 1.0 - onOuter;
         wp.xz += tw.yz * (wall * uWallThickness);
@@ -840,10 +840,11 @@ ${features.manual ? '' : /* glsl */ `
     col = mix(col, mergeTierColor(vLod), 0.55);
   }
 
-  // Skirts darken to read as a recessed crack filler — except in circle mode,
-  // where they exist purely to plug LOD T-junctions and must stay terrain-toned.
+  // Skirts darken to read as a recessed crack filler on the legacy single
+  // board. Multi-cell skirts can overlap shared boundaries while LODs differ,
+  // so keep every finite assembly crack filler terrain-toned.
   float skirtDarken = vSkirt * 0.55;
-  if (uInfiniteMode < 0.5 && uTileShape > 0.5) skirtDarken = 0.0;
+  if (uInfiniteMode < 0.5 && uUseTiles > 0.5) skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -948,7 +949,9 @@ void main() {
   vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
                        + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
 
-  col *= 1.0 - vSkirt * 0.55;
+  float skirtDarken = vSkirt * 0.55;
+  if (uInfiniteMode < 0.5 && uUseTiles > 0.5) skirtDarken = 0.0;
+  col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));

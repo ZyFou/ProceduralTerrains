@@ -1,5 +1,30 @@
 import * as THREE from 'three';
 
+function float32ToBase64(array) {
+  const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToFloat32(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const binary = atob(value);
+    if (binary.length % Float32Array.BYTES_PER_ELEMENT !== 0) return null;
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Float32Array(bytes.buffer);
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // Erosion height-offset field (studio / tile mode).
 //
@@ -157,12 +182,22 @@ export class ErosionField {
    * rather than mutating them in place, so sharing the reference is safe and
    * keeps history lightweight. Returns null when nothing is baked.
    */
-  serialize() {
+  serialize({ jsonSafe = false } = {}) {
     if (!this.hasResult()) return null;
+    const encodeGrid = (value) => (
+      jsonSafe && value instanceof Float32Array ? float32ToBase64(value) : value
+    );
+    const masks = this.masks
+      ? Object.fromEntries(Object.entries(this.masks).map(([key, value]) => [
+        key,
+        key === 'res' ? value : encodeGrid(value),
+      ]))
+      : null;
     return {
+      ...(jsonSafe ? { version: 1, encoding: 'base64-f32' } : {}),
       res: this.res,
-      delta: this.delta,
-      masks: this.masks,
+      delta: encodeGrid(this.delta),
+      masks,
       enabled: this.enabled,
       originX: this.originX,
       originZ: this.originZ,
@@ -174,9 +209,24 @@ export class ErosionField {
   /** Restore a snapshot produced by serialize(). A null blob clears the field. */
   restore(blob) {
     if (!blob || !blob.delta) { this.clear(); return; }
+    const reviveFloatGrid = (value) => {
+      if (!value || value instanceof Float32Array) return value;
+      if (typeof value === 'string') return base64ToFloat32(value);
+      if (Array.isArray(value)) return Float32Array.from(value);
+      if (typeof value === 'object') return Float32Array.from(Object.values(value));
+      return null;
+    };
+    const delta = reviveFloatGrid(blob.delta);
+    const res = Math.max(2, Math.round(Number(blob.res) || 0));
+    if (!delta || delta.length !== res * res) { this.clear(); return; }
     this.setRegion(blob.originX, blob.originZ, blob.sizeX, blob.sizeZ);
-    this.setDelta(blob.delta, blob.res);
-    this.masks = blob.masks ?? null;
+    this.setDelta(delta, res);
+    this.masks = blob.masks
+      ? Object.fromEntries(Object.entries(blob.masks).map(([key, value]) => [
+        key,
+        key === 'res' ? value : reviveFloatGrid(value),
+      ]))
+      : null;
     this.enabled = !!blob.enabled && this.hasResult();
   }
 

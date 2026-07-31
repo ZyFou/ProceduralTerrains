@@ -47,6 +47,56 @@ describe('water startup shaders', () => {
     }
   });
 
+  it('never rewrites an owned realistic Infinite material with legacy source', () => {
+    const uniforms = createTerrainUniforms();
+    const realistic = createInfiniteRealisticWaterMaterial(
+      uniforms,
+      7,
+      stackGLSL,
+    );
+    const engine = {
+      uniforms,
+      params: { octaves: 7 },
+      _infiniteWaterMat: realistic,
+    };
+    const waterSystem = new WaterSystem(engine);
+    waterSystem._realisticInfinite = realistic;
+    waterSystem._usingRealistic = true;
+    waterSystem._effectiveMode = 'realistic';
+
+    waterSystem.onStackRebuilt(stackGLSL, 7);
+
+    expect(realistic.fragmentShader).toContain('uniform float uWaterTier');
+    expect(realistic.fragmentShader).toContain('uSceneColor');
+    waterSystem.dispose();
+  });
+
+  it('warms a mode-matching realistic Infinite shader clone', () => {
+    const uniforms = createTerrainUniforms();
+    const realistic = createInfiniteRealisticWaterMaterial(
+      uniforms,
+      7,
+      stackGLSL,
+    );
+    const engine = {
+      uniforms,
+      params: { octaves: 7 },
+      proceduralSky: null,
+    };
+    const waterSystem = new WaterSystem(engine);
+    waterSystem._realisticInfinite = realistic;
+    waterSystem._usingRealistic = true;
+    waterSystem._effectiveMode = 'cinematic';
+
+    const warm = waterSystem.createInfiniteStackWarmMaterial(stackGLSL, 8);
+
+    expect(warm).not.toBe(realistic);
+    expect(warm.defines.OCTAVES).toBe(8);
+    expect(warm.fragmentShader).toContain('uniform float uWaterTier');
+    warm.dispose();
+    waterSystem.dispose();
+  });
+
   it('publishes the fast rebuild preview to water without downgrading terrain shading', () => {
     const engine = Object.create(Engine.prototype);
     const uniforms = createTerrainUniforms();
@@ -308,6 +358,11 @@ describe('water startup shaders', () => {
       _bootStart: performance.now(),
       _tierNotice: null,
       _waterDeferred: false,
+      _terrainSourcePendingToken: null,
+      _compiling: 0,
+      _terrainGen: 7,
+      _bakedStudioGen: 7,
+      _bakedStudioLayout: '2x2',
       projectMode: 'procedural',
       params: { waterEnabled: true },
       perf: { terrainDetailQuality: 3, terrainDetailOpacity: 1 },
@@ -331,6 +386,7 @@ describe('water startup shaders', () => {
       _renderInitialStudioFrame: vi.fn(() => 2),
       _releaseBootFallback: Engine.prototype._releaseBootFallback,
       _scheduleErosionGPUWarmImport: vi.fn(),
+      _studioBakeLayoutKey: vi.fn(() => '2x2'),
     });
 
     expect(engine._completeBootIfQualityReady()).toBe(false);
@@ -340,13 +396,19 @@ describe('water startup shaders', () => {
     engine.uniforms.uUseTerrainBiomeTex.value = 1;
     expect(engine._completeBootIfQualityReady()).toBe(false);
     engine.board._lodRebuildQueue = [];
+    engine._bakedStudioGen = 6;
+    expect(engine._completeBootIfQualityReady()).toBe(false);
+    engine._bakedStudioGen = 7;
+    engine._terrainSourcePendingToken = 'terrain-source';
+    expect(engine._completeBootIfQualityReady()).toBe(false);
+    engine._terrainSourcePendingToken = null;
     expect(engine._completeBootIfQualityReady()).toBe(true);
     expect(engine._bootPending).toBe(false);
     expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('releases an interactive Base frame while bake, board and LOD quality work continue', () => {
+  it('keeps boot covered when only an interactive Base frame is ready', () => {
     const engine = Object.create(Engine.prototype);
     Object.assign(engine, {
       _bootPending: true,
@@ -385,9 +447,10 @@ describe('water startup shaders', () => {
 
     expect(engine._completeBootIfInteractiveReady()).toBe(true);
 
-    expect(engine._bootPending).toBe(false);
-    expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
-    expect(engine.cb.onBackgroundWork).toHaveBeenLastCalledWith('Improving terrain quality…');
+    expect(engine._bootInteractiveReady).toBe(true);
+    expect(engine._bootPending).toBe(true);
+    expect(engine.cb.onBootComplete).not.toHaveBeenCalled();
+    expect(engine.cb.onBackgroundWork).not.toHaveBeenCalled();
   });
 
   it('uses the requested boot variant on high tier and Base on weaker tiers', () => {
@@ -413,9 +476,10 @@ describe('water startup shaders', () => {
       _bootFallbackFrameReady: false,
       _bootWatchdogTimer: null,
       gpuTier: 'low',
-      cb: { onToast: vi.fn() },
+      cb: { onToast: vi.fn(), onStatus: vi.fn() },
       _bootReadinessSnapshot: vi.fn(() => ({})),
       _releaseBootFallback: vi.fn(() => true),
+      _completeBootIfQualityReady: vi.fn(() => false),
     });
 
     engine._startBootWatchdog();
@@ -427,8 +491,13 @@ describe('water startup shaders', () => {
     vi.advanceTimersByTime(7999);
     expect(engine._releaseBootFallback).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(engine._releaseBootFallback).toHaveBeenCalledWith('degraded interactive watchdog');
-    expect(engine.cb.onToast).toHaveBeenCalledTimes(1);
+    expect(engine._releaseBootFallback).not.toHaveBeenCalled();
+    expect(engine._completeBootIfQualityReady).toHaveBeenCalledTimes(1);
+    expect(engine.cb.onStatus).toHaveBeenCalledWith(
+      'Still preparing full-quality terrain and water…',
+      true,
+    );
+    expect(engine.cb.onToast).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

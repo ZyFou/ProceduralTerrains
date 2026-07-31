@@ -373,6 +373,11 @@ export class TerrainHeightBaker {
     while (this._activeJob) this.step(Number.MAX_SAFE_INTEGER);
   }
 
+  cancel() {
+    this._activeJob = null;
+    this._bakeUvTransform.value.set(0, 0, 1, 1);
+  }
+
   dispose() {
     this.target.dispose();
     this._writeTarget.dispose();

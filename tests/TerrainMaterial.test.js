@@ -77,6 +77,24 @@ describe('shared Tile and Infinite terrain program', () => {
     );
   });
 
+  it('keeps terrain-coloured skirts on multi-cell LOD boundaries', () => {
+    const uniforms = createTerrainUniforms();
+    const full = createTerrainMaterial(uniforms, 5);
+    const boot = createBootTerrainMaterial(uniforms, 5);
+    materials.push(full, boot);
+
+    expect(full.vertexShader).toContain('skirt = aSkirt;');
+    expect(full.vertexShader).not.toContain(
+      'aSkirt * (1.0 - interiorSeam)',
+    );
+    for (const material of [full, boot]) {
+      expect(material.fragmentShader).toContain(
+        'uInfiniteMode < 0.5 && uUseTiles > 0.5',
+      );
+      expect(material.fragmentShader).toContain('skirtDarken = 0.0');
+    }
+  });
+
   it('shares an optional baked climate texture with realistic Studio water', () => {
     const uniforms = createTerrainUniforms();
     const baker = new TerrainHeightBaker({ renderer: null, uniforms });

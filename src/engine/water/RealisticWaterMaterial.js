@@ -47,7 +47,6 @@ uniform vec2 uGeometryFocus;
 uniform float uGeometryDisplacementEnabled;
 
 varying vec3 vWorldPos;
-varying vec4 vClipPosition;
 
 ${WATER_GEOMETRY_WAVES_GLSL}
 
@@ -93,7 +92,6 @@ void main() {
   }
   vWorldPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
-  vClipPosition = gl_Position;
 }
 `;
 
@@ -190,6 +188,7 @@ uniform float uCausticsQual;
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
 uniform vec2 uSceneTexelSize;
+uniform vec2 uSceneViewportInv;
 uniform float uSceneNear;
 uniform float uSceneFar;
 uniform float uSceneRefractionEnabled;
@@ -205,7 +204,6 @@ uniform float uVisualWetSandRange;
 uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
-varying vec4 vClipPosition;
 
 ${PROCEDURAL_SKY_EVALUATION_GLSL}
 ${WATER_OPTICS_GLSL}
@@ -296,11 +294,11 @@ void main() {
 #endif
 
   float floorH = terrainHeightAt(xz);
-  float depth = mix(
-    uSeaLevel,
-    vWorldPos.y,
-    uGeometryDisplacementEnabled * step(2.5, uWaterTier)
-  ) - floorH;
+  // Mean sea level is the single wet/dry authority used by terrain shore
+  // shading, caustics, swimming and underwater transitions. Cinematic vertex
+  // displacement remains a visual wave only, so crests cannot classify dry
+  // mountains as submerged (or troughs punch classification holes).
+  float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
 
   // Smoothed bathymetry for depth tint — 4 extra samples max (not 20+).
@@ -376,8 +374,10 @@ void main() {
     visualDepth
   );
   float sceneRefractionWeight = sceneCaptureEnabled * visibleFloor;
-  vec2 screenUv = vClipPosition.xy / max(vClipPosition.w, 0.0001);
-  screenUv = screenUv * 0.5 + 0.5;
+  // Derive capture UVs from the rasterized pixel. Interpolating clip
+  // coordinates across the water plane's two triangles can differ by a few
+  // ulps on their shared diagonal, which becomes a visible refraction cut.
+  vec2 screenUv = gl_FragCoord.xy * uSceneViewportInv;
   vec2 refractedUv = screenUv;
   vec3 refractedSceneLinear = vec3(0.0);
   if (sceneCaptureEnabled > 0.5) {
@@ -803,6 +803,7 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSceneColor: { value: null },
     uSceneDepth: { value: null },
     uSceneTexelSize: { value: new THREE.Vector2(1, 1) },
+    uSceneViewportInv: { value: new THREE.Vector2(1, 1) },
     uSceneNear: { value: 1.0 },
     uSceneFar: { value: 50000.0 },
     uSceneRefractionEnabled: { value: 0.0 },

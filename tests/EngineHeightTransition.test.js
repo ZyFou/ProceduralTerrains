@@ -160,6 +160,8 @@ describe('atomic terrain height transitions', () => {
     expect(engine.terrainMaterial.vertexShader).toContain('// 0: legacy (Classic Terrain)');
     expect(engine.waterMaterial.fragmentShader).toBe('old water source');
     expect(engine.terrainMaterial.vertexShader).not.toContain('float graph_terrain_output');
-    expect(engine._syncCpuHeightProgram).toHaveBeenCalledTimes(1);
+    // Each published source updates CPU sampling atomically with the shader:
+    // Blank Nodes first, then the restored Classic program.
+    expect(engine._syncCpuHeightProgram).toHaveBeenCalledTimes(2);
   });
 });
