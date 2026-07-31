@@ -92,41 +92,46 @@ describe('performance phase 3', () => {
       maxSize: 64,
     });
 
-    const preview = baker.begin(5);
-    expect(preview.heightTexture).toBe(baker.previewTexture);
-    expect(preview.biomeTexture).toBe(baker.previewBiomeTexture);
-    expect(renderer.render).toHaveBeenCalledTimes(2);
+    const jobId = baker.begin(5);
+    expect(jobId).toBe(1);
+    expect(renderer.render).toHaveBeenCalledTimes(0);
 
     const first = baker.step(16);
     expect(first.complete).toBe(false);
-    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
     expect(renderer.setViewport).toHaveBeenCalledWith(0, 0, 64, 16);
 
     let result = first;
     let guard = 0;
     while (!result.complete && guard++ < 64) result = baker.step(16);
     expect(result.complete).toBe(true);
-    // 2 immediate preview passes + 4 height stripes + 32 climate stripes.
-    expect(renderer.render).toHaveBeenCalledTimes(38);
+    // 4 height stripes + 32 climate stripes; begin itself is render-free.
+    expect(renderer.render).toHaveBeenCalledTimes(36);
     baker.dispose();
   });
 
-  it('fits the immediate Studio water preview to expanded board bounds', () => {
+  it('sizes full write targets for an expanded board without rendering in begin', () => {
     const renderer = renderTargetRenderer();
     const baker = new TerrainHeightBaker({
       renderer,
       uniforms: createTerrainUniforms(),
       size: 64,
       maxSize: 128,
-      previewSize: 128,
     });
 
-    const preview = baker.begin(5, undefined, 2, 1);
+    const publishedHeight = baker.texture;
+    const publishedBiome = baker.biomeTexture;
+    const jobId = baker.begin(5, undefined, 2, 1);
 
-    expect(baker.previewTarget.width).toBe(128);
-    expect(baker.previewTarget.height).toBe(64);
-    expect(preview.heightTexture).toBe(baker.previewTarget.texture);
-    expect(renderer.setViewport).toHaveBeenCalledWith(0, 0, 128, 64);
+    expect(jobId).toBe(1);
+    expect(baker._writeTarget.width).toBe(128);
+    expect(baker._writeTarget.height).toBe(64);
+    expect(baker._writeBiomeTarget.width).toBe(512);
+    expect(baker._writeBiomeTarget.height).toBe(256);
+    expect(baker.texture).toBe(publishedHeight);
+    expect(baker.biomeTexture).toBe(publishedBiome);
+    expect(renderer.render).toHaveBeenCalledTimes(0);
+    expect(renderer.setViewport).not.toHaveBeenCalled();
     baker.dispose();
   });
 

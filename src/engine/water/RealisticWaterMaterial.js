@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -129,6 +129,7 @@ float waterBiomeClimateAvailable() {
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
+${WATER_TILE_MASK_GLSL}
 ${dependencies}
 ${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
@@ -290,7 +291,7 @@ void main() {
   vec2 xz = vWorldPos.xz;
 
 #ifndef INFINITE_MODE
-  if (tileOccupiedAt(xz) < 0.5) discard;
+  if (waterTileOccupiedAt(xz) < 0.5) discard;
 #endif
 
   float floorH = terrainHeightAt(xz);

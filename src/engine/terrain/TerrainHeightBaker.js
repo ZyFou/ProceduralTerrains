@@ -91,28 +91,23 @@ export class TerrainHeightBaker {
    * @param {object} opts.uniforms   shared terrain uniforms (live objects)
    * @param {number} [opts.size]     per-cell texture resolution (default 2048)
    * @param {number} [opts.maxSize]  multi-cell atlas cap (default 4096)
-   * @param {number} [opts.previewSize] longest edge of the immediate preview
    */
   constructor({
     renderer,
     uniforms,
     size = 2048,
     maxSize = 4096,
-    previewSize = 384,
+    requirePrepared = false,
   }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
     this._baseSize = size;
     this._maxSize = maxSize;
+    this._requirePrepared = requirePrepared;
     this._texW = size;
     this._texH = size;
     this._biomeW = 512;
     this._biomeH = 512;
-    this._previewBaseSize = previewSize;
-    this._previewW = previewSize;
-    this._previewH = previewSize;
-    this._previewBiomeW = Math.max(64, Math.round(previewSize * 0.5));
-    this._previewBiomeH = Math.max(64, Math.round(previewSize * 0.5));
     this._activeJob = null;
     this._jobSerial = 0;
     this._bakeUvTransform = { value: new THREE.Vector4(0, 0, 1, 1) };
@@ -124,16 +119,6 @@ export class TerrainHeightBaker {
     this._writeTarget = this._makeTarget(size, size);
     this.biomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
     this._writeBiomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
-    this.previewTarget = this._makeTarget(
-      this._previewW,
-      this._previewH,
-      'TerrainHeightPreviewR16F',
-    );
-    this.previewBiomeTarget = this._makeBiomeTarget(
-      this._previewBiomeW,
-      this._previewBiomeH,
-      'TerrainBiomeClimatePreview',
-    );
 
     this.scene = new THREE.Scene();
     this.material = null;   // built on first bake so OCTAVES matches the params
@@ -157,12 +142,12 @@ export class TerrainHeightBaker {
 
     this._octaves = -1;
     this._stackSig = null;
+    this._programSerial = 0;
+    this._biomeProgramPrepared = false;
   }
 
   get texture() { return this.target.texture; }
   get biomeTexture() { return this.biomeTarget.texture; }
-  get previewTexture() { return this.previewTarget.texture; }
-  get previewBiomeTexture() { return this.previewBiomeTarget.texture; }
 
   _makeTarget(w, h, name = 'TerrainHeightR16F') {
     const target = new THREE.WebGLRenderTarget(w, h, {
@@ -218,89 +203,95 @@ export class TerrainHeightBaker {
     this._biomeW = biomeW;
     this._biomeH = biomeH;
 
-    // The preview always covers the complete new union, but caps its longest
-    // edge so regeneration/expansion only requires two small immediate passes.
-    const previewW = Math.max(64, Math.round(this._previewBaseSize * cols / maxCells));
-    const previewH = Math.max(64, Math.round(this._previewBaseSize * rows / maxCells));
-    if (this.previewTarget.width !== previewW || this.previewTarget.height !== previewH) {
-      this.previewTarget.dispose();
-      this.previewTarget = this._makeTarget(previewW, previewH, 'TerrainHeightPreviewR16F');
-    }
-    this._previewW = previewW;
-    this._previewH = previewH;
-
-    const previewBiomeW = Math.max(64, Math.round(previewW * 0.5));
-    const previewBiomeH = Math.max(64, Math.round(previewH * 0.5));
-    if (this.previewBiomeTarget.width !== previewBiomeW
-        || this.previewBiomeTarget.height !== previewBiomeH) {
-      this.previewBiomeTarget.dispose();
-      this.previewBiomeTarget = this._makeBiomeTarget(
-        previewBiomeW,
-        previewBiomeH,
-        'TerrainBiomeClimatePreview',
-      );
-    }
-    this._previewBiomeW = previewBiomeW;
-    this._previewBiomeH = previewBiomeH;
   }
 
-  _ensureMaterial(octaves, stackGLSL) {
-    if (this.material && this._octaves === octaves && this._stackSig === stackGLSL.sig) return;
-    if (this.material) this.material.dispose();
-    this.material = new THREE.ShaderMaterial({
+  _makeProgramMaterial(octaves, stackGLSL) {
+    return new THREE.ShaderMaterial({
       uniforms: {
-        ...this.uniforms,                // share the live height uniforms
+        ...this.uniforms,
         uBakeUvTransform: this._bakeUvTransform,
       },
-      defines: { OCTAVES: octaves },     // no INFINITE_MODE → island falloff applies
+      defines: { OCTAVES: octaves },
       vertexShader: BAKE_VERTEX,
       fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d)),
       depthTest: false,
       depthWrite: false,
     });
-    this.mesh.material = this.material;
-    this._octaves = octaves;
-    this._stackSig = stackGLSL.sig;
   }
 
+  _ensureMaterial(octaves, stackGLSL) {
+    const programSig = stackGLSL.heightSig || stackGLSL.sig;
+    if (this.material && this._octaves === octaves && this._stackSig === programSig) return;
+    const next = this._makeProgramMaterial(octaves, stackGLSL);
+    if (this.material) this.material.dispose();
+    this.material = next;
+    this.mesh.material = this.material;
+    this._octaves = octaves;
+    this._stackSig = programSig;
+    this._programSerial++;
+  }
+
+  prepareProgram(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
+    this._ensureTargetSize(cols, rows);
+    const serial = ++this._programSerial;
+    const programSig = stackGLSL.heightSig || stackGLSL.sig;
+    const current = !!this.material
+      && this._octaves === octaves
+      && this._stackSig === programSig
+      && this._biomeProgramPrepared;
+    if (current) return { serial, current: true, octaves, stackSig: programSig, passes: [] };
+    const material = this._makeProgramMaterial(octaves, stackGLSL);
+    return {
+      serial, current: false, material, octaves, stackSig: programSig,
+      passes: [
+        { scene: this.scene, camera: this.cam, mesh: this.mesh, material, renderTarget: this._writeTarget },
+        { scene: this.scene, camera: this.cam, mesh: this.mesh, material: this.biomeMaterial, renderTarget: this._writeBiomeTarget },
+      ],
+    };
+  }
+
+  publishPrepared(handle) {
+    if (!handle || handle.serial !== this._programSerial) return false;
+    if (handle.current) return true;
+    const previous = this.material;
+    this.material = handle.material;
+    this.mesh.material = this.material;
+    this._octaves = handle.octaves;
+    this._stackSig = handle.stackSig;
+    this._biomeProgramPrepared = true;
+    handle.published = true;
+    previous?.dispose();
+    return true;
+  }
+
+  discardPrepared(handle) {
+    if (handle?.material && !handle.published && handle.material !== this.material) {
+      handle.material.dispose();
+    }
+  }
+
+  get programKey() {
+    return this.material ? this._octaves + ':' + this._stackSig : null;
+  }
   /**
-   * Start a progressive bake. Existing textures remain hidden by the Engine
-   * until every stripe has completed, so consumers never sample a half-written
-   * terrain field.
+   * Start a progressive bake without submitting GPU work. Published front
+   * textures remain unchanged until every height and climate stripe completes.
    */
   begin(octaves, stackGLSL = DEFAULT_STACK_GLSL, cols = 1, rows = 1) {
+    const programSig = stackGLSL.heightSig || stackGLSL.sig;
+    if (this._requirePrepared && (!this._biomeProgramPrepared
+        || !this.material || this._octaves !== octaves || this._stackSig !== programSig)) {
+      return null;
+    }
     this._ensureTargetSize(cols, rows);
     this._ensureMaterial(octaves, stackGLSL);
-    // Publishable same-frame approximation. This uses the exact height/climate
-    // logic over the complete new bounds, only at a lower spatial resolution.
-    // The high-quality targets remain progressive and double-buffered below.
-    this._renderStripe(
-      this.previewTarget,
-      this.material,
-      this._previewW,
-      this._previewH,
-      0,
-      this._previewH,
-    );
-    this._renderStripe(
-      this.previewBiomeTarget,
-      this.biomeMaterial,
-      this._previewBiomeW,
-      this._previewBiomeH,
-      0,
-      this._previewBiomeH,
-    );
     this._bakeUvTransform.value.set(0, 0, 1, 1);
     this._activeJob = {
       id: ++this._jobSerial,
       pass: 'height',
       row: 0,
     };
-    return {
-      id: this._activeJob.id,
-      heightTexture: this.previewTexture,
-      biomeTexture: this.previewBiomeTexture,
-    };
+    return this._activeJob.id;
   }
 
   get isBaking() { return !!this._activeJob; }
@@ -383,8 +374,6 @@ export class TerrainHeightBaker {
     this._writeTarget.dispose();
     this.biomeTarget.dispose();
     this._writeBiomeTarget.dispose();
-    this.previewTarget.dispose();
-    this.previewBiomeTarget.dispose();
     this.mesh.geometry.dispose();
     if (this.material) this.material.dispose();
     this.biomeMaterial.dispose();

@@ -27,9 +27,9 @@ float vnoise(vec2 p) {
 }
 `;
 
-// Studio water owns a separate preview cache so a fast, low-resolution shore
-// mask can be published immediately without changing terrain normals/colors.
-// The terrain keeps its live procedural shading until the final bake commits.
+// Studio water owns a separate cache binding so the Engine can keep water
+// hidden while a new field bakes. Height and climate become visible together
+// only after a generation- and layout-matched final bake commits atomically.
 export const WATER_TERRAIN_CACHE_GLSL = /* glsl */ `
 uniform sampler2D uWaterTerrainHeightTex;
 uniform sampler2D uWaterTerrainBiomeTex;

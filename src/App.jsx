@@ -41,9 +41,9 @@ import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
-import { getProjectTemplate, PROJECT_TEMPLATES, projectTemplatePreviewCacheKey } from './project/ProjectTemplates.js';
+import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
 import {
-  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
+  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
 } from './project/NodeProjectTemplates.js';
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
@@ -107,9 +107,6 @@ export default function App() {
   const engineRef = useRef(null);
   const activeProjectRef = useRef(null);
   const projectNameRef = useRef('Untitled terrain');
-  const templatePreviewQueueRef = useRef(Promise.resolve());
-  const landingPreviewActiveRef = useRef(true);
-  const landingPreviewSessionRef = useRef(0);
   const liveMetricsRef = useRef(null);
   if (!liveMetricsRef.current) {
     const count = DEFAULT_PARAMS.chunkCount;
@@ -707,22 +704,25 @@ export default function App() {
       blockingUpdateRef.current = update;
       try {
         if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
-        landingPreviewActiveRef.current = false;
-        landingPreviewSessionRef.current += 1;
         if ((nextMode === 'nodes' || nextMode === 'manual') && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
         }
-        eng.newProject({ projectMode: nextMode });
-        // A new terrain is a new document. Do not let saveCurrentProject reuse
-        // the id of whichever project was previously open.
-        setCurrentProject(null);
-        // Every launch starts from the Root's session seed; give each chosen
-        // template a stable-but-fresh variant instead of reverting to seed 1337.
+        // Build the final document once. Seed and preset used to be applied
+        // after newProject(), causing two extra full terrain updates and a
+        // visible flash of the default/previous landscape.
         const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
         const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
         const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
-        eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
+        const projectSeed = (baseSeed + templateOffset * 0x9e3779b9) >>> 0;
+        eng.newProject({
+          projectMode: nextMode,
+          seed: projectSeed,
+          presetKey: nextMode === 'procedural' ? template.preset : null,
+        });
+        // A new terrain is a new document. Do not let saveCurrentProject reuse
+        // the id of whichever project was previously open.
+        setCurrentProject(null);
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
           const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
@@ -731,7 +731,6 @@ export default function App() {
             throw result?.error ?? new Error('Terrain graph could not be compiled');
           }
         } else if (nextMode === 'procedural') {
-          if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
           const result = await eng.rebuildActiveHeightProgram({
             label: 'Loading procedural terrain',
             atomic: true,
@@ -786,74 +785,19 @@ export default function App() {
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
-    const stopLandingPreviews = () => {
-      landingPreviewActiveRef.current = false;
-      landingPreviewSessionRef.current += 1;
-    };
     const onNewProject = (event) => {
       createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
     };
     const onOpenProject = async (event) => {
       const project = event.detail?.project;
       if (!project?.terrain || !engineRef.current) return;
-      stopLandingPreviews();
       await loadProjectJSON(project);
-    };
-    const previewSeed = (templateId, editorMode = 'procedural') => {
-      const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
-      const index = Math.max(0, catalog.findIndex((item) => item.id === templateId));
-      const base = Number(landingRef.current?.sessionSeed) || 1337;
-      return (base + (index + 1) * 0x9e3779b9) >>> 0;
-    };
-    const captureTemplateThumbnail = async (templateId, { silent = true, editorMode = 'procedural', session = landingPreviewSessionRef.current } = {}) => {
-      const eng = engineRef.current;
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || !eng || !canvasRef.current || !landingRef.current?.visible || landingRef.current?.exiting) return;
-      const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
-      const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
-      if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
-        await runModeSwitchRef.current('studio', { silent: true });
-      }
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
-      eng.newProject({ silent, projectMode: nextMode });
-      eng.setParam('seed', previewSeed(template.id, nextMode));
-      if (nextMode === 'nodes') {
-        const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
-        await graphResult?.ready;
-      } else {
-        if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-        await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
-      }
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await new Promise((resolve) => window.setTimeout(resolve, nextMode === 'nodes' ? 260 : 100));
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
-      const image = eng.capturePreviewThumbnail();
-      const cacheKey = nextMode === 'nodes' ? nodeTemplatePreviewCacheKey(template.id) : projectTemplatePreviewCacheKey(template.id);
-      try { sessionStorage.setItem(cacheKey, image); } catch { /* cache is optional */ }
-      window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, editorMode: nextMode, image } }));
-    };
-    const queueTemplatePreview = (templateId, options) => {
-      const session = landingPreviewSessionRef.current;
-      templatePreviewQueueRef.current = templatePreviewQueueRef.current
-        .then(() => captureTemplateThumbnail(templateId, { ...options, session }))
-        .catch(() => {});
-      return templatePreviewQueueRef.current;
-    };
-    const onPreviewTemplate = (event) => {
-      if (!landingRef.current?.visible || landingRef.current?.exiting) return;
-      if (event.detail?.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
-      landingPreviewActiveRef.current = true;
-      // Every explicit selection owns a fresh session so an older queued
-      // procedural preview can never overwrite it.
-      landingPreviewSessionRef.current += 1;
-      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
     };
     window.addEventListener('terrain-project:new', onNewProject);
     window.addEventListener('terrain-project:open', onOpenProject);
-    window.addEventListener('terrain-template:preview', onPreviewTemplate);
     return () => {
       window.removeEventListener('terrain-project:new', onNewProject);
       window.removeEventListener('terrain-project:open', onOpenProject);
-      window.removeEventListener('terrain-template:preview', onPreviewTemplate);
     };
   }, [createProjectFromTemplate, loadProjectJSON]);
 

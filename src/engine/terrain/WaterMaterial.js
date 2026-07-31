@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL } from './terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
@@ -36,6 +36,7 @@ const buildFragment = (stackGLSL, infinite = false) => {
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
+${WATER_TILE_MASK_GLSL}
 ${dependencies}
 ${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
@@ -74,7 +75,7 @@ void main() {
 #ifndef INFINITE_MODE
   // tile assembly: the water plane spans the union bbox but only occupied cells
   // should render water (prevents blue over empty/ghost cells at shallow angles).
-  if (tileOccupiedAt(xz) < 0.5) discard;
+  if (waterTileOccupiedAt(xz) < 0.5) discard;
 #endif
 
   // depth of the sea floor below this fragment (same height field as terrain)

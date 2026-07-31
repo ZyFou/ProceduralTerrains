@@ -69,6 +69,8 @@ export class PlanetCloudChunks {
     this._wind = new THREE.Vector3();
     this._lastParams = null;
     this._compileToken = 0; this._pendingCompile = null;
+    this._pendingMaterialSets = new Set();
+    this._disposed = false;
 
     // depth prepass (terrain occlusion)
     this._depthTarget = null; this._depthTexture = null;
@@ -293,13 +295,21 @@ export class PlanetCloudChunks {
   // ---- background compile (warm the shared program, swap all chunks when ready)
   _compileRep(repMaterial) {
     const token = ++this._compileToken;
-    if (!this._compile) return { token, promise: Promise.resolve() };
+    if (!this._compile) return { token, promise: Promise.resolve({ ready: true }) };
     let promise;
     try { promise = Promise.resolve(this._compile([repMaterial])); }
     catch (e) { promise = Promise.reject(e); }
-    const done = promise.catch(() => {});
+    const done = promise.then((result) => {
+      if (result?.ready === false || result?.aborted === true) {
+        throw new Error('Planet cloud chunk shader did not become ready');
+      }
+      return result;
+    });
     this._pendingCompile = { promise: done };
-    done.finally(() => { if (this._pendingCompile?.promise === done) this._pendingCompile = null; });
+    const clearPending = () => {
+      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    };
+    done.then(clearPending, clearPending);
     return { token, promise: done };
   }
 
@@ -315,13 +325,22 @@ export class PlanetCloudChunks {
     // build the next material for every chunk (all share this.shared + the
     // already-cached program once one is compiled)
     const next = this.chunks.map((ch) => this._makeMaterial(ch.cellNormals));
+    const candidate = { materials: next, disposed: false };
+    this._pendingMaterialSets.add(candidate);
+    const disposeCandidate = () => {
+      if (candidate.disposed) return;
+      candidate.disposed = true;
+      this._pendingMaterialSets.delete(candidate);
+      next.forEach((m) => m.dispose());
+    };
     const previous = this.chunks.map((ch) => ch.material);
     const { token, promise } = this._compileRep(next[0]);
     promise.then(() => {
-      if (token !== this._compileToken) { next.forEach((m) => m.dispose()); return; }
+      if (this._disposed || token !== this._compileToken) { disposeCandidate(); return; }
+      this._pendingMaterialSets.delete(candidate);
       this.chunks.forEach((ch, i) => { ch.material = next[i]; ch.mesh.material = next[i]; });
       previous.forEach((m) => m.dispose());
-    });
+    }, disposeCandidate);
   }
 
   // ---- per-frame: animate (shared, once) + cull + LOD (per chunk)
@@ -505,6 +524,19 @@ export class PlanetCloudChunks {
   }
 
   dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    // Retire every in-flight compile before releasing live materials. Candidate
+    // sets are disposed now (rather than waiting for a driver promise that may
+    // never settle), and their late callbacks are idempotent.
+    this._compileToken++;
+    this._pendingCompile = null;
+    for (const candidate of this._pendingMaterialSets) {
+      if (candidate.disposed) continue;
+      candidate.disposed = true;
+      candidate.materials.forEach((material) => material.dispose());
+    }
+    this._pendingMaterialSets.clear();
     if (this._depthTarget) { this._depthTarget.dispose(); this._depthTarget = null; this._depthTexture = null; }
     for (const ch of this.chunks) ch.material.dispose();
     this._boxGeo.dispose();

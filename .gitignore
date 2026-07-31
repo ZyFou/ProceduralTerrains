@@ -64,3 +64,6 @@ temp/
 # Optional eslint cache
 .eslintcache
 .claude/
+
+.codex-remote-attachments
+.playwright-cli

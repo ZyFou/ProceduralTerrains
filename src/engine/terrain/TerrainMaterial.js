@@ -115,6 +115,7 @@ varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
 varying float vWall;
+
 varying float vWallMesh;
 
 void main() {
@@ -131,17 +132,13 @@ void main() {
     if (uUseTiles > 0.5) {
       if (uTileShape > 0.5) {
         if (aWall > 0.5) {
-          // Dedicated radial wall: its top ring (aSkirt 0) follows the terrain
-          // silhouette at the disk perimeter, its base ring (aSkirt 1) drops to
-          // the plinth base. Shaded as the plinth wall.
+          // Dedicated radial wall: top follows the same single analytic
+          // terrain sample; the base ring drops to the plinth.
           wall = aSkirt;
           skirt = 0.0;
         } else {
-          // Disk chunk: the curved perimeter is the radial wall's job, so chunk
-          // Skirts survive only as LOD crack fillers — full depth, terrain
-          // coloured, no darkening and no wall shading. They must also remain
-          // on occupied cell boundaries: neighbouring chunks can temporarily
-          // use different LODs, and suppressing both skirts exposes a long cut.
+          // Retain both terrain-toned crack covers. Either neighbour can be
+          // the finer LOD, so fixed-side ownership can expose a T-junction.
           skirt = aSkirt;
           wall = 0.0;
         }
@@ -150,8 +147,6 @@ void main() {
         // space become the plinth wall; shared seams stay continuous terrain.
         vec3 tw = tileWall(wp.xz);
         float onOuter = step(0.5, tw.x);
-        // Keep the drop at shared cell boundaries as a terrain-coloured crack
-        // filler. Only outer skirts become the visible plinth wall.
         skirt = aSkirt;
         wall = aSkirt * onOuter;
         skirt *= 1.0 - onOuter;
@@ -528,11 +523,15 @@ float causticPattern(vec2 xz, float t, vec2 refr, float depthSpread) {
 // Project caustics onto the submerged, upward-facing sea floor. World-XZ space
 // → seamless across chunks (Tile + Infinite). Modulated by sun lighting and
 // water depth so it genuinely sits in the environment, not on the lens.
-vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
+vec3 applyTerrainCaustics(vec3 col, vec2 xz, float visibleHeight, vec3 nGeo, vec3 lightN) {
   float amt = uCausticStrength * uCausticBlend;
   if (amt < 0.001) return col;
 
-  float below = uSeaLevel - hC;          // >0 when terrain is under water
+  // Structural skirt and perimeter-wall geometry is not sea floor. Use the
+  // visible faceted height because the analytic/baked height can be submerged
+  // while a coarse rendered triangle is visibly above the water.
+  if (vSkirt > 0.0001 || vWallMesh > 0.5) return col;
+  float below = uSeaLevel - visibleHeight; // >0 only when the rendered surface is submerged
   if (below <= 0.0) return col;
 
   // Avoid the bright caustic/water overlap on terrain that nearly intersects
@@ -793,7 +792,7 @@ ${features.manual ? '' : /* glsl */ `
 
   // underwater caustics on the submerged sea floor (no-op when dry: the
   // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
-  col = applyTerrainCaustics(col, xz, hC, nGeo, n);
+  col = applyTerrainCaustics(col, xz, vWorldPos.y, nGeo, n);
 
   // Analysis is a lightweight branch in the existing terrain pass. It reads
   // the final height function, so paint, erosion and spline edits agree.
@@ -840,11 +839,9 @@ ${features.manual ? '' : /* glsl */ `
     col = mix(col, mergeTierColor(vLod), 0.55);
   }
 
-  // Skirts darken to read as a recessed crack filler on the legacy single
-  // board. Multi-cell skirts can overlap shared boundaries while LODs differ,
-  // so keep every finite assembly crack filler terrain-toned.
-  float skirtDarken = vSkirt * 0.55;
-  if (uInfiniteMode < 0.5 && uUseTiles > 0.5) skirtDarken = 0.0;
+  // Crack-cover skirts retain terrain colour in every production mode.
+  // Dark flaps turn ordinary LOD covers into the long grid lines users saw.
+  float skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -949,8 +946,7 @@ void main() {
   vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
                        + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
 
-  float skirtDarken = vSkirt * 0.55;
-  if (uInfiniteMode < 0.5 && uUseTiles > 0.5) skirtDarken = 0.0;
+  float skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -1116,9 +1112,9 @@ export function createTerrainUniforms() {
     // reconstructed cheaply from low-frequency noise in visible shaders.
     uTerrainBiomeTex:     { value: null },
     uUseTerrainBiomeTex:  { value: 0.0 },
-    // Dedicated Studio water cache. During a terrain rebuild these may point
-    // at the immediate low-resolution preview while terrain shading stays on
-    // its exact live procedural field until the final bake is complete.
+    // Dedicated Studio water cache. During a rebuild the Engine disables these
+    // bindings and hides Studio water; the matching final height + climate
+    // textures are then published together.
     uWaterTerrainHeightTex:   { value: null },
     uWaterTerrainBiomeTex:    { value: null },
     uUseWaterTerrainBiomeTex: { value: 0.0 },
@@ -1261,6 +1257,7 @@ export function createTerrainMaterial(
     extensions: { derivatives: true },
   });
   material.userData.terrainVariant = variant;
+  material.userData.heightProgramSig = stackGLSL.sig;
   return material;
 }
 
@@ -1292,6 +1289,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = true;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   return mat;
 }
 
@@ -1312,6 +1310,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   );
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.userData.terrainVariant = variant;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;
   mat.needsUpdate = true;
@@ -1325,5 +1324,6 @@ export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   mat.vertexShader = buildVertex(h);
   mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = true;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   mat.needsUpdate = true;
 }

@@ -213,6 +213,7 @@ float tileInteriorSeam(vec2 xz) {
   return step(1.0 - band, max(abs(lc.x), abs(lc.y)));
 }
 
+
 // 1 when the world XZ lies inside an occupied tile cell.
 float tileOccupiedAt(vec2 xz) {
   if (uUseTiles < 0.5) return 1.0;
@@ -307,33 +308,42 @@ uniform float uUseTerrainBiomeTex;
 
 Climate terrainCachedClimateAt(vec2 xz) {
   vec2 p = xz * uFrequency + uSeedOffset;
+  float temp = 0.0;
+  float moist = 0.0;
+  float cont = 0.0;
+  float erosion = 0.0;
+  float region = 0.0;
+  float cached = 0.0;
   if (uInfiniteMode < 0.5 && uUseTerrainBiomeTex > 0.5) {
     vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
-    Climate c;
-    c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
-    c.temp = baked.r;
-    c.moist = baked.g;
-    c.cont = baked.b;
-    c.erosion = baked.a;
-    c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
-    return c;
-  }
-  if (uInfiniteMode > 0.5) {
+    temp = baked.r;
+    moist = baked.g;
+    cont = baked.b;
+    erosion = baked.a;
+    region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+    cached = 1.0;
+  } else if (uInfiniteMode > 0.5) {
     float available = 0.0;
     vec4 field = infiniteFieldSampleAt(xz, available);
     if (available > 0.5) {
-      Climate c;
-      c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
-      c.temp = field.g;
-      c.moist = field.b;
-      c.cont = field.a;
       vec2 b = p * uBiomeScale;
-      c.erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
-      c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
-      return c;
+      temp = field.g;
+      moist = field.b;
+      cont = field.a;
+      erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
+      region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+      cached = 1.0;
     }
   }
-  return climateAt(p);
+  if (cached < 0.5) {
+    vec2 b = p * uBiomeScale;
+    cont = fbm3(b * 0.085 + vec2(211.3, 57.9));
+    temp = clamp(fbm3(b * 0.150 + vec2(71.7, 313.1)) * 1.5 - 0.25 + uTempBias, 0.0, 1.0);
+    moist = clamp(fbm3(b * 0.130 * uMoistScale + vec2(91.7, 53.9)) * 1.5 - 0.25 + uMoistBias, 0.0, 1.0);
+    erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
+    region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+  }
+  return Climate(temp, moist, cont, erosion, region);
 }
 `;
 
@@ -356,6 +366,38 @@ vec4 manualSurfaceWeightsBAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
   return texture2D(uPaintPropsTexture, uv);
+}
+`;
+
+export const WATER_TILE_MASK_GLSL = /* glsl */ `
+uniform float uWallThickness;
+
+float waterTileOccupiedAt(vec2 xz) {
+  if (uUseTiles < 0.5) return 1.0;
+  float wall = max(uWallThickness, 0.0);
+  if (uTileShape > 0.5) {
+    // The circular plinth wall stays at the analytic disk radius. Expanding
+    // only the water mask would create a visibly unsupported floating annulus.
+    return step(length(xz), uTileDiskRadius);
+  }
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  vec2 cell = floor(rel);
+  vec2 local = rel - cell;
+  float band = wall / max(uTileCellSize, 1.0);
+  float occupied = tileOccAt(cell);
+  if (local.x <= band) occupied = max(occupied, tileOccAt(cell + vec2(-1.0, 0.0)));
+  if (local.x >= 1.0 - band) occupied = max(occupied, tileOccAt(cell + vec2(1.0, 0.0)));
+  if (local.y <= band) occupied = max(occupied, tileOccAt(cell + vec2(0.0, -1.0)));
+  if (local.y >= 1.0 - band) occupied = max(occupied, tileOccAt(cell + vec2(0.0, 1.0)));
+  if (local.x <= band && local.y <= band)
+    occupied = max(occupied, tileOccAt(cell + vec2(-1.0, -1.0)));
+  if (local.x <= band && local.y >= 1.0 - band)
+    occupied = max(occupied, tileOccAt(cell + vec2(-1.0, 1.0)));
+  if (local.x >= 1.0 - band && local.y <= band)
+    occupied = max(occupied, tileOccAt(cell + vec2(1.0, -1.0)));
+  if (local.x >= 1.0 - band && local.y >= 1.0 - band)
+    occupied = max(occupied, tileOccAt(cell + vec2(1.0, 1.0)));
+  return occupied;
 }
 `;
 

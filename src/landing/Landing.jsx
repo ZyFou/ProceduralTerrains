@@ -182,7 +182,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     setSelectedProjectId(null);
     showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
-    else dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
   };
   const openTemplates = (editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';

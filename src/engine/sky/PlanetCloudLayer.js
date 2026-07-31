@@ -224,7 +224,7 @@ export class PlanetCloudLayer {
 
   _compileMaterial(material) {
     const token = ++this._compileToken;
-    if (!this._compile) return { token, promise: Promise.resolve() };
+    if (!this._compile) return { token, promise: Promise.resolve({ ready: true }) };
 
     let promise;
     try {
@@ -233,12 +233,18 @@ export class PlanetCloudLayer {
       promise = Promise.reject(e);
     }
 
-    const done = promise.catch(() => {});
+    const done = promise.then((result) => {
+      if (result?.ready === false || result?.aborted === true) {
+        throw new Error('Planet cloud shader did not become ready');
+      }
+      return result;
+    });
     this._pendingCompile = { material, promise: done };
 
-    done.finally(() => {
+    const clearPending = () => {
       if (this._pendingCompile?.promise === done) this._pendingCompile = null;
-    });
+    };
+    done.then(clearPending, clearPending);
 
     return { token, promise: done };
   }
@@ -258,7 +264,7 @@ export class PlanetCloudLayer {
 
   _disposeWhenSafe(material, pending) {
     if (!material) return;
-    if (pending) pending.finally(() => material.dispose());
+    if (pending) pending.then(() => material.dispose(), () => material.dispose());
     else material.dispose();
   }
 
@@ -333,7 +339,7 @@ export class PlanetCloudLayer {
       this.material = next;
       this._applyOccupancyUniforms();
       this._disposeWhenSafe(previous, pendingPrevious);
-    });
+    }, () => next.dispose());
   }
 
   /** Per-frame: advance animation, refresh sun + camera-distance culling. */

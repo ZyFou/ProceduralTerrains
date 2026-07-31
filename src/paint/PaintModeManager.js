@@ -48,6 +48,10 @@ export class PaintModeManager {
       const half = this.getBoardSize() / 2; return Math.abs(x) <= half && Math.abs(z) <= half;
     } });
     this.isPainting = false;
+    // Shader application is independent from whether the editor is open.
+    // Once a stroke exists, painted height/biomes must remain active after
+    // leaving Paint Mode and while the shoreline cache is rebuilt.
+    this._layersActive = false;
     this._lastStamp = 0;
     this._lastPaintPoint = null;
 
@@ -105,6 +109,8 @@ export class PaintModeManager {
 
   clear({ silent = false } = {}) {
     this.layers.clear();
+    this._layersActive = false;
+    this._syncUniforms();
     if (!silent) this.onToast?.('Paint layers cleared');
   }
 
@@ -124,11 +130,18 @@ export class PaintModeManager {
   startEmpty() {
     this.setBaseMode('flat');
     this.layers.clear();
+    this._layersActive = false;
+    this._syncUniforms();
     this.onToast?.('Empty Terrain — flat board, paint layers cleared');
   }
 
   serialize() { return this.layers.serialize(); }
-  load(data) { return this.layers.load(data); }
+  load(data) {
+    const loaded = this.layers.load(data);
+    this._layersActive = !this.layers.isEmpty();
+    this._syncUniforms();
+    return loaded;
+  }
 
   update() {
     if (!this.state.enabled) return;
@@ -142,7 +155,10 @@ export class PaintModeManager {
 
   _syncUniforms() {
     this.layers.setBoardSize(this.getBoardSize());
-    this.uniforms.uPaintEnabled.value = this.state.enabled ? 1 : 0;
+    const applyLayers = this.state.enabled
+      || this._layersActive
+      || this.state.baseMode === 'flat';
+    this.uniforms.uPaintEnabled.value = applyLayers ? 1 : 0;
     this.uniforms.uPaintBoardSize.value = this.getBoardSize();
     this.uniforms.uPaintOpacity.value = this.state.layerOpacity;
     this.uniforms.uPaintBaseMult.value = this.state.baseMultiplier;
@@ -252,6 +268,7 @@ export class PaintModeManager {
   }
 
   _stampAt(point) {
+    const previousRevision = this.layers.revision;
     this.layers.stamp({
       x: point.x,
       z: point.z,
@@ -269,6 +286,7 @@ export class PaintModeManager {
       riverBankSoftness: this.state.riverBankSoftness,
       baseHeightAt: (x, z) => this._heightAt(x, z, false) ?? 0,
     });
+    if (this.layers.revision !== previousRevision) this._layersActive = true;
   }
 
   dispose() {

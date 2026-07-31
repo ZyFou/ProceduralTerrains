@@ -47,6 +47,27 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('INFINITE_MODE');
   });
 
+  it('returns fully initialized climate structs on every cache path', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    const start = material.fragmentShader.indexOf('Climate terrainCachedClimateAt');
+    const end = material.fragmentShader.indexOf('\n}\n', start);
+    const helper = material.fragmentShader.slice(start, end + 2);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(helper).toContain('float temp = 0.0;');
+    expect(helper).toContain('float cached = 0.0;');
+    expect(helper.match(/return Climate\(/g)).toHaveLength(1);
+    expect(helper).not.toContain('return climateAt(p);');
+    expect(helper).not.toMatch(/Climate result|Climate c;/);
+    expect(material.fragmentShader).toContain(
+      'Climate c = Climate(0.0, 0.0, 0.0, 0.0, 0.0);',
+    );
+  });
+
   it('projects the live cloud mask into both Tile terrain shader variants', () => {
     const uniforms = createTerrainUniforms();
     const full = createTerrainMaterial(uniforms, 5);
@@ -75,24 +96,47 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(material.fragmentShader).toContain(
       'depthFade = depthFade * depthFade * minDepthMask',
     );
+    expect(material.fragmentShader).toContain(
+      'if (vSkirt > 0.0001 || vWallMesh > 0.5) return col;',
+    );
+    expect(material.fragmentShader).toContain(
+      'float below = uSeaLevel - visibleHeight;',
+    );
+    expect(material.fragmentShader).toContain(
+      'applyTerrainCaustics(col, xz, vWorldPos.y, nGeo, n)',
+    );
+    expect(material.fragmentShader).not.toContain(
+      'applyTerrainCaustics(col, xz, hC, nGeo, n)',
+    );
   });
 
-  it('keeps terrain-coloured skirts on multi-cell LOD boundaries', () => {
+  it('retains both terrain-toned crack covers at occupied cell boundaries', () => {
     const uniforms = createTerrainUniforms();
     const full = createTerrainMaterial(uniforms, 5);
     const boot = createBootTerrainMaterial(uniforms, 5);
     materials.push(full, boot);
 
-    expect(full.vertexShader).toContain('skirt = aSkirt;');
-    expect(full.vertexShader).not.toContain(
-      'aSkirt * (1.0 - interiorSeam)',
-    );
     for (const material of [full, boot]) {
-      expect(material.fragmentShader).toContain(
-        'uInfiniteMode < 0.5 && uUseTiles > 0.5',
-      );
+      expect(material.vertexShader).not.toContain('tileInteriorSkirtOwner');
+      expect(material.vertexShader).toContain('skirt = aSkirt;');
+      expect(material.vertexShader).toContain('wall = aSkirt * onOuter;');
       expect(material.fragmentShader).toContain('skirtDarken = 0.0');
     }
+  });
+
+  it('keeps the circular wall vertex path to one safe height sample', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    const vertexMain = material.vertexShader.slice(
+      material.vertexShader.indexOf('void main()'),
+    );
+    expect(vertexMain.match(/terrainCachedHeightAt\(/g)).toHaveLength(1);
+    expect(vertexMain).toContain('float h = terrainCachedHeightAt(wp.xz);');
+    expect(material.vertexShader).not.toContain('circularBoundaryMeshHeightAt');
+    expect(material.uniforms.uCircleBoundarySegments).toBeUndefined();
+    expect(vertexMain).not.toContain('rotateCircularWallSample');
   });
 
   it('shares an optional baked climate texture with realistic Studio water', () => {

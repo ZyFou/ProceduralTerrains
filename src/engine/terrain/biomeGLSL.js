@@ -41,7 +41,7 @@ struct Climate {
 // p is the noise-domain coordinate: worldXZ * uFrequency + uSeedOffset.
 // Each field gets a decorrelated domain offset so they are independent.
 Climate climateAt(vec2 p) {
-  Climate c;
+  Climate c = Climate(0.0, 0.0, 0.0, 0.0, 0.0);
   vec2 b = p * uBiomeScale;
   c.cont    = fbm3(b * 0.085 + vec2(211.3,  57.9));
   c.temp    = clamp(fbm3(b * 0.150 + vec2( 71.7, 313.1)) * 1.5 - 0.25 + uTempBias, 0.0, 1.0);

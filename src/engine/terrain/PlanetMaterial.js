@@ -390,12 +390,18 @@ export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_
 // relink is served from three's program cache (no freeze). All planet chunk
 // materials share one program, so flipping each one's source is free after the
 // first.
-export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+export function rebuildPlanetMaterialSource(
+  mat, stackGLSL = DEFAULT_STACK_GLSL, { minimal = mat?.userData?.minimalFragment === true } = {},
+) {
   const ph = buildPlanetHeightGLSL(stackGLSL.body3d);
   mat.vertexShader = buildVertex(ph);
-  mat.fragmentShader = buildFragment(ph);
-  mat.userData.minimalFragment = false;
+  mat.fragmentShader = minimal ? buildMinimalFragment(ph) : buildFragment(ph);
+  mat.userData.minimalFragment = minimal;
   mat.needsUpdate = true;
+}
+
+export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+  rebuildPlanetMaterialSource(mat, stackGLSL, { minimal: false });
 }
 
 // ============================================================================
@@ -565,4 +571,9 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7, stackGLSL = DEF
     // the ocean sphere isn't drawn behind the planet, and overdraw is halved.
     side: THREE.FrontSide,
   });
+}
+
+export function rebuildPlanetWaterMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+  mat.fragmentShader = buildWaterFragment(buildPlanetHeightGLSL(stackGLSL.body3d));
+  mat.needsUpdate = true;
 }
