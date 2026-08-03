@@ -12,6 +12,7 @@ uniform vec2  uSeedOffset;     // deterministic domain offset derived from seed
 uniform float uFrequency;      // base noise frequency (1/world units)
 uniform float uHeightScale;    // world-space height of h01 == 1.0
 uniform float uSeaLevel;       // world-space water height
+uniform float uTerrainFormationSeaLevel; // frozen wetland-generation baseline
 uniform float uAmplitude;      // overall noise strength multiplier
 uniform float uStackNormalize; // 0 = legacy clamp, 1 = remap by output min/max
 uniform float uStackOutMin;    // raw stack height mapped to 0 when normalized
@@ -213,6 +214,7 @@ float tileInteriorSeam(vec2 xz) {
   return step(1.0 - band, max(abs(lc.x), abs(lc.y)));
 }
 
+
 // 1 when the world XZ lies inside an occupied tile cell.
 float tileOccupiedAt(vec2 xz) {
   if (uUseTiles < 0.5) return 1.0;
@@ -232,9 +234,9 @@ float assemblyFalloff(vec2 xz) {
 }
 `;
 
-// Baked studio height texture sampling. Studio terrain + water fragment
-// shaders include this so they can replace the per-pixel ~46-octave height
-// field with a single texture2D fetch when the engine's bake is active. Infinite
+// Baked Studio height/normal texture sampling. Studio terrain + water fragment
+// shaders include this so they can replace the per-pixel height field with a
+// correctness-preserving packed lookup when the engine's bake is active. Infinite
 // terrain includes the same declarations so both modes share one GPU program;
 // uInfiniteMode keeps the unbounded world on the procedural path at runtime.
 // Studio bake covers uBakeOrigin … uBakeOrigin+uBakeSpan in world XZ.
@@ -243,7 +245,7 @@ uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
 vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
-  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).r * uHeightScale;
+  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
 }
 `;
 
@@ -299,41 +301,51 @@ float terrainCachedHeightAt(vec2 xz) {
 }
 `;
 
-// Shared climate lookup used by the visible terrain fragment. Studio consumes
-// its existing biome bake; Infinite consumes the rolling field cache.
+// Cached climate lookup retained for manual terrain and Infinite World. The
+// procedural Studio terrain uses climateAt directly so visible biome colors are
+// not quantized or stale; its climate texture is only consumed by water tinting.
 export const TERRAIN_CLIMATE_CACHE_GLSL = /* glsl */ `
 uniform sampler2D uTerrainBiomeTex;
 uniform float uUseTerrainBiomeTex;
 
 Climate terrainCachedClimateAt(vec2 xz) {
   vec2 p = xz * uFrequency + uSeedOffset;
+  float temp = 0.0;
+  float moist = 0.0;
+  float cont = 0.0;
+  float erosion = 0.0;
+  float region = 0.0;
+  float cached = 0.0;
   if (uInfiniteMode < 0.5 && uUseTerrainBiomeTex > 0.5) {
     vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
-    Climate c;
-    c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
-    c.temp = baked.r;
-    c.moist = baked.g;
-    c.cont = baked.b;
-    c.erosion = baked.a;
-    c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
-    return c;
-  }
-  if (uInfiniteMode > 0.5) {
+    temp = baked.r;
+    moist = baked.g;
+    cont = baked.b;
+    erosion = baked.a;
+    region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+    cached = 1.0;
+  } else if (uInfiniteMode > 0.5) {
     float available = 0.0;
     vec4 field = infiniteFieldSampleAt(xz, available);
     if (available > 0.5) {
-      Climate c;
-      c.temp = 0.0; c.moist = 0.0; c.cont = 0.0; c.erosion = 0.0; c.region = 0.0;
-      c.temp = field.g;
-      c.moist = field.b;
-      c.cont = field.a;
       vec2 b = p * uBiomeScale;
-      c.erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
-      c.region = fbm3(p * 0.700 + vec2(631.4, 199.2));
-      return c;
+      temp = field.g;
+      moist = field.b;
+      cont = field.a;
+      erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
+      region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+      cached = 1.0;
     }
   }
-  return climateAt(p);
+  if (cached < 0.5) {
+    vec2 b = p * uBiomeScale;
+    cont = fbm3(b * 0.085 + vec2(211.3, 57.9));
+    temp = clamp(fbm3(b * 0.150 + vec2(71.7, 313.1)) * 1.5 - 0.25 + uTempBias, 0.0, 1.0);
+    moist = clamp(fbm3(b * 0.130 * uMoistScale + vec2(91.7, 53.9)) * 1.5 - 0.25 + uMoistBias, 0.0, 1.0);
+    erosion = fbm3(b * 0.190 + vec2(157.1, 423.7));
+    region = fbm3(p * 0.700 + vec2(631.4, 199.2));
+  }
+  return Climate(temp, moist, cont, erosion, region);
 }
 `;
 
@@ -356,6 +368,38 @@ vec4 manualSurfaceWeightsBAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
   return texture2D(uPaintPropsTexture, uv);
+}
+`;
+
+export const WATER_TILE_MASK_GLSL = /* glsl */ `
+uniform float uWallThickness;
+
+float waterTileOccupiedAt(vec2 xz) {
+  if (uUseTiles < 0.5) return 1.0;
+  float wall = max(uWallThickness, 0.0);
+  if (uTileShape > 0.5) {
+    // The circular plinth wall stays at the analytic disk radius. Expanding
+    // only the water mask would create a visibly unsupported floating annulus.
+    return step(length(xz), uTileDiskRadius);
+  }
+  vec2 rel = (xz - uTileGridOrigin) / uTileCellSize;
+  vec2 cell = floor(rel);
+  vec2 local = rel - cell;
+  float band = wall / max(uTileCellSize, 1.0);
+  float occupied = tileOccAt(cell);
+  if (local.x <= band) occupied = max(occupied, tileOccAt(cell + vec2(-1.0, 0.0)));
+  if (local.x >= 1.0 - band) occupied = max(occupied, tileOccAt(cell + vec2(1.0, 0.0)));
+  if (local.y <= band) occupied = max(occupied, tileOccAt(cell + vec2(0.0, -1.0)));
+  if (local.y >= 1.0 - band) occupied = max(occupied, tileOccAt(cell + vec2(0.0, 1.0)));
+  if (local.x <= band && local.y <= band)
+    occupied = max(occupied, tileOccAt(cell + vec2(-1.0, -1.0)));
+  if (local.x <= band && local.y >= 1.0 - band)
+    occupied = max(occupied, tileOccAt(cell + vec2(-1.0, 1.0)));
+  if (local.x >= 1.0 - band && local.y <= band)
+    occupied = max(occupied, tileOccAt(cell + vec2(1.0, -1.0)));
+  if (local.x >= 1.0 - band && local.y >= 1.0 - band)
+    occupied = max(occupied, tileOccAt(cell + vec2(1.0, 1.0)));
+  return occupied;
 }
 `;
 
@@ -504,9 +548,9 @@ float legacyShape2D(vec2 xz, Climate c) {
                   * (1.0 - bw.wetland);
   h += ridgeShape * mountains * uRidge * mix(1.15, 0.82, smoothAmt);
 
-  // layer 5: wetlands settle just above sea level (after amplitude so they
-  // land at the true water line)
-  float sea01 = uSeaLevel / max(uHeightScale, 1.0);
+  // layer 5: wetlands settle just above the terrain formation baseline.
+  // Live Sea Level moves only water and must not reshape existing terrain.
+  float sea01 = uTerrainFormationSeaLevel / max(uHeightScale, 1.0);
   h = mix(h, sea01 + 0.012 + base * 0.03, bw.wetland * 0.85);
 
   // layer 6: canyon/badlands strata terracing

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -47,7 +47,6 @@ uniform vec2 uGeometryFocus;
 uniform float uGeometryDisplacementEnabled;
 
 varying vec3 vWorldPos;
-varying vec4 vClipPosition;
 
 ${WATER_GEOMETRY_WAVES_GLSL}
 
@@ -93,7 +92,6 @@ void main() {
   }
   vWorldPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
-  vClipPosition = gl_Position;
 }
 `;
 
@@ -118,19 +116,22 @@ float waterBiomeClimateAvailable() {
 `
     : /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
-  vec4 baked = texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz));
-  float region = vnoise((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
-  return vec4(baked.rgb, region);
+  if (uUseWaterTerrainBiomeTex > 0.5) {
+    return texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz));
+  }
+  Climate climate = climateAt(xz * uFrequency + uSeedOffset);
+  return vec4(climate.temp, climate.moist, climate.cont, climate.region);
 }
 
 float waterBiomeClimateAvailable() {
-  return uUseWaterTerrainBiomeTex;
+  return 1.0;
 }
 `;
   return /* glsl */ `
 precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
+${WATER_TILE_MASK_GLSL}
 ${dependencies}
 ${WATER_TERRAIN_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
@@ -190,6 +191,7 @@ uniform float uCausticsQual;
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
 uniform vec2 uSceneTexelSize;
+uniform vec2 uSceneViewportInv;
 uniform float uSceneNear;
 uniform float uSceneFar;
 uniform float uSceneRefractionEnabled;
@@ -205,7 +207,6 @@ uniform float uVisualWetSandRange;
 uniform float uVisualShallowWaterSoftness;
 
 varying vec3 vWorldPos;
-varying vec4 vClipPosition;
 
 ${PROCEDURAL_SKY_EVALUATION_GLSL}
 ${WATER_OPTICS_GLSL}
@@ -292,15 +293,14 @@ void main() {
   vec2 xz = vWorldPos.xz;
 
 #ifndef INFINITE_MODE
-  if (tileOccupiedAt(xz) < 0.5) discard;
+  if (waterTileOccupiedAt(xz) < 0.5) discard;
 #endif
 
   float floorH = terrainHeightAt(xz);
-  float depth = mix(
-    uSeaLevel,
-    vWorldPos.y,
-    uGeometryDisplacementEnabled * step(2.5, uWaterTier)
-  ) - floorH;
+  // Mean sea level and the exact terrain field are the single shoreline
+  // authority. Geometry waves are visual displacement only and cannot turn a
+  // dry mountain into water or detach the foam band from the coast.
+  float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
 
   // Smoothed bathymetry for depth tint — 4 extra samples max (not 20+).
@@ -376,8 +376,10 @@ void main() {
     visualDepth
   );
   float sceneRefractionWeight = sceneCaptureEnabled * visibleFloor;
-  vec2 screenUv = vClipPosition.xy / max(vClipPosition.w, 0.0001);
-  screenUv = screenUv * 0.5 + 0.5;
+  // Derive capture UVs from the rasterized pixel. Interpolating clip
+  // coordinates across the water plane's two triangles can differ by a few
+  // ulps on their shared diagonal, which becomes a visible refraction cut.
+  vec2 screenUv = gl_FragCoord.xy * uSceneViewportInv;
   vec2 refractedUv = screenUv;
   vec3 refractedSceneLinear = vec3(0.0);
   if (sceneCaptureEnabled > 0.5) {
@@ -654,8 +656,9 @@ void main() {
     0.0,
     1.0
   );
-  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
-  premultipliedColor = mix(premultipliedColor, litFoamColor, foam);
+  // Foam remains an authored surface color as in the stable renderer. Feeding
+  // it through the atmospheric light resolver dimmed it into grey shore bands.
+  premultipliedColor = mix(premultipliedColor, uColFoam, foam);
   alpha = mix(alpha, 1.0, foam);
 
   vec3 refractionTerm = mix(
@@ -667,15 +670,9 @@ void main() {
   // fake caustics in shallow water (smoothed depth, coarse noise)
   if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
     float shallowMask = 1.0 - smoothstep(uShallowDist * 0.5, uDeepDist, visualDepth);
-    float minDepthMask = smoothstep(
-      uCausticMinDepth,
-      uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
-      visualDepth
-    );
     float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
     float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));
-    float caust = pow(max(c1 * c2, 0.0), 2.2)
-      * shallowMask * minDepthMask;
+    float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;
     premultipliedColor += vec3(0.9, 0.95, 1.0)
       * caust * uCausticsStr * uCausticsQual * 0.28 * alpha;
   }
@@ -803,6 +800,7 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSceneColor: { value: null },
     uSceneDepth: { value: null },
     uSceneTexelSize: { value: new THREE.Vector2(1, 1) },
+    uSceneViewportInv: { value: new THREE.Vector2(1, 1) },
     uSceneNear: { value: 1.0 },
     uSceneFar: { value: 50000.0 },
     uSceneRefractionEnabled: { value: 0.0 },
@@ -829,11 +827,11 @@ export function createRealisticWaterMaterial(
     fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,
     premultipliedAlpha: true,
+    depthTest: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
-  mat.userData.bakedHeightOnly = true;
   return mat;
 }
 
@@ -850,6 +848,7 @@ export function createInfiniteRealisticWaterMaterial(
     fragmentShader: buildFragment(stackGLSL, true),
     transparent: true,
     premultipliedAlpha: true,
+    depthTest: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,

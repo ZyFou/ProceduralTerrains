@@ -23,6 +23,8 @@ const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3,
 const VISIBILITY_ICONS = { private: Lock, unlisted: Eye, public: Globe2 };
 const AUTH_VIEWS = new Set(['login', 'register']);
 const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'admin', 'confidentiality']);
+const BOOT_READY_HOLD_MS = 320;
+const BOOT_REVEAL_MS = 680;
 
 function viewFromHash() {
   const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -73,6 +75,34 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [query, setQuery] = useState('');
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
+  const bootReadyAtMountRef = useRef(bootReady);
+  const [bootStage, setBootStage] = useState(() => bootReady ? 'ready' : 'loading');
+
+  useEffect(() => {
+    if (!bootReady) {
+      setBootStage('loading');
+      return undefined;
+    }
+    // Returning to Home remounts Landing with an already-ready engine. Only a
+    // real cold boot needs the ready hold and reveal choreography.
+    if (bootReadyAtMountRef.current) {
+      setBootStage('ready');
+      return undefined;
+    }
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const holdMs = reducedMotion ? 100 : BOOT_READY_HOLD_MS;
+    const revealMs = reducedMotion ? 80 : BOOT_REVEAL_MS;
+    setBootStage('holding');
+    const revealTimer = window.setTimeout(() => setBootStage('revealing'), holdMs);
+    const readyTimer = window.setTimeout(() => setBootStage('ready'), holdMs + revealMs);
+    return () => {
+      window.clearTimeout(revealTimer);
+      window.clearTimeout(readyTimer);
+    };
+  }, [bootReady]);
+
+  const visualBootStage = HASH_VIEWS.has(view) ? 'ready' : bootStage;
+  const menuReady = bootReady && visualBootStage === 'ready';
 
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
@@ -163,13 +193,13 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     if (view === 'admin' && authStatus !== 'loading' && user?.role !== 'admin') showView(user ? 'home' : 'login');
   }, [view, authStatus, user]);
   const create = (templateId, editorMode = 'procedural') => {
-    if (!bootReady || exiting) return;
+    if (!menuReady || exiting) return;
     setCreateOpen(false);
     dispatch('terrain-project:new', { templateId, editorMode });
     onLaunch();
   };
   const open = (project) => {
-    if (!bootReady || exiting) return;
+    if (!menuReady || exiting) return;
     dispatch('terrain-project:open', { project });
     onLaunch();
   };
@@ -182,7 +212,6 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     setSelectedProjectId(null);
     showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
-    else dispatch('terrain-template:preview', { templateId: id, editorMode: nextKind });
   };
   const openTemplates = (editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
@@ -270,7 +299,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     const SyncIcon = isSynced ? CloudCheck : CloudOff;
     return (
     <article className={`lp-card${menuFor === project.id ? ' menu-open' : ''}`} key={project.id}>
-      <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!bootReady || exiting}>
+      <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!menuReady || exiting}>
         <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
         <span role="img" className={`lp-card-cloud-badge${isSynced ? ' synced' : ' unsynced'}`} title={visibilityLabel ? `${syncLabel} · ${visibilityLabel}` : syncLabel} aria-label={visibilityLabel ? `${syncLabel}. ${visibilityLabel}.` : syncLabel}>
           <SyncIcon size={13} aria-hidden />
@@ -294,7 +323,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       ><EllipsisVertical size={15} /></button>
       {menuFor === project.id && (
         <div className="lp-card-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); open(project); }} disabled={!bootReady || exiting}><FolderOpen size={13} /> Open</button>
+          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); open(project); }} disabled={!menuReady || exiting}><FolderOpen size={13} /> Open</button>
           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); renameProject(project); }} disabled={projectActionBusy}><Pencil size={13} /> Rename</button>
           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); duplicateProject(project); }} disabled={projectActionBusy}><Copy size={13} /> Duplicate</button>
           <button type="button" role="menuitem" className="danger" onClick={() => { setMenuFor(null); setDeleteTarget(project); }} disabled={projectActionBusy}><Trash2 size={13} /> Delete</button>
@@ -309,13 +338,13 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       <FolderOpen size={24} />
       <strong>No projects yet</strong>
       <span>Create a terrain from a template or drop a project file anywhere on this page.</span>
-      <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
+      <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!menuReady || exiting}><Plus size={15} /> Create terrain</button>
     </div>
   );
 
   return (
     <div
-      className={`landing landing-overlay lp${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp boot-${visualBootStage}${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -379,7 +408,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <h1>Craft <em>stunning worlds</em> with procedural power</h1>
               <p>{APP_NAME} helps you generate, shape, and texture terrain for your projects.</p>
               <div className="lp-hero-actions">
-                <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
+                <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!menuReady || exiting}><Plus size={15} /> Create terrain</button>
                 <button type="button" className="lp-secondary" onClick={() => openTemplates()}><LayoutTemplate size={14} /> Browse templates</button>
               </div>
             </section>
@@ -441,7 +470,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <div className="lp-section-head"><h2>Projects</h2></div>
               <ProjectLibrary
                 localProjects={projects}
-                bootReady={bootReady}
+                bootReady={menuReady}
                 exiting={exiting}
                 onOpen={open}
                 onCreate={() => setCreateOpen(true)}
@@ -488,7 +517,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                 ))}
               </div>
               <p className="lp-template-hint">{templateKind === 'nodes' ? 'Node templates load instantly; open the 2D preview when you need it.' : 'Selecting a template previews it live in the background.'}</p>
-              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!bootReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
+              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!menuReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
             </section>
             );
           })()}
@@ -511,7 +540,15 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
         </main>
       </div>
 
-      {!bootReady && !HASH_VIEWS.has(view) && <div className="landing-preview-loader" role="status"><span className="landing-preview-spinner" aria-hidden="true" /><strong>Starting terrain editor</strong><small>Preparing your random terrain workspace…</small></div>}
+      {visualBootStage !== 'ready' && (
+        <div className={`landing-preview-loader is-${visualBootStage}`} role="status" aria-live="polite">
+          <div className="landing-preview-loader-content">
+            <span className="landing-preview-spinner" aria-hidden="true" />
+            <strong>{visualBootStage === 'loading' ? 'Starting terrain editor' : 'Terrain ready'}</strong>
+            <small>{visualBootStage === 'loading' ? 'Preparing your random terrain workspace…' : 'Bringing your workspace into view…'}</small>
+          </div>
+        </div>
+      )}
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>
@@ -519,19 +556,19 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={16} /></button>
           </header>
           <div className="landing-create-options">
-            <button type="button" onClick={() => create('blank', 'procedural')} disabled={!bootReady || exiting}>
+            <button type="button" onClick={() => create('blank', 'procedural')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon"><SlidersHorizontal size={22} /></span>
               <strong>Procedural</strong>
               <small>The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.</small>
               <span className="landing-create-action">Create procedural terrain <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => create('nodes-blank', 'nodes')} disabled={!bootReady || exiting}>
+            <button type="button" onClick={() => create('nodes-blank', 'nodes')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon nodes"><Boxes size={22} /></span>
               <strong>Nodes</strong>
               <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
               <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!bootReady || exiting}>
+            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon manual"><Mountain size={22} /></span>
               <strong>Manual Terrain</strong>
               <small>Drag mountains, valleys, ridges, plateaus, and craters onto a clean terrain and transform them directly.</small>

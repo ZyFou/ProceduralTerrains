@@ -44,6 +44,9 @@ export class WaterSystem {
     this._disposed = false;
     this._waterCompileGen = 0;
     this._waterCompilePending = false;
+    this._waterCompileRetryTimer = null;
+    this._waterCompileRetryCount = 0;
+    this._waterCompileFailed = false;
     this._surfacePass = new WaterSurfacePass();
     this._planarReflectionPass = new WaterPlanarReflectionPass();
     this._baseStudioGeometry = engine.water?.geometry ?? null;
@@ -56,9 +59,14 @@ export class WaterSystem {
     this._timedMeshes = new Map();
     this._bindSurfaceTiming(engine.water);
 
-    // owned realistic materials (legacy materials stay on engine)
+    // Owned transition materials. The legacy Infinite fallback is private and
+    // exists only while a realistic replacement is compiling.
     this._realisticStudio = null;
     this._realisticInfinite = null;
+    this._realisticInfiniteHeightSig = null;
+    this._realisticInfiniteHeightProgram = null;
+    this._legacyInfiniteFallback = null;
+    this._realisticAttached = false;
   }
 
   /** Call once after engine scene + water meshes exist. */
@@ -103,6 +111,8 @@ export class WaterSystem {
 
     this._waterCompilePending = false;
     this._waterCompileGen++;
+    this._waterCompileRetryCount = 0;
+    this._waterCompileFailed = false;
     if (this._usingRealistic) {
       this._attachRealisticMaterials(p, debug);
     } else {
@@ -154,6 +164,7 @@ export class WaterSystem {
 
   /** Main settings sync — call from _applyUniforms and mode changes. */
   sync(params, worldMode) {
+    if (worldMode !== 'infinite') this._disposeLegacyInfiniteFallback();
     const prevMode = this._effectiveMode;
     const prevRealistic = this._usingRealistic;
     this._effectiveMode = resolveEffectiveWaterMode(params, worldMode);
@@ -161,6 +172,8 @@ export class WaterSystem {
     this._syncStudioGeometry(params, worldMode);
 
     if (prevMode !== this._effectiveMode || prevRealistic !== this._usingRealistic) {
+      this._waterCompileRetryCount = 0;
+      this._waterCompileFailed = false;
       if (!this._usingRealistic && prevRealistic) this._disposeRealistic();
       this._swapMaterials(params, worldMode);
       // Material swap may be async — uniforms for the active mesh are applied there.
@@ -298,19 +311,66 @@ export class WaterSystem {
 
   onStackRebuilt(stackGLSL, octaves) {
     const eng = this.engine;
-    if (this._realisticInfinite) {
-      rebuildRealisticWaterShaderSource(this._realisticInfinite, stackGLSL);
-      this._realisticInfinite.defines.OCTAVES = octaves;
-      this._realisticInfinite.needsUpdate = true;
+    if (this._realisticStudio) {
+      rebuildRealisticWaterShaderSource(this._realisticStudio, stackGLSL);
+      this._realisticStudio.defines ||= {};
+      this._realisticStudio.defines.OCTAVES = octaves;
+      this._realisticStudio.needsUpdate = true;
     }
-    if (eng._infiniteWaterMat) {
-      rebuildWaterShaderSource(eng._infiniteWaterMat, stackGLSL);
-      eng._infiniteWaterMat.defines.OCTAVES = octaves;
-      eng._infiniteWaterMat.needsUpdate = true;
+    // Infinite World always uses the Classic stack. Studio Nodes may call this
+    // hook with graph-only GLSL while an Infinite realistic material is retained
+    // across mode teardown, so never publish that graph source into this cache.
+    const infiniteStack = eng._stackGLSL ?? stackGLSL;
+    const infiniteOctaves = Math.round(eng.params?.octaves ?? octaves);
+    if (this._realisticInfinite) {
+      this._syncRealisticInfiniteHeightSource(infiniteStack, infiniteOctaves);
+    }
+    // Rebuild every live legacy Infinite material, including the private
+    // transition fallback when the realistic shader is still linking.
+    const legacyInfiniteMaterials = new Set([
+      this._legacyInfiniteFallback,
+      eng._infiniteWaterMat,
+    ]);
+    for (const material of legacyInfiniteMaterials) {
+      if (!material
+          || material === this._realisticStudio
+          || material === this._realisticInfinite) continue;
+      rebuildWaterShaderSource(material, infiniteStack);
+      material.defines.OCTAVES = infiniteOctaves;
+      material.needsUpdate = true;
     }
     if (eng.planetWaterMat) {
       // planet water rebuild handled by engine planet rebuild path
     }
+  }
+
+  /**
+   * Build a disposable Infinite-water clone matching the currently requested
+   * renderer. Engine uses it to warm the exact realistic program before the
+   * live source swap; legacy water is warmed directly by Engine.
+   */
+  createInfiniteStackWarmMaterial(stackGLSL, octaves) {
+    if (!this._usingRealistic || !this._realisticInfinite) return null;
+    return createWaterMaterialForMode({
+      mode: this._effectiveMode,
+      sharedUniforms: this.engine.uniforms,
+      environmentUniforms: this.engine.proceduralSky?.uniforms,
+      octaves,
+      stackGLSL,
+      infinite: true,
+    });
+  }
+
+  /** Build a disposable Studio-water clone for an atomic terrain transition. */
+  createStudioStackWarmMaterial(stackGLSL, octaves) {
+    return createWaterMaterialForMode({
+      mode: this._effectiveMode,
+      sharedUniforms: this.engine.uniforms,
+      environmentUniforms: this.engine.proceduralSky?.uniforms,
+      octaves,
+      stackGLSL,
+      infinite: false,
+    });
   }
 
   /** Materials for shader warmup / compile lists. */
@@ -330,6 +390,19 @@ export class WaterSystem {
 
   getInfiniteMaterial() {
     return this._activeInfiniteMaterial();
+  }
+
+  /** Material most recently prepared for a mode, whether attached or not. */
+  getRequestedMaterial(worldMode = this.engine.worldMode) {
+    if (worldMode === 'planet') return this.engine.planetWaterMat;
+    if (this._usingRealistic) {
+      return worldMode === 'infinite'
+        ? this._realisticInfinite
+        : this._realisticStudio;
+    }
+    return worldMode === 'infinite'
+      ? this.engine._infiniteWaterMat
+      : this.engine.waterMaterial;
   }
 
   /** Replace infinite water material reference when entering infinite mode. */
@@ -381,6 +454,10 @@ export class WaterSystem {
 
   dispose() {
     this._disposed = true;
+    if (this._waterCompileRetryTimer) {
+      clearTimeout(this._waterCompileRetryTimer);
+      this._waterCompileRetryTimer = null;
+    }
     this._waterCompileGen++;
     this._waterCompilePending = false;
     this._surfacePass.dispose();
@@ -388,6 +465,7 @@ export class WaterSystem {
     this._disposeCinematicGeometry();
     this._restoreSurfaceTiming();
     this._disposeRealistic();
+    this._disposeLegacyInfiniteFallback();
     if (this._boundsHelper) {
       this.engine.scene.remove(this._boundsHelper);
       this._boundsHelper.geometry?.dispose();
@@ -404,6 +482,10 @@ export class WaterSystem {
 
   _swapMaterials(params, worldMode) {
     const eng = this.engine;
+    if (this._waterCompileRetryTimer) {
+      clearTimeout(this._waterCompileRetryTimer);
+      this._waterCompileRetryTimer = null;
+    }
     const oct = Math.round(eng.params.octaves);
     const p = params ?? eng.params;
     const debug = p.waterDebugView ?? 'off';
@@ -418,6 +500,7 @@ export class WaterSystem {
 
       this._waterCompileGen++;
       const gen = this._waterCompileGen;
+      const materialVersions = mats.map((material) => material?.version ?? 0);
       this._waterCompilePending = true;
       // Keep the cheap legacy plane visible while the requested realistic
       // material links. This matters on boot, where water was hidden until init.
@@ -437,20 +520,104 @@ export class WaterSystem {
       }
       this._applyVisibility(p, wm);
       this._updateBoundsHelper(p);
-      eng.compileWaterMaterialsAsync(mats, () => {
+      this._realisticAttached = false;
+      const compileJob = eng.compileWaterMaterialsAsync(mats, () => {
         if (this._disposed || gen !== this._waterCompileGen) return;
+        const currentParams = eng.params;
+        const currentWorldMode = eng.worldMode;
+        const currentMode = resolveEffectiveWaterMode(
+          currentParams,
+          currentWorldMode,
+        );
+        const materialSourceIsCurrent = mats.every(
+          (material, index) =>
+            (material?.version ?? 0) === materialVersions[index],
+        );
+        if (!materialSourceIsCurrent
+            || currentMode !== this._effectiveMode
+            || currentWorldMode !== wm
+            || !isRealisticWaterMode(currentMode)) {
+          this._waterCompilePending = false;
+          if (!materialSourceIsCurrent
+              && currentMode === this._effectiveMode
+              && isRealisticWaterMode(currentMode)) {
+            this._swapMaterials(currentParams, currentWorldMode);
+          } else {
+            this.sync(currentParams, currentWorldMode);
+          }
+          return;
+        }
+        const currentDebug = currentParams.waterDebugView ?? 'off';
         this._waterCompilePending = false;
-        this._attachRealisticMaterials(p, debug);
-        this._applyVisibility(p, wm);
-        this._applyUniforms(p);
-        this._applyDebug(p);
-        this._updateBoundsHelper(p);
+        this._waterCompileRetryCount = 0;
+        this._waterCompileFailed = false;
+        this._attachRealisticMaterials(currentParams, currentDebug);
+        this._applyVisibility(currentParams, currentWorldMode);
+        this._applyUniforms(currentParams);
+        this._applyDebug(currentParams);
+        this._updateBoundsHelper(currentParams);
         this.applyPerf(eng.perf);
+      });
+      Promise.resolve(compileJob).then((ready) => {
+        if (this._disposed || gen !== this._waterCompileGen || ready !== false) return;
+        this._waterCompilePending = false;
+        this._realisticAttached = false;
+        const currentParams = eng.params;
+        const currentWorldMode = eng.worldMode;
+        const currentDebug = currentParams.waterDebugView ?? 'off';
+        if (eng.water && eng.waterMaterial) {
+          eng.water.material = eng.waterMaterial;
+          applyWaterMaterialSettings(
+            eng.waterMaterial,
+            currentParams,
+            'legacy',
+            currentDebug,
+          );
+        }
+        if (currentWorldMode === 'infinite') {
+          this._ensureLegacyInfiniteMaterial(Math.round(currentParams.octaves));
+          if (eng.infiniteWorld?.waterPlane && eng._infiniteWaterMat) {
+            eng.infiniteWorld.waterPlane.material = eng._infiniteWaterMat;
+            eng.infiniteWorld.waterMaterial = eng._infiniteWaterMat;
+            applyWaterMaterialSettings(
+              eng._infiniteWaterMat,
+              currentParams,
+              'legacy',
+              currentDebug,
+            );
+          }
+        }
+        this._applyVisibility(currentParams, currentWorldMode);
+        this._waterCompileRetryCount++;
+        if (this._waterCompileRetryCount >= 3) {
+          // Keep the visible legacy material as a terminal degraded fallback.
+          // A setting/mode change or a later successful compile resets this.
+          this._waterCompileFailed = true;
+          return;
+        }
+        if (!this._waterCompileRetryTimer
+            && isRealisticWaterMode(resolveEffectiveWaterMode(
+              currentParams,
+              currentWorldMode,
+            ))) {
+          const delay = Math.min(
+            15000,
+            3000 * (2 ** Math.min(this._waterCompileRetryCount - 1, 2)),
+          );
+          this._waterCompileRetryTimer = setTimeout(() => {
+            this._waterCompileRetryTimer = null;
+            if (this._disposed) return;
+            this._swapMaterials(eng.params, eng.worldMode);
+          }, delay);
+        }
       });
       return;
     }
 
     this._waterCompilePending = false;
+    this._waterCompileRetryCount = 0;
+    this._waterCompileFailed = false;
+    this._realisticAttached = false;
     this._waterCompileGen++;
     this._ensureLegacyInfiniteMaterial(oct);
     if (eng.water && eng.waterMaterial) eng.water.material = eng.waterMaterial;
@@ -471,23 +638,49 @@ export class WaterSystem {
       eng.infiniteWorld.waterMaterial = this._realisticInfinite;
     }
     eng._infiniteWaterMat = this._realisticInfinite ?? eng._infiniteWaterMat;
+    // A legacy material may have stayed visible while the realistic program
+    // linked. The atomic attachment above releases its final references.
+    this._disposeLegacyInfiniteFallback();
+    this._realisticAttached = true;
     applyWaterMaterialSettings(this._realisticStudio, p, this._effectiveMode, debug);
     if (this._realisticInfinite) {
       applyWaterMaterialSettings(this._realisticInfinite, p, this._effectiveMode, debug);
     }
   }
 
-  /** Recreate legacy infinite material after disposing realistic instance. */
+  /** Recreate or reattach the owned legacy Infinite transition fallback. */
   _ensureLegacyInfiniteMaterial(octaves) {
     const eng = this.engine;
-    if (eng._infiniteWaterMat && !this.ownsMaterial(eng._infiniteWaterMat)) return;
-    eng._infiniteWaterMat = createWaterMaterialForMode({
+    const current = eng._infiniteWaterMat;
+    if (current && !this.ownsMaterial(current)) return current;
+    if (this._legacyInfiniteFallback) {
+      eng._infiniteWaterMat = this._legacyInfiniteFallback;
+      return this._legacyInfiniteFallback;
+    }
+    this._legacyInfiniteFallback = createWaterMaterialForMode({
       mode: 'legacy',
       sharedUniforms: eng.uniforms,
       octaves,
       stackGLSL: eng._stackGLSL,
       infinite: true,
     });
+    eng._infiniteWaterMat = this._legacyInfiniteFallback;
+    return this._legacyInfiniteFallback;
+  }
+
+  _disposeLegacyInfiniteFallback() {
+    const fallback = this._legacyInfiniteFallback;
+    if (!fallback) return;
+    const eng = this.engine;
+    if (eng.infiniteWorld?.waterPlane?.material === fallback) {
+      eng.infiniteWorld.waterPlane.material = null;
+    }
+    if (eng.infiniteWorld?.waterMaterial === fallback) {
+      eng.infiniteWorld.waterMaterial = null;
+    }
+    if (eng._infiniteWaterMat === fallback) eng._infiniteWaterMat = null;
+    fallback.dispose();
+    this._legacyInfiniteFallback = null;
   }
 
   _ensureRealisticStudio(octaves) {
@@ -504,8 +697,11 @@ export class WaterSystem {
   }
 
   _ensureRealisticInfinite(octaves) {
-    if (this._realisticInfinite) return;
     const eng = this.engine;
+    if (this._realisticInfinite) {
+      this._syncRealisticInfiniteHeightSource(eng._stackGLSL, octaves);
+      return;
+    }
     this._realisticInfinite = createWaterMaterialForMode({
       mode: this._effectiveMode,
       sharedUniforms: eng.uniforms,
@@ -514,22 +710,61 @@ export class WaterSystem {
       stackGLSL: eng._stackGLSL,
       infinite: true,
     });
+    this._realisticInfiniteHeightSig = eng._stackGLSL?.heightSig
+      || eng._stackGLSL?.sig
+      || null;
+    this._realisticInfiniteHeightProgram = eng._stackGLSL ?? null;
+  }
+
+  _syncRealisticInfiniteHeightSource(stackGLSL, octaves) {
+    const material = this._realisticInfinite;
+    if (!material) return false;
+    const sourceSig = stackGLSL?.heightSig || stackGLSL?.sig || null;
+    const sourceMatches = sourceSig != null
+      ? this._realisticInfiniteHeightSig === sourceSig
+      : this._realisticInfiniteHeightProgram === stackGLSL;
+    if (sourceMatches && material.defines?.OCTAVES === octaves) return false;
+    rebuildRealisticWaterShaderSource(material, stackGLSL);
+    material.defines ||= {};
+    material.defines.OCTAVES = octaves;
+    material.needsUpdate = true;
+    this._realisticInfiniteHeightSig = sourceSig;
+    this._realisticInfiniteHeightProgram = stackGLSL ?? null;
+    return true;
   }
 
   _disposeRealistic() {
+    const eng = this.engine;
+    if (eng.water?.material === this._realisticStudio && eng.waterMaterial) {
+      eng.water.material = eng.waterMaterial;
+    }
+    if (eng.infiniteWorld?.waterPlane?.material === this._realisticInfinite) {
+      eng.infiniteWorld.waterPlane.material = null;
+      eng.infiniteWorld.waterMaterial = null;
+    }
+    if (eng._infiniteWaterMat === this._realisticInfinite) {
+      eng._infiniteWaterMat = null;
+    }
     for (const mat of [this._realisticStudio, this._realisticInfinite]) {
       mat?.dispose();
     }
     this._realisticStudio = null;
     this._realisticInfinite = null;
+    this._realisticInfiniteHeightSig = null;
+    this._realisticInfiniteHeightProgram = null;
+    this._realisticAttached = false;
   }
 
   _activeStudioMaterial() {
-    return this._usingRealistic ? this._realisticStudio : this.engine.waterMaterial;
+    return this._usingRealistic && this._realisticAttached
+      ? this._realisticStudio
+      : this.engine.waterMaterial;
   }
 
   _activeInfiniteMaterial() {
-    return this._usingRealistic ? this._realisticInfinite : this.engine._infiniteWaterMat;
+    return this._usingRealistic && this._realisticAttached
+      ? this._realisticInfinite
+      : this.engine._infiniteWaterMat;
   }
 
   _allActiveMaterials() {
@@ -592,7 +827,19 @@ export class WaterSystem {
   }
 
   ownsMaterial(mat) {
-    return mat === this._realisticStudio || mat === this._realisticInfinite;
+    return mat === this._realisticStudio
+      || mat === this._realisticInfinite
+      || mat === this._legacyInfiniteFallback;
+  }
+
+  isMaterialTransitionPending() {
+    return this._waterCompilePending;
+  }
+
+  isRequestedMaterialReady() {
+    return !this._usingRealistic
+      || this._realisticAttached
+      || this._waterCompileFailed;
   }
 
   _applyDebug(params) {

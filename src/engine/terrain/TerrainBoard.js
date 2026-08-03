@@ -36,6 +36,9 @@ export class TerrainBoard {
     this._distanceScale = 1.0;
     this._maxHeight = 0;
     this._skirtDepth = 0;
+    this._circularBoundary = null;
+    this._circularBoundaryGeometry = null;
+    this._circularBoundarySegments = 0;
 
     // Gradual LOD geometry rebuild (one level per updateLOD call)
     this._lodRebuildQueue = [];
@@ -329,6 +332,9 @@ export class TerrainBoard {
     for (const geo of this.geometries) {
       setChunkBounds(geo, this.chunkSize, maxHeight, skirtDepth);
     }
+    if (this._circularBoundaryGeometry) {
+      setChunkBounds(this._circularBoundaryGeometry, this.chunkSize, maxHeight, skirtDepth);
+    }
   }
 
   // Pick a LOD per chunk from camera distance, then (if enabled) walk the
@@ -353,6 +359,84 @@ export class TerrainBoard {
     this._updateChunkLOD(cameraPos, true);
   }
 
+  setCircularBoundary(boundary = null) {
+    const maxLod = Math.max(0, this.geometries.length - 1);
+    const lod = Math.max(0, Math.min(
+      maxLod,
+      Math.round(Number(boundary?.lod) || 0),
+    ));
+    const next = boundary && Number.isFinite(boundary.radius) && boundary.radius > 0
+      ? {
+          x: Number(boundary.x) || 0,
+          z: Number(boundary.z) || 0,
+          radius: Number(boundary.radius),
+          lod,
+          segments: Math.max(
+            2,
+            Math.round(Number(boundary.chunkSegments) || this.lodSegments[lod] || 2),
+          ),
+        }
+      : null;
+    const prev = this._circularBoundary;
+    const unchanged = (!prev && !next)
+      || (prev && next
+        && prev.x === next.x
+        && prev.z === next.z
+        && prev.radius === next.radius
+        && prev.lod === next.lod
+        && prev.segments === next.segments);
+    if (unchanged && (!next || this._circularBoundaryGeometry)) return false;
+
+    const previousGeometry = this._circularBoundaryGeometry;
+    this._circularBoundary = next;
+    this._circularBoundaryGeometry = next
+      ? buildChunkGeometry(next.segments, next.lod)
+      : null;
+    this._circularBoundarySegments = next?.segments ?? 0;
+    if (this._circularBoundaryGeometry) {
+      setChunkBounds(
+        this._circularBoundaryGeometry,
+        this.chunkSize,
+        this._maxHeight,
+        this._skirtDepth,
+      );
+    }
+
+    for (const chunk of this.chunks) {
+      const onBoundary = !!next && this._straddlesCircularBoundary(
+        chunk.center.x - this.chunkSize * 0.5,
+        chunk.center.z - this.chunkSize * 0.5,
+        this.chunkSize,
+        this.chunkSize,
+      );
+      if (onBoundary) {
+        chunk.lod = next.lod;
+        chunk.mesh.geometry = this._circularBoundaryGeometry;
+      } else if (chunk.mesh.geometry === previousGeometry) {
+        chunk.mesh.geometry = this.geometries[Math.min(maxLod, chunk.lod)];
+      }
+    }
+    previousGeometry?.dispose();
+    this._treeDirty = true;
+    return true;
+  }
+
+  _straddlesCircularBoundary(minX, minZ, spanX, spanZ) {
+    const circle = this._circularBoundary;
+    if (!circle) return false;
+    const maxX = minX + spanX;
+    const maxZ = minZ + spanZ;
+    const nearX = circle.x < minX ? minX - circle.x
+      : (circle.x > maxX ? circle.x - maxX : 0);
+    const nearZ = circle.z < minZ ? minZ - circle.z
+      : (circle.z > maxZ ? circle.z - maxZ : 0);
+    const farX = Math.max(Math.abs(minX - circle.x), Math.abs(maxX - circle.x));
+    const farZ = Math.max(Math.abs(minZ - circle.z), Math.abs(maxZ - circle.z));
+    const radiusSq = circle.radius * circle.radius;
+    return nearX * nearX + nearZ * nearZ <= radiusSq
+      && farX * farX + farZ * farZ >= radiusSq;
+  }
+
   // Recursively decide, per node, whether to fold it into one mesh or descend
   // into its 4 children. A node folds once the camera's nearest distance to it
   // exceeds its world span × mergeDistance (3D distance, so overhead views fold
@@ -366,7 +450,9 @@ export class TerrainBoard {
     // Only a FULL node (its whole square is tiled by existing chunks) may fold:
     // a partial node straddles the assembly boundary or not-yet-streamed tiles,
     // and folding it would paint terrain across the empty gap with no edge wall.
-    const canFold = node.full && (this.macroProxyEnabled || node.level > 0);
+    const canFold = node.full
+      && (this.macroProxyEnabled || node.level > 0)
+      && !this._straddlesCircularBoundary(node.minX, node.minZ, node.spanX, node.spanZ);
     if (canFold) {
       const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
       const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
@@ -390,10 +476,24 @@ export class TerrainBoard {
     for (const chunk of this.chunks) {
       if (skipMerged && chunk.merged) continue;
       const d = this._tmp.copy(chunk.center).sub(cameraPos).length();
-      const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
-      if (lod !== chunk.lod) {
+      // A circle-straddling chunk uses one stable, budget-aware LOD. This keeps
+      // the rim topology independent of camera motion without pinning a large
+      // expanded disk to the most expensive geometry.
+      const onCircularBoundary = this._straddlesCircularBoundary(
+        chunk.center.x - this.chunkSize * 0.5,
+        chunk.center.z - this.chunkSize * 0.5,
+        this.chunkSize,
+        this.chunkSize,
+      );
+      const lod = onCircularBoundary
+        ? Math.min(this.geometries.length - 1, this._circularBoundary.lod)
+        : (d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3);
+      const geometry = onCircularBoundary && this._circularBoundaryGeometry
+        ? this._circularBoundaryGeometry
+        : this.geometries[lod];
+      if (lod !== chunk.lod || chunk.mesh.geometry !== geometry) {
         chunk.lod = lod;
-        chunk.mesh.geometry = this.geometries[lod];
+        chunk.mesh.geometry = geometry;
       }
       counts[lod]++;
     }
@@ -672,6 +772,10 @@ export class TerrainBoard {
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
     for (const chunk of this.chunks) this.group.remove(chunk.mesh);
+    this._circularBoundaryGeometry?.dispose();
+    this._circularBoundaryGeometry = null;
+    this._circularBoundarySegments = 0;
+    this._circularBoundary = null;
     for (const geo of this.geometries) geo.dispose();
     this.chunks = [];
     this._cells = [];

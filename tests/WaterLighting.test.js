@@ -85,21 +85,67 @@ describe('water atmosphere lighting', () => {
     }
 
     expect(materials[0].fragmentShader).toContain(
-      'vec3(0.55 + 0.65 * diff)',
+      'col *= 0.55 + 0.65 * diff;',
     );
     expect(materials[1].fragmentShader).toContain(
       'vec3(0.62 + 0.38 * diff)',
     );
     expect(materials[2].fragmentShader).toContain(
-      'vec3(0.55 + 0.65 * diff)',
+      'col *= 0.55 + 0.65 * diff;',
     );
   });
 
-  it('uses spherical local up for Planet ambient lighting', () => {
+  it('uses the exact terrain field for water visibility in every world shape', () => {
+    const uniforms = createTerrainUniforms();
+    const legacy = createWaterMaterial(uniforms);
+    const realistic = createRealisticWaterMaterial(uniforms);
+    const planet = createPlanetWaterMaterial(uniforms);
+
+    for (const material of [legacy, realistic, planet]) {
+      expect(material.depthTest).toBe(true);
+      expect(material.depthWrite).toBe(false);
+      expect(material.fragmentShader).toContain(
+        'if (depth <= 0.02) discard;',
+      );
+    }
+    expect(legacy.fragmentShader).toContain(
+      'float depth = uSeaLevel - floorH;',
+    );
+    expect(realistic.fragmentShader).toContain(
+      'float depth = uSeaLevel - floorH;',
+    );
+    expect(planet.fragmentShader).toContain(
+      'float depth = waterR - terrainR;',
+    );
+    expect(planet.polygonOffset).toBe(false);
+
+    legacy.dispose();
+    realistic.dispose();
+    planet.dispose();
+  });
+
+  it('keeps Legacy and Planet foam on the stable authored-color lighting path', () => {
+    const uniforms = createTerrainUniforms();
+    const legacy = createWaterMaterial(uniforms);
+    const planet = createPlanetWaterMaterial(uniforms);
+
+    for (const material of [legacy, planet]) {
+      expect(material.fragmentShader).toContain('col *= 0.55 + 0.65 * diff;');
+      expect(material.fragmentShader).toContain(
+        'col = mix(col, uColFoam, foam * 0.75);',
+      );
+      expect(material.fragmentShader).not.toContain(
+        'vec3 litFoamColor = waterResolveFoamColor',
+      );
+      material.dispose();
+    }
+  });
+
+  it('uses spherical local up for Planet fresnel lighting', () => {
     const material = createPlanetWaterMaterial(createTerrainUniforms());
 
-    expect(material.fragmentShader).toMatch(
-      /waterResolveLighting\(\s*n,\s*up,\s*diff,/,
+    expect(material.fragmentShader).toContain(
+      'max(dot(viewDir, up), 0.0)',
     );
     material.dispose();
   });

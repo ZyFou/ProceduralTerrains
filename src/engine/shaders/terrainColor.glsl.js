@@ -109,11 +109,10 @@ TerrainColorResult computeTerrainAlbedo(
   snow *= 1.0 - bw.desert;
   albedo = mix(albedo, uColSnow, snow);
 
-  if (hRel < 0.0) {
-    float depth = clamp(-hRel / 55.0, 0.0, 1.0);
-    vec3 floorCol = mix(mix(uColSand, uColSwamp, bw.wetland * 0.7) * 0.65, uColDeep, depth);
-    albedo = mix(albedo, floorCol, 0.92);
-  }
+  // Terrain owns only the physical ground albedo. Water color, absorption and
+  // underwater tint are composited by the water/underwater passes. Baking a
+  // uColDeep tint into terrain here made blue ground visible whenever the water
+  // wet mask and a rendered LOD triangle disagreed at the shoreline.
 
   float micro = mix(0.20, 0.06, max(bw.desert * (1.0 - rockBlend), bw.wetland * 0.8));
   micro = mix(micro, 0.30, max(rockBlend * 0.6, bw.canyon * 0.4));
@@ -145,12 +144,15 @@ vec3 terrainBiomeDebugColor(BiomeWeights bw, float h01) {
 
 vec3 terrainLighting(vec3 albedo, vec3 n, vec3 sunDir, float ao,
   float snow, float sandBand, float hRel, float flatness, float bwWetland,
-  vec3 viewDir, float cloudShadow) {
+  vec3 viewDir) {
   float diff = max(dot(n, sunDir), 0.0);
   vec3 sunCol = uTerrainSunCol * uTerrainSunIntensity;
   vec3 skyAmb = uTerrainSkyAmb * 0.50 * (n.y * 0.5 + 0.5);
   vec3 bounce = uTerrainBounce * 0.25 * (1.0 - n.y * 0.5);
-  vec3 col = albedo * (sunCol * diff * (1.0 - clamp(cloudShadow, 0.0, 1.0)) + skyAmb + bounce) * ao;
+  // Keep the 1.0.0-b lighting baseline authoritative. The later procedural
+  // cloud-mask projection could suppress nearly all direct light over a tile,
+  // which made a correctly baked terrain look flat and unlit.
+  vec3 col = albedo * (sunCol * diff + skyAmb + bounce) * ao;
 
   float spec = pow(max(dot(reflect(-sunDir, n), viewDir), 0.0), 32.0);
   float shoreSheen = 1.0 - smoothstep(0.0, max(sandBand, 0.5), abs(hRel));

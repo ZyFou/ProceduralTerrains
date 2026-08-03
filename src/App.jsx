@@ -41,9 +41,9 @@ import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
 import { normalizeProject, projectStore } from './project/ProjectStore.js';
-import { getProjectTemplate, PROJECT_TEMPLATES, projectTemplatePreviewCacheKey } from './project/ProjectTemplates.js';
+import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
 import {
-  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate, nodeTemplatePreviewCacheKey,
+  NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
 } from './project/NodeProjectTemplates.js';
 import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
 import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
@@ -107,9 +107,6 @@ export default function App() {
   const engineRef = useRef(null);
   const activeProjectRef = useRef(null);
   const projectNameRef = useRef('Untitled terrain');
-  const templatePreviewQueueRef = useRef(Promise.resolve());
-  const landingPreviewActiveRef = useRef(true);
-  const landingPreviewSessionRef = useRef(0);
   const liveMetricsRef = useRef(null);
   if (!liveMetricsRef.current) {
     const count = DEFAULT_PARAMS.chunkCount;
@@ -534,10 +531,22 @@ export default function App() {
       detail: 'Preparing terrain…',
     }, async (update) => {
       blockingUpdateRef.current = update;
+      const previousWorldMode = worldModeRef.current;
+      histSuppressRef.current = true;
+      if (histTimerRef.current) {
+        clearTimeout(histTimerRef.current);
+        histTimerRef.current = null;
+      }
       try {
-        if ((terrain.editorMode === 'nodes' || terrain.editorMode === 'manual' || terrain.realWorldSource)
-            && worldModeRef.current !== 'studio') {
-          await runModeSwitchRef.current('studio', { silent: true });
+        const targetWorldMode = terrain.editorMode === 'nodes'
+          || terrain.editorMode === 'manual'
+          || terrain.realWorldSource
+          ? 'studio'
+          : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
+            ? terrain.worldMode
+            : 'studio');
+        if (worldModeRef.current !== targetWorldMode) {
+          await runModeSwitchRef.current(targetWorldMode, { silent: true });
           blockingUpdateRef.current = update;
         }
         update({
@@ -555,10 +564,60 @@ export default function App() {
             })
             : undefined,
         });
+        const eng = engineRef.current;
+        if (eng) {
+          const baseline = eng.serializeState();
+          historyRef.current = {
+            past: [],
+            future: [],
+            present: JSON.stringify(baseline),
+          };
+          paintBlobsRef.current.clear();
+          erosionBlobsRef.current.clear();
+          manualSculptBlobsRef.current.clear();
+          manualSurfaceBlobsRef.current.clear();
+          // The compact history snapshot stores only heavy-field revision IDs.
+          // Seed the newly loaded document's corresponding blobs before history
+          // resumes, otherwise its first paint/sculpt edit would Undo to null.
+          if ((baseline.paintRev ?? 0) > 0) {
+            const blob = eng.serializePaint();
+            if (blob) paintBlobsRef.current.set(baseline.paintRev, blob);
+          }
+          if ((baseline.erosionRev ?? 0) > 0) {
+            const blob = eng.serializeErosion();
+            if (blob) erosionBlobsRef.current.set(baseline.erosionRev, blob);
+          }
+          if ((baseline.manualSculptRev ?? 0) > 0) {
+            const blob = eng.serializeManualSculpt();
+            if (blob) {
+              manualSculptBlobsRef.current.set(baseline.manualSculptRev, blob);
+            }
+          }
+          if ((baseline.manualSurfaceRev ?? 0) > 0) {
+            const blob = eng.serializeManualSurface();
+            if (blob) {
+              manualSurfaceBlobsRef.current.set(baseline.manualSurfaceRev, blob);
+            }
+          }
+          nativeHistoryActionsRef.current = [];
+          nativeHistoryCursorRef.current = -1;
+          setNativeHistoryActions([]);
+          setHistState({ canUndo: false, canRedo: false });
+        }
         setCurrentProject(project);
         if (project) showToast(`Opened ${name}`, 'success');
+      } catch (error) {
+        if (worldModeRef.current !== previousWorldMode) {
+          await runModeSwitchRef.current(previousWorldMode, { silent: true });
+        }
+        showToast(`Could not open ${name}`, 'error');
+        throw error;
       } finally {
         if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+        // Structural shader callbacks can settle on the following task. Keep
+        // history suppressed through that hand-off so no half-loaded snapshot
+        // becomes the first Undo target.
+        setTimeout(() => { histSuppressRef.current = false; }, 60);
       }
     });
   }, [setCurrentProject, showToast]);
@@ -645,30 +704,48 @@ export default function App() {
       blockingUpdateRef.current = update;
       try {
         if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
-        landingPreviewActiveRef.current = false;
-        landingPreviewSessionRef.current += 1;
         if ((nextMode === 'nodes' || nextMode === 'manual') && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
         }
-        eng.newProject({ projectMode: nextMode });
-        // A new terrain is a new document. Do not let saveCurrentProject reuse
-        // the id of whichever project was previously open.
-        setCurrentProject(null);
-        // Every launch starts from the Root's session seed; give each chosen
-        // template a stable-but-fresh variant instead of reverting to seed 1337.
+        // Build the final document once. Seed and preset used to be applied
+        // after newProject(), causing two extra full terrain updates and a
+        // visible flash of the default/previous landscape.
         const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
         const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
         const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
-        eng.setParam('seed', (baseSeed + templateOffset * 0x9e3779b9) >>> 0);
+        const projectSeed = (baseSeed + templateOffset * 0x9e3779b9) >>> 0;
+        eng.newProject({
+          projectMode: nextMode,
+          seed: projectSeed,
+          presetKey: nextMode === 'procedural' ? template.preset : null,
+        });
+        // A new terrain is a new document. Do not let saveCurrentProject reuse
+        // the id of whichever project was previously open.
+        setCurrentProject(null);
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
           const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
-          await graphResult?.ready;
+          const result = await graphResult?.ready;
+          if (!graphResult?.ok || result?.error) {
+            throw result?.error ?? new Error('Terrain graph could not be compiled');
+          }
         } else if (nextMode === 'procedural') {
-          if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-          await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
+          const result = await eng.rebuildActiveHeightProgram({
+            label: 'Loading procedural terrain',
+            atomic: true,
+            terrainDirtyOnSwap: true,
+          });
+          if (result?.error) throw result.error;
+        } else {
+          const result = await eng.rebuildActiveHeightProgram({
+            label: 'Loading manual terrain',
+            atomic: true,
+            terrainDirtyOnSwap: true,
+          });
+          if (result?.error) throw result.error;
         }
+        await eng.waitForTerrainReady();
         // A freshly-created project owns a fresh undo timeline. Without this
         // baseline, the first edit could undo into the landing preview/default
         // procedural document — especially visible when the first Manual edit
@@ -708,74 +785,19 @@ export default function App() {
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
-    const stopLandingPreviews = () => {
-      landingPreviewActiveRef.current = false;
-      landingPreviewSessionRef.current += 1;
-    };
     const onNewProject = (event) => {
       createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
     };
     const onOpenProject = async (event) => {
       const project = event.detail?.project;
       if (!project?.terrain || !engineRef.current) return;
-      stopLandingPreviews();
       await loadProjectJSON(project);
-    };
-    const previewSeed = (templateId, editorMode = 'procedural') => {
-      const catalog = editorMode === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
-      const index = Math.max(0, catalog.findIndex((item) => item.id === templateId));
-      const base = Number(landingRef.current?.sessionSeed) || 1337;
-      return (base + (index + 1) * 0x9e3779b9) >>> 0;
-    };
-    const captureTemplateThumbnail = async (templateId, { silent = true, editorMode = 'procedural', session = landingPreviewSessionRef.current } = {}) => {
-      const eng = engineRef.current;
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || !eng || !canvasRef.current || !landingRef.current?.visible || landingRef.current?.exiting) return;
-      const nextMode = editorMode === 'nodes' ? 'nodes' : 'procedural';
-      const template = nextMode === 'nodes' ? getNodeProjectTemplate(templateId) : getProjectTemplate(templateId);
-      if (nextMode === 'nodes' && worldModeRef.current !== 'studio') {
-        await runModeSwitchRef.current('studio', { silent: true });
-      }
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
-      eng.newProject({ silent, projectMode: nextMode });
-      eng.setParam('seed', previewSeed(template.id, nextMode));
-      if (nextMode === 'nodes') {
-        const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
-        await graphResult?.ready;
-      } else {
-        if (template.preset !== 'highlands') eng.applyPresetByKey(template.preset);
-        await eng.rebuildActiveHeightProgram({ label: 'Loading procedural terrain', atomic: true });
-      }
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await new Promise((resolve) => window.setTimeout(resolve, nextMode === 'nodes' ? 260 : 100));
-      if (!landingPreviewActiveRef.current || session !== landingPreviewSessionRef.current || landingRef.current?.exiting) return;
-      const image = eng.capturePreviewThumbnail();
-      const cacheKey = nextMode === 'nodes' ? nodeTemplatePreviewCacheKey(template.id) : projectTemplatePreviewCacheKey(template.id);
-      try { sessionStorage.setItem(cacheKey, image); } catch { /* cache is optional */ }
-      window.dispatchEvent(new CustomEvent('terrain-template:thumbnail', { detail: { templateId: template.id, editorMode: nextMode, image } }));
-    };
-    const queueTemplatePreview = (templateId, options) => {
-      const session = landingPreviewSessionRef.current;
-      templatePreviewQueueRef.current = templatePreviewQueueRef.current
-        .then(() => captureTemplateThumbnail(templateId, { ...options, session }))
-        .catch(() => {});
-      return templatePreviewQueueRef.current;
-    };
-    const onPreviewTemplate = (event) => {
-      if (!landingRef.current?.visible || landingRef.current?.exiting) return;
-      if (event.detail?.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
-      landingPreviewActiveRef.current = true;
-      // Every explicit selection owns a fresh session so an older queued
-      // procedural preview can never overwrite it.
-      landingPreviewSessionRef.current += 1;
-      queueTemplatePreview(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
     };
     window.addEventListener('terrain-project:new', onNewProject);
     window.addEventListener('terrain-project:open', onOpenProject);
-    window.addEventListener('terrain-template:preview', onPreviewTemplate);
     return () => {
       window.removeEventListener('terrain-project:new', onNewProject);
       window.removeEventListener('terrain-project:open', onOpenProject);
-      window.removeEventListener('terrain-template:preview', onPreviewTemplate);
     };
   }, [createProjectFromTemplate, loadProjectJSON]);
 
@@ -983,6 +1005,11 @@ export default function App() {
     h.past.forEach(collect);
     h.future.forEach(collect);
     if (h.present) collect(h.present);
+    // History-panel jump targets carry their own snapshots and can outlive a
+    // branch in the linear undo stack. Keep their referenced heavy blobs too.
+    nativeHistoryActionsRef.current.forEach((action) => {
+      if (action.snapshot) collect(action.snapshot);
+    });
     for (const key of paintMap.keys()) if (!livePaint.has(key)) paintMap.delete(key);
     for (const key of erosionMap.keys()) if (!liveErosion.has(key)) erosionMap.delete(key);
     for (const key of sculptMap.keys()) if (!liveSculpt.has(key)) sculptMap.delete(key);
@@ -1037,6 +1064,7 @@ export default function App() {
   const applySnapshot = useCallback(async (snapStr) => {
     const eng = engineRef.current;
     if (!eng || !snapStr) return;
+    const previousWorldMode = worldModeRef.current;
     let snap;
     try { snap = JSON.parse(snapStr); } catch { return; }
     histSuppressRef.current = true;
@@ -1060,7 +1088,7 @@ export default function App() {
       if (snap.worldMode && snap.worldMode !== worldModeRef.current) {
         await runModeSwitchRef.current(snap.worldMode, { silent: true });
       }
-      eng.restoreState(snap);
+      await eng.restoreState(snap);
       // sync the React mirrors the engine has no callback for
       setDebugFlags({ ...DEFAULT_DEBUG_FLAGS, ...(snap.debug || {}) });
       setCullingEnabled(snap.cullingEnabled !== false);
@@ -1071,11 +1099,16 @@ export default function App() {
       // against it (and we don't log a spurious "paintRev-only" history entry).
       const live = captureSnapshot();
       if (live) historyRef.current.present = live;
+      return true;
     } catch (err) {
       console.warn('History restore failed', err);
+      if (worldModeRef.current !== previousWorldMode) {
+        await runModeSwitchRef.current(previousWorldMode, { silent: true });
+      }
+      return false;
     } finally {
-      // release after the synchronous callbacks settle (a structural noise-stack
-      // change may fire onParams again on the next frame — keep it suppressed).
+      // The engine promise includes structural compilation and the final
+      // full-resolution terrain frame; leave one task for React callbacks.
       setTimeout(() => { histSuppressRef.current = false; }, 60);
     }
   }, [captureSnapshot]);
@@ -1087,13 +1120,31 @@ export default function App() {
     const index = actions.findIndex((action) => action.id === id);
     if (index < 0) return;
     const h = historyRef.current;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.past = actions.slice(0, index).map((action) => action.snapshot);
     h.present = actions[index].snapshot;
     // Redo pops from the end, so keep the next action at the end of the stack.
     h.future = actions.slice(index + 1).reverse().map((action) => action.snapshot);
     nativeHistoryCursorRef.current = index;
     setHistState({ canUndo: h.past.length > 0, canRedo: h.future.length > 0 });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [applySnapshot, flushRecord]);
 
   const undo = useCallback(() => {
@@ -1101,11 +1152,29 @@ export default function App() {
     flushRecord();
     const h = historyRef.current;
     if (!h.past.length) return;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.future.push(h.present);
     h.present = h.past.pop();
     nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: h.past.length > 0, canRedo: true });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [flushRecord, applySnapshot]);
 
   const redo = useCallback(() => {
@@ -1113,11 +1182,29 @@ export default function App() {
     flushRecord();
     const h = historyRef.current;
     if (!h.future.length) return;
+    const previous = {
+      past: [...h.past],
+      future: [...h.future],
+      present: h.present,
+      cursor: nativeHistoryCursorRef.current,
+    };
     h.past.push(h.present);
     h.present = h.future.pop();
     nativeHistoryCursorRef.current = Math.max(-1, Math.min(nativeHistoryActionsRef.current.length - 1, h.past.length - 1));
     setHistState({ canUndo: true, canRedo: h.future.length > 0 });
-    applySnapshot(h.present);
+    void applySnapshot(h.present).then((restored) => {
+      if (restored) return;
+      Object.assign(h, {
+        past: previous.past,
+        future: previous.future,
+        present: previous.present,
+      });
+      nativeHistoryCursorRef.current = previous.cursor;
+      setHistState({
+        canUndo: h.past.length > 0,
+        canRedo: h.future.length > 0,
+      });
+    });
   }, [flushRecord, applySnapshot]);
 
   useEffect(() => {
@@ -1564,9 +1651,7 @@ export default function App() {
 
   const block = blockingTask(loading.tasks);
   const nonBlock = nonBlockingTask(loading.tasks);
-  const showBlockingOverlay = block
-    && !landing?.visible
-    && !(block.id === 'boot' && landing?.bootReady);
+  const showBlockingOverlay = block && !landing?.visible;
 
   useLayoutEffect(() => {
     if (!showStudioUI || !isStudio || !engineRef.current) return;

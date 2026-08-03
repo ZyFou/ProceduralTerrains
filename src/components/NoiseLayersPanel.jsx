@@ -318,21 +318,15 @@ export default function NoiseLayersPanel({ ctx, children }) {
   const [expandedId, setExpandedId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [dragOver, setDragOver] = useState(-1);
-  const debounceRef = useRef(null);
   const addBtnRef = useRef(null);
 
   const solo = ctx._soloLayerId ?? null;
 
-  // debounced push (for continuous slider drags)
-  const pushStack = useCallback((next, structural = false) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (structural) {
-      onNoiseStack(next);
-    } else {
-      debounceRef.current = setTimeout(() => onNoiseStack(next), 32);
-      // also push immediately so the uniform refresh is fast
-      onNoiseStack(next);
-    }
+  // Slider controls already emit at the browser input cadence. Dispatch each
+  // state exactly once: the previous immediate + delayed duplicate could replay
+  // stale values over a newer edit and restart the terrain bake twice.
+  const pushStack = useCallback((next) => {
+    onNoiseStack(next);
   }, [onNoiseStack]);
 
   const handleAdd = (type) => {

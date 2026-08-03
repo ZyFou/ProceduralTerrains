@@ -12,6 +12,7 @@ function createCaptureMaterial() {
       uSceneColor: { value: null },
       uSceneDepth: { value: null },
       uSceneTexelSize: { value: new THREE.Vector2(1, 1) },
+      uSceneViewportInv: { value: new THREE.Vector2(1, 1) },
       uSceneNear: { value: 0 },
       uSceneFar: { value: 0 },
       uSceneRefractionEnabled: { value: 0 },
@@ -108,6 +109,14 @@ describe('WaterSurfacePass', () => {
     expect(material.uniforms.uSceneColor.value).toBe(pass.target.texture);
     expect(material.uniforms.uSceneDepth.value).toBe(pass.target.depthTexture);
     expect(material.uniforms.uSceneRefractionEnabled.value).toBe(1);
+    expect(material.uniforms.uSceneTexelSize.value.toArray()).toEqual([
+      1 / 600,
+      1 / 400,
+    ]);
+    expect(material.uniforms.uSceneViewportInv.value.toArray()).toEqual([
+      1 / 1200,
+      1 / 800,
+    ]);
     expect(renderer.setRenderTarget.mock.calls.at(-1)[0]).toBeNull();
     expect(pass.diagnostics()).toMatchObject({
       active: true,

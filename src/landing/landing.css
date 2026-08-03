@@ -37,7 +37,17 @@ body:has(.landing-overlay) {
 /* Shift the showcase render into the right-hand half so the terrain is not
    hidden behind the content panel. The gap it leaves on the left sits under
    the opaque panel; the transform eases back when the editor takes over. */
-#app .viewport-area { transition: transform 0.72s cubic-bezier(0.4, 0, 0.2, 1); }
+#app .viewport-area {
+  transition:
+    transform 0.72s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.72s cubic-bezier(.22, 1, .36, 1),
+    filter 0.82s cubic-bezier(.22, 1, .36, 1);
+}
+body:has(.landing-overlay.boot-loading) #app.landing-mode .viewport-area,
+body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
+  opacity: .28;
+  filter: saturate(.72) blur(3px);
+}
 @media (min-width: 921px) {
   #app.landing-mode .viewport-area { transform: translateX(22vw); }
 }
@@ -81,8 +91,11 @@ body:has(.landing-overlay) {
   clip-path: polygon(0 0, 55% 0, 51% 100%, 0 100%);
   filter: drop-shadow(18px 0 48px rgba(0, 0, 0, 0.55));
   pointer-events: none;
-  transition: clip-path .52s cubic-bezier(.4, 0, .2, 1);
-  will-change: clip-path;
+  transition:
+    clip-path .52s cubic-bezier(.4, 0, .2, 1),
+    opacity .72s cubic-bezier(.22, 1, .36, 1),
+    transform .78s cubic-bezier(.22, 1, .36, 1);
+  will-change: clip-path, opacity, transform;
 }
 
 /* ---- Top navigation ---- */
@@ -98,6 +111,9 @@ body:has(.landing-overlay) {
   padding: 0 28px;
   background: #05060a;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  transition:
+    opacity .58s cubic-bezier(.22, 1, .36, 1),
+    transform .68s cubic-bezier(.22, 1, .36, 1);
 }
 .lp-brand {
   display: flex;
@@ -181,7 +197,31 @@ body:has(.landing-overlay) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  transition:
+    opacity .64s cubic-bezier(.22, 1, .36, 1),
+    transform .76s cubic-bezier(.22, 1, .36, 1);
 }
+
+/* Cold-boot handoff: keep the completed menu staged behind the loader, then
+   reveal the terrain, dark content panel, navigation and body in a soft
+   sequence. Returning to Home uses boot-ready immediately and skips this. */
+.landing-overlay.boot-loading .lp-bg,
+.landing-overlay.boot-holding .lp-bg {
+  opacity: 0;
+  transform: translateX(-24px) scale(1.015);
+}
+.landing-overlay.boot-loading .lp-nav,
+.landing-overlay.boot-holding .lp-nav {
+  opacity: 0;
+  transform: translateY(-14px);
+}
+.landing-overlay.boot-loading .lp-scroll,
+.landing-overlay.boot-holding .lp-scroll {
+  opacity: 0;
+  transform: translateY(18px);
+}
+.landing-overlay.boot-revealing .lp-nav { transition-delay: 70ms; }
+.landing-overlay.boot-revealing .lp-scroll { transition-delay: 130ms; }
 .lp-content {
   display: flex;
   flex-direction: column;
@@ -1090,10 +1130,79 @@ body:has(.landing-overlay) {
 }
 
 /* ============ Loader / dialogs ============ */
-.landing-preview-loader { position: fixed; inset: 0; z-index: 10002; display: grid; justify-items: center; align-content: center; gap: 10px; background: rgba(5, 5, 5, .88); color: var(--text-main); }
-.landing-preview-loader strong { font-size: 14px; }
+.landing-preview-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 68% 44%, rgba(37, 99, 235, .1), transparent 34%),
+    rgba(5, 5, 5, .94);
+  color: var(--text-main);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    opacity .68s cubic-bezier(.22, 1, .36, 1),
+    backdrop-filter .68s cubic-bezier(.22, 1, .36, 1);
+  will-change: opacity, backdrop-filter;
+}
+.landing-preview-loader.is-revealing {
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(0);
+  -webkit-backdrop-filter: blur(0);
+}
+.landing-preview-loader-content {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 34px;
+  transition:
+    opacity .44s ease,
+    transform .62s cubic-bezier(.22, 1, .36, 1);
+}
+.landing-preview-loader.is-revealing .landing-preview-loader-content {
+  opacity: 0;
+  transform: translateY(-10px) scale(.98);
+}
+.landing-preview-loader strong { font-size: 14px; transition: color .2s ease; }
 .landing-preview-loader small { color: var(--text-muted); font-size: 12px; }
-.landing-preview-spinner { width: 25px; height: 25px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: landing-preview-spin .8s linear infinite; }
+.landing-preview-spinner {
+  position: relative;
+  width: 25px;
+  height: 25px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: landing-preview-spin .8s linear infinite;
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.landing-preview-spinner::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 4px;
+  width: 6px;
+  height: 10px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  opacity: 0;
+  transform: rotate(45deg) scale(.7);
+  transition: opacity .16s ease, transform .2s cubic-bezier(.22, 1, .36, 1);
+}
+.landing-preview-loader.is-holding .landing-preview-spinner,
+.landing-preview-loader.is-revealing .landing-preview-spinner {
+  animation: none;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, .13), 0 8px 24px rgba(37, 99, 235, .22);
+}
+.landing-preview-loader.is-holding .landing-preview-spinner::after,
+.landing-preview-loader.is-revealing .landing-preview-spinner::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
 @keyframes landing-preview-spin { to { transform: rotate(360deg); } }
 .landing-credits-backdrop { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; padding: 18px; background: rgba(0, 0, 0, .68); }
 .landing-credits-dialog { display: grid; gap: 16px; width: min(360px, 100%); padding: 20px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel); box-shadow: 0 24px 80px rgba(0,0,0,.6); }
@@ -1214,10 +1323,20 @@ body:has(.landing-overlay) {
 @media (prefers-reduced-motion: reduce) {
   .landing-overlay { transition: opacity 0.35s ease; }
   .landing-overlay.exiting { transform: none; filter: none; }
-  .lp-bg { transition: none; }
+  #app .viewport-area { transition: opacity .12s ease; }
+  .lp-bg, .lp-nav, .lp-scroll { transition: opacity .12s ease; }
+  .landing-overlay.boot-loading .lp-bg,
+  .landing-overlay.boot-holding .lp-bg,
+  .landing-overlay.boot-loading .lp-nav,
+  .landing-overlay.boot-holding .lp-nav,
+  .landing-overlay.boot-loading .lp-scroll,
+  .landing-overlay.boot-holding .lp-scroll { transform: none; }
   .lp-content-scroll > * { animation: none; }
   .lp-project-tab-panel { animation: none; }
   .lp-account-chip:hover, .lp-account-chip.active, .lp-project-tabs button.active { transform: none; }
   .lp-primary:hover:not(:disabled) { transform: none; }
+  .landing-preview-loader,
+  .landing-preview-loader-content { transition: opacity .08s linear; }
+  .landing-preview-loader.is-revealing .landing-preview-loader-content { transform: none; }
   .landing-preview-spinner { animation: none; border-top-color: var(--text-dim); }
 }

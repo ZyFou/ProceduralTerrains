@@ -148,26 +148,28 @@ void main() {
   vec3 dA = normalize(dir + t1 * eps);
   vec3 dB = normalize(dir + t2 * eps);
 
-  // Height + geometric normal. Three R16F cubemap samples replace three full
-  // ~46-octave evaluations and reconstruct the normal from neighbouring heights.
+  // Stable packed bake: the centre fetch contains the exact geometric normal
+  // and height; neighbour heights remain available for concavity AO.
   // The branch is on a uniform, so it stays coherent across the warp (a real
   // GPU saving, not just fewer ALU on paper).
   float hC, hA, hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    hC = textureCube(uPlanetHeightTex, dir).r * uHeightScale;
-    hA = textureCube(uPlanetHeightTex, dA).r * uHeightScale;
-    hB = textureCube(uPlanetHeightTex, dB).r * uHeightScale;
+    vec4 packedHeightNormal = textureCube(uPlanetHeightTex, dir);
+    hC = packedHeightNormal.a * uHeightScale;
+    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
+    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
     hC = heightAt3D(dir);
     hA = heightAt3D(dA);
     hB = heightAt3D(dB);
+    vec3 pC = dir * (uPlanetRadius + hC);
+    vec3 pA = dA  * (uPlanetRadius + hA);
+    vec3 pB = dB  * (uPlanetRadius + hB);
+    nGeo = normalize(cross(pA - pC, pB - pC));
+    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
   }
-  vec3 pC = dir * (uPlanetRadius + hC);
-  vec3 pA = dA  * (uPlanetRadius + hA);
-  vec3 pB = dB  * (uPlanetRadius + hB);
-  nGeo = normalize(cross(pA - pC, pB - pC));
-  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
 
   // normal-strength tweak: lean the geometric normal toward/away from up
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
@@ -178,7 +180,7 @@ void main() {
   BiomeWeights bw = biomeWeightsAt(cl);
 
   float slope = 1.0 - up;
-  float hRel = hC - uSeaLevel;
+  float hRel = length(vWorldPos) - uPlanetRadius - uSeaLevel;
   float h01 = hC / max(uHeightScale, 1e-3);
 
   if (uBiomeDebug > 0.5) {
@@ -312,26 +314,28 @@ void main() {
   float hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    hC = textureCube(uPlanetHeightTex, dir).r * uHeightScale;
-    hA = textureCube(uPlanetHeightTex, dA).r * uHeightScale;
-    hB = textureCube(uPlanetHeightTex, dB).r * uHeightScale;
+    vec4 packedHeightNormal = textureCube(uPlanetHeightTex, dir);
+    hC = packedHeightNormal.a * uHeightScale;
+    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
+    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
     hC = heightAt3D(dir);
     hA = heightAt3D(dA);
     hB = heightAt3D(dB);
+    vec3 pC = dir * (uPlanetRadius + hC);
+    vec3 pA = dA  * (uPlanetRadius + hA);
+    vec3 pB = dB  * (uPlanetRadius + hB);
+    nGeo = normalize(cross(pA - pC, pB - pC));
+    if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
   }
-  vec3 pC = dir * (uPlanetRadius + hC);
-  vec3 pA = dA  * (uPlanetRadius + hA);
-  vec3 pB = dB  * (uPlanetRadius + hB);
-  nGeo = normalize(cross(pA - pC, pB - pC));
-  if (dot(nGeo, dir) < 0.0) nGeo = -nGeo;
 
   float up = clamp(dot(nGeo, dir), 0.0, 1.0);
   vec3 n = normalize(mix(dir, nGeo, uNormalStrength));
 
   float slope = 1.0 - up;
   float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
-  float hRel = hC - uSeaLevel;
+  float hRel = length(vWorldPos) - uPlanetRadius - uSeaLevel;
 
   // banded albedo from the REAL palette uniforms so the interim look already
   // matches the user's style (see TerrainMaterial buildMinimalFragment)
@@ -390,19 +394,24 @@ export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_
 // relink is served from three's program cache (no freeze). All planet chunk
 // materials share one program, so flipping each one's source is free after the
 // first.
-export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+export function rebuildPlanetMaterialSource(
+  mat, stackGLSL = DEFAULT_STACK_GLSL, { minimal = mat?.userData?.minimalFragment === true } = {},
+) {
   const ph = buildPlanetHeightGLSL(stackGLSL.body3d);
   mat.vertexShader = buildVertex(ph);
-  mat.fragmentShader = buildFragment(ph);
-  mat.userData.minimalFragment = false;
+  mat.fragmentShader = minimal ? buildMinimalFragment(ph) : buildFragment(ph);
+  mat.userData.minimalFragment = minimal;
   mat.needsUpdate = true;
+}
+
+export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+  rebuildPlanetMaterialSource(mat, stackGLSL, { minimal: false });
 }
 
 // ============================================================================
 // Planet water: a sphere shell at radius (planetRadius + seaLevel). The
-// fragment samples heightAt3D under each point and discards where the terrain
-// pokes above the sea, so oceans only fill the basins. Shares the same height
-// field + palette as the terrain, so coastlines line up exactly.
+// fragment uses the exact terrain height field as its wet/dry mask, so ocean
+// visibility, depth shading, and shoreline foam share one coastline authority.
 // ============================================================================
 
 const WATER_VERTEX = /* glsl */ `
@@ -462,12 +471,10 @@ float rippleTri(vec3 p, vec3 blend, float t) {
 void main() {
   vec3 dir = normalize(vDir);
 
-  // ocean only where the terrain sits below sea level. The baked height
-  // cubemap (when active) gives the sea-floor height in one fetch instead of
-  // re-evaluating the full per-pixel field — this is the bulk of the planet
-  // water shader's cost when the ocean fills the screen up close.
+  // The terrain field is the wet/dry authority, matching the stable 1.0.0-b
+  // planet coastline and keeping foam attached to the spherical relief.
   float terrainH = uUsePlanetHeightTex > 0.5
-    ? textureCube(uPlanetHeightTex, dir).r * uHeightScale
+    ? textureCube(uPlanetHeightTex, dir).a * uHeightScale
     : heightAt3D(dir);
   float terrainR = uPlanetRadius + terrainH;
   float waterR = uPlanetRadius + uSeaLevel;
@@ -501,21 +508,13 @@ void main() {
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float diff = max(dot(n, uSunDir), 0.0);
-  vec3 waterLight = waterResolveLighting(
-    n,
-    up,
-    diff,
-    vec3(0.55 + 0.65 * diff)
-  );
-  col *= waterLight;
+  col *= 0.55 + 0.65 * diff;
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
-  col += waterResolveSunLight(vec3(1.0, 0.95, 0.85))
-    * spec * 0.55 * uWaterReflection;
+  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
 
   // spherical fresnel: up is the local normal, not world +Y
   float fres = pow(1.0 - max(dot(viewDir, up), 0.0), 3.0);
-  col += waterResolveSkyLight(vec3(0.30, 0.42, 0.55))
-    * fres * 0.25 * uWaterReflection;
+  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
 
   float foamNoise = 0.0;
   if (uWaterQuality > 0.5) {
@@ -528,8 +527,7 @@ void main() {
   float shoreDistance = max(uFoamWidth, 0.5);
   float shoreInner = min(0.6, shoreDistance * 0.5);
   float foam = 1.0 - smoothstep(shoreInner, shoreDistance, depth + foamNoise * 2.4);
-  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
-  col = mix(col, litFoamColor, foam * 0.75);
+  col = mix(col, uColFoam, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 
@@ -555,14 +553,15 @@ export function createPlanetWaterMaterial(uniforms, octaves = 7, stackGLSL = DEF
     vertexShader: WATER_VERTEX,
     fragmentShader: buildWaterFragment(buildPlanetHeightGLSL(stackGLSL.body3d)),
     transparent: true,
+    depthTest: true,
     depthWrite: false,
-    // bias the depth test toward the camera so the transparent shell wins over
-    // coincident terrain at the shoreline (belt-and-braces with the radius bias)
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
     // Outer shell only: cull the inner (back) faces so the far hemisphere of
     // the ocean sphere isn't drawn behind the planet, and overdraw is halved.
     side: THREE.FrontSide,
   });
+}
+
+export function rebuildPlanetWaterMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL) {
+  mat.fragmentShader = buildWaterFragment(buildPlanetHeightGLSL(stackGLSL.body3d));
+  mat.needsUpdate = true;
 }

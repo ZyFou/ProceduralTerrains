@@ -115,6 +115,7 @@ varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
 varying float vWall;
+
 varying float vWallMesh;
 
 void main() {
@@ -131,19 +132,14 @@ void main() {
     if (uUseTiles > 0.5) {
       if (uTileShape > 0.5) {
         if (aWall > 0.5) {
-          // Dedicated radial wall: its top ring (aSkirt 0) follows the terrain
-          // silhouette at the disk perimeter, its base ring (aSkirt 1) drops to
-          // the plinth base. Shaded as the plinth wall.
+          // Dedicated radial wall: top follows the same single analytic
+          // terrain sample; the base ring drops to the plinth.
           wall = aSkirt;
           skirt = 0.0;
         } else {
-          // Disk chunk: the curved perimeter is the radial wall's job, so chunk
-          // skirts survive ONLY as LOD crack fillers — full depth, terrain
-          // coloured, no darkening, no wall shading. Suppress the drop on cell
-          // boundaries between two occupied cells (interior seams), otherwise the
-          // vertical flap reads as a dark line between tiles.
-          float interiorSeam = tileInteriorSeam(wp.xz);
-          skirt = aSkirt * (1.0 - interiorSeam);
+          // Retain both terrain-toned crack covers. Either neighbour can be
+          // the finer LOD, so fixed-side ownership can expose a T-junction.
+          skirt = aSkirt;
           wall = 0.0;
         }
       } else {
@@ -151,8 +147,7 @@ void main() {
         // space become the plinth wall; shared seams stay continuous terrain.
         vec3 tw = tileWall(wp.xz);
         float onOuter = step(0.5, tw.x);
-        float interiorSeam = tileInteriorSeam(wp.xz);
-        skirt = aSkirt * (1.0 - interiorSeam);
+        skirt = aSkirt;
         wall = aSkirt * onOuter;
         skirt *= 1.0 - onOuter;
         wp.xz += tw.yz * (wall * uWallThickness);
@@ -373,7 +368,6 @@ ${graphColorGLSL}
 ${features.surface ? SURFACE_TEXTURE_UNIFORMS_GLSL : ''}
 ${features.surface ? SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
 ${features.detail ? TERRAIN_DETAIL_GLSL : TERRAIN_DETAIL_STUB_GLSL}
-${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -528,25 +522,20 @@ float causticPattern(vec2 xz, float t, vec2 refr, float depthSpread) {
 // Project caustics onto the submerged, upward-facing sea floor. World-XZ space
 // → seamless across chunks (Tile + Infinite). Modulated by sun lighting and
 // water depth so it genuinely sits in the environment, not on the lens.
-vec3 applyTerrainCaustics(vec3 col, vec2 xz, float hC, vec3 nGeo, vec3 lightN) {
+vec3 applyTerrainCaustics(vec3 col, vec2 xz, float visibleHeight, vec3 nGeo, vec3 lightN) {
   float amt = uCausticStrength * uCausticBlend;
   if (amt < 0.001) return col;
 
-  float below = uSeaLevel - hC;          // >0 when terrain is under water
+  // Structural skirt and perimeter-wall geometry is not sea floor. Use the
+  // visible faceted height because the analytic/baked height can be submerged
+  // while a coarse rendered triangle is visibly above the water.
+  if (vSkirt > 0.0001 || vWallMesh > 0.5) return col;
+  float below = uSeaLevel - visibleHeight; // >0 only when the rendered surface is submerged
   if (below <= 0.0) return col;
-
-  // Avoid the bright caustic/water overlap on terrain that nearly intersects
-  // the surface, then ease the light back in over a user-controlled band.
-  float minDepthMask = smoothstep(
-    uCausticMinDepth,
-    uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
-    below
-  );
-  if (minDepthMask <= 0.001) return col;
 
   // shallow terrain near the shoreline catches the most light; deep fades out
   float depthFade = 1.0 - clamp(below / max(uCausticDepthFade, 1.0), 0.0, 1.0);
-  depthFade = depthFade * depthFade * minDepthMask;
+  depthFade *= depthFade;
   // upward-facing surfaces catch the light; vertical cliffs stay dark
   float upFace = clamp(nGeo.y * 1.1, 0.0, 1.0);
   upFace *= upFace;
@@ -588,7 +577,12 @@ void main() {
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
   if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
-  Climate cl = terrainCachedClimateAt(xz);
+  // Correctness path: procedural terrain shading uses the same exact climate
+  // function as terrain formation. The low-resolution climate cache introduced
+  // visible color blocks and stale biome classifications after water changes.
+  Climate cl = ${features.manual
+    ? 'terrainCachedClimateAt(xz)'
+    : 'climateAt(xz * uFrequency + uSeedOffset)'};
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz)'};
   vec4 splineMask = ${features.manual ? 'vec4(0.0)' : 'splineMaskAt(xz)'};
@@ -625,17 +619,18 @@ ${features.manual ? /* glsl */ `
   nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
 ` : /* glsl */ `
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    // Three R16F samples reconstruct height + geometric normal + concavity,
-    // replacing three full ~46-octave procedural evaluations.
+    // Stable packed bake: the centre fetch contains the exact finite-difference
+    // normal plus height. Neighbour heights remain available for concavity AO.
     vec2 uv = bakedUvAt(xz);
     vec2 duv = vec2(
       uEps / max(uBakeSpan.x, 1.0),
       uEps / max(uBakeSpan.y, 1.0)
     );
-    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
-    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
-    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
-    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
+    hC = packedHeightNormal.a * uHeightScale;
+    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).a * uHeightScale;
+    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
     hC = terrainCachedHeightAt(xz);
     float normalDistance = length(cameraPosition - vWorldPos);
@@ -709,7 +704,10 @@ ${features.manual ? '' : /* glsl */ `
   vec3 surfaceBaseNormal = n;
 
   float slope = 1.0 - nGeo.y;
-  float hRel = hC - uSeaLevel;
+  // Wet/dry color classification follows the surface actually rasterized by
+  // the active LOD mesh. Using the higher-resolution bake here colored visible
+  // terrain blue when its interpolated triangle sat above the water plane.
+  float hRel = vWorldPos.y - uSeaLevel;
   float h01 = hC / max(uHeightScale, 1e-3);
 
   if (uBiomeDebug > 0.5) {
@@ -778,11 +776,10 @@ ${features.manual ? '' : /* glsl */ `
   ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
-  float cloudShadow = terrainCloudShadow(vWorldPos);
   vec3 col = terrainLighting(
     td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-    viewDir, cloudShadow
+    viewDir
   );
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
@@ -793,7 +790,7 @@ ${features.manual ? '' : /* glsl */ `
 
   // underwater caustics on the submerged sea floor (no-op when dry: the
   // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
-  col = applyTerrainCaustics(col, xz, hC, nGeo, n);
+  col = applyTerrainCaustics(col, xz, vWorldPos.y, nGeo, n);
 
   // Analysis is a lightweight branch in the existing terrain pass. It reads
   // the final height function, so paint, erosion and spline edits agree.
@@ -840,10 +837,9 @@ ${features.manual ? '' : /* glsl */ `
     col = mix(col, mergeTierColor(vLod), 0.55);
   }
 
-  // Skirts darken to read as a recessed crack filler — except in circle mode,
-  // where they exist purely to plug LOD T-junctions and must stay terrain-toned.
-  float skirtDarken = vSkirt * 0.55;
-  if (uInfiniteMode < 0.5 && uTileShape > 0.5) skirtDarken = 0.0;
+  // Crack-cover skirts retain terrain colour in every production mode.
+  // Dark flaps turn ordinary LOD covers into the long grid lines users saw.
+  float skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
@@ -868,7 +864,6 @@ ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${graphColorGLSL}
-${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uColorMode;
 uniform float uEps;
@@ -892,10 +887,9 @@ void main() {
       uEps / max(uBakeSpan.x, 1.0),
       uEps / max(uBakeSpan.y, 1.0)
     );
-    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
-    float hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
-    float hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
-    nGeo = normalize(vec3(-(hX - hC) / uEps, 1.0, -(hZ - hC) / uEps));
+    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
+    hC = packedHeightNormal.a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else
   {
     hC = vWorldPos.y;
@@ -926,7 +920,7 @@ void main() {
 
   float slope = 1.0 - nGeo.y;
   float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
-  float hRel = hC - uSeaLevel;
+  float hRel = vWorldPos.y - uSeaLevel;
 
   // banded albedo from the REAL palette uniforms so the interim look already
   // matches the user's style — the boot→full swap reads as added detail, not
@@ -944,11 +938,11 @@ void main() {
 
   vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
   float diff = max(dot(n, uSunDir), 0.0);
-  diff *= 1.0 - terrainCloudShadow(vWorldPos);
   vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
                        + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
 
-  col *= 1.0 - vSkirt * 0.55;
+  float skirtDarken = 0.0;
+  col *= 1.0 - skirtDarken;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
@@ -980,6 +974,7 @@ export function createTerrainUniforms() {
     uFrequency:      { value: 0.002 },
     uHeightScale:    { value: 420 },
     uSeaLevel:       { value: 42 },
+    uTerrainFormationSeaLevel: { value: 42 },
     uAmplitude:      { value: 1.0 },
     uStackNormalize: { value: 0.0 },
     uStackOutMin:    { value: 0.0 },
@@ -1101,21 +1096,20 @@ export function createTerrainUniforms() {
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
 
-    // Studio-mode baked height texture (shared by the studio terrain +
+    // Studio-mode packed height/normal texture (shared by the studio terrain +
     // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
     // 2D texture instead of re-evaluating the height field per pixel. The shared
     // Tile/Infinite program always declares it; uInfiniteMode keeps unbounded
     // terrain on the procedural path.
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
-    // Low-resolution procedural climate bake used by Studio water tinting.
-    // RGBA = temperature, moisture, continentalness, erosion. Region jitter is
-    // reconstructed cheaply from low-frequency noise in visible shaders.
+    // Procedural climate bake used only by Studio water tinting.
+    // RGBA = temperature, moisture, continentalness, region.
     uTerrainBiomeTex:     { value: null },
     uUseTerrainBiomeTex:  { value: 0.0 },
-    // Dedicated Studio water cache. During a terrain rebuild these may point
-    // at the immediate low-resolution preview while terrain shading stays on
-    // its exact live procedural field until the final bake is complete.
+    // Dedicated Studio water cache. During a rebuild the Engine disables these
+    // bindings and hides Studio water; the matching final height + climate
+    // textures are then published together.
     uWaterTerrainHeightTex:   { value: null },
     uWaterTerrainBiomeTex:    { value: null },
     uUseWaterTerrainBiomeTex: { value: 0.0 },
@@ -1258,6 +1252,7 @@ export function createTerrainMaterial(
     extensions: { derivatives: true },
   });
   material.userData.terrainVariant = variant;
+  material.userData.heightProgramSig = stackGLSL.sig;
   return material;
 }
 
@@ -1289,6 +1284,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = true;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   return mat;
 }
 
@@ -1309,6 +1305,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   );
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.userData.terrainVariant = variant;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;
   mat.needsUpdate = true;
@@ -1322,5 +1319,6 @@ export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   mat.vertexShader = buildVertex(h);
   mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = true;
+  mat.userData.heightProgramSig = stackGLSL.sig;
   mat.needsUpdate = true;
 }

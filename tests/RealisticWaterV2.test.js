@@ -59,6 +59,20 @@ describe('Realistic Water Surface V2', () => {
     expect(material.fragmentShader).toContain(
       'vec3 sceneTransmittance = mix',
     );
+    expect(material.fragmentShader).toContain(
+      'float depth = uSeaLevel - floorH',
+    );
+    expect(material.fragmentShader).toContain('if (depth <= 0.02) discard;');
+    expect(material.fragmentShader).toContain(
+      'if (uUseWaterTerrainBiomeTex > 0.5)',
+    );
+    expect(material.fragmentShader).toContain(
+      'Climate climate = climateAt(xz * uFrequency + uSeedOffset)',
+    );
+    expect(material.fragmentShader).toContain(
+      'vec2 screenUv = gl_FragCoord.xy * uSceneViewportInv',
+    );
+    expect(material.fragmentShader).not.toContain('vClipPosition');
 
     applyRealisticWaterUniforms(material, {
       waterRefractionQuality: 0.8,
@@ -143,12 +157,12 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
-  it('fades caustics in after a configurable minimum water depth', () => {
+  it('keeps caustics visible through the shallow-water band', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
 
-    expect(material.fragmentShader).toContain('float minDepthMask = smoothstep');
+    expect(material.fragmentShader).not.toContain('float minDepthMask = smoothstep');
     expect(material.fragmentShader).toContain(
-      'uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001)',
+      'float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;',
     );
     applyRealisticWaterUniforms(material, {
       waterUnderwaterCausticMinDepth: 2.5,

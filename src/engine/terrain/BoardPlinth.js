@@ -10,6 +10,7 @@ import * as THREE from 'three';
 
 const PLINTH_COLOR = 0x231e19;
 const OUTSET = 0.35;   // default; Engine passes the wall flare so the box caps it
+export const MAX_DISK_BOUNDARY_SEGMENTS = 8192;
 
 export function createBoardPlinthMaterial() {
   return new THREE.MeshStandardMaterial({
@@ -161,9 +162,16 @@ export function buildTileAssemblyPlinthGeometry(cells, cellSize, skirtDepth, top
 // height shader, so its top follows the island/mountain silhouette. There is
 // deliberately no top cap (a cap below sea level shows through lakes as a dark
 // floor).
-export function buildCircularPlinthGeometry(radius, skirtDepth) {
+export function resolveDiskBoundarySegments(radius, targetEdge) {
+  const circumference = Math.PI * 2 * Math.max(0, Number(radius) || 0);
+  const raw = Math.ceil(circumference / Math.max(1, Number(targetEdge) || 1));
+  const aligned = Math.ceil(raw / 4) * 4;
+  return Math.max(96, Math.min(MAX_DISK_BOUNDARY_SEGMENTS, aligned));
+}
+
+export function buildCircularPlinthGeometry(radius, skirtDepth, segments = 96) {
   const baseY = -skirtDepth;
-  const bottom = new THREE.CircleGeometry(radius, 96);
+  const bottom = new THREE.CircleGeometry(radius, Math.max(16, Math.round(segments)));
   bottom.rotateX(-Math.PI / 2);
   bottom.translate(0, baseY, 0);
   return bottom;

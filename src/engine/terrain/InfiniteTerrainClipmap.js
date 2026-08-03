@@ -55,6 +55,7 @@ export class InfiniteTerrainClipmap {
     octaves,
     stackGLSL = DEFAULT_STACK_GLSL,
     resolutions = [512, 384, 256],
+    requirePrepared = false,
   }) {
     this.renderer = renderer;
     this.uniforms = uniforms;
@@ -64,6 +65,7 @@ export class InfiniteTerrainClipmap {
     this.queue = [];
     this.generation = -1;
     this._disposed = false;
+    this._requirePrepared = requirePrepared;
 
     const maxSpan = this.chunkSize * (this.viewRadius * 2 + 4);
     const spans = [
@@ -98,9 +100,22 @@ export class InfiniteTerrainClipmap {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.Camera();
-    this.material = new THREE.ShaderMaterial({
+    this.material = this._makeProgramMaterial(octaves, stackGLSL);
+    this._octaves = octaves;
+    this._stackSig = stackGLSL.heightSig || stackGLSL.sig;
+    this._programSerial = 0;
+    this._programPrepared = false;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
+    this.mesh.frustumCulled = false;
+    this.scene.add(this.mesh);
+    uniforms.uUseInfiniteFieldCache.value = 1;
+    this._publishReady();
+  }
+
+  _makeProgramMaterial(octaves, stackGLSL) {
+    return new THREE.ShaderMaterial({
       uniforms: {
-        ...uniforms,
+        ...this.uniforms,
         uClipBakeOrigin: { value: new THREE.Vector2() },
         uClipBakeSpan: { value: new THREE.Vector2(1, 1) },
       },
@@ -110,23 +125,38 @@ export class InfiniteTerrainClipmap {
       depthTest: false,
       depthWrite: false,
     });
-    this._octaves = octaves;
-    this._stackSig = stackGLSL.sig;
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
-    this.mesh.frustumCulled = false;
-    this.scene.add(this.mesh);
-    uniforms.uUseInfiniteFieldCache.value = 1;
-    this._publishReady();
   }
 
-  setProgram(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
-    if (this._disposed) return false;
-    if (this._octaves === octaves && this._stackSig === stackGLSL.sig) return false;
-    this._octaves = octaves;
-    this._stackSig = stackGLSL.sig;
-    this.material.defines.OCTAVES = octaves;
-    this.material.fragmentShader = buildFragment(buildHeightGLSL(stackGLSL.body2d));
-    this.material.needsUpdate = true;
+  prepareProgram(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+    if (this._disposed) return null;
+    const serial = ++this._programSerial;
+    const programSig = stackGLSL.heightSig || stackGLSL.sig;
+    const current = this._programPrepared
+      && this._octaves === octaves
+      && this._stackSig === programSig;
+    if (current) return { serial, current: true, octaves, stackSig: programSig, passes: [] };
+    const material = this._makeProgramMaterial(octaves, stackGLSL);
+    return {
+      serial, current: false, material, octaves, stackSig: programSig,
+      passes: [{
+        scene: this.scene, camera: this.camera, mesh: this.mesh, material,
+        renderTarget: this.levels[0]?.target ?? null,
+      }],
+    };
+  }
+
+  publishPrepared(handle) {
+    if (!handle || this._disposed || handle.serial !== this._programSerial) return false;
+    if (!handle.current) {
+      const previous = this.material;
+      this.material = handle.material;
+      this.mesh.material = this.material;
+      this._octaves = handle.octaves;
+      this._stackSig = handle.stackSig;
+      handle.published = true;
+      previous?.dispose();
+    }
+    this._programPrepared = true;
     this.generation = -1;
     this.queue.length = 0;
     for (const level of this.levels) level.ready = false;
@@ -134,6 +164,20 @@ export class InfiniteTerrainClipmap {
     return true;
   }
 
+  discardPrepared(handle) {
+    if (handle?.material && !handle.published && handle.material !== this.material) {
+      handle.material.dispose();
+    }
+  }
+
+  setProgram(octaves, stackGLSL = DEFAULT_STACK_GLSL) {
+    if (this._disposed) return false;
+    const programSig = stackGLSL.heightSig || stackGLSL.sig;
+    if (this._octaves === octaves && this._stackSig === programSig && this._programPrepared) return false;
+    const handle = this.prepareProgram(octaves, stackGLSL);
+    this.publishPrepared(handle);
+    return true;
+  }
   request(center, generation) {
     if (this._disposed) return;
     const generationChanged = generation !== this.generation;
@@ -162,6 +206,7 @@ export class InfiniteTerrainClipmap {
   }
 
   update(center, generation) {
+    if (this._disposed || (this._requirePrepared && !this._programPrepared)) return false;
     this.request(center, generation);
     if (!this.queue.length) return false;
     const index = this.queue.shift();

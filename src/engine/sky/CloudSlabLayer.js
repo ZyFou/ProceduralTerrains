@@ -304,7 +304,7 @@ export class CloudSlabLayer {
   // new program is ready). Returns a token to detect superseding rebuilds.
   _compileMaterial(material) {
     const token = ++this._compileToken;
-    if (!this._compile) return { token, promise: Promise.resolve() };
+    if (!this._compile) return { token, promise: Promise.resolve({ ready: true }) };
 
     let promise;
     try {
@@ -313,11 +313,17 @@ export class CloudSlabLayer {
       promise = Promise.reject(e);
     }
 
-    const done = promise.catch(() => {});
-    this._pendingCompile = { material, promise: done };
-    done.finally(() => {
-      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    const done = promise.then((result) => {
+      if (result?.ready === false || result?.aborted === true) {
+        throw new Error('Cloud shader did not become ready');
+      }
+      return result;
     });
+    this._pendingCompile = { material, promise: done };
+    const clearPending = () => {
+      if (this._pendingCompile?.promise === done) this._pendingCompile = null;
+    };
+    done.then(clearPending, clearPending);
 
     return { token, promise: done };
   }
@@ -343,6 +349,11 @@ export class CloudSlabLayer {
         this._warming = false;
         this._upgradeToTargetConfig();
       }
+    }, () => {
+      if (token === this._compileToken && this.material === material) {
+        this._ready = false;
+        this._warming = false;
+      }
     });
 
     return promise;
@@ -350,7 +361,7 @@ export class CloudSlabLayer {
 
   _disposeWhenSafe(material, pending) {
     if (!material) return;
-    if (pending) pending.finally(() => material.dispose());
+    if (pending) pending.then(() => material.dispose(), () => material.dispose());
     else material.dispose();
   }
 
@@ -467,7 +478,7 @@ export class CloudSlabLayer {
       this.material = next;
       this._applyOccupancyUniforms();
       this._disposeWhenSafe(previous, pendingPrevious);
-    });
+    }, () => next.dispose());
   }
 
   update(dt, cameraPos, sunDir) {

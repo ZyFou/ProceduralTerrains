@@ -25,6 +25,8 @@ function setMaterialCapture(material, {
   depth = null,
   width = 1,
   height = 1,
+  viewportWidth = width,
+  viewportHeight = height,
   near = 1,
   far = 50000,
   enabled = false,
@@ -37,6 +39,12 @@ function setMaterialCapture(material, {
     uniforms.uSceneTexelSize.value.set(
       1 / Math.max(width, 1),
       1 / Math.max(height, 1),
+    );
+  }
+  if (uniforms.uSceneViewportInv) {
+    uniforms.uSceneViewportInv.value.set(
+      1 / Math.max(viewportWidth, 1),
+      1 / Math.max(viewportHeight, 1),
     );
   }
   if (uniforms.uSceneNear) uniforms.uSceneNear.value = near;
@@ -100,6 +108,13 @@ export class WaterSurfacePass {
       this.deactivate(materials);
       return false;
     }
+    let viewportWidth = sceneSize?.x ?? sceneSize?.width;
+    let viewportHeight = sceneSize?.y ?? sceneSize?.height;
+    if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) {
+      const fallbackSize = renderer.getDrawingBufferSize?.(new THREE.Vector2());
+      viewportWidth = fallbackSize?.x ?? sourceTarget?.width ?? 1;
+      viewportHeight = fallbackSize?.y ?? sourceTarget?.height ?? 1;
+    }
     if (sourceTarget?.texture && sourceTarget?.depthTexture) {
       this._target?.dispose();
       this._target = null;
@@ -112,6 +127,8 @@ export class WaterSurfacePass {
           depth: sourceTarget.depthTexture,
           width: sourceTarget.width,
           height: sourceTarget.height,
+          viewportWidth,
+          viewportHeight,
           near: camera.near,
           far: camera.far,
           enabled: true,
@@ -121,12 +138,9 @@ export class WaterSurfacePass {
     }
     this._sharedSource = null;
 
-    const fallbackSize = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const sourceWidth = sceneSize?.x ?? sceneSize?.width ?? fallbackSize.x;
-    const sourceHeight = sceneSize?.y ?? sceneSize?.height ?? fallbackSize.y;
     const size = resolveWaterSurfacePassSize({
-      width: sourceWidth,
-      height: sourceHeight,
+      width: viewportWidth,
+      height: viewportHeight,
       renderScale: params?.waterRenderScale ?? 1,
     });
     this._ensureTarget(size.width, size.height);
@@ -159,6 +173,8 @@ export class WaterSurfacePass {
         depth: this._target.depthTexture,
         width: this._target.width,
         height: this._target.height,
+        viewportWidth,
+        viewportHeight,
         near: camera.near,
         far: camera.far,
         enabled: true,

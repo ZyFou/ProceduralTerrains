@@ -215,6 +215,55 @@ describe('stage 1 runtime stability', () => {
     material.dispose();
   });
 
+  it('keeps circular boundary chunks at a stable configured LOD and prevents boundary nodes from folding', () => {
+    const scene = new THREE.Scene();
+    const material = new THREE.MeshBasicMaterial();
+    const board = new TerrainBoard(scene, material);
+    board.build({
+      chunkCount: 4,
+      chunkSize: 10,
+      maxHeight: 100,
+      skirtDepth: 20,
+      cells: [{ cx: 0, cz: 0 }],
+      progressive: false,
+    });
+    const boundary = { x: 0, z: 0, radius: 15, lod: 2 };
+    expect(board.setCircularBoundary(boundary)).toBe(true);
+    expect(board.setCircularBoundary({ ...boundary })).toBe(false);
+    expect(board.setCircularBoundary({ ...boundary, lod: 1 })).toBe(true);
+    expect(board.setCircularBoundary({ ...boundary, lod: 1 })).toBe(false);
+    expect(board.setCircularBoundary(boundary)).toBe(true);
+    expect(board._circularBoundary.lod).toBe(2);
+    board.setMergeOptions({ mergeDistance: 0.5, macroEnabled: true });
+
+    board.updateLOD(new THREE.Vector3(0, 10000, 0));
+
+    const boundaryChunk = board.chunks.find(
+      (chunk) => chunk.center.x === 15 && chunk.center.z === 5,
+    );
+    const interiorChunk = board.chunks.find(
+      (chunk) => chunk.center.x === 5 && chunk.center.z === 5,
+    );
+    expect(boundaryChunk.lod).toBe(2);
+    expect(boundaryChunk.mesh.geometry).toBe(board._circularBoundaryGeometry);
+    expect(boundaryChunk.mesh.geometry).not.toBe(board.geometries[2]);
+    expect(interiorChunk.lod).toBe(3);
+    expect(interiorChunk.mesh.geometry).toBe(board.geometries[3]);
+
+    expect(board._root.full).toBe(true);
+    expect(board._straddlesCircularBoundary(
+      board._root.minX,
+      board._root.minZ,
+      board._root.spanX,
+      board._root.spanZ,
+    )).toBe(true);
+    expect(board._root.merged).toBe(false);
+    expect(board.mergedGroupCount).toBe(0);
+
+    board.dispose();
+    material.dispose();
+  });
+
   it('uses sustained FPS hysteresis and a cooldown for water quality', () => {
     const water = Object.create(WaterSystem.prototype);
     const material = {
