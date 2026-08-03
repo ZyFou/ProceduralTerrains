@@ -18,20 +18,53 @@ import { defaultLegacyStack } from '../src/engine/terrain/noise/NoiseStack.js';
 const stackGLSL = generateStackGLSL(defaultLegacyStack());
 
 describe('water startup shaders', () => {
-  it('keeps Studio water baked-only and single-pass', () => {
+  it('keeps Studio water single-pass with an exact live-terrain fallback', () => {
     const uniforms = createTerrainUniforms();
     const legacy = createWaterMaterial(uniforms, 7, stackGLSL);
     const realistic = createRealisticWaterMaterial(uniforms, 7, stackGLSL);
 
     for (const material of [legacy, realistic]) {
       expect(material.forceSinglePass).toBe(true);
-      expect(material.userData.bakedHeightOnly).toBe(true);
+      expect(material.userData.bakedHeightOnly).not.toBe(true);
+      expect(material.fragmentShader).toContain('if (uUseWaterTerrainBiomeTex > 0.5)');
       expect(material.fragmentShader).toContain('return waterBakedHeightAt(xz)');
+      expect(material.fragmentShader).toContain('return heightAt(xz)');
       expect(material.fragmentShader).toContain('uWaterTerrainHeightTex');
       expect(material.fragmentShader).not.toContain('texture2D(uTerrainHeightTex');
-      expect(material.fragmentShader).not.toContain('float heightAt(vec2 xz)');
-      expect(material.fragmentShader).not.toContain('BiomeWeights biomeWeightsAt');
+      expect(material.fragmentShader).toContain('float heightAt(vec2 xz)');
+      expect(material.fragmentShader).toContain('BiomeWeights biomeWeightsAt');
     }
+  });
+
+  it('keeps the Tile correctness path on one live terrain field', async () => {
+    const engine = Object.create(Engine.prototype);
+    const uniforms = createTerrainUniforms();
+    uniforms.uUseTerrainHeightTex.value = 1;
+    uniforms.uUseTerrainBiomeTex.value = 1;
+    uniforms.uUseWaterTerrainBiomeTex.value = 1;
+    const baker = {
+      begin: vi.fn(),
+      prepareProgram: vi.fn(),
+    };
+    Object.assign(engine, {
+      _disposed: false,
+      _studioLiveHeightField: true,
+      _debug: { disableHeightBake: false },
+      worldMode: 'studio',
+      params: { octaves: 7 },
+      uniforms,
+      terrainHeightBaker: baker,
+    });
+
+    engine._ensureTerrainHeightTex();
+
+    expect(uniforms.uUseTerrainHeightTex.value).toBe(0);
+    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
+    expect(engine._isStudioWaterBakeReady()).toBe(true);
+    await expect(engine._prepareStudioHeightCacheAsync()).resolves.toBe(true);
+    expect(baker.begin).not.toHaveBeenCalled();
+    expect(baker.prepareProgram).not.toHaveBeenCalled();
   });
 
   it('retains procedural terrain height only for Infinite water', () => {
@@ -97,7 +130,7 @@ describe('water startup shaders', () => {
     waterSystem.dispose();
   });
 
-  it('keeps an in-progress final bake private and hides stale water', () => {
+  it('keeps an in-progress final bake private while live water stays visible', () => {
     const engine = Object.create(Engine.prototype);
     const uniforms = createTerrainUniforms();
     const baker = {
@@ -133,11 +166,40 @@ describe('water startup shaders', () => {
     expect(uniforms.uWaterTerrainHeightTex.value).toBeNull();
     expect(uniforms.uWaterTerrainBiomeTex.value).toBeNull();
     expect(uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
-    expect(engine._waterDeferred).toBe(true);
-    expect(engine.water.visible).toBe(false);
+    expect(engine._waterDeferred).toBe(false);
+    expect(engine.water.visible).toBe(true);
     expect(uniforms.uUseTerrainHeightTex.value).toBe(0);
     expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
     expect(engine._needsRender).toBe(true);
+  });
+
+  it('invalidates terrain caches without hiding active Studio water', () => {
+    const engine = Object.create(Engine.prototype);
+    const uniforms = createTerrainUniforms();
+    uniforms.uUseTerrainHeightTex.value = 1;
+    uniforms.uUseTerrainBiomeTex.value = 1;
+    uniforms.uUseWaterTerrainBiomeTex.value = 1;
+    Object.assign(engine, {
+      worldMode: 'studio',
+      _terrainGen: 4,
+      _bakedStudioGen: 4,
+      _bakedTerrainGen: 4,
+      _waterDeferred: false,
+      water: { visible: true },
+      uniforms,
+      heightSampler: { invalidate: vi.fn() },
+      propSurfaceField: { invalidate: vi.fn() },
+    });
+
+    engine._markTerrainFieldDirty();
+
+    expect(engine._terrainGen).toBe(5);
+    expect(engine._bakedStudioGen).toBe(-1);
+    expect(uniforms.uUseTerrainHeightTex.value).toBe(0);
+    expect(uniforms.uUseTerrainBiomeTex.value).toBe(0);
+    expect(uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
+    expect(engine._waterDeferred).toBe(false);
+    expect(engine.water.visible).toBe(true);
   });
 
   it('keeps Studio water deferred until a generation-matched final bake is ready', async () => {
@@ -401,7 +463,8 @@ describe('water startup shaders', () => {
 
     expect(materials).toHaveLength(1);
     expect(materials[0]).not.toBe(legacy);
-    expect(materials[0].userData.bakedHeightOnly).toBe(true);
+    expect(materials[0].userData.bakedHeightOnly).not.toBe(true);
+    expect(materials[0].fragmentShader).toContain('return heightAt(xz)');
     expect(waterSystem.getEffectiveMode()).toBe('realistic');
     waterSystem.dispose();
   });
@@ -461,7 +524,7 @@ describe('water startup shaders', () => {
     engine._warmGeo.dispose();
   });
 
-  it('releases a safe frame before starting live shader work', async () => {
+  it('keeps the safe frame behind the overlay until the final terrain shader is ready', async () => {
     const engine = Object.create(Engine.prototype);
     const sceneTarget = {};
     const order = [];
@@ -508,9 +571,9 @@ describe('water startup shaders', () => {
     expect(engine._compileSceneStaggered).not.toHaveBeenCalled();
     expect(engine._resumeInitialShaderWarmup).toHaveBeenCalledWith();
     expect(order).toEqual(['placeholder']);
-    expect(engine._bootPending).toBe(false);
+    expect(engine._bootPending).toBe(true);
     expect(engine.cb.onStatus).toHaveBeenLastCalledWith('Loading terrain detail…', true);
-    expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
+    expect(engine.cb.onBootComplete).not.toHaveBeenCalled();
     expect(engine._schedulePostFirstPaintWarmups).not.toHaveBeenCalled();
   });
 
@@ -633,7 +696,7 @@ describe('water startup shaders', () => {
     expect(engine._bootTerrainVariant()).toBe('base');
   });
 
-  it('uses the watchdog as a bounded fallback after a safety frame exists', () => {
+  it('keeps the watchdog safety frame behind the overlay until final terrain is ready', () => {
     vi.useFakeTimers();
     const engine = Object.create(Engine.prototype);
     Object.assign(engine, {
@@ -657,8 +720,9 @@ describe('water startup shaders', () => {
     vi.advanceTimersByTime(7999);
     expect(engine._releaseBootFallback).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(engine._releaseBootFallback).toHaveBeenCalledWith('startup watchdog');
+    expect(engine._releaseBootFallback).not.toHaveBeenCalled();
     expect(engine._completeBootIfInteractiveReady).toHaveBeenCalledTimes(1);
+    expect(engine._bootWatchdogTimer).not.toBeNull();
     expect(engine.cb.onStatus).toHaveBeenCalledWith(
       'Still preparing full-quality terrain and water…',
       true,

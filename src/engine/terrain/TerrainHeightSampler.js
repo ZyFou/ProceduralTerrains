@@ -372,8 +372,11 @@ export class TerrainHeightSampler {
       * f(1 - bw.wetland));
     h = f(h + f(f(f(ridgeShape * mountains) * f(u.uRidge.value)) * mix32(1.15, 0.82, smoothAmt)));
 
-    // layer 5: wetlands settle just above sea level
-    const sea01 = f(f(u.uSeaLevel.value) / Math.max(f(u.uHeightScale.value), 1));
+    // layer 5: wetlands use the frozen formation baseline. Fall back to the
+    // live sea uniform only for older standalone sampler callers.
+    const formationSeaLevel = u.uTerrainFormationSeaLevel?.value
+      ?? u.uSeaLevel.value;
+    const sea01 = f(f(formationSeaLevel) / Math.max(f(u.uHeightScale.value), 1));
     h = mix32(h, f(f(sea01 + 0.012) + f(base * 0.03)), f(bw.wetland * 0.85));
 
     // layer 6: canyon strata terracing

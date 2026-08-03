@@ -32,7 +32,7 @@ function refractionMaterial() {
 }
 
 describe('performance phase 2', () => {
-  it('stores Studio height in an R16F single-channel target', () => {
+  it('stores Studio height and exact normals in a packed half-float target', () => {
     const baker = new TerrainHeightBaker({
       renderer: progressiveRenderer(),
       uniforms: {},
@@ -40,9 +40,14 @@ describe('performance phase 2', () => {
       maxSize: 64,
     });
 
-    expect(baker.target.texture.format).toBe(THREE.RedFormat);
+    expect(baker.target.texture.format).toBe(THREE.RGBAFormat);
     expect(baker.target.texture.type).toBe(THREE.HalfFloatType);
-    expect(baker.target.texture.internalFormat).toBe('R16F');
+    expect(baker.material).toBeNull();
+    baker.begin(3);
+    expect(baker.material.fragmentShader).toContain('uniform float uEps;');
+    expect(baker.material.fragmentShader).toContain(
+      'gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);',
+    );
     baker.dispose();
   });
 
@@ -55,9 +60,12 @@ describe('performance phase 2', () => {
       previewSize: 16,
     });
 
-    expect(baker.target.texture.format).toBe(THREE.RedFormat);
-    expect(baker.previewTarget.texture.format).toBe(THREE.RedFormat);
+    expect(baker.target.texture.format).toBe(THREE.RGBAFormat);
+    expect(baker.previewTarget.texture.format).toBe(THREE.RGBAFormat);
     baker.begin(3);
+    expect(baker.material.fragmentShader).toContain(
+      'gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);',
+    );
 
     for (let face = 0; face < 5; face++) {
       expect(baker.step()).toMatchObject({ updated: true, ready: false });

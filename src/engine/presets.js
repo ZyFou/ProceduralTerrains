@@ -16,6 +16,10 @@ export const DEFAULT_PARAMS = {
   // height
   heightScale: 560,        // world units (displayed as m)
   seaLevel: 100,
+  // Frozen terrain-generation baseline used by the legacy wetland recipe.
+  // The live Sea Level control moves water only; presets/new projects reset
+  // this value explicitly and project saves persist it for stable reloads.
+  terrainFormationSeaLevel: 100,
 
   // noise stack
   noiseScale: 45,          // feature scale (bigger = more features across board)
@@ -200,11 +204,31 @@ export function applyPreset(params, presetKey) {
     'rockSlopeLo', 'rockSlopeHi', 'snowSlopeMin', 'snowSlopeMax',
   ]) next[key] = DEFAULT_PARAMS[key];
   Object.assign(next, preset.params);
+  // Applying a complete terrain preset establishes a fresh formation baseline.
+  // Later Sea Level slider edits intentionally leave this value unchanged.
+  next.terrainFormationSeaLevel = next.seaLevel;
   next.preset = presetKey;
   // A preset may also declare a colour palette / noise style (e.g. Cartoon).
   // Only set these when declared so plain shape presets never clobber a palette
   // the user picked independently. Engine.applyPresetByKey applies the palette.
   if (preset.palettePreset) next.palettePreset = preset.palettePreset;
   if (preset.noisePreset) next.noisePreset = preset.noisePreset;
+  return next;
+}
+
+/**
+ * Add the frozen wetland-formation baseline to old or partially populated
+ * parameter objects. Existing projects inherit their saved water level once;
+ * documents that already contain the baseline keep it unchanged.
+ */
+export function migrateTerrainFormationParams(params, source = params) {
+  const next = { ...params };
+  const stored = source?.terrainFormationSeaLevel;
+  const savedSeaLevel = Number(source?.seaLevel ?? next.seaLevel);
+  next.terrainFormationSeaLevel = typeof stored === 'number' && Number.isFinite(stored)
+    ? stored
+    : (Number.isFinite(savedSeaLevel)
+      ? savedSeaLevel
+      : DEFAULT_PARAMS.terrainFormationSeaLevel);
   return next;
 }

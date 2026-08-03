@@ -56,7 +56,7 @@ describe('paint mode lifecycle', () => {
     expect(manager.uniforms.uPaintEnabled.value).toBe(0);
   });
 
-  it('cancels stale terrain and water caches before entering Paint Mode', () => {
+  it('cancels stale caches but keeps live terrain and water visible in Paint Mode', () => {
     const engine = Object.create(Engine.prototype);
     const paintMode = {
       state: { enabled: false },
@@ -76,6 +76,7 @@ describe('paint mode lifecycle', () => {
       water,
       uniforms: {
         uUseTerrainHeightTex: { value: 1 },
+        uUseTerrainBiomeTex: { value: 1 },
         uUseWaterTerrainBiomeTex: { value: 1 },
       },
       cb: { onToast: vi.fn() },
@@ -87,9 +88,10 @@ describe('paint mode lifecycle', () => {
     expect(engine._terrainBakeJobKey).toBeNull();
     expect(engine._bakedStudioGen).toBe(-1);
     expect(engine.uniforms.uUseTerrainHeightTex.value).toBe(0);
+    expect(engine.uniforms.uUseTerrainBiomeTex.value).toBe(0);
     expect(engine.uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
-    expect(engine._waterDeferred).toBe(true);
-    expect(water.visible).toBe(false);
+    expect(engine._waterDeferred).toBe(false);
+    expect(water.visible).toBe(true);
     expect(paintMode.setEnabled).toHaveBeenCalledWith(true);
   });
 });

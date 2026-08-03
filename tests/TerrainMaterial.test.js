@@ -47,6 +47,21 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).not.toContain('INFINITE_MODE');
   });
 
+  it('uses a frozen formation level for legacy wetland geometry', () => {
+    const uniforms = createTerrainUniforms();
+    const tile = createTerrainMaterial(uniforms, 5);
+    const planet = createPlanetMaterial(uniforms, 5);
+    materials.push(tile, planet);
+
+    expect(uniforms.uTerrainFormationSeaLevel.value).toBe(42);
+    expect(tile.vertexShader).toContain(
+      'float sea01 = uTerrainFormationSeaLevel / max(uHeightScale, 1.0);',
+    );
+    expect(planet.vertexShader).toContain(
+      'float sea01 = uTerrainFormationSeaLevel / max(uHeightScale, 1.0);',
+    );
+  });
+
   it('returns fully initialized climate structs on every cache path', () => {
     const uniforms = createTerrainUniforms();
     const material = createTerrainMaterial(uniforms, 5);
@@ -68,7 +83,41 @@ describe('shared Tile and Infinite terrain program', () => {
     );
   });
 
-  it('projects the live cloud mask into both Tile terrain shader variants', () => {
+  it('uses exact climate, packed normals, and rendered height for visible Studio shading', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    expect(material.fragmentShader).toContain(
+      'Climate cl = climateAt(xz * uFrequency + uSeedOffset);',
+    );
+    expect(material.fragmentShader).toContain(
+      'nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);',
+    );
+    expect(material.fragmentShader).toContain(
+      'hC = packedHeightNormal.a * uHeightScale;',
+    );
+    expect(material.fragmentShader).toContain(
+      'float hRel = vWorldPos.y - uSeaLevel;',
+    );
+  });
+
+  it('leaves underwater color compositing to the water pipeline', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+
+    expect(material.fragmentShader).not.toContain('if (hRel < 0.0)');
+    expect(material.fragmentShader).not.toContain('vec3 floorCol = mix');
+    expect(material.fragmentShader).not.toContain(
+      'albedo = mix(albedo, floorCol, 0.92);',
+    );
+    expect(material.fragmentShader).toContain(
+      'vec3 albedo = mix(uColSand, lowland',
+    );
+  });
+
+  it('keeps the stable direct-lighting path in both Tile terrain shader variants', () => {
     const uniforms = createTerrainUniforms();
     const full = createTerrainMaterial(uniforms, 5);
     const boot = createBootTerrainMaterial(uniforms, 5);
@@ -77,25 +126,22 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(uniforms.uTerrainCloudShadowEnabled.value).toBe(0);
     expect(uniforms.uTerrainCloudShadowStrength.value).toBeCloseTo(0.45);
     expect(uniforms.uTerrainCloudShadowTex).toBeUndefined();
-    expect(full.fragmentShader).toContain('float terrainCloudShadow(vec3 worldPos)');
-    expect(full.fragmentShader).toContain('float terrainCloudFbm(vec3 p)');
-    expect(full.fragmentShader).toContain('float cloudShadow = terrainCloudShadow(vWorldPos)');
-    expect(boot.fragmentShader).toContain('diff *= 1.0 - terrainCloudShadow(vWorldPos)');
+    expect(full.fragmentShader).not.toContain('float terrainCloudShadow(vec3 worldPos)');
+    expect(full.fragmentShader).not.toContain('float terrainCloudFbm(vec3 p)');
+    expect(full.fragmentShader).toContain('vec3 col = terrainLighting(');
+    expect(full.fragmentShader).not.toContain('cloudShadow');
+    expect(boot.fragmentShader).not.toContain('terrainCloudShadow(vWorldPos)');
   });
 
-  it('keeps terrain caustics clear of the water surface with a smooth falloff', () => {
+  it('restores visible shallow-water terrain caustics', () => {
     const uniforms = createTerrainUniforms();
     const material = createTerrainMaterial(uniforms, 5);
     materials.push(material);
 
     expect(uniforms.uCausticMinDepth.value).toBe(1);
     expect(uniforms.uCausticMinDepthFalloff.value).toBe(1);
-    expect(material.fragmentShader).toContain(
-      'uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001)',
-    );
-    expect(material.fragmentShader).toContain(
-      'depthFade = depthFade * depthFade * minDepthMask',
-    );
+    expect(material.fragmentShader).not.toContain('float minDepthMask = smoothstep');
+    expect(material.fragmentShader).toContain('depthFade *= depthFade;');
     expect(material.fragmentShader).toContain(
       'if (vSkirt > 0.0001 || vWallMesh > 0.5) return col;',
     );

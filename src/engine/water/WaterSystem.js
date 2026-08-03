@@ -311,6 +311,12 @@ export class WaterSystem {
 
   onStackRebuilt(stackGLSL, octaves) {
     const eng = this.engine;
+    if (this._realisticStudio) {
+      rebuildRealisticWaterShaderSource(this._realisticStudio, stackGLSL);
+      this._realisticStudio.defines ||= {};
+      this._realisticStudio.defines.OCTAVES = octaves;
+      this._realisticStudio.needsUpdate = true;
+    }
     // Infinite World always uses the Classic stack. Studio Nodes may call this
     // hook with graph-only GLSL while an Infinite realistic material is retained
     // across mode teardown, so never publish that graph source into this cache.
@@ -352,6 +358,18 @@ export class WaterSystem {
       octaves,
       stackGLSL,
       infinite: true,
+    });
+  }
+
+  /** Build a disposable Studio-water clone for an atomic terrain transition. */
+  createStudioStackWarmMaterial(stackGLSL, octaves) {
+    return createWaterMaterialForMode({
+      mode: this._effectiveMode,
+      sharedUniforms: this.engine.uniforms,
+      environmentUniforms: this.engine.proceduralSky?.uniforms,
+      octaves,
+      stackGLSL,
+      infinite: false,
     });
   }
 

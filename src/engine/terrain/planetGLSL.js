@@ -190,8 +190,9 @@ float legacyShape3D(vec3 dir) {
                   * (1.0 - bw.wetland);
   h += ridgeShape * mountains * uRidge * mix(1.15, 0.82, smoothAmt);
 
-  // layer 5: wetlands settle just above sea level
-  float sea01 = uSeaLevel / max(uHeightScale, 1.0);
+  // layer 5: wetlands settle just above the frozen formation baseline.
+  // Live Sea Level remains a water/presentation threshold.
+  float sea01 = uTerrainFormationSeaLevel / max(uHeightScale, 1.0);
   h = mix(h, sea01 + 0.012 + base * 0.03, bw.wetland * 0.85);
 
   // layer 6: canyon strata terracing

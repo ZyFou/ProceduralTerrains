@@ -368,7 +368,6 @@ ${graphColorGLSL}
 ${features.surface ? SURFACE_TEXTURE_UNIFORMS_GLSL : ''}
 ${features.surface ? SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
 ${features.detail ? TERRAIN_DETAIL_GLSL : TERRAIN_DETAIL_STUB_GLSL}
-${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -534,18 +533,9 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float visibleHeight, vec3 nGeo, vec
   float below = uSeaLevel - visibleHeight; // >0 only when the rendered surface is submerged
   if (below <= 0.0) return col;
 
-  // Avoid the bright caustic/water overlap on terrain that nearly intersects
-  // the surface, then ease the light back in over a user-controlled band.
-  float minDepthMask = smoothstep(
-    uCausticMinDepth,
-    uCausticMinDepth + max(uCausticMinDepthFalloff, 0.001),
-    below
-  );
-  if (minDepthMask <= 0.001) return col;
-
   // shallow terrain near the shoreline catches the most light; deep fades out
   float depthFade = 1.0 - clamp(below / max(uCausticDepthFade, 1.0), 0.0, 1.0);
-  depthFade = depthFade * depthFade * minDepthMask;
+  depthFade *= depthFade;
   // upward-facing surfaces catch the light; vertical cliffs stay dark
   float upFace = clamp(nGeo.y * 1.1, 0.0, 1.0);
   upFace *= upFace;
@@ -587,7 +577,12 @@ void main() {
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
   if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
-  Climate cl = terrainCachedClimateAt(xz);
+  // Correctness path: procedural terrain shading uses the same exact climate
+  // function as terrain formation. The low-resolution climate cache introduced
+  // visible color blocks and stale biome classifications after water changes.
+  Climate cl = ${features.manual
+    ? 'terrainCachedClimateAt(xz)'
+    : 'climateAt(xz * uFrequency + uSeedOffset)'};
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz)'};
   vec4 splineMask = ${features.manual ? 'vec4(0.0)' : 'splineMaskAt(xz)'};
@@ -624,17 +619,18 @@ ${features.manual ? /* glsl */ `
   nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
 ` : /* glsl */ `
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    // Three R16F samples reconstruct height + geometric normal + concavity,
-    // replacing three full ~46-octave procedural evaluations.
+    // Stable packed bake: the centre fetch contains the exact finite-difference
+    // normal plus height. Neighbour heights remain available for concavity AO.
     vec2 uv = bakedUvAt(xz);
     vec2 duv = vec2(
       uEps / max(uBakeSpan.x, 1.0),
       uEps / max(uBakeSpan.y, 1.0)
     );
-    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
-    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
-    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
-    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
+    hC = packedHeightNormal.a * uHeightScale;
+    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).a * uHeightScale;
+    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
     hC = terrainCachedHeightAt(xz);
     float normalDistance = length(cameraPosition - vWorldPos);
@@ -708,7 +704,10 @@ ${features.manual ? '' : /* glsl */ `
   vec3 surfaceBaseNormal = n;
 
   float slope = 1.0 - nGeo.y;
-  float hRel = hC - uSeaLevel;
+  // Wet/dry color classification follows the surface actually rasterized by
+  // the active LOD mesh. Using the higher-resolution bake here colored visible
+  // terrain blue when its interpolated triangle sat above the water plane.
+  float hRel = vWorldPos.y - uSeaLevel;
   float h01 = hC / max(uHeightScale, 1e-3);
 
   if (uBiomeDebug > 0.5) {
@@ -777,11 +776,10 @@ ${features.manual ? '' : /* glsl */ `
   ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
-  float cloudShadow = terrainCloudShadow(vWorldPos);
   vec3 col = terrainLighting(
     td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-    viewDir, cloudShadow
+    viewDir
   );
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
@@ -866,7 +864,6 @@ ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${graphColorGLSL}
-${TERRAIN_CLOUD_SHADOW_GLSL}
 
 uniform float uColorMode;
 uniform float uEps;
@@ -890,10 +887,9 @@ void main() {
       uEps / max(uBakeSpan.x, 1.0),
       uEps / max(uBakeSpan.y, 1.0)
     );
-    hC = texture2D(uTerrainHeightTex, uv).r * uHeightScale;
-    float hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).r * uHeightScale;
-    float hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).r * uHeightScale;
-    nGeo = normalize(vec3(-(hX - hC) / uEps, 1.0, -(hZ - hC) / uEps));
+    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
+    hC = packedHeightNormal.a * uHeightScale;
+    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else
   {
     hC = vWorldPos.y;
@@ -924,7 +920,7 @@ void main() {
 
   float slope = 1.0 - nGeo.y;
   float h01 = clamp(hC / max(uHeightScale, 1e-3), 0.0, 1.0);
-  float hRel = hC - uSeaLevel;
+  float hRel = vWorldPos.y - uSeaLevel;
 
   // banded albedo from the REAL palette uniforms so the interim look already
   // matches the user's style — the boot→full swap reads as added detail, not
@@ -942,7 +938,6 @@ void main() {
 
   vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
   float diff = max(dot(n, uSunDir), 0.0);
-  diff *= 1.0 - terrainCloudShadow(vWorldPos);
   vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
                        + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
 
@@ -979,6 +974,7 @@ export function createTerrainUniforms() {
     uFrequency:      { value: 0.002 },
     uHeightScale:    { value: 420 },
     uSeaLevel:       { value: 42 },
+    uTerrainFormationSeaLevel: { value: 42 },
     uAmplitude:      { value: 1.0 },
     uStackNormalize: { value: 0.0 },
     uStackOutMin:    { value: 0.0 },
@@ -1100,16 +1096,15 @@ export function createTerrainUniforms() {
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
 
-    // Studio-mode baked height texture (shared by the studio terrain +
+    // Studio-mode packed height/normal texture (shared by the studio terrain +
     // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
     // 2D texture instead of re-evaluating the height field per pixel. The shared
     // Tile/Infinite program always declares it; uInfiniteMode keeps unbounded
     // terrain on the procedural path.
     uTerrainHeightTex:    { value: null },
     uUseTerrainHeightTex: { value: 0.0 },
-    // Low-resolution procedural climate bake used by Studio water tinting.
-    // RGBA = temperature, moisture, continentalness, erosion. Region jitter is
-    // reconstructed cheaply from low-frequency noise in visible shaders.
+    // Procedural climate bake used only by Studio water tinting.
+    // RGBA = temperature, moisture, continentalness, region.
     uTerrainBiomeTex:     { value: null },
     uUseTerrainBiomeTex:  { value: 0.0 },
     // Dedicated Studio water cache. During a rebuild the Engine disables these

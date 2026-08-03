@@ -27,13 +27,13 @@ function heightTransitionHarness() {
     _liveHeightSourceSig: null,
     _matTrash: [],
     worldMode: 'studio',
-    params: { octaves: 6 },
+    params: { octaves: 6, waterEnabled: false },
     uniforms: {},
     terrainMaterial: liveMaterial(),
     waterMaterial: {
       ...liveMaterial(),
       defines: {},
-      userData: { bakedHeightOnly: true },
+      userData: {},
     },
     _infiniteTerrainMat: null,
     _infiniteWaterMat: null,
@@ -210,6 +210,8 @@ describe('atomic terrain height transitions', () => {
     engine.params.waterEnabled = true;
     engine._liveHeightSig = before.sig;
     engine._liveHeightSourceSig = before.heightSig;
+    engine.terrainMaterial.defines.OCTAVES = 6;
+    engine.waterMaterial.defines.OCTAVES = 6;
     engine._compileMaterialVariants = vi.fn(async () => ({ ready: true }));
 
     await engine._rebuildStackMaterialsAsync(after);
@@ -320,9 +322,9 @@ describe('atomic terrain height transitions', () => {
     expect(engine._compiling).toBe(0);
     expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
     expect(engine.terrainMaterial.defines.OCTAVES).toBe(6);
-    expect(engine.waterMaterial.defines.OCTAVES).toBeUndefined();
+    expect(engine.waterMaterial.defines.OCTAVES).toBe(6);
     expect(engine.terrainMaterial.vertexShader).toContain('graph_template_alpine_ridges');
-    expect(engine.waterMaterial.fragmentShader).toBe('old water source');
+    expect(engine.waterMaterial.fragmentShader).toContain('graph_template_alpine_ridges');
     expect(engine.terrainMaterial.vertexShader).not.toContain('graph_template_dunes_dunes');
     expect(engine.waterSystem.onStackRebuilt).toHaveBeenCalledWith(nodesProgram, 6);
   });
@@ -377,7 +379,8 @@ describe('atomic terrain height transitions', () => {
     expect(result.swapped).toBe(true);
     expect(engine._compiling).toBe(0);
     expect(engine.terrainMaterial.vertexShader).toContain('// 0: legacy (Classic Terrain)');
-    expect(engine.waterMaterial.fragmentShader).toBe('old water source');
+    expect(engine.waterMaterial.fragmentShader).toContain('// 0: legacy (Classic Terrain)');
+    expect(engine.waterMaterial.fragmentShader).not.toContain('float graph_blank_height_2d');
     expect(engine.terrainMaterial.vertexShader).not.toContain('float graph_terrain_output');
     // Each published source updates CPU sampling atomically with the shader:
     // Blank Nodes first, then the restored Classic program.

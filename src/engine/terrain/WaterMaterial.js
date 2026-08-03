@@ -78,7 +78,9 @@ void main() {
   if (waterTileOccupiedAt(xz) < 0.5) discard;
 #endif
 
-  // depth of the sea floor below this fragment (same height field as terrain)
+  // Restore the stable 1.0.0-b coastline authority: the same exact height field
+  // drives both the water wet mask and its foam/depth shading. Clamping this
+  // value made every point on the plane wet and detached foam from the relief.
   float floorH = waterTerrainHeightAt(xz);
   float depth = uSeaLevel - floorH;
   if (depth <= 0.02) discard;
@@ -102,21 +104,13 @@ void main() {
   // lighting: soft diffuse + sun glints
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float diff = max(dot(n, uSunDir), 0.0);
-  vec3 waterLight = waterResolveLighting(
-    n,
-    vec3(0.0, 1.0, 0.0),
-    diff,
-    vec3(0.55 + 0.65 * diff)
-  );
-  col *= waterLight;
+  col *= 0.55 + 0.65 * diff;
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
-  col += waterResolveSunLight(vec3(1.0, 0.95, 0.85))
-    * spec * 0.55 * uWaterReflection;
+  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
 
   // fresnel: steeper viewing angle = clearer water
   float fres = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
-  col += waterResolveSkyLight(vec3(0.30, 0.42, 0.55))
-    * fres * 0.25 * uWaterReflection;
+  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
 
   // shore foam: thin animated band where the water gets shallow.
   // Low quality skips the animated noise and keeps a plain depth band.
@@ -133,8 +127,7 @@ void main() {
     shoreDistance + shoreSoft * 1.8,
     depth + foamNoise * mix(2.4, 4.6, breakup)
   )) * foamPatch;
-  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
-  col = mix(col, litFoamColor, foam * 0.75);
+  col = mix(col, uColFoam, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 
@@ -183,11 +176,11 @@ export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEF
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, false),
     transparent: true,
+    depthTest: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
-  mat.userData.bakedHeightOnly = true;
   return mat;
 }
 
@@ -213,6 +206,7 @@ export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7, stackGL
     vertexShader: VERTEX,
     fragmentShader: buildFragment(stackGLSL, true),
     transparent: true,
+    depthTest: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     forceSinglePass: true,

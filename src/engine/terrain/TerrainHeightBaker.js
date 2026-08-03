@@ -7,7 +7,7 @@ import { defaultLegacyStack } from './noise/NoiseStack.js';
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 
 // ============================================================================
-// Studio (flat board) height baker — the 2D analog of
+// Studio (flat board) height/normal baker — the 2D analog of
 // PlanetHeightBaker. The studio terrain + water fragment shaders re-evaluate
 // the full ~46-octave height field FOR EVERY PIXEL, EVERY FRAME (the terrain
 // fragment does it three times to build the analytic normal). Whenever the
@@ -16,10 +16,13 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 //
 // This baker evaluates the field once into a 2D texture whenever it actually
 // changes (seed / shape / biome / paint edits, tracked by the engine's terrain
-// generation counter). The R16F texture stores height / heightScale in its red
-// channel. Visible shaders reconstruct geometric normals from neighbouring
-// samples, so the procedural field is evaluated once rather than three times
-// per baked texel while the target uses one quarter of the previous memory.
+// generation counter). Restore the stable packed representation used before
+// the performance passes:
+//   RGB = geometric surface normal (encoded * 0.5 + 0.5)
+//   A   = height / heightScale
+// Baking the exact finite-difference normal keeps terrain lighting identical to
+// the live field. Reconstructing it later from a filtered height-only texture
+// visibly flattened the terrain and moved material/shore signals.
 //
 // The board spans world XZ in [-uBoardHalf, uBoardHalf]; the bake maps the
 // fullscreen quad UV straight onto that range, so a later fetch by world XZ
@@ -49,12 +52,18 @@ ${heightGLSL}
 
 varying vec2 vUv;
 uniform vec4 uBakeUvTransform;
+uniform float uEps;
 
 void main() {
   vec2 bakeUv = uBakeUvTransform.xy + vUv * uBakeUvTransform.zw;
   vec2 xz = uBakeOrigin + bakeUv * max(uBakeSpan, vec2(1.0));
-  float h01 = heightAt(xz) / max(uHeightScale, 1e-3);
-  gl_FragColor = vec4(h01, 0.0, 0.0, 1.0);
+  float eps = uEps;
+  float hC = heightAt(xz);
+  float hX = heightAt(xz + vec2(eps, 0.0));
+  float hZ = heightAt(xz + vec2(0.0, eps));
+  vec3 nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  float h01 = hC / max(uHeightScale, 1e-3);
+  gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);
 }
 `;
 
@@ -79,7 +88,7 @@ void main() {
     climate.temp,
     climate.moist,
     climate.cont,
-    climate.erosion
+    climate.region
   );
 }
 `;
@@ -149,11 +158,10 @@ export class TerrainHeightBaker {
   get texture() { return this.target.texture; }
   get biomeTexture() { return this.biomeTarget.texture; }
 
-  _makeTarget(w, h, name = 'TerrainHeightR16F') {
+  _makeTarget(w, h, name = 'TerrainHeightNormalRGBA16F') {
     const target = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType,
-      format: THREE.RedFormat,
-      internalFormat: 'R16F',
+      format: THREE.RGBAFormat,
       magFilter: THREE.LinearFilter,
       minFilter: THREE.LinearFilter,
       depthBuffer: false,

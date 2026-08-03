@@ -5,6 +5,14 @@ import {
   createTerrainMaterial,
   createTerrainUniforms,
 } from '../src/engine/terrain/TerrainMaterial.js';
+import { TerrainHeightSampler } from '../src/engine/terrain/TerrainHeightSampler.js';
+import { PlanetHeightSampler } from '../src/engine/terrain/PlanetHeightSampler.js';
+import { WaterSystem } from '../src/engine/water/WaterSystem.js';
+import {
+  applyPreset,
+  DEFAULT_PARAMS,
+  migrateTerrainFormationParams,
+} from '../src/engine/presets.js';
 import {
   defaultLegacyStack,
   makeLayer,
@@ -23,6 +31,7 @@ function createParamEngine() {
       autoUpdate: true,
       seed: 10,
       seaLevel: 40,
+      terrainFormationSeaLevel: 40,
       waterOpacity: 0.8,
     },
     noiseStack: {
@@ -44,22 +53,23 @@ function createParamEngine() {
 }
 
 describe('terrain state stability', () => {
-  it('invalidates terrain for sea-level interpretation changes but not water styling', () => {
+  it('keeps the published terrain bake when sea level or water styling changes', () => {
     const engine = createParamEngine();
 
     engine.setParam('waterOpacity', 0.65);
     expect(engine._terrainGen).toBe(7);
     expect(engine._bakedStudioGen).toBe(7);
     engine.setParam('seaLevel', 55);
+    expect(engine._terrainGen).toBe(7);
+    expect(engine._bakedStudioGen).toBe(7);
+    expect(engine.params.terrainFormationSeaLevel).toBe(40);
+
+    engine.setParam('seed', 11);
     expect(engine._terrainGen).toBe(8);
     expect(engine._bakedStudioGen).toBe(-1);
 
     engine.setParam('seed', 11);
-    expect(engine._terrainGen).toBe(9);
-    expect(engine._bakedStudioGen).toBe(-1);
-
-    engine.setParam('seed', 11);
-    expect(engine._terrainGen).toBe(9);
+    expect(engine._terrainGen).toBe(8);
     expect(engine.cb.onParams).toHaveBeenCalledTimes(3);
   });
 
@@ -75,8 +85,69 @@ describe('terrain state stability', () => {
       expect.stringContaining('Pending'),
       true,
     );
-    expect(engine._terrainGen).toBe(8);
-    expect(engine._bakedStudioGen).toBe(-1);
+    expect(engine._terrainGen).toBe(7);
+    expect(engine._bakedStudioGen).toBe(7);
+  });
+
+  it('moves active Studio water immediately without deferring it', () => {
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    const engine = {
+      water,
+      _waterDeferred: false,
+      infiniteWorld: null,
+      planetWater: null,
+    };
+    const waterSystem = Object.create(WaterSystem.prototype);
+    Object.assign(waterSystem, {
+      engine,
+      _effectiveMode: 'legacy',
+    });
+
+    waterSystem._applyVisibility({ seaLevel: 72 }, 'studio');
+
+    expect(water.position.y).toBe(72);
+    expect(water.visible).toBe(true);
+    expect(engine._waterDeferred).toBe(false);
+    water.geometry.dispose();
+  });
+
+  it('keeps legacy Studio and Planet heights stable while live sea level moves', () => {
+    const uniforms = createTerrainUniforms();
+    uniforms.uTerrainFormationSeaLevel.value = 42;
+    const terrain = new TerrainHeightSampler(
+      uniforms,
+      () => ({ octaves: 7, infinite: false }),
+    );
+    const planet = new PlanetHeightSampler(uniforms, () => ({ octaves: 7 }));
+
+    const studioBefore = terrain._legacyShape2D(-1000, -1000);
+    const planetBefore = planet._legacyShape3D(0, 1, 0);
+    uniforms.uSeaLevel.value = 180;
+
+    expect(terrain._legacyShape2D(-1000, -1000)).toBe(studioBefore);
+    expect(planet._legacyShape3D(0, 1, 0)).toBe(planetBefore);
+
+    uniforms.uTerrainFormationSeaLevel.value = 180;
+    expect(terrain._legacyShape2D(-1000, -1000)).not.toBe(studioBefore);
+    expect(planet._legacyShape3D(0, 1, 0)).not.toBe(planetBefore);
+  });
+
+  it('migrates old projects and resets the formation baseline with full presets', () => {
+    const migrated = migrateTerrainFormationParams(
+      { ...DEFAULT_PARAMS, seaLevel: 73 },
+      { seaLevel: 73 },
+    );
+    expect(migrated.terrainFormationSeaLevel).toBe(73);
+
+    const persisted = migrateTerrainFormationParams(
+      { ...DEFAULT_PARAMS, seaLevel: 140, terrainFormationSeaLevel: 28 },
+      { seaLevel: 140, terrainFormationSeaLevel: 28 },
+    );
+    expect(persisted.terrainFormationSeaLevel).toBe(28);
+
+    const preset = applyPreset(persisted, 'archipelago');
+    expect(preset.terrainFormationSeaLevel).toBe(preset.seaLevel);
+    expect(preset.seaLevel).toBe(78);
   });
 
   it('keeps deferred terrain params staged while live water settings update', () => {

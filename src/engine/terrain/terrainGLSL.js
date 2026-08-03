@@ -12,6 +12,7 @@ uniform vec2  uSeedOffset;     // deterministic domain offset derived from seed
 uniform float uFrequency;      // base noise frequency (1/world units)
 uniform float uHeightScale;    // world-space height of h01 == 1.0
 uniform float uSeaLevel;       // world-space water height
+uniform float uTerrainFormationSeaLevel; // frozen wetland-generation baseline
 uniform float uAmplitude;      // overall noise strength multiplier
 uniform float uStackNormalize; // 0 = legacy clamp, 1 = remap by output min/max
 uniform float uStackOutMin;    // raw stack height mapped to 0 when normalized
@@ -233,9 +234,9 @@ float assemblyFalloff(vec2 xz) {
 }
 `;
 
-// Baked studio height texture sampling. Studio terrain + water fragment
-// shaders include this so they can replace the per-pixel ~46-octave height
-// field with a single texture2D fetch when the engine's bake is active. Infinite
+// Baked Studio height/normal texture sampling. Studio terrain + water fragment
+// shaders include this so they can replace the per-pixel height field with a
+// correctness-preserving packed lookup when the engine's bake is active. Infinite
 // terrain includes the same declarations so both modes share one GPU program;
 // uInfiniteMode keeps the unbounded world on the procedural path at runtime.
 // Studio bake covers uBakeOrigin … uBakeOrigin+uBakeSpan in world XZ.
@@ -244,7 +245,7 @@ uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
 vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
-  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).r * uHeightScale;
+  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
 }
 `;
 
@@ -300,8 +301,9 @@ float terrainCachedHeightAt(vec2 xz) {
 }
 `;
 
-// Shared climate lookup used by the visible terrain fragment. Studio consumes
-// its existing biome bake; Infinite consumes the rolling field cache.
+// Cached climate lookup retained for manual terrain and Infinite World. The
+// procedural Studio terrain uses climateAt directly so visible biome colors are
+// not quantized or stale; its climate texture is only consumed by water tinting.
 export const TERRAIN_CLIMATE_CACHE_GLSL = /* glsl */ `
 uniform sampler2D uTerrainBiomeTex;
 uniform float uUseTerrainBiomeTex;
@@ -546,9 +548,9 @@ float legacyShape2D(vec2 xz, Climate c) {
                   * (1.0 - bw.wetland);
   h += ridgeShape * mountains * uRidge * mix(1.15, 0.82, smoothAmt);
 
-  // layer 5: wetlands settle just above sea level (after amplitude so they
-  // land at the true water line)
-  float sea01 = uSeaLevel / max(uHeightScale, 1.0);
+  // layer 5: wetlands settle just above the terrain formation baseline.
+  // Live Sea Level moves only water and must not reshape existing terrain.
+  float sea01 = uTerrainFormationSeaLevel / max(uHeightScale, 1.0);
   h = mix(h, sea01 + 0.012 + base * 0.03, bw.wetland * 0.85);
 
   // layer 6: canyon/badlands strata terracing

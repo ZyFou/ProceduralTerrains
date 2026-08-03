@@ -28,7 +28,12 @@ import {
 import { EditorControls } from './EditorControls.js';
 import { FPSControls } from './FPSControls.js';
 import { Minimap } from './Minimap.js';
-import { DEFAULT_PARAMS, applyPreset, PRESETS } from './presets.js';
+import {
+  DEFAULT_PARAMS,
+  applyPreset,
+  migrateTerrainFormationParams,
+  PRESETS,
+} from './presets.js';
 import { ProceduralSky } from './sky/ProceduralSky.js';
 import { evaluateTimeOfDay } from './sky/TimeOfDay.js';
 import { resolveCloudLightingState } from './sky/CloudLightingState.js';
@@ -165,12 +170,12 @@ function yieldFrame() {
   return new Promise((resolve) => setTimeout(resolve, 16));
 }
 
-// Parameter keys that change, or change the interpretation of, the baked
-// terrain height/climate field. Sea level participates in shoreline/depth
-// classification, so a bake produced for another sea level is not coherent
-// with the live terrain and water even though the raw height values are equal.
+// Parameter keys that change the baked terrain height/climate field. Live sea
+// level is deliberately excluded: it moves water and presentation thresholds
+// without changing terrain geometry. The frozen formation level remains a true
+// terrain input because full presets/new projects may replace it.
 const TERRAIN_FIELD_KEYS = new Set([
-  'seed', 'seaLevel', 'heightScale', 'noiseScale', 'noiseStrength', 'octaves',
+  'seed', 'terrainFormationSeaLevel', 'heightScale', 'noiseScale', 'noiseStrength', 'octaves',
   'terrainSmoothing', 'persistence', 'lacunarity', 'ridge', 'warp', 'falloff', 'edgeFalloffMode',
   'moistScale', 'moistBias', 'biomeScale', 'tempBias',
   'chunkCount', 'chunkSize',
@@ -178,7 +183,7 @@ const TERRAIN_FIELD_KEYS = new Set([
 
 const REBUILD_KEYS = new Set(['chunkCount', 'chunkSize', 'planetFaceGrid']);
 const DEFERRED_TERRAIN_KEYS = new Set(
-  [...TERRAIN_FIELD_KEYS].filter((key) => key !== 'seaLevel' && !REBUILD_KEYS.has(key)),
+  [...TERRAIN_FIELD_KEYS].filter((key) => !REBUILD_KEYS.has(key)),
 );
 const STACK_COMPAT_PARAM_KEYS = new Set([
   'warp', 'ridge', 'persistence', 'lacunarity', 'octaves',
@@ -191,7 +196,10 @@ export class Engine {
     this.cb = callbacks;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
-      migrateWaterParams({ ...DEFAULT_PARAMS, ...initialParams }),
+      migrateWaterParams(migrateTerrainFormationParams(
+        { ...DEFAULT_PARAMS, ...initialParams },
+        initialParams || {},
+      )),
       initialParams || {},
     ));
     // Live Noise Stack (drives terrain shape). Migrated from params so old saves
@@ -414,6 +422,13 @@ export class Engine {
       mergeDebug: false,      // wireframe boxes around merged groups / macro proxy
       freeCamNoClip: false,
     };
+    // Correctness baseline for Tile mode. The optimized Studio height/climate
+    // cache has repeatedly allowed terrain geometry, shoreline masks and
+    // surface colour classification to observe different generations. Until a
+    // future cache implementation can prove atomic coordinate/generation
+    // parity, keep every visible Tile consumer on the same live height field.
+    // Infinite World and Planet retain their dedicated cache paths.
+    this._studioLiveHeightField = true;
     this._landingShowcase = false;
 
     this._initRenderer();
@@ -579,10 +594,15 @@ export class Engine {
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
     const oct = Math.round(this.params.octaves);
-    // Studio boots on a cheap fragment so first paint never waits on the full
-    // terrain material's Windows/ANGLE translation. The full shader upgrades in
-    // the background after the canvas is usable.
-    this.terrainMaterial = createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL);
+    // Install the requested final terrain material from the first scene frame.
+    // Shader compilation stays behind the loading overlay; users must never see
+    // a temporary low-detail terrain that changes underneath an open project.
+    this.terrainMaterial = createTerrainMaterial(
+      this.uniforms,
+      oct,
+      this._stackGLSL,
+      { variant: this._targetTerrainVariant() },
+    );
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
@@ -2213,6 +2233,10 @@ export class Engine {
     const { style, params, perf } = this.planetStyle.applyPlanetPreset(key);
     this._clearPendingTerrainParams(Object.keys(params));
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    const resetsFormationLevel = Object.hasOwn(params, 'seaLevel');
+    if (resetsFormationLevel) {
+      this.params.terrainFormationSeaLevel = this.params.seaLevel;
+    }
     if (perf && Object.keys(perf).length) {
       this.perf = sanitizePerfSettings({ ...this.perf, ...perf, preset: 'custom' });
       this.qualityPreset = this.perf.preset;
@@ -2224,7 +2248,10 @@ export class Engine {
     this.params.noisePreset = style.noisePreset;
     this.params.planetStyle = style;
     this.cb.onParams(this._paramsSnapshot());
-    const changedKeys = Object.keys(params);
+    const changedKeys = [
+      ...Object.keys(params),
+      ...(resetsFormationLevel ? ['terrainFormationSeaLevel'] : []),
+    ];
     this._afterParamChange(
       changedKeys.some((k) => REBUILD_KEYS.has(k)),
       changedKeys.some((k) => TERRAIN_FIELD_KEYS.has(k)),
@@ -2267,6 +2294,10 @@ export class Engine {
     const { style, params } = this.planetStyle.randomizePlanetPreset();
     this._clearPendingTerrainParams(Object.keys(params));
     for (const [k, v] of Object.entries(params)) this.params[k] = v;
+    const resetsFormationLevel = Object.hasOwn(params, 'seaLevel');
+    if (resetsFormationLevel) {
+      this.params.terrainFormationSeaLevel = this.params.seaLevel;
+    }
     this.params.planetPreset = style.planetPreset;
     this.params.palettePreset = style.palettePreset;
     this.params.noisePreset = style.noisePreset;
@@ -2274,7 +2305,8 @@ export class Engine {
     this.cb.onParams(this._paramsSnapshot());
     this._afterParamChange(
       false,
-      Object.keys(params).some((k) => TERRAIN_FIELD_KEYS.has(k)),
+      resetsFormationLevel
+        || Object.keys(params).some((k) => TERRAIN_FIELD_KEYS.has(k)),
     );
     this.planetStyle.applyToUniforms(this.uniforms);
     this._applyStudioFogFromStyle();
@@ -2310,13 +2342,20 @@ export class Engine {
     this._terrainGen++;
     this._bakedStudioGen = -1;
     this._bakedTerrainGen = -1;
-    // Never render Studio water against a stale terrain mask. The previous
-    // textures may stay allocated, but the mesh remains hidden until the final
-    // generation/layout-matched bake is published atomically.
-    if (this.worldMode === 'studio'
-        && this.waterMaterial) {
-      this._waterDeferred = true;
-      if (this.water) this.water.visible = false;
+    // A stale cache must never be mixed with the new terrain field. Disable it
+    // immediately, but keep the final terrain and water materials visible: both
+    // shaders evaluate the same live height program until the replacement
+    // height/climate pair is published atomically.
+    if (this.worldMode === 'studio') {
+      if (this.uniforms?.uUseTerrainHeightTex) {
+        this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      }
+      if (this.uniforms?.uUseTerrainBiomeTex) {
+        this.uniforms.uUseTerrainBiomeTex.value = 0.0;
+      }
+      if (this.uniforms?.uUseWaterTerrainBiomeTex) {
+        this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
+      }
     }
     this.heightSampler?.invalidate?.();
     this.propSurfaceField?.invalidate?.();
@@ -2978,13 +3017,19 @@ export class Engine {
       warm = [nodePreviewMaterial
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
         : createTerrainMaterial(this.uniforms, oct, sg, { variant: terrainVariant })];
-      const waterActive = this.params.waterEnabled !== false && !this._waterDeferred;
-      if ((heightSourceChanged || octavesChanged)
-          && waterActive && this.worldMode === 'infinite') {
-        warm.push(
-          this.waterSystem?.createInfiniteStackWarmMaterial?.(sg, oct)
-          ?? createInfiniteWaterMaterial(this.uniforms, oct, sg),
-        );
+      const waterActive = this.params.waterEnabled !== false;
+      if ((heightSourceChanged || octavesChanged) && waterActive) {
+        if (this.worldMode === 'infinite') {
+          warm.push(
+            this.waterSystem?.createInfiniteStackWarmMaterial?.(sg, oct)
+            ?? createInfiniteWaterMaterial(this.uniforms, oct, sg),
+          );
+        } else {
+          warm.push(
+            this.waterSystem?.createStudioStackWarmMaterial?.(sg, oct)
+            ?? createWaterMaterial(this.uniforms, oct, sg),
+          );
+        }
       }
 
       const emitProgress = (payload) => {
@@ -3092,13 +3137,18 @@ export class Engine {
           ? [this._infiniteTerrainMat, this._infiniteWaterMat]
           : [this.terrainMaterial, this.waterMaterial];
         for (const mat of liveMaterials) {
-          if (!mat || mat.userData?.bakedHeightOnly) continue;
+          if (!mat) continue;
           mat.defines ||= {};
           if (mat.defines.OCTAVES !== oct) mat.defines.OCTAVES = oct;
         }
         if (modeAtStart === 'studio') {
           if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
           else rebuildTerrainShaderSource(this.terrainMaterial, sg, { variant: terrainVariant });
+          if (heightSourceChanged
+              && this.waterMaterial
+              && !this.waterSystem?.ownsMaterial?.(this.waterMaterial)) {
+            rebuildWaterShaderSource(this.waterMaterial, sg);
+          }
         } else if (this._infiniteTerrainMat) {
           rebuildTerrainShaderSource(this._infiniteTerrainMat, sg, { variant: terrainVariant });
         }
@@ -3118,7 +3168,9 @@ export class Engine {
           this._waterMaterialWarmed = false;
           this._waterMaterialWarmIdentity = null;
         }
-        this.waterSystem?.onStackRebuilt(sg, oct);
+        if (heightSourceChanged || octavesChanged) {
+          this.waterSystem?.onStackRebuilt(sg, oct);
+        }
         if (this.heightSampler) this.heightSampler.invalidate();
         if (this.propSurfaceField) this.propSurfaceField.invalidate();
         this._applyUniforms();
@@ -3624,6 +3676,7 @@ export class Engine {
     u.uFrequency.value = (p.noiseScale * 0.1) / size;
     u.uHeightScale.value = p.heightScale;
     u.uSeaLevel.value = p.seaLevel;
+    u.uTerrainFormationSeaLevel.value = p.terrainFormationSeaLevel;
     u.uAmplitude.value = p.noiseStrength;
     u.uTerrainSmoothing.value = p.terrainSmoothing ?? 0;
     u.uPersistence.value = p.persistence;
@@ -4526,11 +4579,7 @@ export class Engine {
     this.profiler.setMetric('waterShaderCompile', this._lastWaterShaderCompile);
   }
 
-  /**
-   * Compile and render a lightweight safety frame behind the loading overlay.
-   * Release the overlay as soon as that frame is painted; terrain detail,
-   * height/climate baking, water and remaining board work continue afterward.
-   */
+  /** Compile a final-quality first frame behind the loading overlay. */
   async _warmupInitialShaders() {
     this._compiling++;
     this.cb.onStatus('Preparing first frame…', true);
@@ -4540,8 +4589,8 @@ export class Engine {
       // frame. The exact compile target is resolved later, immediately before
       // each asynchronous warm attempt.
       this._prepareCameraPipeline();
-      // Paint and release a trivial frame before starting any live shader
-      // translation. This guarantees the browser can present responsive UI.
+      // Paint a trivial safety frame before starting live shader translation.
+      // It remains behind the opaque overlay and is never a normal editor frame.
       this._bootShaderPending = true;
       const paintMs = this._renderBootPlaceholderFrame();
       this._bootFallbackFrameReady = paintMs != null;
@@ -4551,9 +4600,6 @@ export class Engine {
         + `elapsed ${(performance.now() - startedAt).toFixed(0)}ms`
       );
       this.cb.onStatus('Loading terrain detail…', true);
-      if (this._bootFallbackFrameReady) {
-        this._completeBootIfInteractiveReady('first rendered safety frame', { alreadyRendered: true });
-      }
     } catch (error) {
       console.warn('Initial safety frame failed', error);
     } finally {
@@ -4640,6 +4686,7 @@ export class Engine {
       this._initialShaderRetryCount = 0;
       this._bgWorkEnd('boot-shader');
       this._needsRender = true;
+      this._completeBootIfInteractiveReady('final terrain shader ready');
       if (this.worldMode === 'studio') {
         this._schedulePostFirstPaintWarmups(150);
       }
@@ -4673,6 +4720,7 @@ export class Engine {
     this.studioCloud?.setInScene(false);
     this._needsRender = true;
     this.cb.onToast?.('Graphics initialization failed; running in safe mode');
+    this._completeBootIfInteractiveReady('degraded graphics mode');
   }
 
 
@@ -4724,10 +4772,11 @@ export class Engine {
       if (this._disposed || !this._bootPending || !this._bootFallbackFrameReady) return;
       console.warn('[boot] interactive startup watchdog elapsed', this._bootReadinessSnapshot());
       this.cb.onStatus?.('Still preparing full-quality terrain and water…', true);
-      // The already-rendered safety frame is a bounded last resort. Optional
-      // shader, bake, water and LOD work continues behind the live canvas.
+      // Keep the safety frame behind the overlay. Performance work may take
+      // longer, but an unfinished or low-detail terrain is never a normal
+      // editor frame. Terminal shader failure has its own explicit safe mode.
       if (!this._completeBootIfInteractiveReady('startup watchdog')) {
-        this._releaseBootFallback('startup watchdog');
+        this._startBootWatchdog();
       }
     }, delayMs);
   }
@@ -4743,7 +4792,7 @@ export class Engine {
   }
 
   _completeBootIfInteractiveReady(reason = 'interactive terrain ready', { alreadyRendered = false } = {}) {
-    if (!this._bootPending || this._disposed) return false;
+    if (!this._bootPending || this._disposed || this._bootShaderPending) return false;
 
     const nodeMode = this.projectMode === 'nodes';
     const terrainReady = alreadyRendered || nodeMode || !!this.terrainMaterial;
@@ -4787,7 +4836,7 @@ export class Engine {
       || (!this.terrainMaterial?.userData?.minimalFragment
         && this.terrainMaterial?.userData?.terrainVariant === targetVariant);
     const bakeReady = nodeMode
-      || this._debug?.disableHeightBake
+      || this._usesLiveStudioHeightField()
       || (this._bakedStudioGen === this._terrainGen
         && this._bakedStudioLayout === this._studioBakeLayoutKey()
         && (this.uniforms?.uUseTerrainHeightTex?.value ?? 0) > 0.5
@@ -5263,12 +5312,18 @@ export class Engine {
 
   _isStudioWaterBakeReady() {
     if (this.worldMode !== 'studio') return true;
+    if (this._usesLiveStudioHeightField()) return true;
     return this._bakedStudioGen === this._terrainGen
       && this._bakedStudioLayout === this._studioBakeLayoutKey()
       && !this.terrainHeightBaker?.isBaking
       && this.uniforms?.uWaterTerrainHeightTex?.value != null
       && this.uniforms?.uWaterTerrainBiomeTex?.value != null
       && (this.uniforms?.uUseWaterTerrainBiomeTex?.value ?? 0) > 0.5;
+  }
+
+  _usesLiveStudioHeightField() {
+    return this._studioLiveHeightField === true
+      || this._debug?.disableHeightBake === true;
   }
 
   _scheduleWaterWarmRetry(renderTarget = null, delayMs = 250) {
@@ -5318,10 +5373,6 @@ export class Engine {
     this._terrainBakeJobKey = null;
     this._terrainHeightBakeDeferred = true;
     this._terrainHeightBakeFailed = true;
-    if (this.worldMode === 'studio' && this.waterMaterial) {
-      this._waterDeferred = true;
-      if (this.water) this.water.visible = false;
-    }
     if (this.uniforms?.uUseWaterTerrainBiomeTex) {
       this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
     }
@@ -5350,19 +5401,23 @@ export class Engine {
     const t0 = performance.now();
     if (!this._bootPending) this.cb.onStatus('Preparing water...', false);
 
-    let cacheReady = false;
-    try {
-      cacheReady = await this._prepareStudioHeightCacheAsync();
-      if (cacheReady) this._ensureTerrainHeightTex();
-    } catch (e) {
-      this._handleTerrainHeightBakeFailure(e);
+    const preparedWorldMode = this.worldMode;
+    const liveStudioField = preparedWorldMode === 'studio'
+      && this._usesLiveStudioHeightField();
+    let cacheReady = liveStudioField;
+    if (!liveStudioField) {
+      try {
+        cacheReady = await this._prepareStudioHeightCacheAsync();
+        if (cacheReady) this._ensureTerrainHeightTex();
+      } catch (e) {
+        this._handleTerrainHeightBakeFailure(e);
+      }
     }
 
     if (!cacheReady || !this._isStudioWaterBakeReady()) {
       if (!this._bootPending) this.cb.onStatus('Ready', false);
       return false;
     }
-    const preparedWorldMode = this.worldMode;
     const waterTerrainGen = this._terrainGen;
     const waterLayout = preparedWorldMode === 'studio'
       ? this._studioBakeLayoutKey() : null;
@@ -5472,11 +5527,13 @@ export class Engine {
       return false;
     }
     const waterBakeStillCurrent = preparedWorldMode !== 'studio'
-      || (this._terrainGen === waterTerrainGen
-        && this._bakedStudioGen === waterTerrainGen
-        && this._studioBakeLayoutKey() === waterLayout
-        && this._bakedStudioLayout === waterLayout
-        && this._isStudioWaterBakeReady());
+      || (liveStudioField
+        ? this._terrainGen === waterTerrainGen
+        : (this._terrainGen === waterTerrainGen
+          && this._bakedStudioGen === waterTerrainGen
+          && this._studioBakeLayoutKey() === waterLayout
+          && this._bakedStudioLayout === waterLayout
+          && this._isStudioWaterBakeReady()));
     if (!waterBakeStillCurrent) {
       // A sea/terrain/layout edit landed while the shader linked. Never let
       // that stale promise re-show water against the replacement bake.
@@ -6506,9 +6563,10 @@ export class Engine {
       this._bakedStudioGen = -1;
       this._paintWasEnabled = true;
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      if (this.uniforms.uUseTerrainBiomeTex) {
+        this.uniforms.uUseTerrainBiomeTex.value = 0.0;
+      }
       this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
-      this._waterDeferred = true;
-      if (this.water) this.water.visible = false;
     }
     this.paintMode?.setEnabled(enabled);
   }
@@ -7043,6 +7101,9 @@ export class Engine {
   }
 
   async _prepareHeightCacheProgram(mode, octaves, program) {
+    if (mode === 'studio' && this._usesLiveStudioHeightField()) {
+      return { cache: null, handle: null, result: { ready: true, live: true } };
+    }
     let cache = null;
     let handle = null;
     if (mode === 'studio') {
@@ -7080,6 +7141,10 @@ export class Engine {
 
   _prepareStudioHeightCacheAsync() {
     if (this._disposed || !this.params) return Promise.resolve(false);
+    if (this._usesLiveStudioHeightField()) {
+      this._ensureTerrainHeightTex();
+      return Promise.resolve(true);
+    }
     if (this._terrainHeightPreparePromise) return this._terrainHeightPreparePromise;
     const program = this._activeHeightProgram('studio');
     const programSig = program?.heightSig || program?.sig;
@@ -7206,6 +7271,15 @@ export class Engine {
    */
   _ensureTerrainHeightTex() {
     if (this.worldMode !== 'studio') return;
+    if (this._usesLiveStudioHeightField()) {
+      // All three switches must move together. Leaving even the climate or
+      // water cache enabled recreates the mixed-generation shoreline/colour
+      // artifacts this correctness path exists to prevent.
+      this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
+      this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
+      return;
+    }
     // Keep the last coherent full-resolution bake visible while a structural
     // height program is compiling. The matching generation is invalidated
     // atomically when the new terrain shader is ready to publish.
@@ -7220,9 +7294,8 @@ export class Engine {
     }
     if (this.paintState?.enabled) {
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
+      this.uniforms.uUseTerrainBiomeTex.value = 0.0;
       this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
-      this._waterDeferred = true;
-      if (this.water) this.water.visible = false;
       this._paintWasEnabled = true;
       return;
     }
@@ -7244,18 +7317,13 @@ export class Engine {
       );
       if (bakeId == null) {
         this._terrainHeightBakeDeferred = true;
-        this._waterDeferred = true;
-        if (this.water) this.water.visible = false;
         void this._prepareStudioHeightCacheAsync();
         return;
       }
       this._terrainHeightBakeFailed = false;
-      // No interim texture is publishable. A partial height/climate pair gives
-      // water a different shoreline per pass, so keep it hidden until final.
-      if (this.params.waterEnabled !== false && this.waterMaterial) {
-        this._waterDeferred = true;
-        if (this.water) this.water.visible = false;
-      }
+      // No interim texture is publishable. Keep both final materials visible
+      // on their shared live field until the complete height/climate pair is
+      // ready, then publish the pair atomically below.
       this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       this.uniforms.uUseTerrainBiomeTex.value = 0.0;
@@ -8446,6 +8514,7 @@ export class Engine {
     for (const key of Object.keys(DEFAULT_PARAMS)) {
       if (key in src && typeof src[key] === typeof DEFAULT_PARAMS[key]) next[key] = src[key];
     }
+    const migratedTerrainParams = migrateTerrainFormationParams(next, src);
     if (!('waterMode' in src)) {
       if (next.seaLevel <= 0.5) {
         next.waterMode = 'off';
@@ -8456,7 +8525,10 @@ export class Engine {
       }
     }
     this._clearPendingTerrainParams();
-    this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(next, src));
+    this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
+      migratedTerrainParams,
+      src,
+    ));
     this.noiseStack = migrateStack(src.noiseStack);
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
@@ -8682,7 +8754,13 @@ export class Engine {
     // predates so we never end up with undefined settings.
     this._clearPendingTerrainParams();
     this.params = normalizeCloudFormation(
-      normalizeSurfaceTextureParams({ ...DEFAULT_PARAMS, ...snap.params }, snap.params),
+      normalizeSurfaceTextureParams(
+        migrateTerrainFormationParams(
+          { ...DEFAULT_PARAMS, ...snap.params },
+          snap.params,
+        ),
+        snap.params,
+      ),
     );
 
     // planet style lives nested in params — re-import so the style manager and
@@ -8893,6 +8971,7 @@ export class Engine {
         this.params = patchParamsFromDefaults(this.params, [...TERRAIN_RESET_KEYS, ...EROSION_RESET_KEYS]);
         this.params.seed = keepSeed;
         this.params.preset = 'highlands';
+        this.params.terrainFormationSeaLevel = this.params.seaLevel;
         const { params: noisePatch } = this.planetStyle.applyNoisePreset('default');
         this.params.noisePreset = 'default';
         for (const [k, v] of Object.entries(noisePatch)) this.params[k] = v;
