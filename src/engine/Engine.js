@@ -81,7 +81,7 @@ import { ManualTerrainModeManager } from '../manual/ManualTerrainModeManager.js'
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { FlatPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
-import { migrateWaterParams, resolveEffectiveWaterMode, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode } from './water/WaterSettings.js';
+import { migrateWaterParams, resolveEffectiveWaterMode, resolveUnderwaterMode, underwaterModeFellBack, isRealisticWaterMode, isWaterActive } from './water/WaterSettings.js';
 import {
   createWaterBaselineReport,
   getWaterBaselineScene,
@@ -4799,11 +4799,20 @@ export class Engine {
     const boardReady = alreadyRendered || nodeMode
       || !this.board
       || (this.board.activeChunkCount ?? 0) > 0;
+    const landingWaterRequired = this._landingShowcase
+      && this.worldMode === 'studio'
+      && !!this.waterMaterial
+      && isWaterActive(
+        resolveEffectiveWaterMode(this.params, this.worldMode),
+        this.params.seaLevel,
+      );
     const waterSafe = alreadyRendered || nodeMode
       || this.params.waterEnabled === false
       || !this.waterMaterial
       || !this._waterDeferred
-      || (this._waterDeferred && this.water?.visible !== true);
+      || (!landingWaterRequired
+        && this._waterDeferred
+        && this.water?.visible !== true);
     if (!this._bootFallbackFrameReady || !terrainReady || !boardReady || !waterSafe) {
       this._logBootGate('waiting for interactive frame');
       return false;
@@ -5197,13 +5206,30 @@ export class Engine {
     const run = () => {
       this._postFirstPaintWarmTimer = null;
       if (this._disposed) return;
-      // The landing page only needs the already-compiled safe terrain. Height
-      // baking, water activation and full surface quality are editor work and
-      // can synchronously occupy ANGLE even when their promises are asynchronous.
-      // Re-arm the sequence when the showcase closes instead of competing with
-      // template selection and the first project launch.
+      // Water is part of the landing showcase, so prepare its requested material
+      // while the menu is open. Keep height-cache/full-surface quality work on
+      // the editor side of the transition: those jobs can synchronously occupy
+      // ANGLE even when their promises are asynchronous.
       if (this._landingShowcase) {
-        this._postFirstPaintWarmupsStarted = false;
+        const waterJob = this.params?.waterEnabled !== false
+          && this._waterDeferred
+          && this.waterMaterial
+          ? this._warmDeferredWater(renderTarget)
+          : false;
+        Promise.resolve(waterJob).catch((error) => {
+          console.warn('Landing water warmup failed', error);
+        }).finally(() => {
+          if (this._disposed) return;
+          this._postFirstPaintWarmupsStarted = false;
+          this._needsRender = true;
+          // The menu may have closed while the water program was linking. In
+          // that case resume the editor-only cache/quality sequence now because
+          // setLandingShowcase(false) could not schedule it while this job owned
+          // the warmup gate.
+          if (!this._landingShowcase) {
+            this._schedulePostFirstPaintWarmups(100, renderTarget);
+          }
+        });
         return;
       }
       // Shader translation and the first height-cache pass may still occupy the

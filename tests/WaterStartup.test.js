@@ -646,6 +646,7 @@ describe('water startup shaders', () => {
       _bootFallbackFrameReady: true,
       _tierNotice: null,
       _waterDeferred: true,
+      _landingShowcase: false,
       projectMode: 'procedural',
       params: { waterEnabled: true },
       terrainMaterial: {
@@ -680,6 +681,48 @@ describe('water startup shaders', () => {
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
     expect(engine.cb.onBackgroundWork).toHaveBeenCalledTimes(1);
     expect(engine._startQualityWatchdog).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the landing loading mask until water is active in a rendered frame', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _bootPending: true,
+      _qualityPending: true,
+      _disposed: false,
+      _contextLost: false,
+      _bootFallbackFrameReady: true,
+      _tierNotice: null,
+      _waterDeferred: true,
+      _landingShowcase: true,
+      worldMode: 'studio',
+      projectMode: 'procedural',
+      params: { waterEnabled: true, waterMode: 'legacy', seaLevel: 100 },
+      terrainMaterial: { userData: { minimalFragment: false, terrainVariant: 'base' } },
+      waterMaterial: {},
+      water: { visible: false },
+      board: { activeChunkCount: 1 },
+      cb: {
+        onStatus: vi.fn(),
+        onBootComplete: vi.fn(),
+        onBackgroundWork: vi.fn(),
+      },
+      _bgWork: new Map(),
+      _logBootGate: vi.fn(),
+      _renderInitialStudioFrame: vi.fn(() => 1),
+      _scheduleErosionGPUWarmImport: vi.fn(),
+      _startQualityWatchdog: vi.fn(),
+    });
+
+    expect(engine._completeBootIfInteractiveReady()).toBe(false);
+    expect(engine._bootPending).toBe(true);
+    expect(engine._renderInitialStudioFrame).not.toHaveBeenCalled();
+    expect(engine.cb.onBootComplete).not.toHaveBeenCalled();
+
+    engine._waterDeferred = false;
+    engine.water.visible = true;
+    expect(engine._completeBootIfInteractiveReady()).toBe(true);
+    expect(engine._renderInitialStudioFrame).toHaveBeenCalledTimes(1);
+    expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
   });
 
   it('uses Base as the interactive boot variant on every GPU tier', () => {
@@ -1003,7 +1046,7 @@ describe('water startup shaders', () => {
       vi.useRealTimers();
     }
   });
-  it('defers optional height and water warmups while the landing showcase is active', async () => {
+  it('warms visible landing water while deferring editor-only quality work', async () => {
     vi.useFakeTimers();
     try {
       const engine = Object.create(Engine.prototype);
@@ -1012,13 +1055,23 @@ describe('water startup shaders', () => {
         _landingShowcase: true,
         _postFirstPaintWarmupsStarted: false,
         _postFirstPaintWarmTimer: null,
+        _waterDeferred: true,
+        waterMaterial: {},
+        params: { waterEnabled: true },
         projectMode: 'nodes',
+        _warmDeferredWater: vi.fn(async () => true),
+        _prepareStudioHeightCacheAsync: vi.fn(),
+        _scheduleTerrainQualityUpgrade: vi.fn(),
         _completeBootIfInteractiveReady: vi.fn(),
         _completeBootIfQualityReady: vi.fn(),
       });
 
       engine._schedulePostFirstPaintWarmups(0);
       await vi.runAllTimersAsync();
+      await Promise.resolve();
+      expect(engine._warmDeferredWater).toHaveBeenCalledTimes(1);
+      expect(engine._prepareStudioHeightCacheAsync).not.toHaveBeenCalled();
+      expect(engine._scheduleTerrainQualityUpgrade).not.toHaveBeenCalled();
       expect(engine._postFirstPaintWarmupsStarted).toBe(false);
       expect(engine._completeBootIfQualityReady).not.toHaveBeenCalled();
 
