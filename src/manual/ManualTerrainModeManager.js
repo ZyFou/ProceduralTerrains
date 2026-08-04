@@ -9,8 +9,11 @@ import {
   getManualSurfaceMaterial,
 } from './ManualSurfaceCatalog.js';
 import {
+  MAX_MANUAL_SHAPE_LAYERS,
+  createManualShapeLayer,
   createManualShape,
   getManualShapeDefinition,
+  normalizeManualShapeLayer,
   normalizeManualShape,
   normalizeManualTerrainDocument,
 } from './ManualShapeCatalog.js';
@@ -74,6 +77,10 @@ function cloneShapes(shapes) {
     position: { ...shape.position },
     scale: { ...shape.scale },
     mask: { ...shape.mask },
+    layers: (shape.layers || []).map((layer) => ({
+      ...layer,
+      params: { ...layer.params },
+    })),
   }));
 }
 
@@ -460,6 +467,100 @@ export class ManualTerrainModeManager {
     return next;
   }
 
+  _commitShapeLayers(shapeIndex, layers, label) {
+    if (shapeIndex < 0 || shapeIndex >= this.shapes.length) return null;
+    const current = this.shapes[shapeIndex];
+    const next = normalizeManualShape({ ...current, layers }, shapeIndex);
+    this.shapes[shapeIndex] = next;
+    this._rebuildTerrain();
+    this._syncVisuals();
+    this._emit({ terrainChanged: true, documentChanged: true, label });
+    this.onStableAction?.(label);
+    return next;
+  }
+
+  addShapeLayer(shapeId, type) {
+    const shapeIndex = this.shapes.findIndex((shape) => shape.id === shapeId);
+    if (shapeIndex < 0) return null;
+    const shape = this.shapes[shapeIndex];
+    if (shape.layers.length >= MAX_MANUAL_SHAPE_LAYERS) {
+      this.onToast?.(`A shape can contain up to ${MAX_MANUAL_SHAPE_LAYERS} modifier layers`);
+      return null;
+    }
+    const layer = createManualShapeLayer(type, { seedOffset: shape.seed + shape.layers.length * 1013 });
+    this._commitShapeLayers(shapeIndex, [...shape.layers, layer], `Added ${layer.name} to ${shape.name}`);
+    return layer;
+  }
+
+  updateShapeLayer(shapeId, layerId, patch = {}) {
+    const shapeIndex = this.shapes.findIndex((shape) => shape.id === shapeId);
+    if (shapeIndex < 0) return null;
+    const shape = this.shapes[shapeIndex];
+    const layerIndex = shape.layers.findIndex((layer) => layer.id === layerId);
+    if (layerIndex < 0) return null;
+    const current = shape.layers[layerIndex];
+    const nextLayer = normalizeManualShapeLayer({
+      ...current,
+      ...patch,
+      params: { ...current.params, ...(patch.params || {}) },
+    }, layerIndex);
+    const layers = shape.layers.map((layer, index) => index === layerIndex ? nextLayer : layer);
+    this._commitShapeLayers(shapeIndex, layers, `Updated ${nextLayer.name} on ${shape.name}`);
+    return nextLayer;
+  }
+
+  deleteShapeLayer(shapeId, layerId) {
+    const shapeIndex = this.shapes.findIndex((shape) => shape.id === shapeId);
+    if (shapeIndex < 0) return false;
+    const shape = this.shapes[shapeIndex];
+    const layer = shape.layers.find((candidate) => candidate.id === layerId);
+    if (!layer) return false;
+    this._commitShapeLayers(
+      shapeIndex,
+      shape.layers.filter((candidate) => candidate.id !== layerId),
+      `Deleted ${layer.name} from ${shape.name}`,
+    );
+    return true;
+  }
+
+  duplicateShapeLayer(shapeId, layerId) {
+    const shapeIndex = this.shapes.findIndex((shape) => shape.id === shapeId);
+    if (shapeIndex < 0) return null;
+    const shape = this.shapes[shapeIndex];
+    if (shape.layers.length >= MAX_MANUAL_SHAPE_LAYERS) {
+      this.onToast?.(`A shape can contain up to ${MAX_MANUAL_SHAPE_LAYERS} modifier layers`);
+      return null;
+    }
+    const layerIndex = shape.layers.findIndex((layer) => layer.id === layerId);
+    if (layerIndex < 0) return null;
+    const source = shape.layers[layerIndex];
+    const copy = createManualShapeLayer(source.type, {
+      ...source,
+      id: undefined,
+      name: `${source.name} Copy`,
+      seedOffset: source.seedOffset + 1,
+      params: { ...source.params },
+    });
+    const layers = [...shape.layers];
+    layers.splice(layerIndex + 1, 0, copy);
+    this._commitShapeLayers(shapeIndex, layers, `Duplicated ${source.name} on ${shape.name}`);
+    return copy;
+  }
+
+  moveShapeLayer(shapeId, layerId, direction) {
+    const shapeIndex = this.shapes.findIndex((shape) => shape.id === shapeId);
+    if (shapeIndex < 0) return false;
+    const shape = this.shapes[shapeIndex];
+    const layerIndex = shape.layers.findIndex((layer) => layer.id === layerId);
+    const nextIndex = Math.max(0, Math.min(shape.layers.length - 1, layerIndex + Math.sign(direction)));
+    if (layerIndex < 0 || nextIndex === layerIndex) return false;
+    const layers = [...shape.layers];
+    const [layer] = layers.splice(layerIndex, 1);
+    layers.splice(nextIndex, 0, layer);
+    this._commitShapeLayers(shapeIndex, layers, `Reordered ${layer.name} on ${shape.name}`);
+    return true;
+  }
+
   selectShape(id, { requestInspector = false } = {}) {
     const nextId = this.shapes.some((shape) => shape.id === id) ? id : null;
     if (nextId && this.sculpt.enabled) this.setSculptEnabled(false, { silent: true });
@@ -533,7 +634,7 @@ export class ManualTerrainModeManager {
 
   serialize({ includeSculpt = true, includeSurface = true } = {}) {
     return {
-      version: 3,
+      version: 4,
       shapes: cloneShapes(this.shapes),
       ...(includeSculpt ? { sculpt: this.field.serializeSculpt() } : {}),
       ...(includeSurface ? { surfacePaint: this.surfaceField.serialize() } : {}),

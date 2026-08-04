@@ -2111,6 +2111,11 @@ export default function App() {
               onDelete={(id) => engine().deleteManualShape(id)}
               onDuplicate={(id) => engine().duplicateManualShape(id)}
               onReorder={(id, direction) => engine().moveManualShape(id, direction)}
+              onAddShapeLayer={(shapeId, type) => engine().addManualShapeLayer(shapeId, type)}
+              onUpdateShapeLayer={(shapeId, layerId, patch) => engine().updateManualShapeLayer(shapeId, layerId, patch)}
+              onDeleteShapeLayer={(shapeId, layerId) => engine().deleteManualShapeLayer(shapeId, layerId)}
+              onDuplicateShapeLayer={(shapeId, layerId) => engine().duplicateManualShapeLayer(shapeId, layerId)}
+              onReorderShapeLayer={(shapeId, layerId, direction) => engine().moveManualShapeLayer(shapeId, layerId, direction)}
               onSculptEnabled={(enabled) => {
                 setActivePanel(null);
                 engine().setManualSculptEnabled(enabled);

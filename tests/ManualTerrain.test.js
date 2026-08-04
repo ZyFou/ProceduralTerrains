@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
+  createManualShapeLayer,
   createManualShape,
   evaluateManualShape,
   evaluateManualTerrain,
@@ -69,7 +70,7 @@ describe('Manual Terrain shapes', () => {
         seed: -5,
       }],
     });
-    expect(document.version).toBe(3);
+    expect(document.version).toBe(4);
     expect(document.surfacePaint).toBeNull();
     expect(document.shapes).toHaveLength(1);
     expect(document.shapes[0]).toMatchObject({
@@ -84,8 +85,55 @@ describe('Manual Terrain shapes', () => {
       sharpness: 1,
       terraces: 0,
       mask: { type: 'none', invert: false, feather: 0.32, strength: 1 },
+      layers: [],
       seed: 0,
     });
+  });
+
+  it('applies ordered modifier layers only inside their owning shape', () => {
+    const base = createManualShape('mountain', { x: 0, z: 0 }, {
+      id: 'layered-mountain', seed: 42, detail: 0, height: 240, scale: { x: 120, z: 120 },
+    });
+    const detailLayer = createManualShapeLayer('detail', {
+      id: 'detail-layer', seedOffset: 77,
+      params: { strength: 0.85, scale: 9, roughness: 0.7 },
+    });
+    const terraceLayer = createManualShapeLayer('terraces', {
+      id: 'terrace-layer', seedOffset: 91,
+      params: { strength: 1, steps: 5, softness: 0 },
+    });
+    const sample = { x: 31, z: 17 };
+    const baseHeight = evaluateManualShape(base, sample.x, sample.z);
+    const detailed = evaluateManualShape({ ...base, layers: [detailLayer] }, sample.x, sample.z);
+    const detailThenTerrace = evaluateManualShape({ ...base, layers: [detailLayer, terraceLayer] }, sample.x, sample.z);
+    const terraceThenDetail = evaluateManualShape({ ...base, layers: [terraceLayer, detailLayer] }, sample.x, sample.z);
+
+    expect(detailed).not.toBeCloseTo(baseHeight, 3);
+    expect(detailThenTerrace).not.toBeCloseTo(terraceThenDetail, 3);
+    expect(evaluateManualShape({ ...base, layers: [{ ...detailLayer, enabled: false }] }, sample.x, sample.z)).toBeCloseTo(baseHeight, 6);
+    expect(evaluateManualShape({ ...base, layers: [detailLayer] }, 500, 0)).toBe(0);
+  });
+
+  it('round-trips and clamps per-shape modifier layers', () => {
+    const document = normalizeManualTerrainDocument({
+      version: 3,
+      shapes: [{
+        id: 'layered',
+        type: 'ridge',
+        layers: [{
+          id: 'weather', type: 'weathering', opacity: 4, seedOffset: -20,
+          params: { strength: 5, scale: 100, channels: -1 },
+        }],
+      }],
+    });
+    expect(document.version).toBe(4);
+    expect(document.shapes[0].layers).toEqual([expect.objectContaining({
+      id: 'weather',
+      type: 'weathering',
+      opacity: 1,
+      seedOffset: 0,
+      params: { strength: 1, scale: 14, channels: 0 },
+    })]);
   });
 
   it('keeps sculpt strokes separate from procedural shapes and round-trips them', () => {

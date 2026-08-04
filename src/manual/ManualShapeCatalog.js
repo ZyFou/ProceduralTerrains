@@ -96,6 +96,95 @@ export const MANUAL_SHAPE_CATALOG = Object.freeze([
 
 const CATALOG_BY_ID = new Map(MANUAL_SHAPE_CATALOG.map((entry) => [entry.id, entry]));
 
+export const MAX_MANUAL_SHAPE_LAYERS = 8;
+
+export const MANUAL_SHAPE_LAYER_CATALOG = Object.freeze([
+  {
+    id: 'detail',
+    name: 'Noise Detail',
+    description: 'Adds deterministic multi-scale relief inside the selected shape.',
+    params: { strength: 0.22, scale: 6, roughness: 0.55 },
+    controls: [
+      { id: 'strength', label: 'Strength', min: 0, max: 1, step: 0.01, digits: 2 },
+      { id: 'scale', label: 'Scale', min: 1, max: 24, step: 0.25, digits: 2 },
+      { id: 'roughness', label: 'Roughness', min: 0, max: 1, step: 0.01, digits: 2 },
+    ],
+  },
+  {
+    id: 'ridges',
+    name: 'Rock Ridges',
+    description: 'Breaks the silhouette into deterministic radial rock spines.',
+    params: { strength: 0.24, frequency: 7, sharpness: 2.1 },
+    controls: [
+      { id: 'strength', label: 'Strength', min: 0, max: 1, step: 0.01, digits: 2 },
+      { id: 'frequency', label: 'Ridge Count', min: 2, max: 18, step: 1, digits: 0, integer: true },
+      { id: 'sharpness', label: 'Sharpness', min: 0.5, max: 5, step: 0.05, digits: 2 },
+    ],
+  },
+  {
+    id: 'terraces',
+    name: 'Terraces',
+    description: 'Quantizes the current profile into shelves while preserving later detail layers.',
+    params: { strength: 0.8, steps: 7, softness: 0.16 },
+    controls: [
+      { id: 'strength', label: 'Strength', min: 0, max: 1, step: 0.01, digits: 2 },
+      { id: 'steps', label: 'Steps', min: 2, max: 24, step: 1, digits: 0, integer: true },
+      { id: 'softness', label: 'Softness', min: 0, max: 1, step: 0.01, digits: 2 },
+    ],
+  },
+  {
+    id: 'weathering',
+    name: 'Weathering',
+    description: 'Carves broken drainage channels into exposed parts of the shape.',
+    params: { strength: 0.34, scale: 4, channels: 0.58 },
+    controls: [
+      { id: 'strength', label: 'Strength', min: 0, max: 1, step: 0.01, digits: 2 },
+      { id: 'scale', label: 'Feature Scale', min: 1, max: 14, step: 0.25, digits: 2 },
+      { id: 'channels', label: 'Channels', min: 0, max: 1, step: 0.01, digits: 2 },
+    ],
+  },
+]);
+
+const SHAPE_LAYER_BY_ID = new Map(MANUAL_SHAPE_LAYER_CATALOG.map((entry) => [entry.id, entry]));
+
+export function getManualShapeLayerDefinition(type) {
+  return SHAPE_LAYER_BY_ID.get(type) ?? SHAPE_LAYER_BY_ID.get('detail');
+}
+
+export function normalizeManualShapeLayer(input = {}, index = 0) {
+  const definition = getManualShapeLayerDefinition(input.type);
+  const sourceParams = input.params && typeof input.params === 'object' ? input.params : {};
+  const params = {};
+  for (const control of definition.controls) {
+    const fallback = definition.params[control.id];
+    const value = clamp(finiteNumber(sourceParams[control.id], fallback), control.min, control.max);
+    params[control.id] = control.integer ? Math.round(value) : value;
+  }
+  return {
+    id: String(input.id || `shape-layer-${index + 1}`),
+    name: String(input.name || definition.name).slice(0, 80),
+    type: definition.id,
+    enabled: input.enabled !== false,
+    opacity: clamp(finiteNumber(input.opacity, 1), 0, 1),
+    seedOffset: clamp(Math.round(finiteNumber(input.seedOffset, index * 1013)), 0, 0x7fffffff),
+    params,
+  };
+}
+
+export function createManualShapeLayer(type, overrides = {}) {
+  const definition = getManualShapeLayerDefinition(type);
+  return normalizeManualShapeLayer({
+    id: overrides.id ?? globalThis.crypto?.randomUUID?.()
+      ?? `shape-layer-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: overrides.name ?? definition.name,
+    type: definition.id,
+    enabled: overrides.enabled ?? true,
+    opacity: overrides.opacity ?? 1,
+    seedOffset: overrides.seedOffset ?? Math.floor(Math.random() * 1000000),
+    params: { ...definition.params, ...(overrides.params || {}) },
+  });
+}
+
 export function getManualShapeDefinition(type) {
   return CATALOG_BY_ID.get(type) ?? CATALOG_BY_ID.get('mountain');
 }
@@ -129,6 +218,7 @@ export function createManualShape(type, position = {}, overrides = {}) {
       feather: 0.32,
       strength: 1,
     },
+    layers: overrides.layers ?? [],
     seed,
   });
 }
@@ -138,6 +228,9 @@ export function normalizeManualShape(input = {}, index = 0) {
   const scale = input.scale && typeof input.scale === 'object' ? input.scale : {};
   const position = input.position && typeof input.position === 'object' ? input.position : {};
   const mask = input.mask && typeof input.mask === 'object' ? input.mask : {};
+  const layers = Array.isArray(input.layers)
+    ? input.layers.slice(0, MAX_MANUAL_SHAPE_LAYERS).map(normalizeManualShapeLayer)
+    : [];
   const height = Number(input.height);
   return {
     id: String(input.id || `shape-${index + 1}`),
@@ -165,6 +258,7 @@ export function normalizeManualShape(input = {}, index = 0) {
       feather: clamp(finiteNumber(mask.feather, 0.32), 0.02, 1),
       strength: clamp(finiteNumber(mask.strength, 1), 0, 1),
     },
+    layers,
     seed: clamp(Math.round(Number(input.seed) || 0), 0, 0x7fffffff),
   };
 }
@@ -175,7 +269,7 @@ export function normalizeManualTerrainDocument(input) {
     ? source.shapes.slice(0, 256).map(normalizeManualShape)
     : [];
   return {
-    version: 3,
+    version: 4,
     shapes,
     sculpt: source.sculpt && typeof source.sculpt === 'object' ? source.sculpt : null,
     surfacePaint: source.surfacePaint && typeof source.surfacePaint === 'object' ? source.surfacePaint : null,
@@ -188,6 +282,48 @@ function detailNoise(x, z, seed) {
   const b = Math.sin(x * -21.17 + z * 16.31 + s * 91.7);
   const c = Math.sin((x + z) * 34.13 + s * 17.3);
   return (a * 0.5 + b * 0.32 + c * 0.18);
+}
+
+function applyManualShapeLayers(profile, shape, x, z, radial, edge) {
+  let current = profile;
+  for (let index = 0; index < (shape.layers?.length ?? 0); index++) {
+    const layer = shape.layers[index];
+    if (layer.enabled === false || layer.opacity <= 0) continue;
+    const params = layer.params ?? {};
+    const seed = shape.seed + layer.seedOffset + index * 1619;
+    let target = current;
+
+    if (layer.type === 'detail') {
+      const scale = Math.max(1, params.scale);
+      const coarse = detailNoise(x * scale, z * scale, seed);
+      const fine = detailNoise(x * scale * 2.07, z * scale * 2.07, seed + 4099);
+      const noise = lerp(coarse, coarse * 0.62 + fine * 0.38, clamp(params.roughness, 0, 1));
+      const amplitude = params.strength * (0.1 + Math.abs(current) * 0.34) * edge;
+      target = current + noise * amplitude;
+    } else if (layer.type === 'ridges') {
+      const frequency = Math.max(2, Math.round(params.frequency));
+      const bend = detailNoise(x * 2.1, z * 2.1, seed) * 0.24;
+      const wave = Math.sin((Math.atan2(z, x) + bend) * frequency);
+      const ridge = Math.pow(Math.max(0, 1 - Math.abs(wave)), Math.max(0.5, params.sharpness));
+      const radialEnvelope = smoothstep(radial / 0.2) * edge;
+      target = current * (1 + (ridge - 0.24) * params.strength * radialEnvelope);
+    } else if (layer.type === 'terraces') {
+      const steps = Math.max(2, Math.round(params.steps));
+      const stepped = Math.round(current * steps) / steps;
+      const softened = lerp(stepped, current, clamp(params.softness, 0, 1));
+      target = lerp(current, softened, clamp(params.strength, 0, 1));
+    } else if (layer.type === 'weathering') {
+      const scale = Math.max(1, params.scale);
+      const flow = detailNoise(x * scale, z * scale, seed);
+      const channels = Math.pow(Math.max(0, 1 - Math.abs(flow)), lerp(3.2, 0.85, clamp(params.channels, 0, 1)));
+      const exposed = smoothstep(radial / 0.16) * edge;
+      const erosion = params.strength * channels * exposed * (0.08 + Math.abs(current) * 0.28);
+      target = current - Math.sign(current || 1) * Math.min(Math.abs(current) * 0.78, erosion);
+    }
+
+    current = lerp(current, target, clamp(layer.opacity, 0, 1));
+  }
+  return current;
 }
 
 function evaluateShapeMask(shape, x, z, radial) {
@@ -262,6 +398,8 @@ export function evaluateManualShapeSample(shape, worldX, worldZ) {
       break;
     }
   }
+
+  profile = applyManualShapeLayers(profile, shape, x, z, radial, edge);
 
   const signed = Math.sign(profile);
   let shapedProfile = Math.pow(Math.abs(profile), shape.sharpness ?? 1) * signed;

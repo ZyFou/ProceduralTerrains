@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -9,11 +9,13 @@ import {
   Eye,
   EyeOff,
   GripVertical,
+  Layers3,
   Mountain,
   Minus,
   MousePointer2,
   Move3D,
   Palette,
+  Plus,
   RotateCw,
   Scaling,
   SlidersHorizontal,
@@ -25,7 +27,10 @@ import {
   MANUAL_BLEND_MODES,
   MANUAL_MASK_TYPES,
   MANUAL_SHAPE_CATALOG,
+  MANUAL_SHAPE_LAYER_CATALOG,
+  MAX_MANUAL_SHAPE_LAYERS,
   getManualShapeDefinition,
+  getManualShapeLayerDefinition,
 } from '../../manual/ManualShapeCatalog.js';
 import {
   MANUAL_SURFACE_MATERIALS,
@@ -184,6 +189,11 @@ export default function ManualTerrainPanel({
   onDelete,
   onDuplicate,
   onReorder,
+  onAddShapeLayer,
+  onUpdateShapeLayer,
+  onDeleteShapeLayer,
+  onDuplicateShapeLayer,
+  onReorderShapeLayer,
   onSculptEnabled,
   onSculptSetting,
   onClearSculpt,
@@ -209,6 +219,7 @@ export default function ManualTerrainPanel({
   const inspectorWidth = 304;
   const workspaceRef = useRef(null);
   const libraryResizeRef = useRef(null);
+  const [expandedLayerId, setExpandedLayerId] = useState(null);
 
   const clampLibraryHeight = (height, target) => {
     const workspace = target?.matches?.('.manual-terrain-workspace')
@@ -272,6 +283,9 @@ export default function ManualTerrainPanel({
     window.addEventListener('resize', fitLibraryToWorkspace);
     return () => window.removeEventListener('resize', fitLibraryToWorkspace);
   }, [libraryHeight, bottomToolOffset, onLibraryHeightChange]);
+  useEffect(() => {
+    setExpandedLayerId((current) => selected?.layers?.some((layer) => layer.id === current) ? current : null);
+  }, [selected?.id, selected?.layers]);
   const positionX = { label: 'Position X', min: -half, max: half, step: 1, digits: 0, unit: 'u' };
   const positionZ = { label: 'Position Z', min: -half, max: half, step: 1, digits: 0, unit: 'u' };
   const rotation = { label: 'Rotation', min: -180, max: 180, step: 1, digits: 0, unit: 'deg' };
@@ -298,6 +312,7 @@ export default function ManualTerrainPanel({
   const textureBrushSize = { label: 'Brush Size', min: 4, max: 900, step: 2, digits: 0, unit: 'u' };
   const textureStrength = { label: 'Strength', min: 0.01, max: 1, step: 0.01, digits: 2 };
   const textureFalloff = { label: 'Edge Blend', min: 0.02, max: 1, step: 0.01, digits: 2 };
+  const layerOpacity = { label: 'Layer Opacity', min: 0, max: 1, step: 0.01, digits: 2 };
 
   const libraryStyle = {
     left: sideToolOffset('left'),
@@ -687,6 +702,90 @@ export default function ManualTerrainPanel({
                     </button>
                   </span>
                 </label>
+              </section>
+              <section className="manual-inspector-section manual-shape-layer-stack">
+                <div className="manual-shape-layer-title">
+                  <span>
+                    <h3>Shape Layers</h3>
+                    <small>{selected.layers.length} / {MAX_MANUAL_SHAPE_LAYERS}</small>
+                  </span>
+                  <label title="Add a modifier layer to this shape">
+                    <Plus size={13} aria-hidden />
+                    <select
+                      value=""
+                      disabled={selected.layers.length >= MAX_MANUAL_SHAPE_LAYERS}
+                      aria-label="Add shape modifier layer"
+                      onChange={(event) => {
+                        const layer = onAddShapeLayer?.(selected.id, event.target.value);
+                        if (layer?.id) setExpandedLayerId(layer.id);
+                      }}
+                    >
+                      <option value="">Add layer</option>
+                      {MANUAL_SHAPE_LAYER_CATALOG.map((definition) => (
+                        <option key={definition.id} value={definition.id}>{definition.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={11} aria-hidden />
+                  </label>
+                </div>
+                {selected.layers.length ? (
+                  <div className="manual-shape-layer-list">
+                    {selected.layers.map((layer, layerIndex) => {
+                      const definition = getManualShapeLayerDefinition(layer.type);
+                      const expanded = expandedLayerId === layer.id;
+                      return (
+                        <article className={`manual-shape-layer-card${expanded ? ' expanded' : ''}${layer.enabled === false ? ' disabled' : ''}`} key={layer.id}>
+                          <div className="manual-shape-layer-row">
+                            <button type="button" className="manual-shape-layer-main" onClick={() => setExpandedLayerId(expanded ? null : layer.id)} aria-expanded={expanded}>
+                              <Layers3 size={13} aria-hidden />
+                              <span><strong>{layer.name}</strong><small>{definition.name}</small></span>
+                              {expanded ? <ChevronUp size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
+                            </button>
+                            <div className="manual-shape-layer-actions">
+                              <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { enabled: layer.enabled === false })} title={layer.enabled === false ? 'Enable layer' : 'Disable layer'} aria-label={layer.enabled === false ? `Enable ${layer.name}` : `Disable ${layer.name}`}>
+                                {layer.enabled === false ? <EyeOff size={12} /> : <Eye size={12} />}
+                              </button>
+                              <button type="button" onClick={() => onDuplicateShapeLayer?.(selected.id, layer.id)} disabled={selected.layers.length >= MAX_MANUAL_SHAPE_LAYERS} title="Duplicate layer" aria-label={`Duplicate ${layer.name}`}><Copy size={12} /></button>
+                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, -1)} disabled={layerIndex === 0} title="Move layer up" aria-label={`Move ${layer.name} up`}><ChevronUp size={12} /></button>
+                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, 1)} disabled={layerIndex === selected.layers.length - 1} title="Move layer down" aria-label={`Move ${layer.name} down`}><ChevronDown size={12} /></button>
+                              <button type="button" className="danger" onClick={() => onDeleteShapeLayer?.(selected.id, layer.id)} title="Delete layer" aria-label={`Delete ${layer.name}`}><Trash2 size={12} /></button>
+                            </div>
+                          </div>
+                          {expanded ? (
+                            <div className="manual-shape-layer-editor manual-inspector-controls">
+                              <p>{definition.description}</p>
+                              <label className="manual-name-field">
+                                <span>Layer Name</span>
+                                <input value={layer.name} maxLength={80} onChange={(event) => onUpdateShapeLayer?.(selected.id, layer.id, { name: event.target.value })} />
+                              </label>
+                              <SliderCtl def={layerOpacity} value={layer.opacity} onChange={(value) => onUpdateShapeLayer?.(selected.id, layer.id, { opacity: value })} />
+                              {definition.controls.map((control) => (
+                                <SliderCtl
+                                  key={control.id}
+                                  def={control}
+                                  value={layer.params[control.id]}
+                                  onChange={(value) => onUpdateShapeLayer?.(selected.id, layer.id, { params: { [control.id]: value } })}
+                                />
+                              ))}
+                              <label className="manual-name-field">
+                                <span>Seed Offset</span>
+                                <span className="manual-seed-row">
+                                  <input type="number" min="0" max="2147483647" value={layer.seedOffset} onChange={(event) => onUpdateShapeLayer?.(selected.id, layer.id, { seedOffset: Number(event.target.value) || 0 })} />
+                                  <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { seedOffset: Math.floor(Math.random() * 0x7fffffff) })} title="Randomize layer seed" aria-label={`Randomize ${layer.name} seed`}><Dices size={14} aria-hidden /></button>
+                                </span>
+                              </label>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="manual-shape-layer-empty">
+                    <Layers3 size={16} aria-hidden />
+                    <span>Add procedural detail that stays attached to this shape.</span>
+                  </div>
+                )}
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
                 <h3>Shape Mask</h3>

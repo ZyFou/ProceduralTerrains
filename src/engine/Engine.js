@@ -6692,6 +6692,11 @@ export class Engine {
   deleteManualShape(id) { return this.manualTerrain?.deleteShape(id); }
   duplicateManualShape(id) { return this.manualTerrain?.duplicateShape(id); }
   moveManualShape(id, direction) { return this.manualTerrain?.moveShape(id, direction); }
+  addManualShapeLayer(shapeId, type) { return this.manualTerrain?.addShapeLayer(shapeId, type); }
+  updateManualShapeLayer(shapeId, layerId, patch) { return this.manualTerrain?.updateShapeLayer(shapeId, layerId, patch); }
+  deleteManualShapeLayer(shapeId, layerId) { return this.manualTerrain?.deleteShapeLayer(shapeId, layerId); }
+  duplicateManualShapeLayer(shapeId, layerId) { return this.manualTerrain?.duplicateShapeLayer(shapeId, layerId); }
+  moveManualShapeLayer(shapeId, layerId, direction) { return this.manualTerrain?.moveShapeLayer(shapeId, layerId, direction); }
   setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
   setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
   clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
@@ -8558,7 +8563,7 @@ export class Engine {
           : 1,
       },
     };
-    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 3, shapes: [], sculpt: null, surfacePaint: null };
+    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 4, shapes: [], sculpt: null, surfacePaint: null };
     const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
     if (realWorldSource) data.realWorldSource = realWorldSource;
     // Only embed paint pixel data when something was actually painted —
@@ -8788,7 +8793,7 @@ export class Engine {
       generationSource: this.generationSource,
       terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
-      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 3, shapes: [] },
+      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 4, shapes: [] },
       manualSculptRev: this.manualTerrain?.field?.sculptRevision ?? 0,
       manualSurfaceRev: this.manualTerrain?.surfaceField?.revision ?? 0,
     };
