@@ -1,7 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { COLOR_PALETTE_PRESETS } from '../engine/style/ColorPalettePresets.js';
+import {
+  COLOR_PALETTE_PRESETS,
+  TERRAIN_COLOR_PALETTE_OPTIONS,
+  TERRAIN_COLOR_PALETTE_PRESETS,
+} from '../engine/style/ColorPalettePresets.js';
 import { PLANET_GEN_TYPES } from '../engine/style/ColorPaletteGenerator.js';
 import { PALETTE_KEYS, colorToHex, parseColor } from '../engine/style/ColorPalette.js';
+import { terrainGradientCss } from '../engine/terrain/graph/TerrainGradientPresets.js';
 import { ColorInput, SliderCtl } from './controls.jsx';
 
 const COLOR_GROUPS = [
@@ -155,7 +160,12 @@ export default function ColorPalettePanel({
   const [genType, setGenType] = useState('random');
   const [genSeed, setGenSeed] = useState(() => String(terrainSeed ?? Date.now()));
   const [openGroups, setOpenGroups] = useState({ water: true, vegetation: true });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const targetId = settingsTarget?.settingId ?? null;
+  const advancedVisible = advancedOpen || Boolean(targetId);
+  const activeTerrainPalette = TERRAIN_COLOR_PALETTE_PRESETS[palettePreset];
+  const classicPalettePresets = Object.entries(COLOR_PALETTE_PRESETS)
+    .filter(([, preset]) => !preset.nodePreset);
 
   const readSeed = () => {
     const raw = seedInputRef.current?.value ?? genSeed;
@@ -214,6 +224,59 @@ export default function ColorPalettePanel({
         <span className="palette-preview-hint">{PALETTE_KEYS.length} biomes</span>
       </div>
 
+      <section className="terrain-palette-picker" aria-labelledby="terrain-palette-title">
+        <div className="terrain-palette-picker-head">
+          <div>
+            <strong id="terrain-palette-title">Terrain palettes</strong>
+            <span>Same color presets as Nodes</span>
+          </div>
+          <span className="terrain-palette-picker-count">{TERRAIN_COLOR_PALETTE_OPTIONS.length}</span>
+        </div>
+        <div className="terrain-palette-grid">
+          {TERRAIN_COLOR_PALETTE_OPTIONS.map((option) => {
+            const selected = palettePreset === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`terrain-palette-card${selected ? ' selected' : ''}`}
+                onClick={() => onPalettePreset(option.value)}
+                aria-pressed={selected}
+                title={TERRAIN_COLOR_PALETTE_PRESETS[option.value].description}
+              >
+                <span
+                  className="terrain-palette-card-swatch"
+                  style={{ background: terrainGradientCss(option.nodePreset) }}
+                  aria-hidden
+                />
+                <span className="terrain-palette-card-label">{option.label}</span>
+                <span className="terrain-palette-card-check" aria-hidden>✓</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="terrain-palette-description">
+          {activeTerrainPalette?.description
+            ?? 'Choose a terrain palette to recolor water, vegetation, rock, and snow together.'}
+        </p>
+      </section>
+
+      <button
+        type="button"
+        className="palette-advanced-toggle"
+        onClick={() => setAdvancedOpen((open) => !open)}
+        aria-expanded={advancedVisible}
+      >
+        <span>
+          <strong>Advanced colors</strong>
+          <small>Generator, custom biomes &amp; legacy palettes</small>
+        </span>
+        <svg viewBox="0 0 16 16" aria-hidden>
+          <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {advancedVisible && <div className="palette-advanced-body">
       {/* Procedural generator */}
       <div className="palette-generator">
         <div className="palette-generator-head">
@@ -306,9 +369,16 @@ export default function ColorPalettePanel({
           </span>
         </div>
         <select value={palettePreset} onChange={(e) => onPalettePreset(e.target.value)}>
-          {Object.entries(COLOR_PALETTE_PRESETS).map(([key, p]) => (
-            <option key={key} value={key}>{p.label}</option>
-          ))}
+          <optgroup label="Terrain palettes">
+            {TERRAIN_COLOR_PALETTE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Classic palettes">
+            {classicPalettePresets.map(([key, p]) => (
+              <option key={key} value={key}>{p.label}</option>
+            ))}
+          </optgroup>
           {palettePreset === 'custom' && <option value="custom">Custom</option>}
         </select>
       </div>
@@ -359,6 +429,7 @@ export default function ColorPalettePanel({
           Import
         </button>
       </div>
+      </div>}
     </div>
   );
 }

@@ -1,10 +1,85 @@
-import { clonePalette } from './ColorPalette.js';
+import { clonePalette, parseColor } from './ColorPalette.js';
+import { TERRAIN_GRADIENT_PRESETS } from '../terrain/graph/TerrainGradientPresets.js';
 
 // ============================================================================
 // Named color palettes — visual interpretation layer only; terrain shape unchanged.
 // ============================================================================
 
+function paletteFromHex(colors) {
+  return Object.fromEntries(Object.entries(colors).map(([key, value]) => [key, parseColor(value)]));
+}
+
+function terrainPalette(nodePreset, colors) {
+  const source = TERRAIN_GRADIENT_PRESETS[nodePreset];
+  return Object.freeze({
+    label: source.label,
+    description: source.description,
+    nodePreset,
+    palette: paletteFromHex(colors),
+  });
+}
+
+/**
+ * Full biome adaptations of the four-stop palettes used by Node Terrain.
+ * The node colors remain the visual anchors while water, beach, vegetation,
+ * rock and snow receive material-specific shades for the procedural shader.
+ */
+export const TERRAIN_COLOR_PALETTE_PRESETS = Object.freeze({
+  'terrain-alpine': terrainPalette('alpine', {
+    deep: '#0b1b24', shallow: '#244c58', sand: '#776f5e', dune: '#887e69',
+    dryGrass: '#6b725b', grass: '#59634e', forest: '#25362f', jungle: '#1c2c27',
+    swamp: '#314842', tundra: '#766f62', redRock: '#695a4c', redRock2: '#877363',
+    rock: '#766f62', rockHi: '#979186', snow: '#b7b0a2', foam: '#dce5e2',
+  }),
+  'terrain-temperate': terrainPalette('temperate', {
+    deep: '#0c2027', shallow: '#315763', sand: '#80745a', dune: '#918466',
+    dryGrass: '#596348', grass: '#40563b', forest: '#1e3128', jungle: '#172820',
+    swamp: '#29433a', tundra: '#746b52', redRock: '#66523f', redRock2: '#806c52',
+    rock: '#746b52', rockHi: '#918c7d', snow: '#aaa596', foam: '#d8e1dc',
+  }),
+  'terrain-arid': terrainPalette('arid', {
+    deep: '#18303a', shallow: '#42616a', sand: '#a88b68', dune: '#c0aa8b',
+    dryGrass: '#a18361', grass: '#927055', forest: '#6b5844', jungle: '#514a35',
+    swamp: '#536054', tundra: '#9d826a', redRock: '#8a5841', redRock2: '#a46c4d',
+    rock: '#8a5841', rockHi: '#a77d65', snow: '#c0aa8b', foam: '#e4ddd0',
+  }),
+  'terrain-volcanic': terrainPalette('volcanic', {
+    deep: '#080b0d', shallow: '#202a2c', sand: '#44372f', dune: '#55443a',
+    dryGrass: '#35352e', grass: '#2d302c', forest: '#171a18', jungle: '#101311',
+    swamp: '#202521', tundra: '#55443a', redRock: '#744131', redRock2: '#98523a',
+    rock: '#55443a', rockHi: '#6f685f', snow: '#928b7f', foam: '#c0b6a6',
+  }),
+  'terrain-coastal': terrainPalette('coastal', {
+    deep: '#092735', shallow: '#276273', sand: '#afa37c', dune: '#c0b58e',
+    dryGrass: '#647059', grass: '#4d6049', forest: '#34483e', jungle: '#263b32',
+    swamp: '#34534c', tundra: '#74766c', redRock: '#6b6256', redRock2: '#83796c',
+    rock: '#74766c', rockHi: '#92938a', snow: '#aaa99f', foam: '#e1e7e3',
+  }),
+  'terrain-river': terrainPalette('river', {
+    deep: '#09292f', shallow: '#28636b', sand: '#81745a', dune: '#9a8966',
+    dryGrass: '#687052', grass: '#536448', forest: '#183a38', jungle: '#12312f',
+    swamp: '#183a38', tundra: '#81745a', redRock: '#6e5947', redRock2: '#88705a',
+    rock: '#81745a', rockHi: '#8e8876', snow: '#9b9b91', foam: '#d5e2df',
+  }),
+  'terrain-canyon': terrainPalette('canyon', {
+    deep: '#162c35', shallow: '#3d6670', sand: '#b98c5f', dune: '#c4a57f',
+    dryGrass: '#8d704e', grass: '#76503c', forest: '#3a302b', jungle: '#2d2723',
+    swamp: '#3d5147', tundra: '#a06d48', redRock: '#76503c', redRock2: '#a06d48',
+    rock: '#a06d48', rockHi: '#ae8864', snow: '#c4a57f', foam: '#e5ded2',
+  }),
+  'terrain-dunes': terrainPalette('dunes', {
+    deep: '#17323d', shallow: '#446a72', sand: '#c79a62', dune: '#e0c18e',
+    dryGrass: '#b18859', grass: '#a47b50', forest: '#6a5541', jungle: '#514334',
+    swamp: '#4b5a4d', tundra: '#b99163', redRock: '#8f5f3f', redRock2: '#b77849',
+    rock: '#c79a62', rockHi: '#d2ad78', snow: '#e0c18e', foam: '#eee3ce',
+  }),
+});
+
+export const TERRAIN_COLOR_PALETTE_OPTIONS = Object.freeze(Object.entries(TERRAIN_COLOR_PALETTE_PRESETS)
+  .map(([value, preset]) => Object.freeze({ value, label: preset.label, nodePreset: preset.nodePreset })));
+
 export const COLOR_PALETTE_PRESETS = {
+  ...TERRAIN_COLOR_PALETTE_PRESETS,
   earth: {
     label: 'Earth',
     palette: clonePalette(),
