@@ -16,6 +16,7 @@ import {
 } from '../../engine/terrain/graph/GraphDocument.js';
 import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
 import { terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
+import { NODE_PROJECT_TEMPLATES } from '../../project/NodeProjectTemplates.js';
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v2';
@@ -424,6 +425,7 @@ function NodeInspector({
 
 export default function NodeWorkspace({
   graph, graphView, graphState, onGraphChange, onGraphViewChange, onStartBlank,
+  onApplyTemplate,
   inspectorReplaced = false, onRequestInspector, preview = null, onPreviewVisibilityChange,
   toolsRailVisible = false, toolsRailEdge = 'left', onPaletteDockChange,
 }) {
@@ -437,6 +439,7 @@ export default function NodeWorkspace({
   const [searchState, setSearchState] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [paletteQuery, setPaletteQuery] = useState('');
+  const [applyingTemplateId, setApplyingTemplateId] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [instance, setInstance] = useState(null);
   const [draggingDock, setDraggingDock] = useState(null);
@@ -629,6 +632,22 @@ export default function NodeWorkspace({
   }, [createGroupFromSelection, deleteSelection, duplicateSelection, instance, openSearch, selectedNodes, ungroupSelection]);
 
   const updateLayout = useCallback((patch) => setLayout((current) => ({ ...current, ...patch })), []);
+  const applyTemplate = useCallback(async (event) => {
+    const templateId = event.target.value;
+    if (!templateId || !onApplyTemplate) return;
+    setApplyingTemplateId(templateId);
+    try {
+      const applied = await onApplyTemplate(templateId);
+      if (applied === false) return;
+      setSelectedNodes(new Set());
+      setSelectedGroups(new Set());
+      setSelectedEdges(new Set());
+      setNodeMeasurements({});
+      requestAnimationFrame(() => requestAnimationFrame(() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 320 })));
+    } finally {
+      setApplyingTemplateId('');
+    }
+  }, [instance, onApplyTemplate]);
   const beginDockDrag = useCallback((kind, event) => {
     if (event.button !== 0 || event.target.closest('button, input, select, textarea, a')) return;
     if (!window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 821px)').matches) return;
@@ -808,6 +827,18 @@ export default function NodeWorkspace({
         <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
           <div className="node-dock-heading"><span className="node-dock-kicker">Nodes</span><strong>{graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise'}</strong></div>
           <div className="node-toolbar-actions">
+            {graphMode === 'terrain' && onApplyTemplate ? (
+              <label className="node-template-picker" title="Replace the graph with an authored terrain recipe">
+                <Sparkles size={13} aria-hidden />
+                <select value={applyingTemplateId} onChange={applyTemplate} disabled={!!applyingTemplateId} aria-label="Load terrain node recipe">
+                  <option value="">Recipes</option>
+                  {NODE_PROJECT_TEMPLATES.filter((template) => template.id !== 'nodes-blank').map((template) => (
+                    <option key={template.id} value={template.id}>{template.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={11} aria-hidden />
+              </label>
+            ) : null}
             <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
             <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title="Group selected nodes (G)"><FolderPlus size={13} /> Group</button>
             <button type="button" className="node-icon-button" onClick={() => ungroupSelection()} disabled={!selectedGroups.size} title="Remove selected group frame (Shift+G)"><Ungroup size={13} /></button>

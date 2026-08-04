@@ -119,7 +119,7 @@ export default function App() {
 
   const loading = useLoading();
   const landing = useLanding();
-  const { showPopup } = usePopup();
+  const { showPopup, showConfirm } = usePopup();
   const landingRef = useRef(landing);
   landingRef.current = landing;
   const loadingRef = useRef(loading);
@@ -719,6 +719,7 @@ export default function App() {
           projectMode: nextMode,
           seed: projectSeed,
           presetKey: nextMode === 'procedural' ? template.preset : null,
+          noiseStackPresetKey: nextMode === 'procedural' ? template.noiseStackPreset : null,
         });
         // A new terrain is a new document. Do not let saveCurrentProject reuse
         // the id of whichever project was previously open.
@@ -1339,6 +1340,48 @@ export default function App() {
     setTerrainGraph(next);
     engineRef.current?.setTerrainGraph(next, { structural: true, affectedNodeIds: next.nodes.map((node) => node.id) });
   }, []);
+
+  const handleApplyNodeTemplate = useCallback(async (templateId) => {
+    const template = getNodeProjectTemplate(templateId);
+    if (template.id === 'nodes-blank') return false;
+    const confirmed = await showConfirm({
+      title: `Load ${template.name}?`,
+      message: 'This replaces the current terrain graph with the selected recipe. You can undo the change from History.',
+      confirmLabel: 'Replace graph',
+    });
+    if (!confirmed) return false;
+
+    if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
+    if (graphCompileIdleRef.current) {
+      const { kind, id } = graphCompileIdleRef.current;
+      if (kind === 'idle') cancelIdleCallback(id); else cancelAnimationFrame(id);
+    }
+    if (graphUniformFrameRef.current) cancelAnimationFrame(graphUniformFrameRef.current);
+    graphUniformFrameRef.current = null;
+    graphCompileTimerRef.current = null;
+    graphCompileIdleRef.current = null;
+    pendingGraphRef.current = null;
+    pendingGraphCompileNodesRef.current.clear();
+
+    const next = createNodeTemplateGraph(template.id);
+    const nextView = { x: 0, y: 0, zoom: 1 };
+    setTerrainGraph(next);
+    setGraphView(nextView);
+    engineRef.current?.setGraphView(nextView);
+    const graphResult = engineRef.current?.setTerrainGraph(next, {
+      structural: true,
+      atomic: true,
+      affectedNodeIds: next.nodes.map((node) => node.id),
+    });
+    const result = await graphResult?.ready;
+    if (!graphResult?.ok || result?.error) {
+      const error = result?.error ?? new Error('Terrain graph could not be compiled');
+      showToast(error.message, 'error');
+      return false;
+    }
+    showToast(`${template.name} recipe loaded`, 'success');
+    return true;
+  }, [showConfirm, showToast]);
 
   useEffect(() => () => {
     if (graphCompileTimerRef.current) clearTimeout(graphCompileTimerRef.current);
@@ -2138,6 +2181,7 @@ export default function App() {
                 onGraphChange={handleTerrainGraphChange}
                 onGraphViewChange={handleGraphView}
                 onStartBlank={handleStartBlankGraph}
+                onApplyTemplate={handleApplyNodeTemplate}
                 inspectorReplaced={!!effectivePanel}
                 onRequestInspector={() => setActivePanel(null)}
                 onPreviewVisibilityChange={setNodesPreviewVisible}

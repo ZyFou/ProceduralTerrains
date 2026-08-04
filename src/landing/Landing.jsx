@@ -223,6 +223,10 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
   };
+  const chooseTemplateWorkflow = (editorMode) => {
+    setCreateOpen(false);
+    openTemplates(editorMode);
+  };
   const importProjectFile = (file, { openAfter } = {}) => {
     if (!file) return;
     const reader = new FileReader();
@@ -556,17 +560,17 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={16} /></button>
           </header>
           <div className="landing-create-options">
-            <button type="button" onClick={() => create('blank', 'procedural')} disabled={!menuReady || exiting}>
+            <button type="button" onClick={() => chooseTemplateWorkflow('procedural')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon"><SlidersHorizontal size={22} /></span>
               <strong>Procedural</strong>
               <small>The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.</small>
-              <span className="landing-create-action">Create procedural terrain <ArrowRight size={13} /></span>
+              <span className="landing-create-action">Choose a procedural template <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => create('nodes-blank', 'nodes')} disabled={!menuReady || exiting}>
+            <button type="button" onClick={() => chooseTemplateWorkflow('nodes')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon nodes"><Boxes size={22} /></span>
               <strong>Nodes</strong>
               <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
-              <span className="landing-create-action">Create Nodes terrain <ArrowRight size={13} /></span>
+              <span className="landing-create-action">Choose a Nodes recipe <ArrowRight size={13} /></span>
             </button>
             <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!menuReady || exiting}>
               <span className="landing-create-icon manual"><Mountain size={22} /></span>

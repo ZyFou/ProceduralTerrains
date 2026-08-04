@@ -12,7 +12,15 @@ describe('procedural project templates', () => {
   });
 
   it('uses a workflow-specific versioned preview cache', () => {
-    expect(projectTemplatePreviewCacheKey('mountain')).toBe('terrain-template-preview:procedural-v2:mountain');
+    expect(projectTemplatePreviewCacheKey('mountain')).toBe('terrain-template-preview:procedural-v3:mountain');
     expect(projectTemplatePreviewCacheKey('mountain')).not.toContain('nodes-v2');
+  });
+
+  it('exposes Geological Hybrid as a complete procedural template', () => {
+    expect(getProjectTemplate('geological-hybrid')).toMatchObject({
+      name: 'Geological Hybrid',
+      preset: 'alpine',
+      noiseStackPreset: 'geologicalHybrid',
+    });
   });
 });

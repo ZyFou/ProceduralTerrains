@@ -2038,13 +2038,23 @@ export class Engine {
     this.setParam('seed', (Math.random() * 0xffffffff) >>> 0);
   }
 
-  newProject({ silent = false, projectMode = 'procedural', seed = null, presetKey = null } = {}) {
+  newProject({
+    silent = false,
+    projectMode = 'procedural',
+    seed = null,
+    presetKey = null,
+    noiseStackPresetKey = null,
+  } = {}) {
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
     this._clearPendingTerrainParams();
     this.params = { ...DEFAULT_PARAMS };
     if (this.projectMode === 'procedural' && PRESETS[presetKey]) {
       this.params = applyPreset(this.params, presetKey);
     }
+    const noiseStackRecipe = this.projectMode === 'procedural'
+      ? buildNoiseStackPresetRecipe(noiseStackPresetKey)
+      : null;
+    if (noiseStackRecipe) Object.assign(this.params, noiseStackRecipe.terrainParams);
     if (Number.isFinite(Number(seed))) this.params.seed = Number(seed) >>> 0;
     this.planetStyle.reset();
     if (this.projectMode === 'procedural' && PRESETS[presetKey]?.palettePreset) {
@@ -2055,7 +2065,7 @@ export class Engine {
     // The previous order rendered the old project stack, reset the stack in a
     // second pass, then changed the seed in a third pass. Besides wasted work,
     // that exposed exactly the transient default/old terrain seen at startup.
-    const defaultStack = migrateStack(undefined);
+    const defaultStack = noiseStackRecipe?.stack ?? migrateStack(undefined);
     this.noiseStack = defaultStack;
     this.params.noiseStack = defaultStack;
     this._soloLayerId = null;
@@ -2138,6 +2148,10 @@ export class Engine {
     // over the fresh small default board. params already reset erosion* knobs.
     this.erosionField?.clear();
     this.erosionField?.applyTo(this.uniforms);
+    // newProject mutates the complete document in one pass instead of routing
+    // every preset field through setParam(). Publish that finished snapshot so
+    // React panels do not keep rendering the previous project's stack.
+    this.cb.onParams(this._paramsSnapshot());
     this.applyAll({ force: true });
     this._onErosionChanged();
     this._notifyTiles();
