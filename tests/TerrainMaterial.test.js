@@ -133,6 +133,31 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(boot.fragmentShader).not.toContain('terrainCloudShadow(vWorldPos)');
   });
 
+  it('lights the lightweight Node preview from the visible terrain slopes', () => {
+    const uniforms = createTerrainUniforms();
+    const preview = createBootTerrainMaterial(uniforms, 5);
+    materials.push(preview);
+
+    expect(preview.vertexShader).toContain('varying vec3 vTerrainPreviewNormal;');
+    expect(preview.vertexShader).toContain(
+      'float hNormalX = terrainCachedHeightAt(wp.xz + vec2(normalEps, 0.0));',
+    );
+    expect(preview.vertexShader).toContain(
+      'float hNormalZ = terrainCachedHeightAt(wp.xz + vec2(0.0, normalEps));',
+    );
+    expect(preview.fragmentShader).toContain('nGeo = normalize(vTerrainPreviewNormal);');
+    expect(preview.fragmentShader).not.toContain('dFdx(vWorldPos)');
+    expect(preview.fragmentShader).not.toContain('nGeo = vec3(0.0, 1.0, 0.0);');
+    expect(preview.fragmentShader).toContain('uniform float uNormalStrength;');
+    expect(preview.fragmentShader).toContain('nGeo.x * uNormalStrength');
+    expect(preview.fragmentShader).toContain(
+      'vec3 skyAmb = uTerrainSkyAmb * 0.50 * (n.y * 0.5 + 0.5);',
+    );
+    expect(preview.fragmentShader).toContain(
+      'vec3 bounce = uTerrainBounce * 0.25 * (1.0 - n.y * 0.5);',
+    );
+  });
+
   it('restores visible shallow-water terrain caustics', () => {
     const uniforms = createTerrainUniforms();
     const material = createTerrainMaterial(uniforms, 5);

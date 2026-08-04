@@ -96,6 +96,7 @@ Climate terrainCachedClimateAt(vec2 xz) {
 
 const buildVertex = (heightGLSL, variant = 'full') => {
   const manual = variant === 'manual';
+  const preview = variant === 'preview';
   return /* glsl */ `
 ${manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
@@ -106,6 +107,7 @@ ${manual ? MANUAL_TERRAIN_CACHE_GLSL : INFINITE_FIELD_CACHE_GLSL}
 uniform float uSkirtDepth;
 uniform float uPlinthBaseY;
 uniform float uWallThickness;
+${preview ? 'uniform float uEps;' : ''}
 
 attribute float aSkirt;
 attribute float aLod;
@@ -115,8 +117,8 @@ varying vec3  vWorldPos;
 varying float vLod;
 varying float vSkirt;
 varying float vWall;
-
 varying float vWallMesh;
+${preview ? 'varying vec3 vTerrainPreviewNormal;' : ''}
 
 void main() {
   vec4 localPosition = vec4(position, 1.0);
@@ -125,6 +127,19 @@ void main() {
   #endif
   vec4 wp = modelMatrix * localPosition;
   float h = terrainCachedHeightAt(wp.xz);
+${preview ? /* glsl */ `
+  // Smooth lighting for the lightweight Node preview. Two extra height
+  // samples per vertex are much cheaper than evaluating the graph per pixel,
+  // and interpolate cleanly across the visible terrain triangles.
+  float normalEps = max(uEps, 0.001);
+  float hNormalX = terrainCachedHeightAt(wp.xz + vec2(normalEps, 0.0));
+  float hNormalZ = terrainCachedHeightAt(wp.xz + vec2(0.0, normalEps));
+  vTerrainPreviewNormal = normalize(vec3(
+    -(hNormalX - h) / normalEps,
+    1.0,
+    -(hNormalZ - h) / normalEps
+  ));
+` : ''}
 
   float skirt = aSkirt;
   float wall = 0.0;   // outer-perimeter skirt -> plinth wall
@@ -867,12 +882,14 @@ ${graphColorGLSL}
 
 uniform float uColorMode;
 uniform float uEps;
+uniform float uNormalStrength;
 uniform vec3  uPlinthColor;
 
 varying vec3  vWorldPos;
 varying float vSkirt;
 varying float vWall;
 varying float vWallMesh;
+varying vec3  vTerrainPreviewNormal;
 
 void main() {
   vec2 xz = vWorldPos.xz;
@@ -893,7 +910,11 @@ void main() {
   } else
   {
     hC = vWorldPos.y;
-    nGeo = vec3(0.0, 1.0, 0.0);
+    // Node authoring deliberately keeps this lightweight fragment live while
+    // the graph changes. Its height cache is therefore commonly unavailable.
+    // Use the smoothly interpolated normal prepared by the preview vertex
+    // shader instead of treating every slope as horizontal.
+    nGeo = normalize(vTerrainPreviewNormal);
   }
 
   // keep the height-packing export/sampler modes correct while the boot
@@ -936,10 +957,16 @@ void main() {
   float graphDetail = fract(sin(dot(floor(xz * 0.02), vec2(12.9898, 78.233))) * 43758.5453);
   albedo = applyTerrainGraphColor(albedo, xz, h01, slope, graphDetail, 0.5);
 
-  vec3 n = normalize(vec3(nGeo.x, 1.0, nGeo.z));
+  vec3 n = normalize(vec3(
+    nGeo.x * uNormalStrength,
+    max(nGeo.y, 0.0001),
+    nGeo.z * uNormalStrength
+  ));
   float diff = max(dot(n, uSunDir), 0.0);
-  vec3 col = albedo * (uTerrainSunCol * uTerrainSunIntensity * diff
-                       + uTerrainSkyAmb * 0.5 + uTerrainBounce * 0.25);
+  vec3 sunCol = uTerrainSunCol * uTerrainSunIntensity;
+  vec3 skyAmb = uTerrainSkyAmb * 0.50 * (n.y * 0.5 + 0.5);
+  vec3 bounce = uTerrainBounce * 0.25 * (1.0 - n.y * 0.5);
+  vec3 col = albedo * (sunCol * diff + skyAmb + bounce);
 
   float skirtDarken = 0.0;
   col *= 1.0 - skirtDarken;
@@ -1279,7 +1306,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
   const mat = new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },
-    vertexShader: buildVertex(h),
+    vertexShader: buildVertex(h, 'preview'),
     fragmentShader: buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL),
     side: THREE.DoubleSide,
   });
@@ -1316,7 +1343,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
 // without paying for the full surface/detail fragment after every graph edit.
 export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   const h = buildHeightGLSL(stackGLSL.body2d);
-  mat.vertexShader = buildVertex(h);
+  mat.vertexShader = buildVertex(h, 'preview');
   mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = true;
   mat.userData.heightProgramSig = stackGLSL.sig;
