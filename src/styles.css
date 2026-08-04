@@ -4417,6 +4417,52 @@ input[type="color"].palette-color-input {
 .node-template-picker select:disabled { opacity: .6; cursor: wait; }
 .node-template-picker > svg:last-child { pointer-events: none; color: var(--text-dim); }
 .node-template-picker:hover { border-color: var(--border-active); background: var(--accent-bg); }
+.node-color-controls {
+  height: 27px;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgba(196, 133, 255, .22);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(155, 123, 232, .055);
+}
+.node-color-controls.active { border-color: rgba(196, 133, 255, .42); background: rgba(155, 123, 232, .1); }
+.node-color-toggle {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-right: 1px solid rgba(196, 133, 255, .16);
+  background: transparent;
+  color: var(--text-dim);
+  font: 650 9px/1 var(--font);
+  cursor: var(--cursor-pointer);
+}
+.node-color-controls.active .node-color-toggle { color: #c49cff; }
+.node-color-toggle:hover { background: rgba(196, 133, 255, .09); color: var(--text-main); }
+.node-color-preset {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+}
+.node-color-preset-swatch { width: 24px; height: 7px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
+.node-color-preset select {
+  width: 92px;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  background: transparent;
+  color: var(--text-main);
+  font: 650 9px/1 var(--font);
+  cursor: var(--cursor-pointer);
+}
+.node-color-preset > svg { pointer-events: none; color: var(--text-dim); }
+.node-color-preset:hover { background: rgba(196, 133, 255, .07); }
 .node-mode-switch {
   height: 26px;
   display: grid;
@@ -4866,6 +4912,11 @@ input[type="color"].palette-color-input {
   .node-template-picker { width: 28px; padding: 0; justify-content: center; }
   .node-template-picker select { position: absolute; inset: 0; width: 100%; opacity: 0; }
   .node-template-picker > svg:last-child { display: none; }
+  .node-color-toggle { width: 28px; padding: 0; justify-content: center; }
+  .node-color-toggle span { display: none; }
+  .node-color-preset { width: 34px; padding: 0 5px; justify-content: center; }
+  .node-color-preset select { position: absolute; inset: 0; width: 100%; opacity: 0; }
+  .node-color-preset > svg { display: none; }
 }
 @media (max-width: 820px) {
   .nodes-workspace { display: none; }

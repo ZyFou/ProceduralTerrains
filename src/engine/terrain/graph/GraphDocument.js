@@ -1,7 +1,8 @@
 import { cloneStack, defaultLegacyStack, migrateStack } from '../noise/NoiseStack.js';
 import {
-  ANALYTIC_HEIGHT, GRAPH_CAPACITY, GRAPH_COLOR_CAPACITY, getGraphNodeDefinition, nodeDefaults,
+  ANALYTIC_COLOR, ANALYTIC_HEIGHT, GRAPH_CAPACITY, GRAPH_COLOR_CAPACITY, getGraphNodeDefinition, nodeDefaults,
 } from './GraphRegistry.js';
+import { getTerrainGradientPreset } from './TerrainGradientPresets.js';
 
 export const GRAPH_DOCUMENT_VERSION = 3;
 export const TERRAIN_OUTPUT_ID = 'terrain-output';
@@ -133,6 +134,76 @@ export function findOutputNode(graph) { return graph.nodes.find((node) => node.t
 
 export function inputEdge(graph, nodeId, handleId) {
   return graph.edges.find((edge) => edge.target === nodeId && edge.targetHandle === handleId) || null;
+}
+
+function graphColorSink(graph) {
+  const connected = inputEdge(graph, TERRAIN_OUTPUT_ID, 'color');
+  if (connected) return graph.nodes.find((node) => node.id === connected.source) || null;
+  const priority = { colorGrade: 4, moistureTint: 3, slopeTint: 2, terrainGradient: 1 };
+  return graph.nodes
+    .filter((node) => getGraphNodeDefinition(node.type)?.outputs.some((port) => port.type === ANALYTIC_COLOR))
+    .filter((node) => !graph.edges.some((edge) => edge.source === node.id && edge.type === ANALYTIC_COLOR && edge.target !== TERRAIN_OUTPUT_ID))
+    .sort((a, b) => (priority[b.type] || 0) - (priority[a.type] || 0) || b.position.x - a.position.x)[0] || null;
+}
+
+export function graphColorConfiguration(graph) {
+  const gradient = graph.nodes.find((node) => node.type === 'terrainGradient');
+  const edge = inputEdge(graph, TERRAIN_OUTPUT_ID, 'color');
+  return {
+    enabled: Boolean(edge),
+    preset: gradient?.params?.preset || 'alpine',
+    sourceNodeId: edge?.source || null,
+  };
+}
+
+export function setGraphColorEnabled(graph, enabled, { preset = null } = {}) {
+  const colorEdges = graph.edges.filter((edge) => edge.target === TERRAIN_OUTPUT_ID && edge.targetHandle === 'color');
+  if (!enabled) {
+    if (!colorEdges.length) return graph;
+    return removeGraphEdges(graph, colorEdges.map((edge) => edge.id));
+  }
+  if (colorEdges.length) return graph;
+
+  let next = graph;
+  let source = graphColorSink(next);
+  if (!source) {
+    const output = findOutputNode(next);
+    next = addGraphNode(next, 'terrainGradient', {
+      x: (output?.position.x || 520) - 245,
+      y: (output?.position.y || 90) + 170,
+    }, { params: { preset: preset || 'alpine' } });
+    source = next.nodes.at(-1);
+  }
+  return connectGraphNodes(next, {
+    source: source.id,
+    sourceHandle: 'color',
+    target: TERRAIN_OUTPUT_ID,
+    targetHandle: 'color',
+    type: ANALYTIC_COLOR,
+  });
+}
+
+export function applyGraphColorPreset(graph, presetId) {
+  const preset = getTerrainGradientPreset(presetId);
+  let next = graph;
+  let gradient = next.nodes.find((node) => node.type === 'terrainGradient');
+  if (!gradient) {
+    const output = findOutputNode(next);
+    next = addGraphNode(next, 'terrainGradient', {
+      x: (output?.position.x || 520) - 245,
+      y: (output?.position.y || 90) + 170,
+    });
+    gradient = next.nodes.at(-1);
+  }
+  next = updateGraphNodeParams(next, gradient.id, {
+    preset: presetId,
+    lowPoint: preset.points[1],
+    highPoint: preset.points[2],
+    summitPoint: preset.points[3],
+    variation: preset.variation,
+    macroScale: preset.macroScale,
+  });
+  return setGraphColorEnabled(next, true, { preset: presetId });
 }
 
 export function reachableNodeIds(graph) {

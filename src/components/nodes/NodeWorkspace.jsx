@@ -10,12 +10,14 @@ import {
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, canConnectGraphNodes, connectGraphNodes, createBlankGraph,
-  downstreamNodeIds, duplicateGraphSelection, groupGraphNodes, moveGraphGroup, moveGraphNodes,
+  applyGraphColorPreset, downstreamNodeIds, duplicateGraphSelection, graphColorConfiguration,
+  groupGraphNodes, moveGraphGroup, moveGraphNodes,
   removeGraphEdges, removeGraphGroups, removeGraphNodes, setGraphMode,
+  setGraphColorEnabled,
   updateGraphGroup, updateGraphNode, updateGraphNodeParams,
 } from '../../engine/terrain/graph/GraphDocument.js';
 import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
-import { terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
+import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
 import { NODE_PROJECT_TEMPLATES } from '../../project/NodeProjectTemplates.js';
 import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
 
@@ -477,6 +479,7 @@ export default function NodeWorkspace({
   }, [commit]);
 
   const graphMode = localGraph.mode === 'noise' ? 'noise' : 'terrain';
+  const colorConfiguration = useMemo(() => graphColorConfiguration(localGraph), [localGraph]);
   useEffect(() => { setPaletteQuery(''); }, [graphMode]);
   const definitions = useMemo(() => listGraphNodeDefinitions({ mode: graphMode }), [graphMode]);
   const grouped = useMemo(() => definitions.reduce((map, definition) => {
@@ -648,6 +651,14 @@ export default function NodeWorkspace({
       setApplyingTemplateId('');
     }
   }, [instance, onApplyTemplate]);
+  const toggleGraphColors = useCallback(() => {
+    const next = setGraphColorEnabled(graphRef.current, !graphColorConfiguration(graphRef.current).enabled);
+    commit(next, { structural: true, history: true });
+  }, [commit]);
+  const applyColorPreset = useCallback((event) => {
+    const next = applyGraphColorPreset(graphRef.current, event.target.value);
+    commit(next, { structural: true, history: true });
+  }, [commit]);
   const beginDockDrag = useCallback((kind, event) => {
     if (event.button !== 0 || event.target.closest('button, input, select, textarea, a')) return;
     if (!window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 821px)').matches) return;
@@ -838,6 +849,28 @@ export default function NodeWorkspace({
                 </select>
                 <ChevronDown size={11} aria-hidden />
               </label>
+            ) : null}
+            {graphMode === 'terrain' ? (
+              <div className={`node-color-controls${colorConfiguration.enabled ? ' active' : ''}`}>
+                <button
+                  type="button"
+                  className="node-color-toggle"
+                  aria-pressed={colorConfiguration.enabled}
+                  onClick={toggleGraphColors}
+                  title={colorConfiguration.enabled ? 'Disable node colors and use the project palette' : 'Apply node colors to this terrain'}
+                >
+                  <Palette size={13} aria-hidden />
+                  <span>Colors</span>
+                  {colorConfiguration.enabled ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}
+                </button>
+                <label className="node-color-preset" title="Apply a terrain color preset and enable node colors">
+                  <span className="node-color-preset-swatch" style={{ background: terrainGradientCss(colorConfiguration.preset) }} aria-hidden />
+                  <select value={colorConfiguration.preset} onChange={applyColorPreset} aria-label="Node terrain color preset">
+                    {TERRAIN_GRADIENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <ChevronDown size={11} aria-hidden />
+                </label>
+              </div>
             ) : null}
             <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
             <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title="Group selected nodes (G)"><FolderPlus size={13} /> Group</button>

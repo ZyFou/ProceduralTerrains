@@ -14,6 +14,13 @@ describe('Nodes project templates', () => {
     expect(new Set(NODE_PROJECT_TEMPLATES.map((template) => template.id)).size).toBe(NODE_PROJECT_TEMPLATES.length);
   });
 
+  it('declares the default color behavior shown by the template picker', () => {
+    expect(getNodeProjectTemplate('nodes-blank')).toMatchObject({ colorsEnabled: false, colorPreset: 'alpine' });
+    expect(getNodeProjectTemplate('nodes-geological-hybrid')).toMatchObject({ colorsEnabled: true, colorPreset: 'alpine' });
+    expect(getNodeProjectTemplate('nodes-highlands')).toMatchObject({ colorsEnabled: true, colorPreset: 'temperate' });
+    expect(getNodeProjectTemplate('nodes-craters')).toMatchObject({ colorsEnabled: true, colorPreset: 'volcanic' });
+  });
+
   it.each(NODE_PROJECT_TEMPLATES.map((template) => [template.id]))('%s is valid, reachable, and realtime-safe', (templateId) => {
     const graph = createNodeTemplateGraph(templateId);
     const validation = validateGraph(graph);
@@ -53,6 +60,27 @@ describe('Nodes project templates', () => {
       ['mountain', 'shaper'], ['shaper', 'domainWarp'], ['domainWarp', 'stratify'],
       ['stratify', 'thermalErosion'], ['thermalErosion', 'naturalErosion'], ['geologyDetail', 'terrainOutput'],
     ]));
+  });
+
+  it('authors Geological Hybrid from the new editable noise sources', () => {
+    const graph = createNodeTemplateGraph('nodes-geological-hybrid');
+    const byType = (type) => graph.nodes.filter((node) => node.type === type);
+    const massif = byType('fbm').find((node) => node.params.seedOffset === 271);
+    const weathering = byType('fbm').find((node) => node.params.seedOffset === 809);
+    const ridges = byType('ridged')[0];
+
+    expect(byType('fbm')).toHaveLength(3);
+    expect(byType('combine')).toHaveLength(3);
+    expect(byType('domainWarp')).toHaveLength(1);
+    expect(byType('terrace')).toHaveLength(1);
+    expect(byType('naturalErosion')).toHaveLength(1);
+    expect(byType('geologyDetail')).toHaveLength(1);
+    expect(massif.params).toMatchObject({ erosion: 0.12, warp: 0.18, octaves: 6 });
+    expect(weathering.params).toMatchObject({ erosion: 0.62, warp: 0.25, octaves: 6 });
+    expect(ridges.params).toMatchObject({ sharpness: 2.25, erosion: 0.28, warp: 0.2 });
+    expect(graph.nodes.find((node) => node.id === TERRAIN_OUTPUT_ID)?.params).toMatchObject({
+      normalize: true, outMin: 0.05, outMax: 0.92,
+    });
   });
 
   it('uses dedicated coherent landforms for River, Canyon, and Dunes', () => {

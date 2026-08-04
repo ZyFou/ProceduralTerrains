@@ -45,7 +45,7 @@ import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplate
 import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
 } from './project/NodeProjectTemplates.js';
-import { createBlankGraph } from './engine/terrain/graph/GraphDocument.js';
+import { applyGraphColorPreset, createBlankGraph, setGraphColorEnabled } from './engine/terrain/graph/GraphDocument.js';
 import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
@@ -687,7 +687,9 @@ export default function App() {
     showToast(`Downloaded ${name}`, 'success');
   }, [showToast]);
 
-  const createProjectFromTemplate = useCallback(async (templateId = 'blank', { editorMode = 'procedural' } = {}) => {
+  const createProjectFromTemplate = useCallback(async (templateId = 'blank', {
+    editorMode = 'procedural', nodeColorsEnabled, nodeColorPreset,
+  } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
     const nextMode = editorMode === 'nodes' ? 'nodes' : editorMode === 'manual' ? 'manual' : 'procedural';
@@ -726,7 +728,13 @@ export default function App() {
         setCurrentProject(null);
         if (nextMode === 'nodes') {
           update({ detail: 'Compiling terrain graph…' });
-          const graphResult = eng.setTerrainGraph(createNodeTemplateGraph(template.id), { structural: true, silent: true, atomic: true });
+          let templateGraph = createNodeTemplateGraph(template.id);
+          if (typeof nodeColorsEnabled === 'boolean') {
+            templateGraph = nodeColorsEnabled
+              ? applyGraphColorPreset(templateGraph, nodeColorPreset || template.colorPreset || 'alpine')
+              : setGraphColorEnabled(templateGraph, false);
+          }
+          const graphResult = eng.setTerrainGraph(templateGraph, { structural: true, silent: true, atomic: true });
           const result = await graphResult?.ready;
           if (!graphResult?.ok || result?.error) {
             throw result?.error ?? new Error('Terrain graph could not be compiled');
@@ -787,7 +795,11 @@ export default function App() {
 
   useEffect(() => {
     const onNewProject = (event) => {
-      createProjectFromTemplate(event.detail?.templateId ?? 'blank', { editorMode: event.detail?.editorMode ?? 'procedural' });
+      createProjectFromTemplate(event.detail?.templateId ?? 'blank', {
+        editorMode: event.detail?.editorMode ?? 'procedural',
+        nodeColorsEnabled: event.detail?.nodeColorsEnabled,
+        nodeColorPreset: event.detail?.nodeColorPreset,
+      });
     };
     const onOpenProject = async (event) => {
       const project = event.detail?.project;

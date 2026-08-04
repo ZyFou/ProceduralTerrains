@@ -3,13 +3,14 @@ import {
 } from '../engine/terrain/graph/GraphDocument.js';
 
 export const NODE_PROJECT_TEMPLATES = Object.freeze([
-  { id: 'nodes-blank', name: 'Blank graph', description: 'A flat slab with only Terrain Output.', icon: 'boxes' },
-  { id: 'nodes-alpine', name: 'Alpine ridges', description: 'A staged massif with shaped body, broken strata, scree, drainage, and alpine surface color.', icon: 'mountain' },
-  { id: 'nodes-highlands', name: 'Layered highlands', description: 'Broad combined landforms with mass shaping, strata, thermal weathering, and temperate color.', icon: 'layers' },
-  { id: 'nodes-dunes', name: 'Wind dunes', description: 'Asymmetric dune seas with slip faces, macro undulation, sand ripples, and warm desert grading.', icon: 'waves' },
-  { id: 'nodes-canyon', name: 'River canyon', description: 'A drainage-led canyon with a meandering slot, branching gullies, eroded strata, and sandstone color.', icon: 'route' },
-  { id: 'nodes-craters', name: 'Crater basin', description: 'Eroded impact terrain with basalt, scoria, and ash coloration.', icon: 'orbit' },
-  { id: 'nodes-rivers', name: 'River valleys', description: 'A continuous river trunk, converging tributaries, floodplain shaping, and damp valley color.', icon: 'route' },
+  { id: 'nodes-blank', name: 'Blank graph', description: 'A flat slab with only Terrain Output.', icon: 'boxes', colorsEnabled: false, colorPreset: 'alpine' },
+  { id: 'nodes-geological-hybrid', name: 'Geological Hybrid', description: 'An editable noise recipe with eroded FBM mass, organic warp, weathered terraces, rock ridges, and fine geological detail.', icon: 'layers', colorsEnabled: true, colorPreset: 'alpine' },
+  { id: 'nodes-alpine', name: 'Alpine ridges', description: 'A staged massif with shaped body, broken strata, scree, drainage, and alpine surface color.', icon: 'mountain', colorsEnabled: true, colorPreset: 'alpine' },
+  { id: 'nodes-highlands', name: 'Layered highlands', description: 'Broad combined landforms with mass shaping, strata, thermal weathering, and temperate color.', icon: 'layers', colorsEnabled: true, colorPreset: 'temperate' },
+  { id: 'nodes-dunes', name: 'Wind dunes', description: 'Asymmetric dune seas with slip faces, macro undulation, sand ripples, and warm desert grading.', icon: 'waves', colorsEnabled: true, colorPreset: 'dunes' },
+  { id: 'nodes-canyon', name: 'River canyon', description: 'A drainage-led canyon with a meandering slot, branching gullies, eroded strata, and sandstone color.', icon: 'route', colorsEnabled: true, colorPreset: 'canyon' },
+  { id: 'nodes-craters', name: 'Crater basin', description: 'Eroded impact terrain with basalt, scoria, and ash coloration.', icon: 'orbit', colorsEnabled: true, colorPreset: 'volcanic' },
+  { id: 'nodes-rivers', name: 'River valleys', description: 'A continuous river trunk, converging tributaries, floodplain shaping, and damp valley color.', icon: 'route', colorsEnabled: true, colorPreset: 'river' },
 ]);
 
 export function nodeTemplatePreviewCacheKey(id) {
@@ -64,6 +65,29 @@ function buildGraph(templateId, nodeSpecs, connectionSpecs, outputParams = {}) {
 
 const factories = {
   'nodes-blank': () => createBlankGraph('terrain'),
+  'nodes-geological-hybrid': () => buildGraph('geological-hybrid', [
+    { key: 'massif', type: 'fbm', position: { x: 35, y: 35 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.68, seedOffset: 271, scale: 0.55, octaves: 6, persistence: 0.51, lacunarity: 2.03, erosion: 0.12, warp: 0.18 } },
+    { key: 'warp', type: 'domainWarp', position: { x: 245, y: 35 }, section: 'Geological synthesis', sectionColor: 'amber', params: { scale: 0.58, strength: 0.62, perturbation: 0.28, octaves: 4, roughness: 0.51, seedOffset: 37 } },
+    { key: 'terraces', type: 'terrace', position: { x: 450, y: 35 }, section: 'Geological synthesis', sectionColor: 'amber', params: { count: 7, smoothness: 0.34, strength: 0.68 } },
+    { key: 'weathering', type: 'fbm', position: { x: 35, y: 180 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.2, seedOffset: 809, scale: 0.72, octaves: 6, persistence: 0.51, lacunarity: 2.03, erosion: 0.62, warp: 0.25 } },
+    { key: 'weatheredMass', type: 'combine', position: { x: 655, y: 70 }, section: 'Geological synthesis', sectionColor: 'amber', params: { operation: 'add', mix: 0.5 } },
+    { key: 'ridges', type: 'ridged', position: { x: 450, y: 180 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.12, seedOffset: 1217, scale: 1.7, octaves: 6, persistence: 0.51, lacunarity: 2.03, sharpness: 2.25, erosion: 0.28, warp: 0.2 } },
+    { key: 'ridgeMass', type: 'combine', position: { x: 860, y: 85 }, section: 'Geological synthesis', sectionColor: 'amber', params: { operation: 'add', mix: 0.5 } },
+    { key: 'fineDetail', type: 'fbm', position: { x: 655, y: 220 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.05, seedOffset: 1879, scale: 2.9, octaves: 4, persistence: 0.48, lacunarity: 2.08, erosion: 0.16, warp: 0 } },
+    { key: 'detailedMass', type: 'combine', position: { x: 1065, y: 100 }, section: 'Geological synthesis', sectionColor: 'amber', params: { operation: 'add', mix: 0.5 } },
+    { key: 'erosion', type: 'naturalErosion', position: { x: 1270, y: 100 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.24, radius: 30, talus: 0.66, channels: 0.3, channelScale: 1.45, deposition: 0.18, seed: 2017 } },
+    { key: 'geology', type: 'geologyDetail', position: { x: 1475, y: 100 }, section: 'Geological synthesis', sectionColor: 'amber', params: { strength: 0.045, scale: 4.1, roughness: 0.56, strata: 0.12, strataScale: 13, octaves: 4, persistence: 0.46, lacunarity: 2.12, seed: 2081 } },
+    { key: 'gradient', type: 'terrainGradient', position: { x: 35, y: 430 }, section: 'Geological surface', sectionColor: 'violet', params: { preset: 'alpine', lowPoint: 0.22, highPoint: 0.55, summitPoint: 0.82, variation: 0.2, macroScale: 0.42 } },
+    { key: 'rock', type: 'slopeTint', position: { x: 245, y: 430 }, section: 'Geological surface', sectionColor: 'violet', params: { rockColor: '#6d6861', slopeStart: 0.17, slopeEnd: 0.5, strength: 0.82, variation: 0.16, scale: 0.92 } },
+    { key: 'moisture', type: 'moistureTint', position: { x: 450, y: 430 }, section: 'Geological surface', sectionColor: 'violet', params: { dryColor: '#7b6b5a', wetColor: '#2d4638', amount: 0.24, balance: 0.47, softness: 0.2 } },
+    { key: 'grade', type: 'colorGrade', position: { x: 655, y: 430 }, section: 'Geological surface', sectionColor: 'violet', params: { saturation: 0.86, contrast: 1.08, exposure: 0.96, warmth: -0.02 } },
+  ], [
+    ['massif', 'warp', 'source'], ['warp', 'terraces', 'source'], ['terraces', 'weatheredMass', 'a'],
+    ['weathering', 'weatheredMass', 'b'], ['weatheredMass', 'ridgeMass', 'a'], ['ridges', 'ridgeMass', 'b'],
+    ['ridgeMass', 'detailedMass', 'a'], ['fineDetail', 'detailedMass', 'b'], ['detailedMass', 'erosion', 'source'],
+    ['erosion', 'geology', 'source'], ['geology', 'output', 'height'],
+    ['gradient', 'rock', 'base'], ['rock', 'moisture', 'base'], ['moisture', 'grade', 'base'], ['grade', 'output', 'color'],
+  ], { normalize: true, outMin: 0.05, outMax: 0.92 }),
   'nodes-alpine': () => buildGraph('alpine', [
     { key: 'ridges', type: 'mountain', position: { x: 40, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { style: 'alpine', bulk: 'high', scale: 0.55, height: 1.45, reduceDetails: true, seed: 1201, x: 0, y: 0 } },
     { key: 'shaper', type: 'shaper', position: { x: 245, y: 70 }, section: 'Height synthesis', sectionColor: 'amber', params: { shape: 0.46, strength: 0.86, featureScale: 48, detailPreservation: 0.86 } },

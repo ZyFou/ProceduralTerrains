@@ -1079,6 +1079,42 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 
 .lp-template-hint { margin: 16px 0 0; color: var(--text-dim); font-size: 11.5px; }
 .lp-template-create { margin-top: 12px; width: fit-content; }
+.lp-node-color-options {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, .72fr);
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(155,123,232,.2);
+  border-radius: 10px;
+  background: rgba(155,123,232,.045);
+}
+.lp-node-color-options.enabled { border-color: rgba(155,123,232,.38); background: rgba(155,123,232,.075); }
+.lp-node-color-copy { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.lp-node-color-copy > span:last-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lp-node-color-copy strong { color: var(--text-bright); font-size: 11.5px; }
+.lp-node-color-copy small { color: var(--text-dim); font-size: 9.5px; line-height: 1.35; }
+.lp-node-color-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: rgba(155,123,232,.12); color: #bda6ff; }
+.lp-node-color-toggle {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-control);
+  color: var(--text-muted);
+  font: 650 9.5px var(--font);
+  cursor: var(--cursor-pointer);
+}
+.lp-node-color-options.enabled .lp-node-color-toggle { border-color: rgba(155,123,232,.38); color: #c9baff; }
+.lp-node-color-preset { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--text-dim); font-size: 9.5px; }
+.lp-node-color-select { height: 30px; display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--bg-control); }
+.lp-node-color-select i { flex: none; width: 32px; height: 8px; border-radius: 4px; box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
+.lp-node-color-select select { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: 600 10px var(--font); cursor: var(--cursor-pointer); }
 
 /* ---- Footer ---- */
 .lp-footer {
@@ -1297,6 +1333,9 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .lp-footer-meta { justify-content: space-between; width: 100%; }
   .lp-head-actions .lp-secondary.sm span { display: none; }
   .lp-template-create { width: 100%; }
+  .lp-node-color-options { grid-template-columns: 1fr; gap: 10px; }
+  .lp-node-color-toggle { width: 100%; }
+  .lp-node-color-preset { align-items: stretch; flex-direction: column; gap: 5px; }
   .profile-grid { grid-template-columns: 1fr; }
   .profile-details-card { grid-row: auto; }
   .profile-field-grid { grid-template-columns: 1fr; }

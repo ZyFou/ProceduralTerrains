@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, EllipsisVertical, Eye, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
@@ -8,6 +8,7 @@ import { projectApi } from '../project/projectApi.js';
 import { buildUnifiedProjectIndex } from '../project/projectSync.js';
 import { PROJECT_TEMPLATES, getProjectTemplate, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
 import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
+import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../engine/terrain/graph/TerrainGradientPresets.js';
 import { Logo } from './shared.jsx';
 import AuthPage from '../auth/AuthPage.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -65,6 +66,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const [view, setView] = useState(() => viewFromHash() ?? 'home');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [templateKind, setTemplateKind] = useState('procedural');
+  const [nodeColorsEnabled, setNodeColorsEnabled] = useState(false);
+  const [nodeColorPreset, setNodeColorPreset] = useState('alpine');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -195,7 +198,11 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const create = (templateId, editorMode = 'procedural') => {
     if (!menuReady || exiting) return;
     setCreateOpen(false);
-    dispatch('terrain-project:new', { templateId, editorMode });
+    dispatch('terrain-project:new', {
+      templateId,
+      editorMode,
+      ...(editorMode === 'nodes' ? { nodeColorsEnabled, nodeColorPreset } : {}),
+    });
     onLaunch();
   };
   const open = (project) => {
@@ -207,8 +214,13 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
   const goHome = () => { showView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
   const selectTemplate = (id, editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    const nextTemplate = nextKind === 'nodes' ? getNodeProjectTemplate(id) : null;
     setTemplateKind(nextKind);
     setSelectedTemplateId(id);
+    if (nextTemplate) {
+      setNodeColorsEnabled(nextTemplate.colorsEnabled !== false);
+      setNodeColorPreset(nextTemplate.colorPreset || 'alpine');
+    }
     setSelectedProjectId(null);
     showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
@@ -217,8 +229,14 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
     const catalog = nextKind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
     const currentExists = catalog.some((item) => item.id === selectedTemplateId);
+    const nextTemplateId = currentExists ? selectedTemplateId : catalog[0].id;
     setTemplateKind(nextKind);
-    setSelectedTemplateId(currentExists ? selectedTemplateId : catalog[0].id);
+    setSelectedTemplateId(nextTemplateId);
+    if (nextKind === 'nodes') {
+      const nextTemplate = getNodeProjectTemplate(nextTemplateId);
+      setNodeColorsEnabled(nextTemplate.colorsEnabled !== false);
+      setNodeColorPreset(nextTemplate.colorPreset || 'alpine');
+    }
     setSelectedProjectId(null);
     showView('templates');
     if (nextKind === 'nodes') import('../components/nodes/NodeWorkspace.jsx').catch(() => {});
@@ -520,6 +538,33 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
                   </article>
                 ))}
               </div>
+              {templateKind === 'nodes' ? (
+                <section className={`lp-node-color-options${nodeColorsEnabled ? ' enabled' : ''}`} aria-label="Node template color options">
+                  <div className="lp-node-color-copy">
+                    <span className="lp-node-color-icon"><Palette size={16} aria-hidden /></span>
+                    <span><strong>Node Colors</strong><small>Apply a terrain color graph when this template opens.</small></span>
+                  </div>
+                  <button
+                    type="button"
+                    className="lp-node-color-toggle"
+                    role="switch"
+                    aria-checked={nodeColorsEnabled}
+                    onClick={() => setNodeColorsEnabled((enabled) => !enabled)}
+                  >
+                    {nodeColorsEnabled ? <Eye size={13} aria-hidden /> : <EyeOff size={13} aria-hidden />}
+                    {nodeColorsEnabled ? 'Applied' : 'Project palette'}
+                  </button>
+                  <label className="lp-node-color-preset">
+                    <span>Color preset</span>
+                    <span className="lp-node-color-select">
+                      <i style={{ background: terrainGradientCss(nodeColorPreset) }} aria-hidden />
+                      <select value={nodeColorPreset} onChange={(event) => { setNodeColorPreset(event.target.value); setNodeColorsEnabled(true); }} aria-label="Template color preset">
+                        {TERRAIN_GRADIENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </span>
+                  </label>
+                </section>
+              ) : null}
               <p className="lp-template-hint">{templateKind === 'nodes' ? 'Node templates load instantly; open the 2D preview when you need it.' : 'Selecting a template previews it live in the background.'}</p>
               <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!menuReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
             </section>

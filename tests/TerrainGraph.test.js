@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { makeLayer, makeStack } from '../src/engine/terrain/noise/NoiseStack.js';
 import {
-  GraphValidationError, TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph,
+  GraphValidationError, TERRAIN_OUTPUT_ID, addGraphNode, applyGraphColorPreset, connectGraphNodes, createBlankGraph,
   createGraphFromStack, downstreamNodeIds, duplicateGraphSelection, graphCapacity, graphColorCapacity, groupGraphNodes, inputEdge,
+  graphColorConfiguration,
   migrateGraphDocument, moveGraphGroup, moveGraphNodes, reachableNodeIds, removeGraphGroups, removeGraphNodes,
-  setGraphMode, topologicalSort, updateGraphGroup, updateGraphNodeParams, validateGraph,
+  setGraphColorEnabled, setGraphMode, topologicalSort, updateGraphGroup, updateGraphNodeParams, validateGraph,
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { ANALYTIC_COLOR, ANALYTIC_HEIGHT, getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
@@ -48,6 +49,33 @@ describe('terrain graph document', () => {
     expect(noise.mode).toBe('noise');
     expect(noise.nodes).toEqual(graph.nodes);
     expect(setGraphMode(noise, 'unknown')).toBe(noise);
+  });
+
+  it('toggles node colors without changing the height graph and applies complete color presets', () => {
+    let graph = createBlankGraph('terrain');
+    graph = addGraphNode(graph, 'deterministicNoise', { x: 0, y: 0 });
+    graph = connectGraphNodes(graph, { source: graph.nodes.at(-1).id, target: TERRAIN_OUTPUT_ID });
+    const heightEdge = inputEdge(graph, TERRAIN_OUTPUT_ID, 'height');
+
+    graph = applyGraphColorPreset(graph, 'dunes');
+    expect(graphColorConfiguration(graph)).toMatchObject({ enabled: true, preset: 'dunes' });
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'height')).toEqual(heightEdge);
+    expect(graph.nodes.find((node) => node.type === 'terrainGradient')?.params).toMatchObject({
+      preset: 'dunes', lowPoint: 0.24, highPoint: 0.62, summitPoint: 0.88, variation: 0.16, macroScale: 0.56,
+    });
+
+    const coloredNodeCount = graph.nodes.length;
+    graph = setGraphColorEnabled(graph, false);
+    expect(graphColorConfiguration(graph)).toMatchObject({ enabled: false, preset: 'dunes' });
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')).toBeNull();
+    expect(graph.nodes).toHaveLength(coloredNodeCount);
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'height')).toEqual(heightEdge);
+
+    graph = setGraphColorEnabled(graph, true);
+    expect(graphColorConfiguration(graph).enabled).toBe(true);
+    expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')?.type).toBe(ANALYTIC_COLOR);
+    expect(graph.nodes).toHaveLength(coloredNodeCount);
+    expect(validateGraph(graph)).toEqual({ ok: true, diagnostics: [] });
   });
 
   it('creates a permanent current-terrain compatibility path', () => {
