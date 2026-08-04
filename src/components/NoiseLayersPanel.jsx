@@ -311,7 +311,7 @@ function AddLayerMenu({ onAdd, onClose }) {
 // NoiseLayersPanel — the full side drawer panel
 // ============================================================================
 export default function NoiseLayersPanel({ ctx, children }) {
-  const { params, onNoiseStack, onSoloLayer } = ctx;
+  const { params, onNoiseStack, onNoiseStackPreset, onSoloLayer } = ctx;
   const stack = params.noiseStack;
 
   // local UI state
@@ -372,6 +372,11 @@ export default function NoiseLayersPanel({ ctx, children }) {
   };
 
   const handlePreset = (key) => {
+    if (onNoiseStackPreset && NOISE_STACK_PRESETS[key]?.terrainParams) {
+      onNoiseStackPreset(key);
+      setExpandedId(null);
+      return;
+    }
     const ps = buildNoiseStackPreset(key);
     if (ps) {
       pushStack(ps, true);

@@ -1859,6 +1859,7 @@ export default function App() {
     timeOfDay, onTimeOfDay: handleTimeOfDay,
     onExport, onExportScreenshot, onExportHeightmap,
     onNoiseStack: (stack) => engine().setNoiseStack(stack),
+    onNoiseStackPreset: (key) => engine().applyNoiseStackPresetByKey(key),
     tileDebug, importedMaps,
     tiles, tileGridSize: 5, tileGridExtent: 2, tileAssemblyShape, diskRadiusCells,
     onTileAssemblyShape: (shape) => engine().setTileAssemblyShape(shape),

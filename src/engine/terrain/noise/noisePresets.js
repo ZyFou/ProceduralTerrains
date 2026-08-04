@@ -82,6 +82,49 @@ export const NOISE_STACK_PRESETS = {
   // --- Realistic presets: eroded fractals + self warp + normalized output ---
   // (slope/noise masks confine detail layers where they belong; all values are
   // ordinary layer params, so users can keep editing the stack freely).
+  geologicalHybrid: {
+    label: 'Geological Hybrid',
+    // These global controls complete the recipe. They are intentionally kept
+    // beside the stack so applying the preset from the UI produces the tuned
+    // landform rather than only replacing its layer list. Existing presets do
+    // not declare terrainParams and therefore retain their old stack-only
+    // behavior.
+    terrainParams: {
+      heightScale: 620,
+      noiseScale: 42,
+      noiseStrength: 1.0,
+      terrainSmoothing: 0.0,
+      normalStrength: 1.4,
+      aoStrength: 0.88,
+      aoRidge: 0.28,
+      rockSlopeLo: 0.34,
+      rockSlopeHi: 0.64,
+      snowSlopeMin: 0.24,
+      snowSlopeMax: 0.56,
+      snowLine: 0.76,
+    },
+    build: () => makeStack([
+      // The Lab warps the shared domain before evaluating every height band.
+      L('domainWarp', { name: 'Geological Warp', blendMode: 'add', strength: 0.62,
+        params: { scale: 0.58, octaves: 4 } }),
+      // Low-frequency body. A small amount of derivative erosion and self-warp
+      // keeps the mass organic without destroying the broad silhouette.
+      L('fbm', { name: 'Terraced Massif', blendMode: 'add', strength: 0.68,
+        params: { scale: 0.55, octaves: 6, persistence: 0.51, lacunarity: 2.03, erosion: 0.12, warp: 0.18 } }),
+      // Partial seven-step terracing mirrors the Lab showcase: readable strata
+      // with ramps instead of uniformly vertical staircase walls.
+      L('terrace', { name: 'Weathered Terraces', blendMode: 'replace', strength: 0.68,
+        params: { count: 7, smoothness: 0.34 } }),
+      // Main weathering band. The shader multiplies erosion by four, so 0.62 is
+      // close to the Lab's derivative-weathering coefficient of 2.45.
+      L('fbm', { name: 'Derivative Weathering', blendMode: 'add', strength: 0.20,
+        params: { scale: 0.72, octaves: 6, persistence: 0.51, lacunarity: 2.03, erosion: 0.62, warp: 0.25 } }),
+      L('ridged', { name: 'Rock Ridges', blendMode: 'add', strength: 0.12,
+        params: { scale: 1.70, octaves: 6, persistence: 0.51, lacunarity: 2.03, sharpness: 2.25, erosion: 0.28, warp: 0.20 } }),
+      L('fbm', { name: 'Fine Geological Detail', blendMode: 'add', strength: 0.05,
+        params: { scale: 2.90, octaves: 4, persistence: 0.48, lacunarity: 2.08, erosion: 0.16, warp: 0.0 } }),
+    ], { normalizeOutput: true, outputMin: 0.05, outputMax: 0.92 }),
+  },
   alpineRanges: {
     label: 'Alpine Ranges',
     build: () => makeStack([
@@ -128,4 +171,18 @@ export const NOISE_STACK_PRESET_KEYS = Object.keys(NOISE_STACK_PRESETS);
 export function buildNoiseStackPreset(key) {
   const p = NOISE_STACK_PRESETS[key];
   return p ? p.build() : null;
+}
+
+/**
+ * Build the complete user-facing recipe for a stack preset. Most historical
+ * presets are stack-only; realism presets may additionally provide a small
+ * global terrain patch needed to reproduce their authored proportions.
+ */
+export function buildNoiseStackPresetRecipe(key) {
+  const preset = NOISE_STACK_PRESETS[key];
+  if (!preset) return null;
+  return {
+    stack: preset.build(),
+    terrainParams: { ...(preset.terrainParams || {}) },
+  };
 }

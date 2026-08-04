@@ -65,6 +65,7 @@ import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
 import { PlaneController } from './player/PlaneController.js';
 import { defaultLegacyStack, migrateStack, makeLayer, cloneStack } from './terrain/noise/NoiseStack.js';
+import { buildNoiseStackPresetRecipe } from './terrain/noise/noisePresets.js';
 import {
   TERRAIN_RESET_KEYS, EROSION_RESET_KEYS, BIOME_RESET_KEYS, PROPS_RESET_KEYS, WORLD_RESET_KEYS,
   LIGHTING_PARAM_KEYS, LIGHTING_STYLE_KEYS, DEBUG_PARAM_KEYS,
@@ -2279,6 +2280,51 @@ export class Engine {
       Object.keys(params).some((k) => TERRAIN_FIELD_KEYS.has(k)),
     );
     this.cb.onToast(`Noise: ${key}`);
+  }
+
+  /**
+   * Apply a Noise Layers recipe as one authored operation. Unlike the older
+   * style-level Noise preset above, this replaces the serialized Noise Stack
+   * and may also tune a deliberately small set of global terrain controls.
+   */
+  applyNoiseStackPresetByKey(key) {
+    const recipe = buildNoiseStackPresetRecipe(key);
+    if (!recipe) return Promise.resolve({ error: new Error(`Unknown noise stack preset: ${key}`) });
+
+    const patch = recipe.terrainParams;
+    const patchKeys = Object.keys(patch);
+    if (!this.params.autoUpdate) {
+      this._pendingTerrainParams ||= {};
+      for (const [paramKey, value] of Object.entries(patch)) {
+        if (Object.is(this.params[paramKey], value)) delete this._pendingTerrainParams[paramKey];
+        else this._pendingTerrainParams[paramKey] = value;
+      }
+      return this.setNoiseStack(recipe.stack, { solo: null, force: false });
+    }
+
+    const previousParams = Object.fromEntries(patchKeys.map((paramKey) => [paramKey, this.params[paramKey]]));
+    this._clearPendingTerrainParams(patchKeys);
+    Object.assign(this.params, patch);
+
+    const result = this.setNoiseStack(recipe.stack, { solo: null, force: true });
+    return Promise.resolve(result).then((compileResult) => {
+      if (compileResult?.error) {
+        Object.assign(this.params, previousParams);
+        this._applyUniforms();
+        this.cb.onParams(this._paramsSnapshot());
+        return compileResult;
+      }
+
+      // setNoiseStack owns terrain invalidation for the structural swap. This
+      // pass publishes the companion controls and refreshes their live uniforms.
+      this._applyUniforms();
+      this.cb.onParams(this._paramsSnapshot());
+      this._minimapDirtyAt = performance.now();
+      this.minimap.requestRedraw();
+      this._needsRender = true;
+      this.cb.onToast(`Noise stack: ${key}`);
+      return compileResult;
+    });
   }
 
   generatePalette(options = {}) {
