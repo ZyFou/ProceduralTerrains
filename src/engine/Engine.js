@@ -221,6 +221,7 @@ export class Engine {
     this._octaveTransitionTarget = null;
     this._octaveTransitionPromise = null;
     this.projectMode = 'procedural';
+    this.workspacePreset = null;
     this.generationSource = 'classic';
     this.terrainGraph = null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
@@ -1505,9 +1506,9 @@ export class Engine {
       // expansion fetch the geographically ADJACENT area for each new cell.
       // Imagery RGB is fetched in parallel at the same zoom/bbox so albedo
       // lines up with elevation without a second geo lookup.
-      let elevDone = 0, imgDone = 0, buildingDone = 0;
-      const report = () => onProgress?.((elevDone + imgDone + buildingDone) / 3);
-      const [anchor, imageryAnchor, buildingAnchor] = await Promise.all([
+      let elevDone = 0, imgDone = 0;
+      const report = () => onProgress?.((elevDone + imgDone) / 2);
+      const [anchor, imageryAnchor] = await Promise.all([
         fetchBboxElevation(source.bbox, zoom, {
           onProgress: (p) => { elevDone = p; report(); },
         }),
@@ -1516,16 +1517,6 @@ export class Engine {
           onProgress: (p) => { imgDone = p; report(); },
         }).catch((e) => {
           console.error(e);
-          return null;
-        }),
-        fetchBboxBuildings(source.bbox).then((result) => {
-          buildingDone = 1;
-          report();
-          return result;
-        }).catch((e) => {
-          console.error(e);
-          buildingDone = 1;
-          report();
           return null;
         }),
       ]);
@@ -1540,7 +1531,13 @@ export class Engine {
           imageryStyle: imageryStyle.id,
           cells: { '0,0': anchor },
           imageryCells: imageryAnchor ? { '0,0': imageryAnchor } : {},
-          buildingCells: buildingAnchor ? { '0,0': buildingAnchor } : {},
+          // Buildings are optional and public Overpass queries can be slow.
+          // Seed every visible cell so terrain/imagery can composite now;
+          // the real building patches replace these placeholders below.
+          buildingCells: Object.fromEntries(this.tiles.map((tile) => [
+            `${tile.cx},${tile.cz}`,
+            { buildings: [], pending: true },
+          ])),
         },
         settings: { ...source.heightSettings },
       };
@@ -1565,14 +1562,36 @@ export class Engine {
       this._setImportState('height', { loading: false });
       if (this.importedMaps.imagery) this._setImportState('imagery', { loading: false });
       if (!silent) {
-        const buildingCount = this.realWorldBuildingLayer?.count ?? 0;
         this.cb.onToast(imageryAnchor
-          ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}${buildingCount ? ` + ${buildingCount} buildings` : ''}`
+          ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}`
           : `Loaded ${loc.name} (height only — map texture failed)`);
-        if (buildingAnchor?.skipped === 'area-too-large') {
-          this.cb.onToast('3D buildings skipped: the selected area is too large for a public OSM query.');
-        }
       }
+
+      // Do not keep the main geographic load (and its blocking overlay) open
+      // while optional OSM buildings are queried. Sparse regions often return
+      // quickly, while dense or large selections may need several retries.
+      const geoRef = this.importedMaps.height?.geoRef;
+      const buildingTiles = this.tiles.map((tile) => ({ ...tile }));
+      Promise.allSettled(buildingTiles.map(async (tile) => {
+        const key = `${tile.cx},${tile.cz}`;
+        const bbox = offsetBbox(geoRef.bbox0, tile.cx, tile.cz);
+        const patch = await fetchBboxBuildings(bbox);
+        if (this.importedMaps.height?.geoRef !== geoRef) return;
+        geoRef.buildingCells[key] = patch;
+      })).then((results) => {
+        if (this.importedMaps.height?.geoRef !== geoRef) return;
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.error(result.reason);
+            const tile = buildingTiles[index];
+            geoRef.buildingCells[`${tile.cx},${tile.cz}`] = { buildings: [], error: true };
+          }
+        });
+        const buildingCount = this._rebuildRealWorldBuildings({ force: true });
+        if (!silent && buildingCount) this.cb.onToast(`Loaded ${buildingCount} buildings`);
+        const skipped = Object.values(geoRef.buildingCells).some((patch) => patch?.skipped === 'area-too-large');
+        if (!silent && skipped) this.cb.onToast('3D buildings skipped: the selected area is too large for a public OSM query.');
+      });
       return true;
     } catch (e) {
       console.error(e);
@@ -2218,11 +2237,13 @@ export class Engine {
   newProject({
     silent = false,
     projectMode = 'procedural',
+    workspacePreset = null,
     seed = null,
     presetKey = null,
     noiseStackPresetKey = null,
   } = {}) {
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
+    this.workspacePreset = workspacePreset === 'real-terrain' ? 'real-terrain' : null;
     this._clearPendingTerrainParams();
     this.params = { ...DEFAULT_PARAMS };
     if (this.projectMode === 'procedural' && PRESETS[presetKey]) {
@@ -8735,6 +8756,7 @@ export class Engine {
       creatorTools: this._serializeCreatorTools(),
       historyMetadata: this.projectHistory?.serializeMetadata?.(),
       editorMode: this.projectMode,
+      ...(this.workspacePreset ? { workspacePreset: this.workspacePreset } : {}),
       generationSource: this.generationSource,
       worldMode: this.worldMode,
       graph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
@@ -8817,6 +8839,7 @@ export class Engine {
         : json?.editorMode === 'procedural'
           ? 'procedural'
           : json?.generationSource === 'graph' ? 'nodes' : 'procedural';
+    this.workspacePreset = json?.workspacePreset === 'real-terrain' ? 'real-terrain' : null;
     if (this.projectMode === 'manual') {
       this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.BUILT_IN;
       this.params.surfaceTextureMode = true;

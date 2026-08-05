@@ -98,7 +98,8 @@ function SurfaceTab({ ctx }) {
 
 // ---------------------------------------------------------------- panels
 function TerrainPanel({ ctx }) {
-  const [tab, setTab] = useState('shape');
+  const realTerrainMode = !!ctx.realTerrainMode;
+  const [tab, setTab] = useState(() => realTerrainMode ? 'import' : 'shape');
   const { params, onParam, worldMode } = ctx;
   const isStudio = worldMode === 'studio';
   // Erosion lives as a tab here (Tile mode only). Its bake state is shared
@@ -113,8 +114,14 @@ function TerrainPanel({ ctx }) {
   useEffect(() => {
     if (!isStudio && tab === 'erosion') setTab('shape');
   }, [isStudio, tab]);
-  const onErosionTab = isStudio && tab === 'erosion';
-  const tabs = [
+  useEffect(() => {
+    if (realTerrainMode && tab !== 'import') setTab('import');
+  }, [realTerrainMode, tab]);
+  const activeTab = realTerrainMode ? 'import' : tab;
+  const onErosionTab = !realTerrainMode && isStudio && activeTab === 'erosion';
+  const tabs = realTerrainMode ? [
+    { id: 'import', label: 'Import' },
+  ] : [
     { id: 'shape', label: 'Shape' },
     { id: 'noise', label: 'Noise' },
     { id: 'surface', label: 'Surface' },
@@ -122,12 +129,12 @@ function TerrainPanel({ ctx }) {
     ...(isStudio ? [{ id: 'import', label: 'Import' }] : []),
   ];
   return (
-    <SidePanel title="Terrain" description="Shape and surface generation." onClose={ctx.onClose}
+    <SidePanel title={realTerrainMode ? 'Real terrain' : 'Terrain'} description={realTerrainMode ? 'Geographic elevation, imagery, and buildings.' : 'Shape and surface generation.'} onClose={ctx.onClose}
       footer={onErosionTab
         ? <ErosionTabFooter erosion={erosion} />
-        : <RandomizeTerrainButton onRandomize={ctx.onRandomizeTerrain} />}>
-      <PanelTabs active={tab} onChange={setTab} tabs={tabs} />
-      {tab === 'shape' && (
+        : realTerrainMode ? null : <RandomizeTerrainButton onRandomize={ctx.onRandomizeTerrain} />}>
+      {!realTerrainMode && <PanelTabs active={activeTab} onChange={setTab} tabs={tabs} />}
+      {activeTab === 'shape' && (
         <>
           <SelectRow label="Preset" value={params.preset} settingId="terrain.preset"
             options={Object.entries(PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
@@ -141,7 +148,7 @@ function TerrainPanel({ ctx }) {
             onChange={(v) => onParam('edgeFalloffMode', v)} info="Island fades terrain toward the boundary. Mountains preserves the terrain and adds ridged noise around the outer edge." />
         </>
       )}
-      {tab === 'noise' && (
+      {activeTab === 'noise' && (
         <>
           <SelectRow label="Noise Preset" value={params.noisePreset ?? 'default'} settingId="terrain.noisePreset"
             options={Object.entries(NOISE_PRESETS).map(([key, p]) => ({ value: key, label: p.label }))}
@@ -151,10 +158,10 @@ function TerrainPanel({ ctx }) {
           ))}
         </>
       )}
-      {tab === 'surface' && <SurfaceTab ctx={ctx} />}
+      {activeTab === 'surface' && <SurfaceTab ctx={ctx} />}
       {onErosionTab && <ErosionTabContent ctx={ctx} erosion={erosion} />}
-      {tab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
-      {!onErosionTab && (
+      {activeTab === 'import' && isStudio && <ImportMapsContent ctx={ctx} />}
+      {!realTerrainMode && !onErosionTab && (
         <PanelResetButton label="Reset Terrain Settings" onClick={() => ctx.onResetPanel?.('terrain')} settingId="terrain.reset" />
       )}
     </SidePanel>

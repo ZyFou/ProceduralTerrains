@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Crosshair, Download, Grip, Map, X } from 'lucide-react';
+import { Crosshair, Download, Grip, LoaderCircle, Map, Search, X } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import {
   CUSTOM_AREA_LIMITS,
@@ -11,6 +11,9 @@ import {
 } from '../../engine/terrain/RealWorldHeightmap.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const GEOCODING_SEARCH_URL = import.meta.env.VITE_GEOCODING_SEARCH_URL
+  || 'https://nominatim.openstreetmap.org/search';
+const geocodingCache = new globalThis.Map();
 
 function selectionBounds(spec) {
   const { bbox } = makeCustomLocation(spec);
@@ -66,6 +69,11 @@ export default function RealWorldMapPicker({
   const specRef = useRef(spec);
   const frameRef = useRef(0);
   const dialogRef = useRef(null);
+  const searchAbortRef = useRef(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const info = useMemo(() => describeCustomArea(spec), [spec]);
   const style = resolveImageryStyle(imageryStyle);
 
@@ -83,10 +91,71 @@ export default function RealWorldMapPicker({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
+      searchAbortRef.current?.abort();
       window.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
   }, [busy, onClose]);
+
+  const searchPlaces = async (event) => {
+    event?.preventDefault();
+    const query = searchQuery.trim();
+    if (query.length < 2 || searchBusy) return;
+    setSearchError('');
+    const cacheKey = query.toLocaleLowerCase();
+    if (geocodingCache.has(cacheKey)) {
+      setSearchResults(geocodingCache.get(cacheKey));
+      return;
+    }
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setSearchBusy(true);
+    try {
+      const url = new URL(GEOCODING_SEARCH_URL);
+      url.searchParams.set('q', query);
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('addressdetails', '1');
+      url.searchParams.set('limit', '6');
+      url.searchParams.set('accept-language', navigator.languages?.join(',') || navigator.language || 'en');
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`Search failed (${response.status})`);
+      const payload = await response.json();
+      const results = (Array.isArray(payload) ? payload : []).map((place) => ({
+        id: String(place.place_id ?? `${place.lat}:${place.lon}`),
+        lat: Number(place.lat),
+        lon: Number(place.lon),
+        label: String(place.display_name ?? query),
+        type: String(place.type ?? place.addresstype ?? ''),
+      })).filter((place) => Number.isFinite(place.lat) && Number.isFinite(place.lon));
+      geocodingCache.set(cacheKey, results);
+      setSearchResults(results);
+      if (!results.length) setSearchError('No matching places found.');
+    } catch (error) {
+      if (error?.name !== 'AbortError') setSearchError('Place search is unavailable right now.');
+    } finally {
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setSearchBusy(false);
+      }
+    }
+  };
+
+  const selectSearchResult = (place) => {
+    const next = {
+      ...specRef.current,
+      lat: clamp(place.lat, CUSTOM_AREA_LIMITS.lat.min, CUSTOM_AREA_LIMITS.lat.max),
+      lon: clamp(place.lon, CUSTOM_AREA_LIMITS.lon.min, CUSTOM_AREA_LIMITS.lon.max),
+    };
+    onChange({ ...next, lat: Number(next.lat.toFixed(5)), lon: Number(next.lon.toFixed(5)) });
+    mapRef.current?.flyTo([next.lat, next.lon], Math.max(mapRef.current.getZoom(), 10), { duration: 0.65 });
+    setSearchQuery(place.label.split(',')[0]);
+    setSearchResults([]);
+    setSearchError('');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -237,6 +306,42 @@ export default function RealWorldMapPicker({
         <div className="realworld-map-layout">
           <div className="realworld-map-canvas-wrap">
             <div ref={mapNodeRef} className="realworld-map-canvas" aria-label="Interactive world map" />
+            <div className="realworld-map-search">
+              <form onSubmit={searchPlaces} role="search">
+                <Search size={15} aria-hidden />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setSearchResults([]);
+                    setSearchError('');
+                  }}
+                  placeholder="Search city or place…"
+                  aria-label="Search city or place"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button type="submit" disabled={searchBusy || searchQuery.trim().length < 2} aria-label="Search map">
+                  {searchBusy ? <LoaderCircle size={15} className="tb-spin" aria-hidden /> : 'Search'}
+                </button>
+              </form>
+              {(searchResults.length > 0 || searchError) && (
+                <div className="realworld-map-search-results" role="listbox" aria-label="Place search results">
+                  {searchError && <p>{searchError}</p>}
+                  {searchResults.map((place) => {
+                    const [name, ...rest] = place.label.split(',');
+                    return (
+                      <button key={place.id} type="button" role="option" aria-selected="false" onClick={() => selectSearchResult(place)}>
+                        <strong>{name}</strong>
+                        <span>{rest.join(',').trim() || place.type}</span>
+                      </button>
+                    );
+                  })}
+                  <small>Search data © OpenStreetMap contributors</small>
+                </div>
+              )}
+            </div>
             <div className="realworld-map-crosshair" aria-hidden>
               <Crosshair size={24} strokeWidth={1.6} />
             </div>

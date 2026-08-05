@@ -68,4 +68,21 @@ describe('project document migration', () => {
     expect(project.terrain.realWorldSource).toEqual(realWorldSource);
     expect(normalizeProject(JSON.parse(JSON.stringify(project))).terrain.realWorldSource).toEqual(realWorldSource);
   });
+
+  it('preserves the Real terrain workspace preset without changing the engine authoring mode', () => {
+    const project = normalizeProject({
+      terrain: {
+        editorMode: 'procedural',
+        workspacePreset: 'real-terrain',
+        params: { seed: 21 },
+      },
+    });
+
+    expect(project.terrain).toMatchObject({
+      editorMode: 'procedural',
+      generationSource: 'classic',
+      workspacePreset: 'real-terrain',
+    });
+    expect(normalizeProject(JSON.parse(JSON.stringify(project))).terrain.workspacePreset).toBe('real-terrain');
+  });
 });

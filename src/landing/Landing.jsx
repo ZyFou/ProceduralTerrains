@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
@@ -328,8 +328,8 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           <SyncIcon size={13} aria-hidden />
           {cloudProject && <span className={`lp-card-visibility-icon ${cloudProject.visibility}`}><VisibilityIcon size={12} aria-hidden /></span>}
         </span>
-        <span className={`lp-template-kind-badge ${project.terrain.editorMode}`}>
-          {project.terrain.editorMode === 'nodes' ? 'Nodes' : project.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural'}
+        <span className={`lp-template-kind-badge ${project.terrain.workspacePreset === 'real-terrain' ? 'real' : project.terrain.editorMode}`}>
+          {project.terrain.workspacePreset === 'real-terrain' ? 'Real terrain' : project.terrain.editorMode === 'nodes' ? 'Nodes' : project.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural'}
         </span>
         <span className="lp-card-info">
           <strong>{project.metadata.name}</strong>
@@ -602,7 +602,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
         <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
           <header>
-            <div><span>New project</span><h2 id="create-terrain-title">Choose how to build your terrain</h2><p>Each project uses one authoring workflow. All three can be saved and exported.</p></div>
+            <div><span>New project</span><h2 id="create-terrain-title">Choose how to build your terrain</h2><p>Each project uses one authoring workflow. All four can be saved and exported.</p></div>
             <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={16} /></button>
           </header>
           <div className="landing-create-options">
@@ -623,6 +623,12 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
               <strong>Manual Terrain</strong>
               <small>Drag mountains, valleys, ridges, plateaus, and craters onto a clean terrain and transform them directly.</small>
               <span className="landing-create-action">Create Manual Terrain <ArrowRight size={13} /></span>
+            </button>
+            <button type="button" onClick={() => create('blank', 'real')} disabled={!menuReady || exiting}>
+              <span className="landing-create-icon real"><Earth size={22} /></span>
+              <strong>Real Terrain</strong>
+              <small>Choose any real-world location and work in a focused import workspace with geographic elevation, imagery, and buildings.</small>
+              <span className="landing-create-action">Select a location <ArrowRight size={13} /></span>
             </button>
           </div>
         </section>

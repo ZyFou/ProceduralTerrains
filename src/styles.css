@@ -1178,6 +1178,78 @@ body {
   color: #e8ecf4;
 }
 .realworld-map-canvas .leaflet-control-zoom a:hover { background: #222a36; }
+.realworld-map-search {
+  position: absolute;
+  z-index: 800;
+  top: 14px;
+  left: 50%;
+  width: min(430px, calc(100% - 150px));
+  transform: translateX(-50%);
+}
+.realworld-map-search form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 5px 5px 5px 12px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 9px;
+  background: rgba(10, 14, 20, .94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .42);
+  color: rgba(255, 255, 255, .72);
+  backdrop-filter: blur(9px);
+}
+.realworld-map-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f1f5f9;
+  font: 500 12px var(--font);
+}
+.realworld-map-search input::placeholder { color: rgba(255, 255, 255, .48); }
+.realworld-map-search form button {
+  min-width: 62px;
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(92, 161, 255, .55);
+  border-radius: 6px;
+  background: rgba(47, 125, 225, .2);
+  color: #a9ceff;
+  font: 650 10.5px var(--font);
+  cursor: var(--cursor-pointer);
+}
+.realworld-map-search form button:hover:not(:disabled) { background: rgba(47, 125, 225, .34); color: #fff; }
+.realworld-map-search form button:disabled { opacity: .5; cursor: var(--cursor-default); }
+.realworld-map-search-results {
+  max-height: min(310px, 48vh);
+  margin-top: 6px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 9px;
+  background: rgba(10, 14, 20, .97);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .5);
+}
+.realworld-map-search-results > button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  background: transparent;
+  color: #f1f5f9;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.realworld-map-search-results > button:hover { background: rgba(92, 161, 255, .13); }
+.realworld-map-search-results strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.realworld-map-search-results span { overflow: hidden; color: rgba(255, 255, 255, .55); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.realworld-map-search-results p { margin: 0; padding: 12px; color: rgba(255, 255, 255, .68); font-size: 10.5px; }
+.realworld-map-search-results small { display: block; padding: 7px 12px; color: rgba(255, 255, 255, .4); font-size: 8.5px; }
 .realworld-map-crosshair {
   position: absolute;
   z-index: 500;
@@ -1363,6 +1435,9 @@ body {
   .realworld-map-header p { display: none; }
   .realworld-map-heading-icon { width: 30px; height: 30px; }
   .realworld-map-instruction { font-size: 9.5px; }
+  .realworld-map-search { top: 10px; width: calc(100% - 84px); }
+  .realworld-map-search form { min-height: 38px; }
+  .realworld-map-search form button { min-width: 48px; }
   .realworld-map-layout { grid-template-rows: minmax(230px, 1fr) auto; }
   .realworld-map-sidebar { max-height: 50dvh; }
 }

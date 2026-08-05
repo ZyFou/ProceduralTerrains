@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair, Map, MapPinned } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
@@ -272,6 +272,10 @@ function CustomAreaPicker({ ctx }) {
   const [progress, setProgress] = useState(0);
   const [mapOpen, setMapOpen] = useState(false);
 
+  useEffect(() => {
+    if (ctx.realWorldMapRequest) setMapOpen(true);
+  }, [ctx.realWorldMapRequest]);
+
   const info = useMemo(() => describeCustomArea(spec), [spec]);
   const set = (key) => (v) => {
     setSpec((s) => {
@@ -342,7 +346,8 @@ function CustomAreaPicker({ ctx }) {
     <CollapsibleGroup
       title="Custom Area"
       icon={<Crosshair size={15} strokeWidth={1.75} />}
-      defaultOpen={false}
+      defaultOpen={!!ctx.realTerrainMode}
+      forceOpen={mapOpen}
       settingId="terrain.realWorldCustom"
     >
       <div className="stat-row">
@@ -431,7 +436,9 @@ export default function ImportMapsContent({ ctx }) {
   return (
     <>
       <p className="section-hint">
-        Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.
+        {ctx.realTerrainMode
+          ? 'Select a real-world area to import geographic elevation, imagery, and available building footprints.'
+          : 'Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.'}
       </p>
       <ToggleRow
         label="Display Buildings"

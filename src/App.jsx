@@ -50,6 +50,7 @@ import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
+const REAL_TERRAIN_PANEL_IDS = ['terrain', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
 const SideDrawer = lazy(() => import('./components/ui/SideDrawer.jsx'));
 const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
@@ -195,6 +196,8 @@ export default function App() {
   const [realWorldBuildingsVisible, setRealWorldBuildingsVisible] = useState(true);
 
   const [worldMode, setWorldMode] = useState('studio');
+  const [realTerrainMode, setRealTerrainMode] = useState(false);
+  const [realWorldMapRequest, setRealWorldMapRequest] = useState(0);
   const [exploreMode, setExploreMode] = useState('none');
   const [playerMode, setPlayerMode] = useState(false);
 
@@ -566,6 +569,7 @@ export default function App() {
             })
             : undefined,
         });
+        setRealTerrainMode(terrain.workspacePreset === 'real-terrain');
         const eng = engineRef.current;
         if (eng) {
           const baseline = eng.serializeState();
@@ -694,13 +698,14 @@ export default function App() {
   } = {}) => {
     const eng = engineRef.current;
     if (!eng) return;
+    const realPreset = editorMode === 'real';
     const nextMode = editorMode === 'nodes' ? 'nodes' : editorMode === 'manual' ? 'manual' : 'procedural';
     const template = nextMode === 'nodes'
       ? getNodeProjectTemplate(templateId)
       : nextMode === 'manual'
         ? { id: 'manual-blank', name: 'Manual Terrain', description: 'Build a terrain by composing editable procedural landforms.' }
         : getProjectTemplate(templateId);
-    return loadingRef.current.run('project-create', {
+    const created = await loadingRef.current.run('project-create', {
       blocking: true,
       label: `Creating ${template.name}…`,
       detail: 'Building terrain…',
@@ -708,7 +713,7 @@ export default function App() {
       blockingUpdateRef.current = update;
       try {
         if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
-        if ((nextMode === 'nodes' || nextMode === 'manual') && worldModeRef.current !== 'studio') {
+        if ((nextMode === 'nodes' || nextMode === 'manual' || realPreset) && worldModeRef.current !== 'studio') {
           await runModeSwitchRef.current('studio', { silent: true });
           blockingUpdateRef.current = update;
         }
@@ -721,10 +726,12 @@ export default function App() {
         const projectSeed = (baseSeed + templateOffset * 0x9e3779b9) >>> 0;
         eng.newProject({
           projectMode: nextMode,
+          workspacePreset: realPreset ? 'real-terrain' : null,
           seed: projectSeed,
           presetKey: nextMode === 'procedural' ? template.preset : null,
           noiseStackPresetKey: nextMode === 'procedural' ? template.noiseStackPreset : null,
         });
+        setRealTerrainMode(realPreset);
         // A new terrain is a new document. Do not let saveCurrentProject reuse
         // the id of whichever project was previously open.
         setCurrentProject(null);
@@ -776,7 +783,9 @@ export default function App() {
           setNativeHistoryActions([]);
           setHistState({ canUndo: false, canRedo: false });
         } catch { /* history is best effort */ }
-        const metadata = nextMode === 'nodes'
+        const metadata = realPreset
+          ? { name: 'Real Terrain', description: 'Real-world geographic terrain import.', tags: ['real-terrain', 'geographic'] }
+          : nextMode === 'nodes'
           ? {
             name: template.id === 'nodes-blank' ? 'Nodes Terrain' : template.name,
             description: template.description,
@@ -793,6 +802,12 @@ export default function App() {
         if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
       }
     });
+    if (realPreset && created) {
+      setActivePanel('terrain');
+      setSettingsTarget({ panelId: 'terrain', tabId: 'import', settingId: 'terrain.realWorldCustom' });
+      setRealWorldMapRequest((request) => request + 1);
+    }
+    return created;
   }, [saveCurrentProject, showToast]);
 
   useEffect(() => {
@@ -928,7 +943,22 @@ export default function App() {
     });
   };
 
-  const selectWorldMode = (next) => { runModeSwitch(next); };
+  const selectWorldMode = async (next) => {
+    if (next === 'real') {
+      if (worldModeRef.current !== 'studio') await runModeSwitch('studio');
+      const eng = engineRef.current;
+      if (!eng || eng.worldMode !== 'studio') return;
+      eng.workspacePreset = 'real-terrain';
+      setRealTerrainMode(true);
+      setActivePanel('terrain');
+      setSettingsTarget({ panelId: 'terrain', tabId: 'import', settingId: 'terrain.realWorldCustom' });
+      setRealWorldMapRequest((request) => request + 1);
+      return;
+    }
+    if (engineRef.current) engineRef.current.workspacePreset = null;
+    setRealTerrainMode(false);
+    await runModeSwitch(next);
+  };
   const runModeSwitchRef = useRef(runModeSwitch);
   runModeSwitchRef.current = runModeSwitch;
 
@@ -1582,9 +1612,13 @@ export default function App() {
 
   const settingsSearchResults = useMemo(() => {
     if (!settingsSearchOpen || !searchEnabled) return [];
-    return searchSettings(settingsSearchQuery, (panelId) => panelAvailable(panelId, worldMode))
+    return searchSettings(settingsSearchQuery, (panelId) => (
+      panelAvailable(panelId, worldMode)
+      && (!realTerrainMode || REAL_TERRAIN_PANEL_IDS.includes(panelId))
+    ))
+      .filter((item) => !realTerrainMode || item.panelId !== 'terrain' || item.tabId === 'import')
       .map((item) => ({ ...item, valueText: formatSearchValue(item) }));
-  }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, formatSearchValue]);
+  }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, realTerrainMode, formatSearchValue]);
 
   const groupedSettingsSearchResults = useMemo(() => {
     const map = new Map();
@@ -1675,7 +1709,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [uiSettingsOpen]);
 
-  const projectPanelAvailable = (id) => !['nodes', 'manual'].includes(projectMode) || NODE_PANEL_IDS.includes(id);
+  const projectPanelAvailable = (id) => {
+    if (realTerrainMode) return REAL_TERRAIN_PANEL_IDS.includes(id);
+    return !['nodes', 'manual'].includes(projectMode) || NODE_PANEL_IDS.includes(id);
+  };
   const togglePanel = (id) => {
     if (!projectPanelAvailable(id)) return;
     setActivePanel((cur) => (cur === id ? null : id));
@@ -1849,6 +1886,7 @@ export default function App() {
 
   const ctx = {
     params, worldMode, onParam,
+    realTerrainMode, realWorldMapRequest,
     settingsTarget,
     settingsSearchOpen,
     onSettingsTargetHandled: () => setSettingsTarget(null),
@@ -1977,12 +2015,12 @@ export default function App() {
         </div>
       )}
       <TopBar
-        projectMode={projectMode}
+        projectMode={realTerrainMode ? 'real' : projectMode}
         shortcutsEnabled={!landingMode}
         projectName={projectName}
         onProjectNameChange={updateProjectName}
         previewMode={previewMode}
-        onNew={() => createProjectFromTemplate('blank', { editorMode: projectMode })}
+        onNew={() => createProjectFromTemplate('blank', { editorMode: realTerrainMode ? 'real' : projectMode })}
         onRandomize={() => engine().randomizeSeed()}
         onSave={() => saveCurrentProject()}
         onDownload={downloadCurrentProject}
@@ -2036,7 +2074,8 @@ export default function App() {
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
             showLabels={uiPrefs.toolbarLabels}
-            panelIds={['nodes', 'manual'].includes(projectMode) ? NODE_PANEL_IDS : undefined}
+            panelIds={realTerrainMode ? REAL_TERRAIN_PANEL_IDS : ['nodes', 'manual'].includes(projectMode) ? NODE_PANEL_IDS : undefined}
+            realTerrainMode={realTerrainMode}
           />
         )}
 
@@ -2091,7 +2130,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && !manualMode && (
+          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && !manualMode && !realTerrainMode && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
@@ -2245,7 +2284,7 @@ export default function App() {
 
       {!previewMode && !landingMode && projectMode === 'procedural' && (
         <WorldModeBar
-          worldMode={worldMode}
+          worldMode={realTerrainMode ? 'real' : worldMode}
           onSetWorldMode={selectWorldMode}
           modeLocked={modeLocked}
           modeDisplay={uiPrefs.modeDisplay}

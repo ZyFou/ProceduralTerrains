@@ -26,6 +26,7 @@ export default function LeftToolbar({
   shellRef,
   showLabels = true,
   panelIds = PANEL_ORDER,
+  realTerrainMode = false,
 }) {
   const railRef = useRef(null);
   const menuRef = useRef(null);
@@ -180,7 +181,9 @@ export default function LeftToolbar({
       >
         {panelIds.filter((id) => panelAvailable(id, worldMode)).map((id) => {
           const meta = PANEL_META[id];
-          const display = getPanelDisplay(id, worldMode);
+          const display = realTerrainMode && id === 'terrain'
+            ? { label: 'Real terrain' }
+            : getPanelDisplay(id, worldMode);
           return (
             <button
               key={id}
