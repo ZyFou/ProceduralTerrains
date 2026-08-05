@@ -6,6 +6,8 @@ const FALLBACK_KEY = 'procedural-terrains-projects-v1';
 const SYNC_FALLBACK_KEY = 'procedural-terrains-project-sync-v1';
 const now = () => new Date().toISOString();
 const id = () => globalThis.crypto?.randomUUID?.() ?? `project-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const COMMUNITY_ICON_BY_MODE = Object.freeze({ procedural: 'mountain', nodes: 'boxes', manual: 'hand' });
+const COMMUNITY_ICONS = new Set(['mountain', 'boxes', 'hand', 'waves', 'orbit', 'route']);
 
 function emitChange() {
   window.dispatchEvent(new Event('terrain-projects:changed'));
@@ -112,6 +114,8 @@ export function normalizeProject(input = {}) {
   };
   const metadata = input.metadata ?? {};
   const created = metadata.created ?? input.created ?? now();
+  const fallbackCommunityIcon = COMMUNITY_ICON_BY_MODE[editorMode] ?? COMMUNITY_ICON_BY_MODE.procedural;
+  const communityIcon = COMMUNITY_ICONS.has(metadata.communityIcon) ? metadata.communityIcon : fallbackCommunityIcon;
   return {
     schemaVersion: 2,
     id: input.id ?? id(),
@@ -123,6 +127,7 @@ export function normalizeProject(input = {}) {
       created,
       modified: metadata.modified ?? input.modified ?? now(),
       thumbnail: metadata.thumbnail ?? null,
+      communityIcon,
       dependencies: Array.isArray(metadata.dependencies) ? metadata.dependencies : [],
     },
     terrain,

@@ -28,7 +28,7 @@ const BOOT_READY_HOLD_MS = 320;
 const BOOT_REVEAL_MS = 680;
 
 function viewFromHash() {
-  const value = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+  const value = window.location.hash.replace(/^#\/?/, '').split('?')[0].toLowerCase();
   return HASH_VIEWS.has(value) ? value : null;
 }
 
@@ -421,7 +421,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
             />
           )}
           {view === 'profile' && user && <ProfilePage onBack={goHome} />}
-          {view === 'community' && <CommunityPage onBack={() => showView('projects')} onOpen={open} />}
+          {view === 'community' && <CommunityPage onBack={() => showView('projects')} onOpen={open} ready={menuReady && !exiting} />}
           {view === 'admin' && user?.role === 'admin' && <AdminDashboard user={user} onBack={goHome} />}
           {view === 'confidentiality' && <ConfidentialityPage onBack={goHome} />}
           {view === 'home' && <>

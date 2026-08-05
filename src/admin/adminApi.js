@@ -9,7 +9,7 @@ const queryString = (params = {}) => {
 };
 
 export const adminApi = {
-  overview: () => apiRequest('/admin/overview'),
+  overview: (params) => apiRequest(`/admin/overview${queryString(params)}`),
   users: (params) => apiRequest(`/admin/users${queryString(params)}`),
   updateUser: (userId, input) => apiRequest(`/admin/users/${encodeURIComponent(userId)}`, { method: 'PATCH', body: input }),
   revokeSessions: (userId) => apiRequest(`/admin/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' }),

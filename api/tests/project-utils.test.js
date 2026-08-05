@@ -42,6 +42,13 @@ test('project updates validate visibility and require a field', () => {
   assert.equal(validateProjectUpdate({ name: 'Renamed', visibility: 'public' }).ok, true);
 });
 
+test('project updates accept supported community card icons', () => {
+  const result = validateProjectUpdate({ communityIcon: 'waves' });
+  assert.equal(result.ok, true);
+  assert.equal(result.value.communityIcon, 'waves');
+  assert.equal(validateProjectUpdate({ communityIcon: 'unknown' }).ok, false);
+});
+
 test('project document updates validate an optimistic content revision', () => {
   const protectedUpdate = validateProjectUpdate({ project: { terrain: {} }, expectedContentRevision: 4 });
   assert.equal(protectedUpdate.ok, true);

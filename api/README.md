@@ -159,6 +159,8 @@ GET  /api/v1/admin/audit
 GET  /api/v1/admin/security
 ```
 
+Admin reporting accepts `days=7|30|90` for weekly, monthly, or extended visit ranges. User listings also accept `verified=verified|unverified`, `activity=7d|30d|never`, `terrains=has|none`, and `sessions=active|none` filters.
+
 Register body:
 
 ```json

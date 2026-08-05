@@ -23,6 +23,7 @@ const dateTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nume
 const formatDate = (value, fallback = 'Never') => value ? dateTime.format(new Date(value)) : fallback;
 const actionLabel = (value = '') => value.split('.').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' · ');
 const localDayKey = (value) => {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -54,26 +55,42 @@ function Pagination({ page, pages, onPage }) {
   );
 }
 
-function TrendChart({ data = [], valueKey = 'visits' }) {
+function TrendChart({ data = [], valueKey = 'visits', days: requestedDays = 14, valueLabel: requestedValueLabel }) {
+  const days = Math.max(1, Number(requestedDays) || 14);
+  const valueLabel = requestedValueLabel || valueKey.replace(/([A-Z])/g, ' $1').toLowerCase();
   const points = useMemo(() => {
     const byDay = new Map(data.map((item) => [localDayKey(item.day), item]));
-    return Array.from({ length: 14 }, (_, index) => {
+    return Array.from({ length: days }, (_, index) => {
       const date = new Date();
       date.setHours(0, 0, 0, 0);
-      date.setDate(date.getDate() - (13 - index));
+      date.setDate(date.getDate() - (days - 1 - index));
       const key = localDayKey(date);
       return { day: date, value: Number(byDay.get(key)?.[valueKey] ?? 0) };
     });
-  }, [data, valueKey]);
+  }, [data, days, valueKey]);
   const max = Math.max(1, ...points.map((item) => item.value));
+  const labelStep = days <= 7 ? 2 : days <= 31 ? 7 : 14;
+  const shouldLabel = (index) => index === 0 || index === points.length - 1 || index % labelStep === 0;
+  const [activeIndex, setActiveIndex] = useState(null);
   return (
-    <div className="admin-chart" role="img" aria-label={`Daily ${valueKey.replace(/([A-Z])/g, ' $1').toLowerCase()} over the last 14 days`}>
+    <div className="admin-chart" role="group" aria-label={`Daily ${valueLabel} over the last ${days} days`}>
       <div className="admin-chart-grid" aria-hidden="true"><i /><i /><i /></div>
       <div className="admin-chart-bars">
         {points.map((item, index) => (
-          <span className="admin-chart-column" key={item.day.toISOString()} title={`${shortDate.format(item.day)}: ${number.format(item.value)}`}>
-            <i style={{ height: `${Math.max(item.value ? 6 : 2, (item.value / max) * 100)}%` }} />
-            {(index === 0 || index === 6 || index === 13) && <small>{shortDate.format(item.day)}</small>}
+          <span
+            className={`admin-chart-column ${activeIndex === index ? 'is-active' : ''}`}
+            key={item.day.toISOString()}
+            tabIndex="0"
+            aria-label={`${shortDate.format(item.day)}: ${number.format(item.value)} ${valueLabel}`}
+            onMouseEnter={() => setActiveIndex(index)}
+            onMouseLeave={() => setActiveIndex(null)}
+            onFocus={() => setActiveIndex(index)}
+            onBlur={() => setActiveIndex(null)}
+          >
+            <span className="admin-chart-bar" style={{ height: `${Math.max(item.value ? 6 : 2, (item.value / max) * 100)}%` }}>
+              <span className="admin-chart-tooltip" role="status"><strong>{number.format(item.value)}</strong><small>{shortDate.format(item.day)}</small><em>{valueLabel}</em></span>
+            </span>
+            {shouldLabel(index) && <small>{shortDate.format(item.day)}</small>}
           </span>
         ))}
       </div>
@@ -81,7 +98,26 @@ function TrendChart({ data = [], valueKey = 'visits' }) {
   );
 }
 
-function Overview({ data, onNavigate }) {
+const REPORTING_RANGES = [
+  { value: 7, label: 'Weekly' },
+  { value: 30, label: 'Monthly' },
+  { value: 90, label: '90 days' },
+];
+
+function RangeSelector({ value, onChange, label = 'Reporting period' }) {
+  return (
+    <div className="admin-range-selector" role="group" aria-label={label}>
+      {REPORTING_RANGES.map((range) => (
+        <button type="button" key={range.value} className={value === range.value ? 'active' : ''} onClick={() => onChange(range.value)} aria-pressed={value === range.value}>
+          {range.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Overview({ data, onNavigate, rangeDays, onRangeChange }) {
+  const rangeLabel = REPORTING_RANGES.find((range) => range.value === rangeDays)?.label.toLowerCase() || `${rangeDays} days`;
   const stats = [
     { label: 'Total users', value: data.counts.users, meta: `${number.format(data.counts.activeUsers)} active`, icon: UsersRound, tone: 'blue' },
     { label: 'Visits today', value: data.counts.visitsToday, meta: `${number.format(data.counts.uniqueToday)} unique`, icon: Activity, tone: 'green' },
@@ -101,11 +137,11 @@ function Overview({ data, onNavigate }) {
 
       <section className="admin-panel admin-trend-panel">
         <header>
-          <div><span className="admin-eyebrow">Traffic</span><h2>Visits over the last 14 days</h2></div>
-          <button type="button" className="admin-text-button" onClick={() => onNavigate('visits')}>View visit log <ChevronRight size={13} /></button>
+          <div><span className="admin-eyebrow">Traffic</span><h2>Visits over the last {rangeDays} days</h2></div>
+          <div className="admin-panel-actions"><RangeSelector value={rangeDays} onChange={onRangeChange} /><button type="button" className="admin-text-button" onClick={() => onNavigate('visits')}>View visit log <ChevronRight size={13} /></button></div>
         </header>
-        <TrendChart data={data.visitTrend} />
-        <div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="muted" /> UTC day</span></div>
+        <TrendChart data={data.visitTrend} days={rangeDays} valueLabel="page visits" />
+        <div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="muted" /> Daily values · {rangeLabel}</span></div>
       </section>
 
       <div className="admin-overview-columns">
@@ -148,13 +184,17 @@ function UsersPanel({ currentUser }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [role, setRole] = useState('');
+  const [verified, setVerified] = useState('');
+  const [activity, setActivity] = useState('');
+  const [terrains, setTerrains] = useState('');
+  const [sessions, setSessions] = useState('');
   const [busy, setBusy] = useState('');
 
   const load = useCallback(async () => {
     setError('');
-    try { setData(await adminApi.users({ page, q: query, status, role })); }
+    try { setData(await adminApi.users({ page, q: query, status, role, verified, activity, terrains, sessions })); }
     catch (nextError) { setError(nextError.message); }
-  }, [page, query, status, role]);
+  }, [page, query, status, role, verified, activity, terrains, sessions]);
   useEffect(() => { load(); }, [load]);
 
   const update = async (target, patch) => {
@@ -204,13 +244,25 @@ function UsersPanel({ currentUser }) {
         <div><span className="admin-eyebrow">Accounts</span><h2>User management</h2><p>Review access, roles, account status, and sessions.</p></div>
         <button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button>
       </header>
-      <form className="admin-filters" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}>
+      <form className="admin-filters users-filters" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}>
         <label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, username, or email" aria-label="Search users" /></label>
         <select value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }} aria-label="Filter user status">
           <option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option>
         </select>
         <select value={role} onChange={(event) => { setPage(1); setRole(event.target.value); }} aria-label="Filter user role">
           <option value="">All roles</option><option value="admin">Administrators</option><option value="user">Members</option>
+        </select>
+        <select value={verified} onChange={(event) => { setPage(1); setVerified(event.target.value); }} aria-label="Filter email verification">
+          <option value="">All verification</option><option value="verified">Verified email</option><option value="unverified">Unverified email</option>
+        </select>
+        <select value={terrains} onChange={(event) => { setPage(1); setTerrains(event.target.value); }} aria-label="Filter terrain ownership">
+          <option value="">All terrain activity</option><option value="has">Has terrains</option><option value="none">No terrains</option>
+        </select>
+        <select value={activity} onChange={(event) => { setPage(1); setActivity(event.target.value); }} aria-label="Filter recent activity">
+          <option value="">Any last seen</option><option value="7d">Seen in 7 days</option><option value="30d">Seen in 30 days</option><option value="never">Never seen</option>
+        </select>
+        <select value={sessions} onChange={(event) => { setPage(1); setSessions(event.target.value); }} aria-label="Filter active sessions">
+          <option value="">All sessions</option><option value="active">Has active sessions</option><option value="none">No active sessions</option>
         </select>
         <button type="submit">Search</button>
       </form>
@@ -268,7 +320,7 @@ function VisitsPanel() {
   const DeviceIcon = ({ device }) => device === 'Mobile' ? <Smartphone size={13} /> : device === 'Tablet' ? <Tablet size={13} /> : <Laptop size={13} />;
   return (
     <div className="admin-stack">
-      {data && <section className="admin-panel admin-trend-panel"><header><div><span className="admin-eyebrow">Audience</span><h2>Visits and unique visitors</h2></div><select value={days} onChange={(event) => { setPage(1); setDays(Number(event.target.value)); }} aria-label="Visit reporting period"><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></header><TrendChart data={data.trend} /><div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="green" /> Unique visitors are privacy-safe estimates</span></div></section>}
+      {data && <section className="admin-panel admin-trend-panel"><header><div><span className="admin-eyebrow">Audience</span><h2>Visits and unique visitors</h2></div><RangeSelector value={days} onChange={(value) => { setPage(1); setDays(value); }} /></header><div className="admin-inline-metrics"><div><strong>{number.format(data.summary?.visits ?? data.total)}</strong><span>Total visits</span></div><div><strong>{number.format(data.summary?.uniqueVisitors ?? 0)}</strong><span>Unique visitors</span></div><div><strong>{number.format(data.summary?.averagePerDay ?? 0)}</strong><span>Average per day</span></div></div><TrendChart data={data.trend} days={days} valueLabel="page visits" /><div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="green" /> Hover a day for the exact count</span></div></section>}
       <section className="admin-panel admin-data-panel">
         <header className="admin-data-head"><div><span className="admin-eyebrow">Recent traffic</span><h2>Visit log</h2><p>Raw network addresses are never shown or stored.</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button></header>
         {!data && !error && <LoadingState />}{error && <ErrorState message={error} onRetry={load} />}
@@ -352,13 +404,18 @@ function SecurityPanel() {
 export default function AdminDashboard({ user, onBack }) {
   const [tab, setTab] = useState('overview');
   const [overview, setOverview] = useState(null);
+  const [overviewDays, setOverviewDays] = useState(30);
   const [error, setError] = useState('');
   const loadOverview = useCallback(async () => {
     setError('');
-    try { setOverview(await adminApi.overview()); }
+    try { setOverview(await adminApi.overview({ days: overviewDays })); }
     catch (nextError) { setError(nextError.message); }
-  }, []);
+  }, [overviewDays]);
   useEffect(() => { loadOverview(); }, [loadOverview]);
+  const changeOverviewRange = useCallback((days) => {
+    setOverview(null);
+    setOverviewDays(days);
+  }, []);
   const title = TABS.find((item) => item.id === tab)?.label ?? 'Overview';
 
   return (
@@ -384,7 +441,7 @@ export default function AdminDashboard({ user, onBack }) {
         <div className="admin-page">
           {tab === 'overview' && !overview && !error && <LoadingState />}
           {tab === 'overview' && error && <ErrorState message={error} onRetry={loadOverview} />}
-          {tab === 'overview' && overview && <Overview data={overview} onNavigate={setTab} />}
+          {tab === 'overview' && overview && <Overview data={overview} onNavigate={setTab} rangeDays={overviewDays} onRangeChange={changeOverviewRange} />}
           {tab === 'users' && <UsersPanel currentUser={user} />}
           {tab === 'visits' && <VisitsPanel />}
           {tab === 'terrains' && <TerrainsPanel />}

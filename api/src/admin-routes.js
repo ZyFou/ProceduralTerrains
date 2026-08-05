@@ -57,6 +57,7 @@ export async function registerAdminRoutes(app) {
   app.get('/api/v1/admin/overview', async (request, reply) => {
     const admin = await requireAdmin(request, reply);
     if (!admin) return;
+    const days = Math.max(1, Math.min(90, Number.parseInt(request.query?.days ?? '30', 10) || 30));
     const [
       [[counts]],
       [visitTrend],
@@ -76,16 +77,18 @@ export async function registerAdminRoutes(app) {
       db.execute(
         `SELECT DATE(created_at) AS day, COUNT(*) AS visits, COUNT(DISTINCT ip_hash) AS unique_visitors
            FROM visit_events
-          WHERE created_at >= UTC_DATE() - INTERVAL 13 DAY
+          WHERE created_at >= UTC_DATE() - INTERVAL ? DAY
           GROUP BY DATE(created_at)
-          ORDER BY day`,
+           ORDER BY day`,
+        [days - 1],
       ),
       db.execute(
         `SELECT DATE(created_at) AS day, COUNT(*) AS signups
            FROM users
-          WHERE created_at >= UTC_DATE() - INTERVAL 13 DAY
+          WHERE created_at >= UTC_DATE() - INTERVAL ? DAY
           GROUP BY DATE(created_at)
           ORDER BY day`,
+        [days - 1],
       ),
       db.execute(
         `SELECT p.id, p.name, p.visibility, p.updated_at, u.username
@@ -127,6 +130,10 @@ export async function registerAdminRoutes(app) {
     const { page, limit, offset, search } = parseListQuery(request.query);
     const status = USER_STATUSES.has(request.query?.status) ? request.query.status : '';
     const role = USER_ROLES.has(request.query?.role) ? request.query.role : '';
+    const verified = ['verified', 'unverified'].includes(request.query?.verified) ? request.query.verified : '';
+    const activity = ['7d', '30d', 'never'].includes(request.query?.activity) ? request.query.activity : '';
+    const terrains = ['has', 'none'].includes(request.query?.terrains) ? request.query.terrains : '';
+    const sessions = ['active', 'none'].includes(request.query?.sessions) ? request.query.sessions : '';
     const filters = ['u.deleted_at IS NULL'];
     const values = [];
     if (search) {
@@ -146,6 +153,15 @@ export async function registerAdminRoutes(app) {
         values.push(...config.adminEmails);
       } else filters.push("u.role = 'user'");
     }
+    if (verified === 'verified') filters.push('u.email_verified_at IS NOT NULL');
+    if (verified === 'unverified') filters.push('u.email_verified_at IS NULL');
+    if (terrains === 'has') filters.push('EXISTS (SELECT 1 FROM projects pf WHERE pf.user_id = u.id)');
+    if (terrains === 'none') filters.push('NOT EXISTS (SELECT 1 FROM projects pf WHERE pf.user_id = u.id)');
+    if (sessions === 'active') filters.push('EXISTS (SELECT 1 FROM sessions sf WHERE sf.user_id = u.id AND sf.expires_at > UTC_TIMESTAMP(3))');
+    if (sessions === 'none') filters.push('NOT EXISTS (SELECT 1 FROM sessions sf WHERE sf.user_id = u.id AND sf.expires_at > UTC_TIMESTAMP(3))');
+    if (activity === '7d') filters.push('EXISTS (SELECT 1 FROM sessions sa WHERE sa.user_id = u.id AND sa.last_seen_at >= UTC_TIMESTAMP(3) - INTERVAL 7 DAY)');
+    if (activity === '30d') filters.push('EXISTS (SELECT 1 FROM sessions sa WHERE sa.user_id = u.id AND sa.last_seen_at >= UTC_TIMESTAMP(3) - INTERVAL 30 DAY)');
+    if (activity === 'never') filters.push('NOT EXISTS (SELECT 1 FROM sessions sa WHERE sa.user_id = u.id)');
     const where = filters.join(' AND ');
     const [[countRow]] = await db.execute(`SELECT COUNT(*) AS total FROM users u WHERE ${where}`, values);
     const [rows] = await db.execute(
@@ -268,20 +284,25 @@ export async function registerAdminRoutes(app) {
     if (!admin) return;
     const { page, limit, offset } = parseListQuery(request.query, { maxLimit: 100 });
     const days = Math.max(1, Math.min(90, Number.parseInt(request.query?.days ?? '30', 10) || 30));
-    const [[countRow]] = await db.execute('SELECT COUNT(*) AS total FROM visit_events WHERE created_at >= UTC_DATE() - INTERVAL ? DAY', [days - 1]);
-    const [rows] = await db.execute(
-      `SELECT v.id, v.path, v.referrer_host, v.user_agent, v.created_at, u.username
-         FROM visit_events v LEFT JOIN users u ON u.id = v.user_id
-        WHERE v.created_at >= UTC_DATE() - INTERVAL ? DAY
-        ORDER BY v.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-      [days - 1],
-    );
-    const [trend] = await db.execute(
-      `SELECT DATE(created_at) AS day, COUNT(*) AS visits, COUNT(DISTINCT ip_hash) AS unique_visitors
-         FROM visit_events WHERE created_at >= UTC_DATE() - INTERVAL ? DAY
-        GROUP BY DATE(created_at) ORDER BY day`,
-      [days - 1],
-    );
+    const [[[summary]], [rows], [trend]] = await Promise.all([
+      db.execute(
+        'SELECT COUNT(*) AS total, COUNT(DISTINCT ip_hash) AS unique_visitors FROM visit_events WHERE created_at >= UTC_DATE() - INTERVAL ? DAY',
+        [days - 1],
+      ),
+      db.execute(
+        `SELECT v.id, v.path, v.referrer_host, v.user_agent, v.created_at, u.username
+           FROM visit_events v LEFT JOIN users u ON u.id = v.user_id
+          WHERE v.created_at >= UTC_DATE() - INTERVAL ? DAY
+          ORDER BY v.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+        [days - 1],
+      ),
+      db.execute(
+        `SELECT DATE(created_at) AS day, COUNT(*) AS visits, COUNT(DISTINCT ip_hash) AS unique_visitors
+           FROM visit_events WHERE created_at >= UTC_DATE() - INTERVAL ? DAY
+          GROUP BY DATE(created_at) ORDER BY day`,
+        [days - 1],
+      ),
+    ]);
     noStore(reply);
     return {
       visits: rows.map((row) => ({
@@ -289,7 +310,12 @@ export async function registerAdminRoutes(app) {
         username: row.username ?? null, device: deviceType(row.user_agent), createdAt: row.created_at,
       })),
       trend: trend.map((row) => ({ day: row.day, visits: Number(row.visits), uniqueVisitors: Number(row.unique_visitors) })),
-      page, total: Number(countRow.total), pages: Math.max(1, Math.ceil(Number(countRow.total) / limit)),
+      summary: {
+        visits: Number(summary.total),
+        uniqueVisitors: Number(summary.unique_visitors),
+        averagePerDay: Math.round((Number(summary.total) / days) * 10) / 10,
+      },
+      page, total: Number(summary.total), pages: Math.max(1, Math.ceil(Number(summary.total) / limit)),
     };
   });
 

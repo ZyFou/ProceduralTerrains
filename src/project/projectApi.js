@@ -7,9 +7,10 @@ export const projectApi = {
   update: (projectId, input) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: input }),
   remove: (projectId) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
   rotateShareCode: (projectId) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}/share-code`, { method: 'POST' }),
-  community: ({ query = '', page = 1 } = {}) => {
+  community: ({ query = '', type = '', page = 1 } = {}) => {
     const params = new URLSearchParams();
     if (query.trim()) params.set('q', query.trim());
+    if (type) params.set('type', type);
     if (page > 1) params.set('page', String(page));
     const suffix = params.size ? `?${params}` : '';
     return apiRequest(`/community/projects${suffix}`);

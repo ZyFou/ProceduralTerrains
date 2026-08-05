@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PROJECT_VISIBILITIES } from './profile-utils.js';
 
 export const MAX_PROJECT_BYTES = 8 * 1024 * 1024;
+export const PROJECT_COMMUNITY_ICONS = Object.freeze(['mountain', 'boxes', 'hand', 'waves', 'orbit', 'route']);
 const SHARE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SHARE_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{10}$/;
 
@@ -64,11 +65,15 @@ export function validateProjectUpdate(input) {
     value.visibility = String(input.visibility ?? '').toLowerCase();
     if (!PROJECT_VISIBILITIES.includes(value.visibility)) errors.visibility = 'Choose private, unlisted, or public.';
   }
+  if (Object.hasOwn(input ?? {}, 'communityIcon')) {
+    value.communityIcon = String(input.communityIcon ?? '').trim().toLowerCase();
+    if (!PROJECT_COMMUNITY_ICONS.includes(value.communityIcon)) errors.communityIcon = 'Choose a supported community icon.';
+  }
   if (Object.hasOwn(input ?? {}, 'expectedContentRevision')) {
     expectedContentRevision = Number(input.expectedContentRevision);
     if (!Number.isInteger(expectedContentRevision) || expectedContentRevision < 1) {
       errors.expectedContentRevision = 'Provide a valid cloud content revision.';
-    } else if (!Object.hasOwn(input ?? {}, 'project')) {
+    } else if (!Object.hasOwn(input ?? {}, 'project') && !Object.hasOwn(input ?? {}, 'communityIcon')) {
       errors.expectedContentRevision = 'A cloud content revision can only protect a project update.';
     }
   }
