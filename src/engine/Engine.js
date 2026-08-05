@@ -18,10 +18,13 @@ import {
   fetchBboxImagery, offsetBbox, compositeCellPatches, compositeCellImagery,
   ELEVATION_SOURCE, DEFAULT_IMAGERY_STYLE, resolveImageryStyle,
 } from './terrain/RealWorldHeightmap.js';
+import { fetchBboxBuildings } from './terrain/RealWorldBuildings.js';
+import { RealWorldBuildingLayer } from './terrain/RealWorldBuildingLayer.js';
 import {
   DEFAULT_IMPORT_SETTINGS,
   createRealWorldSource,
   normalizeRealWorldSource,
+  updateRealWorldSourceBuildingsVisible,
   updateRealWorldSourceImageryStyle,
   updateRealWorldSourceSettings,
 } from './terrain/RealWorldSource.js';
@@ -315,6 +318,8 @@ export class Engine {
     this.analysisState = null;
     this.projectHistory = null;
     this.propsManager = null;
+    this.realWorldBuildingLayer = null;
+    this._realWorldBuildingLayoutKey = '';
     this.propSampler = null;
     this.planetPropSampler = null;
     this.propSurfaceField = null;
@@ -407,6 +412,7 @@ export class Engine {
     this.importedMaps = { noise: null, height: null, biome: null, imagery: null };
     this.importedMapState = { noise: null, height: null, biome: null, imagery: null };
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
+    this.realWorldBuildingsVisible = true;
     this.realWorldSource = null;
 
     // Erosion: additive world-space height-offset field applied in heightAt.
@@ -468,6 +474,7 @@ export class Engine {
     this._applyPerformance();
     this._syncPlanetStyleToParams();
     this.cb.onParams(this._paramsSnapshot());
+    this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
     if (this.cb.onPerfChange) this.cb.onPerfChange({ ...this.perf });
 
     this._resizeObserver = new ResizeObserver(() => this._onResize());
@@ -774,6 +781,7 @@ export class Engine {
 
   _initProps() {
     this.propsManager = new ProceduralPropsManager(this.scene);
+    this.realWorldBuildingLayer = new RealWorldBuildingLayer(this.scene);
   }
 
   _creatorBounds() {
@@ -1381,8 +1389,12 @@ export class Engine {
       this._setImportState(type);
     }
     this.realWorldSource = null;
+    this.realWorldBuildingsVisible = true;
+    this.realWorldBuildingLayer?.clear();
+    this._realWorldBuildingLayoutKey = '';
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
     this.cb.onRealWorldImageryStyle?.(DEFAULT_IMAGERY_STYLE);
+    this.cb.onRealWorldBuildingsVisible?.(true);
     this._syncImportedMapUniforms();
   }
 
@@ -1419,6 +1431,8 @@ export class Engine {
       // neither can silently return when this project is reopened.
       if (type === 'height') {
         this.realWorldSource = null;
+        this.realWorldBuildingLayer?.clear();
+        this._realWorldBuildingLayoutKey = '';
         if (this.importedMaps.imagery) {
           this.importedMaps.imagery.texture?.dispose();
           this.importedMaps.imagery = null;
@@ -1480,8 +1494,10 @@ export class Engine {
     // before network work begins so a failed restore remains retryable and the
     // next local/cloud save does not lose the geographic source.
     this.realWorldSource = source;
+    this.realWorldBuildingsVisible = source.buildingsVisible !== false;
     this.realWorldImageryStyle = imageryStyle.id;
     this.cb.onRealWorldImageryStyle?.(imageryStyle.id);
+    this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
     this._setImportState('height', { loading: true, error: '' });
     this._setImportState('imagery', { loading: true, error: '' });
     try {
@@ -1489,9 +1505,9 @@ export class Engine {
       // expansion fetch the geographically ADJACENT area for each new cell.
       // Imagery RGB is fetched in parallel at the same zoom/bbox so albedo
       // lines up with elevation without a second geo lookup.
-      let elevDone = 0, imgDone = 0;
-      const report = () => onProgress?.((elevDone + imgDone) * 0.5);
-      const [anchor, imageryAnchor] = await Promise.all([
+      let elevDone = 0, imgDone = 0, buildingDone = 0;
+      const report = () => onProgress?.((elevDone + imgDone + buildingDone) / 3);
+      const [anchor, imageryAnchor, buildingAnchor] = await Promise.all([
         fetchBboxElevation(source.bbox, zoom, {
           onProgress: (p) => { elevDone = p; report(); },
         }),
@@ -1500,6 +1516,16 @@ export class Engine {
           onProgress: (p) => { imgDone = p; report(); },
         }).catch((e) => {
           console.error(e);
+          return null;
+        }),
+        fetchBboxBuildings(source.bbox).then((result) => {
+          buildingDone = 1;
+          report();
+          return result;
+        }).catch((e) => {
+          console.error(e);
+          buildingDone = 1;
+          report();
           return null;
         }),
       ]);
@@ -1514,6 +1540,7 @@ export class Engine {
           imageryStyle: imageryStyle.id,
           cells: { '0,0': anchor },
           imageryCells: imageryAnchor ? { '0,0': imageryAnchor } : {},
+          buildingCells: buildingAnchor ? { '0,0': buildingAnchor } : {},
         },
         settings: { ...source.heightSettings },
       };
@@ -1538,9 +1565,13 @@ export class Engine {
       this._setImportState('height', { loading: false });
       if (this.importedMaps.imagery) this._setImportState('imagery', { loading: false });
       if (!silent) {
+        const buildingCount = this.realWorldBuildingLayer?.count ?? 0;
         this.cb.onToast(imageryAnchor
-          ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}`
+          ? `Loaded ${loc.name} + ${imageryStyle.shortLabel}${buildingCount ? ` + ${buildingCount} buildings` : ''}`
           : `Loaded ${loc.name} (height only — map texture failed)`);
+        if (buildingAnchor?.skipped === 'area-too-large') {
+          this.cb.onToast('3D buildings skipped: the selected area is too large for a public OSM query.');
+        }
       }
       return true;
     } catch (e) {
@@ -1583,7 +1614,7 @@ export class Engine {
     this.realWorldImageryStyle = style.id;
     this.cb.onRealWorldImageryStyle?.(style.id);
 
-    const entry = this.importedMaps.height;
+    const entry = this.importedMaps?.height;
     const geo = entry?.geoRef;
     if (!geo || this.worldMode !== 'studio') return;
 
@@ -1614,6 +1645,28 @@ export class Engine {
     }
   }
 
+  setRealWorldBuildingsVisible(visible) {
+    this.realWorldBuildingsVisible = visible !== false;
+    if (this.realWorldSource) {
+      this.realWorldSource = updateRealWorldSourceBuildingsVisible(
+        this.realWorldSource,
+        this.realWorldBuildingsVisible,
+      );
+    }
+    if (this.realWorldBuildingLayer) {
+      this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible
+        && this.worldMode === 'studio';
+    }
+    if (this.realWorldBuildingsVisible) {
+      this._rebuildRealWorldBuildings({ force: true });
+      // Turning the layer back on is also an explicit retry opportunity for
+      // any OSM cells that previously failed or were added while it was off.
+      void this._syncRealWorldNeighborTiles({ silent: true });
+    } else this._realWorldBuildingLayoutKey = '';
+    this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
+    this._needsRender = true;
+  }
+
   /**
    * Keep a real-world height import in sync with the tile assembly: fetch the
    * geographic neighbor patch for every cell that doesn't have one yet (same
@@ -1623,14 +1676,19 @@ export class Engine {
    * Satellite / topo RGB patches stay in lockstep with elevation when present.
    */
   async _syncRealWorldNeighborTiles({ silent = false } = {}) {
-    const entry = this.importedMaps.height;
+    const entry = this.importedMaps?.height;
     const geo = entry?.geoRef;
     if (!geo || this.worldMode !== 'studio') return;
     if (!geo.imageryCells) geo.imageryCells = {};
+    if (!geo.buildingCells) geo.buildingCells = {};
     const imageryStyle = resolveImageryStyle(geo.imageryStyle || this.realWorldImageryStyle);
     geo.imageryStyle = imageryStyle.id;
     const layoutKey = `${this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|')}@${imageryStyle.id}`;
-    if (layoutKey === entry.regionKey) return;
+    const hasAllBuildingCells = this.tiles.every((tile) => {
+      const patch = geo.buildingCells[`${tile.cx},${tile.cz}`];
+      return patch && !patch.error && !patch.incomplete;
+    });
+    if (layoutKey === entry.regionKey && hasAllBuildingCells) return;
     const gen = (this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1);
     this._rwClearTileLoadOverlay();   // fresh run owns the overlay from here
 
@@ -1683,9 +1741,14 @@ export class Engine {
 
     const missingElev = this.tiles.filter((t) => !geo.cells[`${t.cx},${t.cz}`]);
     const missingImg = this.tiles.filter((t) => !geo.imageryCells[`${t.cx},${t.cz}`]);
+    const missingBuildings = this.tiles.filter((t) => {
+      const patch = geo.buildingCells[`${t.cx},${t.cz}`];
+      return !patch || patch.error || patch.incomplete;
+    });
     const missingKeys = new Set([
       ...missingElev.map((t) => `${t.cx},${t.cz}`),
       ...missingImg.map((t) => `${t.cx},${t.cz}`),
+      ...missingBuildings.map((t) => `${t.cx},${t.cz}`),
     ]);
     const missing = this.tiles.filter((t) => missingKeys.has(`${t.cx},${t.cz}`));
     let failures = 0;
@@ -1706,12 +1769,15 @@ export class Engine {
         const bbox = offsetBbox(geo.bbox0, t.cx, t.cz);
         const wantElev = !geo.cells[key];
         const wantImg = !geo.imageryCells[key];
+        const wantBuildings = !geo.buildingCells[key]
+          || Boolean(geo.buildingCells[key]?.error)
+          || Boolean(geo.buildingCells[key]?.incomplete);
         try {
-          let elevP = 0, imgP = 0;
+          let elevP = 0, imgP = 0, buildingP = 0;
           const reportCell = () => {
             if (gen !== this._realWorldSyncGen) return;
-            const parts = (wantElev ? 1 : 0) + (wantImg ? 1 : 0);
-            const p = parts ? ((wantElev ? elevP : 0) + (wantImg ? imgP : 0)) / parts : 1;
+            const parts = (wantElev ? 1 : 0) + (wantImg ? 1 : 0) + (wantBuildings ? 1 : 0);
+            const p = parts ? ((wantElev ? elevP : 0) + (wantImg ? imgP : 0) + (wantBuildings ? buildingP : 0)) / parts : 1;
             this._rwSetTileLoadProgress(t.cx, t.cz, p);
           };
           const jobs = [];
@@ -1727,6 +1793,30 @@ export class Engine {
             }).then((patch) => { geo.imageryCells[key] = patch; }).catch((e) => {
               console.error(e);
               failures++;
+            }));
+          }
+          if (wantBuildings) {
+            jobs.push(fetchBboxBuildings(bbox).then((loadedPatch) => {
+              buildingP = 1;
+              reportCell();
+              const previousPatch = geo.buildingCells[key];
+              let patch = loadedPatch;
+              if (loadedPatch.incomplete && previousPatch?.buildings?.length) {
+                const byId = new Map(previousPatch.buildings.map((building) => [building.id, building]));
+                for (const building of loadedPatch.buildings) byId.set(building.id, building);
+                patch = { ...loadedPatch, buildings: [...byId.values()] };
+              }
+              geo.buildingCells[key] = patch;
+              if (patch.incomplete) failures++;
+            }).catch((e) => {
+              console.error(e);
+              buildingP = 1;
+              reportCell();
+              failures++;
+              // Keep terrain/imagery success independent from optional OSM
+              // data, but leave the cell missing so expansion or re-enabling
+              // buildings retries it instead of caching a permanent hole.
+              delete geo.buildingCells[key];
             }));
           }
           await Promise.all(jobs);
@@ -1770,6 +1860,7 @@ export class Engine {
     this._syncImportedMapUniforms();
     this._setImportState(type);
     this.applyAll({ force: false, terrainDirty: type !== 'imagery' });
+    if (type === 'height') this._rebuildRealWorldBuildings();
   }
 
   _setImportState(type, patch = {}) {
@@ -1867,6 +1958,92 @@ export class Engine {
       else region.set(-cs / 2, -cs / 2, cs, cs);
     }
     this._needsRender = true;
+  }
+
+  _sampleRealWorldHeight(x, z) {
+    const entry = this.importedMaps.height;
+    const bounds = entry?.regionBounds;
+    const data = entry?.floatData;
+    if (!entry?.geoRef || !bounds || !data?.length || !entry.width || !entry.height) {
+      return this._getCpuHeightSampler().heightAt(x, z);
+    }
+    const originX = (bounds.minX - 0.5) * this.cellSize;
+    const originZ = (bounds.minZ - 0.5) * this.cellSize;
+    const spanX = bounds.cols * this.cellSize;
+    const spanZ = bounds.rows * this.cellSize;
+    const u = Math.max(0, Math.min(1, (x - originX) / Math.max(1, spanX)));
+    const v = Math.max(0, Math.min(1, (z - originZ) / Math.max(1, spanZ)));
+    const fx = u * (entry.width - 1), fy = v * (entry.height - 1);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const x1 = Math.min(entry.width - 1, x0 + 1), y1 = Math.min(entry.height - 1, y0 + 1);
+    const tx = fx - x0, ty = fy - y0;
+    const top = data[y0 * entry.width + x0] * (1 - tx) + data[y0 * entry.width + x1] * tx;
+    const bottom = data[y1 * entry.width + x0] * (1 - tx) + data[y1 * entry.width + x1] * tx;
+    let normalized = top * (1 - ty) + bottom * ty;
+    if (entry.settings?.invert) normalized = 1 - normalized;
+    const imported = normalized * (this.params.heightScale || 1)
+      * (entry.settings?.heightStrength ?? 1) + (entry.settings?.heightOffset ?? 0);
+    const mode = entry.settings?.mode;
+    const procedural = mode === 'replace' ? 0 : this._getCpuHeightSampler().heightAt(x, z);
+    let height = mode === 'blend'
+      ? procedural + (imported - procedural) * (entry.settings?.blend ?? 1)
+      : (mode === 'replace' ? imported : procedural);
+    height *= this.uniforms.uPaintBaseMult?.value ?? 1;
+    // The CPU procedural sampler already includes erosion; a replaced real-world
+    // field does not, so add it explicitly in that mode.
+    if (mode === 'replace' && this.erosionField?.enabled) height += this.erosionField.offsetAt(x, z);
+    height += this._samplePaintHeightOffset(x, z)
+      + this._sampleManualHeightOffset(x, z)
+      + this._sampleSplineHeightOffset(x, z);
+    return height;
+  }
+
+  _rebuildRealWorldBuildings({ force = false } = {}) {
+    const entry = this.importedMaps?.height;
+    const geo = entry?.geoRef;
+    if (!this.realWorldBuildingLayer || !geo?.buildingCells || !this.realWorldSource) {
+      this.realWorldBuildingLayer?.clear();
+      this._realWorldBuildingLayoutKey = '';
+      return 0;
+    }
+    this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible
+      && this.worldMode === 'studio';
+    if (!this.realWorldBuildingsVisible) {
+      this._realWorldBuildingLayoutKey = '';
+      return this.realWorldBuildingLayer.count;
+    }
+    const cellSummary = Object.entries(geo.buildingCells)
+      .map(([key, patch]) => `${key}:${patch?.buildings?.length ?? 0}`)
+      .sort()
+      .join('|');
+    const settings = entry.settings || {};
+    const layoutKey = [
+      this.tiles.map((tile) => `${tile.cx},${tile.cz}`).sort().join('|'),
+      cellSummary,
+      this.cellSize,
+      this.params.heightScale,
+      entry.meta?.minElev,
+      entry.meta?.maxElev,
+      settings.mode,
+      settings.blend,
+      settings.invert,
+      settings.heightStrength,
+      settings.heightOffset,
+    ].join('@');
+    if (!force && layoutKey === this._realWorldBuildingLayoutKey) return this.realWorldBuildingLayer.count;
+    this._realWorldBuildingLayoutKey = layoutKey;
+    const count = this.realWorldBuildingLayer.rebuild({
+      cells: geo.buildingCells,
+      bbox0: geo.bbox0,
+      zoom: geo.zoom,
+      tiles: this.tiles,
+      cellSize: this.cellSize,
+      heightScale: this.params.heightScale || 1,
+      elevationSpan: (entry.meta?.maxElev ?? 1) - (entry.meta?.minElev ?? 0),
+      sampleHeight: (worldX, worldZ) => this._sampleRealWorldHeight(worldX, worldZ),
+    });
+    this._needsRender = true;
+    return count;
   }
 
   setParam(key, value) {
@@ -2520,6 +2697,9 @@ export class Engine {
     else {
       if (terrainDirty) this._markTerrainFieldDirty();
       this._applyUniforms();
+    }
+    if (terrainDirty && !needsRebuild && this.realWorldSource) {
+      this._rebuildRealWorldBuildings({ force: true });
     }
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
@@ -3590,6 +3770,7 @@ export class Engine {
 
     this._syncManualTerrainBounds();
     this._applyUniforms({ updatePlinth: !rebuildNeeded });
+    this._rebuildRealWorldBuildings();
     this._minimapDirtyAt = performance.now();
     this.minimap.requestRedraw();
     if (!this._bootPending) {
@@ -6825,6 +7006,7 @@ export class Engine {
 
     // Hide studio objects
     this.board.group.visible = false;
+    if (this.realWorldBuildingLayer) this.realWorldBuildingLayer.group.visible = false;
     this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
@@ -7060,6 +7242,9 @@ export class Engine {
   /** Restore the single-board studio scene + editor camera. */
   _enterStudioMode() {
     this.board.group.visible = true;
+    if (this.realWorldBuildingLayer) {
+      this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible;
+    }
     this._setPlinthVisible(true);
     this.water.visible = !this._waterDeferred
       && this.waterSystem?.isEnabled() && this.params.seaLevel > 0.5;
@@ -7496,6 +7681,7 @@ export class Engine {
 
     // hide studio objects + sleep the editor camera
     this.board.group.visible = false;
+    if (this.realWorldBuildingLayer) this.realWorldBuildingLayer.group.visible = false;
     this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
@@ -8734,8 +8920,10 @@ export class Engine {
       this._clearImportedMaps();
       if (realWorldSource) {
         this.realWorldSource = realWorldSource;
+        this.realWorldBuildingsVisible = realWorldSource.buildingsVisible !== false;
         this.realWorldImageryStyle = realWorldSource.imageryStyle;
         this.cb.onRealWorldImageryStyle?.(realWorldSource.imageryStyle);
+        this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
       }
       if (realWorldSource) {
         await this._restoreRealWorldSource(realWorldSource, { onProgress: onRealWorldProgress });
@@ -10426,6 +10614,7 @@ export class Engine {
     if (this.manualTerrain) { this.manualTerrain.dispose(); this.manualTerrain = null; }
     if (this.splineManager) { this.splineManager.dispose(); this.splineManager = null; }
     if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
+    if (this.realWorldBuildingLayer) { this.realWorldBuildingLayer.dispose(); this.realWorldBuildingLayer = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }
     if (this.propSurfaceField) { this.propSurfaceField.dispose(); this.propSurfaceField = null; }

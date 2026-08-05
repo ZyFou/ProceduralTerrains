@@ -81,6 +81,7 @@ export function normalizeRealWorldSource(input) {
     bbox,
     zoom,
     imageryStyle,
+    buildingsVisible: input.buildingsVisible !== false,
     heightSettings: normalizeHeightImportSettings(input.heightSettings),
     imagerySettings: normalizeImageryImportSettings(input.imagerySettings),
   };
@@ -92,6 +93,7 @@ export function createRealWorldSource({
   bbox,
   zoom,
   imageryStyle,
+  buildingsVisible,
   heightSettings,
   imagerySettings,
 }) {
@@ -102,6 +104,7 @@ export function createRealWorldSource({
     bbox,
     zoom,
     imageryStyle,
+    buildingsVisible,
     heightSettings: heightSettings ?? DEFAULT_REAL_WORLD_HEIGHT_SETTINGS,
     imagerySettings: imagerySettings ?? DEFAULT_REAL_WORLD_IMAGERY_SETTINGS,
   });
@@ -119,5 +122,12 @@ export function updateRealWorldSourceImageryStyle(source, imageryStyle) {
   const normalized = normalizeRealWorldSource(source);
   if (!normalized) return null;
   normalized.imageryStyle = IMAGERY_STYLES.has(imageryStyle) ? imageryStyle : 'satellite';
+  return normalized;
+}
+
+export function updateRealWorldSourceBuildingsVisible(source, visible) {
+  const normalized = normalizeRealWorldSource(source);
+  if (!normalized) return null;
+  normalized.buildingsVisible = visible !== false;
   return normalized;
 }

@@ -433,6 +433,13 @@ export default function ImportMapsContent({ ctx }) {
       <p className="section-hint">
         Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.
       </p>
+      <ToggleRow
+        label="Display Buildings"
+        value={ctx.realWorldBuildingsVisible !== false}
+        onChange={(visible) => ctx.onRealWorldBuildingsVisible?.(visible)}
+        info="Show or hide imported 3D building volumes."
+        settingId="terrain.realWorldBuildings"
+      />
       <RealWorldBrowser ctx={ctx} />
       <CustomAreaPicker ctx={ctx} />
       {['height', 'imagery', 'noise', 'biome'].map((type) => (

@@ -5,6 +5,7 @@ import {
   createRealWorldSource,
   normalizeRealWorldSource,
   updateRealWorldSourceImageryStyle,
+  updateRealWorldSourceBuildingsVisible,
   updateRealWorldSourceSettings,
 } from '../src/engine/terrain/RealWorldSource.js';
 
@@ -23,6 +24,7 @@ describe('real-world project source', () => {
     expect(source).toEqual({
       version: REAL_WORLD_SOURCE_VERSION,
       ...sourceInput,
+      buildingsVisible: true,
       heightSettings: {
         mode: 'replace',
         blend: 1,
@@ -80,8 +82,10 @@ describe('real-world project source', () => {
     });
     source = updateRealWorldSourceSettings(source, 'imagery', { mode: 'blend', blend: 0.62 });
     source = updateRealWorldSourceImageryStyle(source, 'opentopo');
+    source = updateRealWorldSourceBuildingsVisible(source, false);
 
     expect(source.imageryStyle).toBe('opentopo');
+    expect(source.buildingsVisible).toBe(false);
     expect(source.heightSettings).toMatchObject({
       mode: 'blend',
       blend: 0.35,
@@ -168,6 +172,50 @@ describe('real-world project source', () => {
     expect(engine.realWorldSource.heightSettings.heightOffset).toBe(88);
     expect(engine.realWorldSource.imageryStyle).toBe('opentopo');
     expect(engine.cb.onRealWorldImageryStyle).toHaveBeenCalledWith('opentopo');
+  });
+
+  it('persists the building toggle and retries missing cells when re-enabled', () => {
+    const engine = Object.create(Engine.prototype);
+    const onVisible = vi.fn();
+    Object.assign(engine, {
+      realWorldSource: createRealWorldSource(sourceInput),
+      realWorldBuildingsVisible: true,
+      realWorldBuildingLayer: { group: { visible: true } },
+      worldMode: 'studio',
+      cb: { onRealWorldBuildingsVisible: onVisible },
+      _rebuildRealWorldBuildings: vi.fn(),
+      _syncRealWorldNeighborTiles: vi.fn(),
+      _needsRender: false,
+    });
+
+    engine.setRealWorldBuildingsVisible(false);
+    expect(engine.realWorldBuildingLayer.group.visible).toBe(false);
+    expect(engine.realWorldSource.buildingsVisible).toBe(false);
+    expect(engine._rebuildRealWorldBuildings).not.toHaveBeenCalled();
+
+    engine.setRealWorldBuildingsVisible(true);
+    expect(engine.realWorldBuildingLayer.group.visible).toBe(true);
+    expect(engine.realWorldSource.buildingsVisible).toBe(true);
+    expect(engine._rebuildRealWorldBuildings).toHaveBeenCalledWith({ force: true });
+    expect(engine._syncRealWorldNeighborTiles).toHaveBeenCalledWith({ silent: true });
+    expect(onVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('forces a building re-anchor when a live terrain-height input changes', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      realWorldSource: createRealWorldSource(sourceInput),
+      _applyUniforms: vi.fn(),
+      _markTerrainFieldDirty: vi.fn(),
+      _rebuildRealWorldBuildings: vi.fn(),
+      minimap: { requestRedraw: vi.fn() },
+    });
+
+    engine._afterParamChange(false, true);
+
+    expect(engine._markTerrainFieldDirty).toHaveBeenCalledOnce();
+    expect(engine._applyUniforms).toHaveBeenCalledOnce();
+    expect(engine._rebuildRealWorldBuildings).toHaveBeenCalledWith({ force: true });
   });
 
   it('restores a custom geographic bbox through the normal fetch pipeline', async () => {
