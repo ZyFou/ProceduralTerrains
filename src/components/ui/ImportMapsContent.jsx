@@ -421,6 +421,9 @@ function CustomAreaPicker({ ctx }) {
             imageryStyle={ctx.realWorldImageryStyle}
             busy={busy}
             progress={progress}
+            chunkCount={ctx.params?.chunkCount}
+            chunkSize={ctx.params?.chunkSize}
+            onChunkSizeChange={(chunkSize) => ctx.onParam?.('chunkSize', chunkSize)}
             onChange={updateSpec}
             onLoad={load}
             onClose={() => setMapOpen(false)}
@@ -437,14 +440,14 @@ export default function ImportMapsContent({ ctx }) {
     <>
       <p className="section-hint">
         {ctx.realTerrainMode
-          ? 'Select a real-world area to import geographic elevation, imagery, and available building footprints.'
+          ? 'Select a real-world area to import geographic elevation and imagery. Buildings are optional.'
           : 'Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.'}
       </p>
       <ToggleRow
-        label="Display Buildings"
-        value={ctx.realWorldBuildingsVisible !== false}
+        label="Fetch Buildings"
+        value={ctx.realWorldBuildingsVisible === true}
         onChange={(visible) => ctx.onRealWorldBuildingsVisible?.(visible)}
-        info="Show or hide imported 3D building volumes."
+        info="Fetch and show OpenStreetMap building volumes. Disabled by default to avoid public API rate limits."
         settingId="terrain.realWorldBuildings"
       />
       <RealWorldBrowser ctx={ctx} />

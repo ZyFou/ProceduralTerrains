@@ -1,59 +1,47 @@
-# Community tab — design QA
+# Real Terrain World Settings — Design QA
 
-## Evidence
+- Source visual truth: `/Users/gaetan/Desktop/Capture d’écran 2026-08-06 à 09.53.04.png`
+- Implementation screenshot: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/output/playwright/real-terrain-3d-world-size.jpg`
+- Viewport: 1119 × 687 CSS px
+- Source pixels: 2238 × 1374 (2× desktop capture; normalized to 1119 × 687 CSS px)
+- Implementation pixels: 1119 × 687 at the matched CSS viewport
+- State: Real Terrain creation dialog open, default Alpine selection, 3D world size 2048 × 2048 units, geographic area size 30 km, terrain detail z12
 
-- Source visual truth: `/var/folders/p4/2wybsmsn2xn2_0msnyqy_wlr0000gn/T/TemporaryItems/NSIRD_screencaptureui_Vwo1e5/Capture d’écran 2026-08-05 à 11.10.10.png`
-- Browser-rendered implementation: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/output/playwright/community-final.png`
-- Full-view comparison: source screenshot and target-size in-app browser capture reviewed together.
-- Browser viewport: source 2048 × 1032 px; implementation capture 1966 × 1032 px due the in-app browser’s available width, with the same desktop-height composition.
-- Density normalization: none; both captures are rendered at 1× browser density for this comparison.
-- State: Community view, dark theme, empty public-project response in the local preview because no API/database service is running; search and editor filters visible.
+## Full-view comparison evidence
+
+The implementation preserves the source dialog frame, header, map/sidebar split, map controls, search placement, selection rectangle, statistics, attribution, and primary action. The requested hierarchy is added in the existing sidebar: a subtle `World settings` card contains a simplified `3D world size` selector. Geographic `Area size` and `Terrain detail` remain separate import controls. The selected location differs from the source capture, but this does not affect layout comparison.
+
+## Focused region comparison evidence
+
+The sidebar is readable in the matched full-view capture, so a separate crop was not needed. The new card uses the product's existing border, radius, background, uppercase section-label, spacing, and typography tokens. `3D world size` exposes the final scene dimensions while the compact note communicates the underlying chunk count and chunk size. Geographic controls and statistics remain visible without overflow.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Existing application font families, weights, small-label casing, monospace values, line heights, and hierarchy are preserved.
+- Spacing and layout rhythm: The 16 px sidebar rhythm is maintained; the new settings card uses 12 px padding and does not crowd or hide persistent controls.
+- Colors and visual tokens: Existing panel, control, border, muted-text, and accent tokens are reused; contrast remains consistent with the source.
+- Image quality and asset fidelity: The existing Leaflet/Esri imagery and Lucide interface icons remain unchanged and render sharply.
+- Copy and content: `3D world size` is clearly distinguished from geographic `Area size`. Existing terrain statistics and the load action remain unchanged.
+
+## Interaction and runtime checks
+
+- Opened Create terrain → Real Terrain → location dialog.
+- Verified the `World settings` heading and `3D world size` selector are exposed semantically.
+- Changed the 3D world preset from 2048 × 2048 to 4096 × 4096 units and confirmed the underlying chunk size changed from 128 to 256 while the dialog remained open.
+- Browser console errors: none.
+- Production build: passed.
+- Automated tests: 415 passed.
 
 ## Findings
 
-- P0: none.
-- P1: none.
-- P2: none.
-
-The implementation keeps the reference’s split landing composition, dark palette, navigation hierarchy, typography scale, header spacing, footer treatment, and terrain showcase. The separate share-code input was intentionally removed per request. The replacement search bar, Procedural/Nodes/Manual filters, link-copy affordance, and owner edit surface use the existing button, border, radius, and accent tokens.
-
-### Required fidelity surfaces
-
-- Fonts and typography: existing landing font and monospace code treatment are preserved; headings, helper copy, filter labels, and code badges use the existing hierarchy and optical weights.
-- Spacing and layout rhythm: the new search control spans the community column, filters sit directly below it, and results retain the reference’s card grid and footer rhythm. The responsive one-column fallback remains active below the existing mobile breakpoint.
-- Colors and visual tokens: existing dark surfaces, blue accent, muted text, public/owner states, and editor-mode color treatments are reused.
-- Image quality and asset fidelity: the supplied terrain showcase remains the existing app asset; new card icons use the existing Lucide icon library rather than approximated artwork.
-- Copy and content: search now explicitly names terrain names, creators, and sharing codes; the empty state and owner controls are concise and action-oriented.
-
-## Interaction and browser checks
-
-- Opened `http://localhost:4173/#/community` in the Codex in-app browser.
-- Confirmed the search field, Search button, All terrains, Procedural, Nodes, and Manual filters render with accessible labels.
-- Selected Nodes and searched for a sharing code; the selected filter, query, results heading, and Clear search control updated correctly.
-- Checked browser console diagnostics: no warning or error entries.
-- Confirmed the share-link route is hash-compatible (`#/community?code=…`) and is parsed by the landing view router for direct browser opens.
-- Card copy, owner edit, and import behavior are wired to the existing API/store contracts; live card mutation was not exercised because this workspace has no running API/database fixture.
-- Production build passed; frontend and API test suites passed.
-
-## Focused comparison evidence
-
-The focused comparison covered the community header and tool region: the implementation preserves the source’s left-column alignment and scale while replacing the requested Sharecode form with a single broader search field and a compact filter row. Card-level comparison was limited to structure because the local API returned no projects.
+No actionable P0, P1, or P2 differences remain. The additional card is an intentional product change requested from the source state.
 
 ## Comparison history
 
-- Pass 1: no actionable P0, P1, or P2 differences were found. No visual correction loop was required. The changed search/filter structure is intentional product behavior from the request, not design drift.
-
-## Implementation checklist
-
-- [x] Search supports terrain names, creators, and sharing codes.
-- [x] Share code badges copy a browser-opening link to the clipboard.
-- [x] Direct `#/community?code=…` links import and open the terrain when the editor is ready.
-- [x] Procedural, Nodes, and Manual filters are server-backed.
-- [x] Owners can rename, change visibility, and configure the community card icon.
-- [x] Browser interaction, visual comparison, build, and tests verified.
+The first pass incorrectly treated geographic area size as world size. After the user's clarification, that P1 semantic mismatch was fixed by restoring `Area size` and adding a separate 3D scene-size selector derived from `chunk count × chunk size`. The second matched-viewport pass confirms the two concepts are distinct, readable, and fully visible.
 
 ## Follow-up polish
 
-- A seeded API preview would allow a second visual capture of populated cards and the owner editor panel; no production blocker was found.
+No P3 follow-up is required for this scoped change.
 
 final result: passed

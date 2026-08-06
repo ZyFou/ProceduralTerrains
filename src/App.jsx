@@ -193,7 +193,7 @@ export default function App() {
   const [diskRadiusCells, setDiskRadiusCells] = useState(0);
   const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null, imagery: null });
   const [realWorldImageryStyle, setRealWorldImageryStyle] = useState('satellite');
-  const [realWorldBuildingsVisible, setRealWorldBuildingsVisible] = useState(true);
+  const [realWorldBuildingsVisible, setRealWorldBuildingsVisible] = useState(false);
 
   const [worldMode, setWorldMode] = useState('studio');
   const [realTerrainMode, setRealTerrainMode] = useState(false);
@@ -556,7 +556,7 @@ export default function App() {
         }
         update({
           detail: terrain.realWorldSource
-            ? 'Downloading elevation, imagery, and buildings…'
+            ? 'Downloading elevation and imagery…'
             : 'Building terrain…',
         });
         await engineRef.current?.loadSeedJSON(terrain, {
@@ -565,7 +565,7 @@ export default function App() {
               progress,
               detail: progress >= 1
                 ? 'Building geographic terrain…'
-                : 'Downloading elevation, imagery, and buildings…',
+                : 'Downloading elevation and imagery…',
             })
             : undefined,
         });
@@ -1849,7 +1849,7 @@ export default function App() {
   const runGeographicLoad = (runner, opts = {}) => loading.run('real-world-load', {
     blocking: true,
     label: 'Loading geographic terrain…',
-    detail: 'Downloading elevation, imagery, and buildings…',
+    detail: 'Downloading elevation and imagery…',
   }, async (update) => {
     blockingUpdateRef.current = update;
     try {
@@ -1859,7 +1859,7 @@ export default function App() {
           progress,
           detail: progress >= 1
             ? 'Building geographic terrain…'
-            : 'Downloading elevation, imagery, and buildings…',
+            : 'Downloading elevation and imagery…',
         });
       });
     } finally {

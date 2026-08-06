@@ -81,7 +81,9 @@ export function normalizeRealWorldSource(input) {
     bbox,
     zoom,
     imageryStyle,
-    buildingsVisible: input.buildingsVisible !== false,
+    // Building footprints use a separately rate-limited public OSM endpoint.
+    // Only an explicit saved opt-in should enable those requests.
+    buildingsVisible: input.buildingsVisible === true,
     heightSettings: normalizeHeightImportSettings(input.heightSettings),
     imagerySettings: normalizeImageryImportSettings(input.imagerySettings),
   };
@@ -128,6 +130,6 @@ export function updateRealWorldSourceImageryStyle(source, imageryStyle) {
 export function updateRealWorldSourceBuildingsVisible(source, visible) {
   const normalized = normalizeRealWorldSource(source);
   if (!normalized) return null;
-  normalized.buildingsVisible = visible !== false;
+  normalized.buildingsVisible = visible === true;
   return normalized;
 }

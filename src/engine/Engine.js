@@ -413,7 +413,7 @@ export class Engine {
     this.importedMaps = { noise: null, height: null, biome: null, imagery: null };
     this.importedMapState = { noise: null, height: null, biome: null, imagery: null };
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
-    this.realWorldBuildingsVisible = true;
+    this.realWorldBuildingsVisible = false;
     this.realWorldSource = null;
 
     // Erosion: additive world-space height-offset field applied in heightAt.
@@ -1390,12 +1390,12 @@ export class Engine {
       this._setImportState(type);
     }
     this.realWorldSource = null;
-    this.realWorldBuildingsVisible = true;
+    this.realWorldBuildingsVisible = false;
     this.realWorldBuildingLayer?.clear();
     this._realWorldBuildingLayoutKey = '';
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
     this.cb.onRealWorldImageryStyle?.(DEFAULT_IMAGERY_STYLE);
-    this.cb.onRealWorldBuildingsVisible?.(true);
+    this.cb.onRealWorldBuildingsVisible?.(false);
     this._syncImportedMapUniforms();
   }
 
@@ -1486,6 +1486,7 @@ export class Engine {
       bbox: loc.bbox,
       zoom,
       imageryStyle: imageryStyle.id,
+      buildingsVisible: this.realWorldBuildingsVisible === true,
     });
     if (!source) {
       this.cb.onToast('The geographic terrain settings are invalid.');
@@ -1495,7 +1496,7 @@ export class Engine {
     // before network work begins so a failed restore remains retryable and the
     // next local/cloud save does not lose the geographic source.
     this.realWorldSource = source;
-    this.realWorldBuildingsVisible = source.buildingsVisible !== false;
+    this.realWorldBuildingsVisible = source.buildingsVisible === true;
     this.realWorldImageryStyle = imageryStyle.id;
     this.cb.onRealWorldImageryStyle?.(imageryStyle.id);
     this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
@@ -1531,13 +1532,9 @@ export class Engine {
           imageryStyle: imageryStyle.id,
           cells: { '0,0': anchor },
           imageryCells: imageryAnchor ? { '0,0': imageryAnchor } : {},
-          // Buildings are optional and public Overpass queries can be slow.
-          // Seed every visible cell so terrain/imagery can composite now;
-          // the real building patches replace these placeholders below.
-          buildingCells: Object.fromEntries(this.tiles.map((tile) => [
-            `${tile.cx},${tile.cz}`,
-            { buildings: [], pending: true },
-          ])),
+          // Buildings are opt-in because public OSM endpoints are separately
+          // rate limited. Cells are populated only after the user enables them.
+          buildingCells: {},
         },
         settings: { ...source.heightSettings },
       };
@@ -1558,7 +1555,7 @@ export class Engine {
       }
       // Composite over the CURRENT assembly — also fetches neighbors for any
       // extra tiles already placed, so multi-tile boards load fully covered.
-      await this._syncRealWorldNeighborTiles({ silent: true });
+      await this._syncRealWorldNeighborTiles({ silent: true, includeBuildings: false });
       this._setImportState('height', { loading: false });
       if (this.importedMaps.imagery) this._setImportState('imagery', { loading: false });
       if (!silent) {
@@ -1567,12 +1564,12 @@ export class Engine {
           : `Loaded ${loc.name} (height only — map texture failed)`);
       }
 
-      // Do not keep the main geographic load (and its blocking overlay) open
-      // while optional OSM buildings are queried. Sparse regions often return
-      // quickly, while dense or large selections may need several retries.
+      // Do not query the separately rate-limited OSM building service unless
+      // the user explicitly enabled it. When enabled, keep that optional work
+      // outside the main geographic loading overlay.
       const geoRef = this.importedMaps.height?.geoRef;
       const buildingTiles = this.tiles.map((tile) => ({ ...tile }));
-      Promise.allSettled(buildingTiles.map(async (tile) => {
+      if (this.realWorldBuildingsVisible) Promise.allSettled(buildingTiles.map(async (tile) => {
         const key = `${tile.cx},${tile.cz}`;
         const bbox = offsetBbox(geoRef.bbox0, tile.cx, tile.cz);
         const patch = await fetchBboxBuildings(bbox);
@@ -1665,7 +1662,7 @@ export class Engine {
   }
 
   setRealWorldBuildingsVisible(visible) {
-    this.realWorldBuildingsVisible = visible !== false;
+    this.realWorldBuildingsVisible = visible === true;
     if (this.realWorldSource) {
       this.realWorldSource = updateRealWorldSourceBuildingsVisible(
         this.realWorldSource,
@@ -1694,7 +1691,10 @@ export class Engine {
    * from _applyTileLayout on every add/remove/expand; a no-op without a geoRef.
    * Satellite / topo RGB patches stay in lockstep with elevation when present.
    */
-  async _syncRealWorldNeighborTiles({ silent = false } = {}) {
+  async _syncRealWorldNeighborTiles({
+    silent = false,
+    includeBuildings = this.realWorldBuildingsVisible,
+  } = {}) {
     const entry = this.importedMaps?.height;
     const geo = entry?.geoRef;
     if (!geo || this.worldMode !== 'studio') return;
@@ -1703,7 +1703,7 @@ export class Engine {
     const imageryStyle = resolveImageryStyle(geo.imageryStyle || this.realWorldImageryStyle);
     geo.imageryStyle = imageryStyle.id;
     const layoutKey = `${this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|')}@${imageryStyle.id}`;
-    const hasAllBuildingCells = this.tiles.every((tile) => {
+    const hasAllBuildingCells = !includeBuildings || this.tiles.every((tile) => {
       const patch = geo.buildingCells[`${tile.cx},${tile.cz}`];
       return patch && !patch.error && !patch.incomplete;
     });
@@ -1760,10 +1760,10 @@ export class Engine {
 
     const missingElev = this.tiles.filter((t) => !geo.cells[`${t.cx},${t.cz}`]);
     const missingImg = this.tiles.filter((t) => !geo.imageryCells[`${t.cx},${t.cz}`]);
-    const missingBuildings = this.tiles.filter((t) => {
+    const missingBuildings = includeBuildings ? this.tiles.filter((t) => {
       const patch = geo.buildingCells[`${t.cx},${t.cz}`];
       return !patch || patch.error || patch.incomplete;
-    });
+    }) : [];
     const missingKeys = new Set([
       ...missingElev.map((t) => `${t.cx},${t.cz}`),
       ...missingImg.map((t) => `${t.cx},${t.cz}`),
@@ -1788,9 +1788,11 @@ export class Engine {
         const bbox = offsetBbox(geo.bbox0, t.cx, t.cz);
         const wantElev = !geo.cells[key];
         const wantImg = !geo.imageryCells[key];
-        const wantBuildings = !geo.buildingCells[key]
+        const wantBuildings = includeBuildings && (
+          !geo.buildingCells[key]
           || Boolean(geo.buildingCells[key]?.error)
-          || Boolean(geo.buildingCells[key]?.incomplete);
+          || Boolean(geo.buildingCells[key]?.incomplete)
+        );
         try {
           let elevP = 0, imgP = 0, buildingP = 0;
           const reportCell = () => {
@@ -8943,7 +8945,7 @@ export class Engine {
       this._clearImportedMaps();
       if (realWorldSource) {
         this.realWorldSource = realWorldSource;
-        this.realWorldBuildingsVisible = realWorldSource.buildingsVisible !== false;
+        this.realWorldBuildingsVisible = realWorldSource.buildingsVisible === true;
         this.realWorldImageryStyle = realWorldSource.imageryStyle;
         this.cb.onRealWorldImageryStyle?.(realWorldSource.imageryStyle);
         this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);

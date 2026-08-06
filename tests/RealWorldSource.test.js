@@ -24,7 +24,7 @@ describe('real-world project source', () => {
     expect(source).toEqual({
       version: REAL_WORLD_SOURCE_VERSION,
       ...sourceInput,
-      buildingsVisible: true,
+      buildingsVisible: false,
       heightSettings: {
         mode: 'replace',
         blend: 1,
@@ -68,6 +68,11 @@ describe('real-world project source', () => {
     expect(source).not.toHaveProperty('preview');
     expect(normalizeRealWorldSource({ ...sourceInput, bbox: { ...sourceInput.bbox, minLat: 50 } })).toBeNull();
     expect(normalizeRealWorldSource({ ...sourceInput, version: 99 })).toBeNull();
+  });
+
+  it('only enables building requests after an explicit opt-in', () => {
+    expect(normalizeRealWorldSource(sourceInput).buildingsVisible).toBe(false);
+    expect(normalizeRealWorldSource({ ...sourceInput, buildingsVisible: true }).buildingsVisible).toBe(true);
   });
 
   it('tracks imagery style and live height/imagery controls', () => {

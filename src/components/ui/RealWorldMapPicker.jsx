@@ -43,6 +43,19 @@ function SliderField({ label, value, min, max, step, unit = '', onChange }) {
   );
 }
 
+function SelectField({ label, value, options, onChange }) {
+  return (
+    <label className="realworld-map-select">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(Number(event.target.value))}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function Stat({ label, children }) {
   return (
     <div className="realworld-map-stat">
@@ -57,6 +70,9 @@ export default function RealWorldMapPicker({
   imageryStyle = 'satellite',
   busy = false,
   progress = 0,
+  chunkCount = 16,
+  chunkSize = 128,
+  onChunkSizeChange,
   onChange,
   onLoad,
   onClose,
@@ -76,6 +92,13 @@ export default function RealWorldMapPicker({
   const [searchError, setSearchError] = useState('');
   const info = useMemo(() => describeCustomArea(spec), [spec]);
   const style = resolveImageryStyle(imageryStyle);
+  const worldSizeOptions = [64, 128, 192, 256].map((size) => {
+    const worldSize = chunkCount * size;
+    return {
+      value: size,
+      label: `${worldSize.toLocaleString()} × ${worldSize.toLocaleString()} units`,
+    };
+  });
 
   useEffect(() => {
     specRef.current = spec;
@@ -355,6 +378,17 @@ export default function RealWorldMapPicker({
             <div className="realworld-map-coordinates">
               <span>Selection center</span>
               <strong>{formatCoordinateDisplay(spec)}</strong>
+            </div>
+
+            <div className="realworld-map-world-settings" aria-labelledby="realworld-world-settings-title">
+              <h3 id="realworld-world-settings-title">World settings</h3>
+              <SelectField
+                label="3D world size"
+                value={chunkSize}
+                options={worldSizeOptions}
+                onChange={(nextChunkSize) => onChunkSizeChange?.(nextChunkSize)}
+              />
+              <p>{chunkCount} × {chunkCount} chunks · {chunkSize} units per chunk</p>
             </div>
 
             <SliderField
