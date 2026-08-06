@@ -71,11 +71,28 @@ vec3 waterResolveSkyLight(vec3 legacySkyLight) {
 }
 
 vec3 waterResolveFoamColor(vec3 foamColor, vec3 resolvedLight) {
-  return foamColor * mix(
-    vec3(1.0),
-    max(resolvedLight, vec3(0.0)),
+  vec3 environmentLight = max(resolvedLight, vec3(0.0));
+  float environmentPeak = max(
+    max(environmentLight.r, environmentLight.g),
+    environmentLight.b
+  );
+
+  // Preserve the environment's hue when lifting very dark foam. The previous
+  // mix from vec3(1.0) left a large neutral-white term (35% at the default
+  // setting), which became a bright emissive-looking outline after gamma.
+  vec3 environmentTint = environmentPeak > 0.0001
+    ? environmentLight / environmentPeak
+    : vec3(0.30, 0.38, 0.50);
+  float readabilityFloor = mix(
+    0.12,
+    0.015,
     clamp(uWaterFoamLighting, 0.0, 1.0)
   );
+  vec3 foamLight = max(
+    environmentLight,
+    environmentTint * readabilityFloor
+  );
+  return foamColor * foamLight;
 }
 `;
 

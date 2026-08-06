@@ -30,7 +30,9 @@ export const PANEL_META = {
   history: { label: 'History', title: 'History', desc: 'Creator checkpoints and actions.', icon: PANEL_ICONS.history },
 };
 
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'splines', 'biomes', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'planet', 'export', 'world', 'performance', 'debug'];
+// Shared left-toolbar order. Keep this list mode-agnostic: each mode filters
+// its available panels from the same sequence.
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'water', 'clouds', 'props', 'visuals', 'skybox', 'lighting', 'biomes', 'planet', 'world', 'performance', 'debug', 'export', 'splines'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];

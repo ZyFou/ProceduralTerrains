@@ -101,16 +101,28 @@ void main() {
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uPaletteSaturation);
   col *= uPaletteTint;
 
-  // lighting: soft diffuse + sun glints
+  // Atmospheric lighting: keep the historical scalar as the compatibility
+  // branch, then resolve the active sky/sun colors through the shared terrain
+  // uniforms. This makes Legacy water follow time of day and skybox tint while
+  // Water Sky Influence = 0 still reproduces the previous independent look.
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float diff = max(dot(n, uSunDir), 0.0);
-  col *= 0.55 + 0.65 * diff;
+  vec3 legacyLight = vec3(0.55 + 0.65 * diff);
+  vec3 resolvedLight = waterResolveLighting(
+    n,
+    vec3(0.0, 1.0, 0.0),
+    diff,
+    legacyLight
+  );
+  col *= resolvedLight;
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
-  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
+  vec3 resolvedSunLight = waterResolveSunLight(vec3(1.0, 0.95, 0.85));
+  col += resolvedSunLight * spec * 0.55 * uWaterReflection;
 
-  // fresnel: steeper viewing angle = clearer water
+  // Fresnel reflects the active ambient sky color instead of a fixed blue.
   float fres = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
-  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
+  vec3 resolvedSkyLight = waterResolveSkyLight(vec3(0.30, 0.42, 0.55));
+  col += resolvedSkyLight * fres * 0.25 * uWaterReflection;
 
   // shore foam: thin animated band where the water gets shallow.
   // Low quality skips the animated noise and keeps a plain depth band.
@@ -127,7 +139,8 @@ void main() {
     shoreDistance + shoreSoft * 1.8,
     depth + foamNoise * mix(2.4, 4.6, breakup)
   )) * foamPatch;
-  col = mix(col, uColFoam, foam * 0.75);
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, resolvedLight);
+  col = mix(col, litFoamColor, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 

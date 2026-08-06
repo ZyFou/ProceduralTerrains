@@ -508,13 +508,22 @@ void main() {
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float diff = max(dot(n, uSunDir), 0.0);
-  col *= 0.55 + 0.65 * diff;
+  vec3 legacyLight = vec3(0.55 + 0.65 * diff);
+  vec3 resolvedLight = waterResolveLighting(
+    n,
+    up,
+    diff,
+    legacyLight
+  );
+  col *= resolvedLight;
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 90.0);
-  col += vec3(1.0, 0.95, 0.85) * spec * 0.55 * uWaterReflection;
+  vec3 resolvedSunLight = waterResolveSunLight(vec3(1.0, 0.95, 0.85));
+  col += resolvedSunLight * spec * 0.55 * uWaterReflection;
 
   // spherical fresnel: up is the local normal, not world +Y
   float fres = pow(1.0 - max(dot(viewDir, up), 0.0), 3.0);
-  col += vec3(0.30, 0.42, 0.55) * fres * 0.25 * uWaterReflection;
+  vec3 resolvedSkyLight = waterResolveSkyLight(vec3(0.30, 0.42, 0.55));
+  col += resolvedSkyLight * fres * 0.25 * uWaterReflection;
 
   float foamNoise = 0.0;
   if (uWaterQuality > 0.5) {
@@ -527,7 +536,8 @@ void main() {
   float shoreDistance = max(uFoamWidth, 0.5);
   float shoreInner = min(0.6, shoreDistance * 0.5);
   float foam = 1.0 - smoothstep(shoreInner, shoreDistance, depth + foamNoise * 2.4);
-  col = mix(col, uColFoam, foam * 0.75);
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, resolvedLight);
+  col = mix(col, litFoamColor, foam * 0.75);
 
   float alpha = clamp(0.50 + dGrade * 0.42 + fres * 0.15 + foam * 0.3, 0.0, 0.94);
 

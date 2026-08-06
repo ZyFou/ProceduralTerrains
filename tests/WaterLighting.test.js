@@ -67,7 +67,7 @@ describe('water atmosphere lighting', () => {
     planet.dispose();
   });
 
-  it('keeps an explicit Legacy compatibility branch in every water shader', () => {
+  it('keeps an explicit Legacy compatibility branch and resolves live atmosphere lighting', () => {
     const uniforms = createTerrainUniforms();
     const materials = [
       createWaterMaterial(uniforms),
@@ -85,14 +85,22 @@ describe('water atmosphere lighting', () => {
     }
 
     expect(materials[0].fragmentShader).toContain(
-      'col *= 0.55 + 0.65 * diff;',
+      'vec3 legacyLight = vec3(0.55 + 0.65 * diff);',
+    );
+    expect(materials[0].fragmentShader).toContain('col *= resolvedLight;');
+    expect(materials[0].fragmentShader).toContain(
+      'waterResolveSunLight(vec3(1.0, 0.95, 0.85))',
+    );
+    expect(materials[0].fragmentShader).toContain(
+      'waterResolveSkyLight(vec3(0.30, 0.42, 0.55))',
     );
     expect(materials[1].fragmentShader).toContain(
       'vec3(0.62 + 0.38 * diff)',
     );
     expect(materials[2].fragmentShader).toContain(
-      'col *= 0.55 + 0.65 * diff;',
+      'vec3 legacyLight = vec3(0.55 + 0.65 * diff);',
     );
+    expect(materials[2].fragmentShader).toContain('col *= resolvedLight;');
   });
 
   it('uses the exact terrain field for water visibility in every world shape', () => {
@@ -124,21 +132,51 @@ describe('water atmosphere lighting', () => {
     planet.dispose();
   });
 
-  it('keeps Legacy and Planet foam on the stable authored-color lighting path', () => {
+  it('lights Legacy and Planet foam with the same resolved atmosphere', () => {
     const uniforms = createTerrainUniforms();
     const legacy = createWaterMaterial(uniforms);
     const planet = createPlanetWaterMaterial(uniforms);
 
     for (const material of [legacy, planet]) {
-      expect(material.fragmentShader).toContain('col *= 0.55 + 0.65 * diff;');
       expect(material.fragmentShader).toContain(
-        'col = mix(col, uColFoam, foam * 0.75);',
+        'vec3 legacyLight = vec3(0.55 + 0.65 * diff);',
       );
-      expect(material.fragmentShader).not.toContain(
-        'vec3 litFoamColor = waterResolveFoamColor',
+      expect(material.fragmentShader).toContain('col *= resolvedLight;');
+      expect(material.fragmentShader).toContain(
+        'vec3 litFoamColor = waterResolveFoamColor(uColFoam, resolvedLight);',
+      );
+      expect(material.fragmentShader).toContain(
+        'col = mix(col, litFoamColor, foam * 0.75);',
       );
       material.dispose();
     }
+  });
+
+  it('lights Realistic foam from the resolved sky while retaining its readability control', () => {
+    const material = createRealisticWaterMaterial(createTerrainUniforms());
+
+    expect(material.fragmentShader).toContain(
+      'vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);',
+    );
+    expect(material.fragmentShader).toContain(
+      'premultipliedColor = mix(premultipliedColor, litFoamColor, foam);',
+    );
+    material.dispose();
+  });
+
+  it('uses a tinted low-light floor instead of an unlit white foam contribution', () => {
+    const material = createWaterMaterial(createTerrainUniforms());
+
+    expect(material.fragmentShader).toContain(
+      'vec3 environmentTint = environmentPeak > 0.0001',
+    );
+    expect(material.fragmentShader).toContain(
+      'float readabilityFloor = mix(',
+    );
+    expect(material.fragmentShader).not.toContain(
+      'foamColor * mix(\n    vec3(1.0)',
+    );
+    material.dispose();
   });
 
   it('uses spherical local up for Planet fresnel lighting', () => {

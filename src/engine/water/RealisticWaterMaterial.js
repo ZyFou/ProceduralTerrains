@@ -656,9 +656,11 @@ void main() {
     0.0,
     1.0
   );
-  // Foam remains an authored surface color as in the stable renderer. Feeding
-  // it through the atmospheric light resolver dimmed it into grey shore bands.
-  premultipliedColor = mix(premultipliedColor, uColFoam, foam);
+  // Keep the authored foam hue, but let its brightness and tint follow the
+  // active atmosphere. uWaterFoamLighting retains a readable unlit component
+  // at night instead of leaving a pure-white emissive-looking shoreline.
+  vec3 litFoamColor = waterResolveFoamColor(uColFoam, waterLight);
+  premultipliedColor = mix(premultipliedColor, litFoamColor, foam);
   alpha = mix(alpha, 1.0, foam);
 
   vec3 refractionTerm = mix(
