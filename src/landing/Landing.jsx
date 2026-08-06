@@ -187,9 +187,10 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       else setView(nextView);
       return;
     }
-    if (viewFromHash()) {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
-    }
+    // Hash routes may carry a share code (e.g. #/community?code=...).
+    // Replace the complete URL when leaving a hash view so the code cannot
+    // trigger CommunityPage's auto-open effect again after returning home.
+    window.history.replaceState(null, '', window.location.pathname);
     setView(nextView);
   };
   useEffect(() => {
