@@ -371,6 +371,26 @@ vec4 manualSurfaceWeightsBAt(vec2 xz) {
 }
 `;
 
+// Shared by the live Studio terrain and the exporter. Real-world imagery uses
+// the height import's world-space region, so the satellite/topographic pixels
+// remain registered to the exported geometry for both single and multi-tile
+// terrain. Keep this outside COMMON_UNIFORMS_GLSL because the manual-terrain
+// shader deliberately removes the imagery sampler.
+export const IMPORTED_IMAGERY_ALBEDO_GLSL = /* glsl */ `
+vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) {
+  if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
+    vec2 imageryUv = importHeightUvAt(xz);
+    if (imageryUv.x >= 0.0 && imageryUv.x <= 1.0 && imageryUv.y >= 0.0 && imageryUv.y <= 1.0) {
+      vec3 imageryColor = texture2D(uImportImageryTex, clamp(imageryUv, 0.0, 1.0)).rgb;
+      return (uImportImageryMode > 2.5)
+        ? mix(baseAlbedo, imageryColor, uImportImageryBlend)
+        : imageryColor;
+    }
+  }
+  return baseAlbedo;
+}
+`;
+
 export const WATER_TILE_MASK_GLSL = /* glsl */ `
 uniform float uWallThickness;
 

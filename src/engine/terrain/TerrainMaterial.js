@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   COMMON_UNIFORMS_GLSL,
+  IMPORTED_IMAGERY_ALBEDO_GLSL,
   NOISE_GLSL,
   buildHeightGLSL,
   TERRAIN_HEIGHT_TEX_GLSL,
@@ -371,6 +372,7 @@ const buildFragment = (
 precision highp float;
 
 ${features.manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
+${features.manual ? '' : IMPORTED_IMAGERY_ALBEDO_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
@@ -774,15 +776,7 @@ ${features.manual ? '' : /* glsl */ `
 ${features.manual ? '' : /* glsl */ `
   // Geo-aligned OpenTopoMap (or file) imagery — same UV region as the real-world
   // height import. Applied after surface materials so the map reads as true albedo.
-  if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
-    vec2 iuv = importHeightUvAt(xz);
-    if (iuv.x >= 0.0 && iuv.x <= 1.0 && iuv.y >= 0.0 && iuv.y <= 1.0) {
-      vec3 mapCol = texture2D(uImportImageryTex, clamp(iuv, 0.0, 1.0)).rgb;
-      td.albedo = (uImportImageryMode > 2.5)
-        ? mix(td.albedo, mapCol, uImportImageryBlend)
-        : mapCol;
-    }
-  }
+  td.albedo = applyImportedImageryAlbedo(td.albedo, xz);
 `}
 
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);

@@ -6005,6 +6005,15 @@ input[type="color"].palette-color-input {
 .manual-inspector-empty strong { color: var(--text-main); font-size: 14px; }
 .manual-inspector-empty span { font-size: 11px; line-height: 1.45; }
 
+/* Node and Manual workspaces own a z-indexed overlay layer. Their inspectors
+   are unmounted while a shared tool drawer is open, so lift that drawer above
+   the workspace layer to make it the visible replacement surface. Without
+   this, Export (and the other shared tools) renders behind the workspace. */
+.nodes-workspace-open .side-drawer,
+.manual-workspace-open .side-drawer {
+  z-index: 24;
+}
+
 @media (hover: hover) and (pointer: fine) and (min-width: 821px) {
   .manual-workspace-open .app-shell[data-tools-rail="left"] .manual-viewport-tools { left: 76px; }
   .manual-workspace-open .app-shell[data-tools-rail="top"] .manual-viewport-tools { top: 70px; }

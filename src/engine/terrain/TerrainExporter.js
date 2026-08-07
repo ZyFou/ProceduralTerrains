@@ -9,7 +9,12 @@ import {
   tilePackageAssetPath,
   tilePackageHeightmapPath,
 } from './TerrainExportLayout.js';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, buildHeightGLSL } from './terrainGLSL.js';
+import {
+  COMMON_UNIFORMS_GLSL,
+  IMPORTED_IMAGERY_ALBEDO_GLSL,
+  NOISE_GLSL,
+  buildHeightGLSL,
+} from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
   PALETTE_UNIFORMS_GLSL,
@@ -34,10 +39,11 @@ const BAKE_VERTEX = /* glsl */ `
   }
 `;
 
-const buildBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
+export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL) => /* glsl */ `
   precision highp float;
 
   ${COMMON_UNIFORMS_GLSL}
+  ${IMPORTED_IMAGERY_ALBEDO_GLSL}
   ${NOISE_GLSL}
   ${BIOME_GLSL}
   ${heightGLSL}
@@ -106,6 +112,9 @@ const buildBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TERRAIN_GRAPH_CO
 
     TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
     tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
+    // Match the live terrain shader: real-world satellite/topographic imagery
+    // is the final albedo layer and shares the imported heightmap's geo region.
+    tc.albedo = applyImportedImageryAlbedo(tc.albedo, xz);
 
     if (uBakeMode == 2) {
       if (uBakeLighting) {
@@ -238,7 +247,7 @@ export class TerrainExporter {
       defines: { OCTAVES: oct },
       uniforms: bakeUniforms,
       vertexShader: BAKE_VERTEX,
-      fragmentShader: buildBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL)
+      fragmentShader: buildTerrainBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL)
     });
     quadMesh.material = bakeMat;
 
