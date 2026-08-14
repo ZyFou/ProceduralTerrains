@@ -342,7 +342,8 @@ SurfaceTexResult applySurfaceMaterials(
   res.amount = 0.0;
 
   float fade = 1.0 - smoothstep(uSurfNear, uSurfFar, dist);
-  float amount = uSurfMode * uSurfAmount * fade;
+  float baseAmount = uSurfMode * uSurfAmount * fade;
+  float amount = uManualSurfaceMode > 0.5 ? fade : baseAmount;
   if (amount < 0.002) return res;
 
   vec3 triBlend;
@@ -354,7 +355,8 @@ SurfaceTexResult applySurfaceMaterials(
   }
 
   bool manualMode = uManualSurfaceMode > 0.5;
-  float manualCoverage = 1.0;
+  bool useManualWeights = false;
+  float manualCoverage = 0.0;
   SurfRoleWeights w;
   if (manualMode) {
     vec4 manualA = manualSurfaceWeightsAAt(wpos.xz);
@@ -378,9 +380,17 @@ SurfaceTexResult applySurfaceMaterials(
       0.0,
       1.0
     );
-    if (manualCoverage < 0.002) return res;
-  } else {
+    useManualWeights = manualCoverage >= 0.002;
+  }
+  if (!useManualWeights) {
+    if (manualMode && uManualBaseGenerated < 0.5) return res;
     w = surfMaterialWeights(tc, cl, bw, slope, hRel, h01, detail, jitter);
+    manualCoverage = 1.0;
+    amount = baseAmount;
+    // Hybrid Manual projects whose generated base uses procedural colours do
+    // not have an active source atlas. Preserve that base verbatim until a
+    // Manual surface stroke supplies local coverage.
+    if (amount < 0.002) return res;
   }
   int bestI = 0;
   int secondI = 0;
@@ -406,7 +416,7 @@ SurfaceTexResult applySurfaceMaterials(
   float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
   if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
     SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
-    float kRole = (manualMode ? 1.0 : roleBlend) * secondW / max(bestW + secondW, 1e-4);
+    float kRole = (useManualWeights ? 1.0 : roleBlend) * secondW / max(bestW + secondW, 1e-4);
     tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
   }
 

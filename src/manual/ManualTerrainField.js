@@ -84,9 +84,10 @@ function base64ToFloat32(base64) {
 }
 
 export class ManualTerrainField {
-  constructor({ uniforms, getBounds, gpuTier = 'high', resolution }) {
+  constructor({ uniforms, getBounds, getBaseHeightAt = () => 0, gpuTier = 'high', resolution }) {
     this.uniforms = uniforms;
     this.getBounds = getBounds;
+    this.getBaseHeightAt = getBaseHeightAt;
     this.resolution = resolution || resolutionForTier(gpuTier);
     this.shapeHeight = new Float32Array(this.resolution * this.resolution);
     this.sculptDelta = new Float32Array(this.resolution * this.resolution);
@@ -204,9 +205,20 @@ export class ManualTerrainField {
     const data = new Float32Array(width * height);
     for (let y = 0; y < height; y++) {
       const sourceStart = (minY + y) * this.resolution + minX;
-      data.set(this.heightDelta.subarray(sourceStart, sourceStart + width), y * width);
+      for (let x = 0; x < width; x++) {
+        const px = minX + x;
+        const py = minY + y;
+        data[y * width + x] = this.heightDelta[sourceStart + x] + this._baseHeightAtPixel(px, py);
+      }
     }
     return { data, minX, minY, width, height };
+  }
+
+  _baseHeightAtPixel(px, py) {
+    const max = Math.max(1, this.resolution - 1);
+    const worldX = this.origin.x + (px / max) * this.span.x;
+    const worldZ = this.origin.z + (py / max) * this.span.z;
+    return Number(this.getBaseHeightAt?.(worldX, worldZ)) || 0;
   }
 
   _sampleRegion(region, px, py) {
@@ -303,7 +315,9 @@ export class ManualTerrainField {
       const sourceRow = (sourceMinY + localY) * this.resolution;
       const targetRow = localY * width;
       for (let localX = 0; localX < width; localX++) {
-        working[targetRow + localX] = this.heightDelta[sourceRow + sourceMinX + localX];
+        const px = sourceMinX + localX;
+        const py = sourceMinY + localY;
+        working[targetRow + localX] = this.heightDelta[sourceRow + px] + this._baseHeightAtPixel(px, py);
       }
     }
 
@@ -366,7 +380,11 @@ export class ManualTerrainField {
         if (distance > 1) continue;
         const index = terrainRow + px;
         const erodedHeight = working[localRow + px - sourceMinX];
-        this.sculptDelta[index] = clamp(erodedHeight - this.shapeHeight[index], -3000, 3000);
+        this.sculptDelta[index] = clamp(
+          erodedHeight - this._baseHeightAtPixel(px, py) - this.shapeHeight[index],
+          -3000,
+          3000,
+        );
         this._composeIndex(index);
       }
     }
@@ -443,7 +461,8 @@ export class ManualTerrainField {
         if (tool === 'lower') {
           next = current - 16 * alpha;
         } else if (tool === 'flatten') {
-          next = current + ((targetHeight - this.shapeHeight[index]) - current) * alpha;
+          const baseHeight = this._baseHeightAtPixel(px, py);
+          next = current + ((targetHeight - baseHeight - this.shapeHeight[index]) - current) * alpha;
         } else if (tool === 'smooth') {
           let sum = 0;
           let count = 0;
@@ -456,7 +475,7 @@ export class ManualTerrainField {
             }
           }
           const average = sum / Math.max(1, count);
-          const desired = average - this.shapeHeight[index];
+          const desired = average - this._baseHeightAtPixel(px, py) - this.shapeHeight[index];
           next = current + (desired - current) * alpha;
         } else if (tool === 'crease' || tool === 'ridge') {
           const width = clamp(creaseWidth, 0.04, 0.8);
@@ -479,7 +498,7 @@ export class ManualTerrainField {
           next = current + relief * 20 * alpha;
         } else if (tool === 'terrace') {
           const stepHeight = Math.max(1, terraceStep);
-          const currentTotal = this.shapeHeight[index] + current;
+          const currentTotal = this._baseHeightAtPixel(px, py) + this.shapeHeight[index] + current;
           const terracedTotal = Math.round(currentTotal / stepHeight) * stepHeight;
           next = current + (terracedTotal - currentTotal) * alpha;
         } else if (tool === 'erase') {

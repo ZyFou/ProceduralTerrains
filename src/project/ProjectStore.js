@@ -1,3 +1,5 @@
+import { normalizeManualTerrainDocument } from '../manual/ManualShapeCatalog.js';
+
 const DB_NAME = 'procedural-terrains-projects';
 const STORE_NAME = 'projects';
 const SYNC_STORE_NAME = 'project-sync';
@@ -103,14 +105,24 @@ export function normalizeProject(input = {}) {
       : legacyTerrain?.editorMode === 'procedural'
         ? 'procedural'
         : legacyTerrain?.generationSource === 'graph' ? 'nodes' : 'procedural';
+  const manualBaseSource = editorMode === 'manual'
+    && (legacyTerrain?.manualTerrain?.baseSource === 'procedural'
+      || legacyTerrain?.manualTerrain?.baseSource === 'nodes')
+    ? legacyTerrain.manualTerrain.baseSource
+    : 'flat';
   const terrain = {
     ...legacyTerrain,
     editorMode,
-    generationSource: editorMode === 'nodes' ? 'graph' : 'classic',
+    generationSource: editorMode === 'nodes' || (editorMode === 'manual' && manualBaseSource === 'nodes')
+      ? 'graph'
+      : 'classic',
     graph: legacyTerrain?.graph ?? null,
     graphView: legacyTerrain?.graphView && typeof legacyTerrain.graphView === 'object'
       ? { x: Number(legacyTerrain.graphView.x) || 0, y: Number(legacyTerrain.graphView.y) || 0, zoom: Number(legacyTerrain.graphView.zoom) || 1 }
       : { x: 0, y: 0, zoom: 1 },
+    ...(editorMode === 'manual'
+      ? { manualTerrain: normalizeManualTerrainDocument(legacyTerrain?.manualTerrain) }
+      : {}),
   };
   const metadata = input.metadata ?? {};
   const created = metadata.created ?? input.created ?? now();
@@ -133,6 +145,89 @@ export function normalizeProject(input = {}) {
     terrain,
     exportHistory: Array.isArray(input.exportHistory) ? input.exportHistory : [],
   };
+}
+
+export function createManualProjectCopy(sourceProject, terrainPayload, baseSource) {
+  const source = sourceProject ? normalizeProject(sourceProject) : null;
+  const normalizedBase = baseSource === 'nodes' ? 'nodes' : 'procedural';
+  const sourceName = String(source?.metadata?.name ?? 'Untitled terrain').trim() || 'Untitled terrain';
+  const terrain = structuredClone(terrainPayload || source?.terrain || {});
+  delete terrain.workspacePreset;
+  return normalizeProject({
+    metadata: {
+      ...(source?.metadata || {}),
+      name: `${sourceName} (Manual)`,
+      tags: [...new Set([
+        ...(source?.metadata?.tags || []),
+        'manual',
+        `base-${normalizedBase}`,
+      ])].slice(0, 12),
+      created: undefined,
+      modified: undefined,
+    },
+    terrain: {
+      ...terrain,
+      editorMode: 'manual',
+      generationSource: normalizedBase === 'nodes' ? 'graph' : 'classic',
+      worldMode: 'studio',
+      manualTerrain: {
+        version: 5,
+        baseSource: normalizedBase,
+        shapes: [],
+        sculpt: null,
+        surfacePaint: null,
+      },
+    },
+    exportHistory: source?.exportHistory ?? [],
+  });
+}
+
+export function importTerrainIntoManualProject(manualProject, manualTerrainPayload, sourceProject) {
+  const current = normalizeProject(manualProject || { terrain: manualTerrainPayload });
+  const source = normalizeProject(sourceProject);
+  const sourceMode = source.terrain.editorMode === 'nodes'
+    ? 'nodes'
+    : source.terrain.editorMode === 'procedural'
+      ? 'procedural'
+      : null;
+  const sourceWorldMode = source.terrain.worldMode === 'infinite'
+    || source.terrain.worldMode === 'planet'
+    ? source.terrain.worldMode
+    : 'studio';
+  if (!sourceMode || sourceWorldMode !== 'studio'
+      || source.terrain.realWorldSource || source.terrain.workspacePreset === 'real-terrain') {
+    throw new Error('Only Procedural or Nodes projects in Tile mode can be imported.');
+  }
+
+  const currentTerrain = structuredClone(manualTerrainPayload || current.terrain || {});
+  const manualDocument = normalizeManualTerrainDocument(currentTerrain.manualTerrain);
+  const importedTerrain = structuredClone(source.terrain);
+  delete importedTerrain.workspacePreset;
+  delete importedTerrain.realWorldSource;
+
+  return normalizeProject({
+    id: current.id,
+    metadata: {
+      ...current.metadata,
+      tags: [...new Set([
+        ...(current.metadata.tags || []).filter((tag) => !String(tag).startsWith('base-')),
+        'manual',
+        `base-${sourceMode}`,
+      ])].slice(0, 12),
+    },
+    terrain: {
+      ...importedTerrain,
+      editorMode: 'manual',
+      generationSource: sourceMode === 'nodes' ? 'graph' : 'classic',
+      worldMode: 'studio',
+      manualTerrain: {
+        ...manualDocument,
+        version: 5,
+        baseSource: sourceMode,
+      },
+    },
+    exportHistory: current.exportHistory,
+  });
 }
 
 export const projectStore = {

@@ -153,8 +153,8 @@ export class ManualSurfacePaintField {
   bind(uniforms) {
     if (!uniforms) return;
     this._boundUniforms = uniforms;
-    uniforms.uPaintBiomeTexture.value = this.textureA;
-    uniforms.uPaintPropsTexture.value = this.textureB;
+    uniforms.uManualSurfaceTextureA.value = this.textureA;
+    uniforms.uManualSurfaceTextureB.value = this.textureB;
     this._applyBoundsToUniforms();
   }
 

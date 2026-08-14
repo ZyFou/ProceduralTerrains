@@ -93,6 +93,7 @@ export class ManualTerrainModeManager {
     controls,
     getBounds,
     getHeightAt,
+    getBaseHeightAt,
     gpuTier,
     onChange,
     onStableAction,
@@ -108,9 +109,11 @@ export class ManualTerrainModeManager {
     this.onChange = onChange;
     this.onStableAction = onStableAction;
     this.onToast = onToast;
+    this.baseSource = 'flat';
     this.shapes = [];
     this.selectedId = null;
     this.enabled = false;
+    this.workspaceActive = true;
     this.transformMode = 'translate';
     this.placementType = null;
     this.dragType = null;
@@ -125,7 +128,7 @@ export class ManualTerrainModeManager {
     this._draggingTransform = false;
     this._visuals = new Map();
 
-    this.field = new ManualTerrainField({ uniforms, getBounds, gpuTier });
+    this.field = new ManualTerrainField({ uniforms, getBounds, getBaseHeightAt, gpuTier });
     this.surfaceField = new ManualSurfacePaintField({ getBounds, gpuTier });
     this.cursor = new PaintBrushCursor(scene);
     this.picker = new TerrainPicker({
@@ -223,7 +226,9 @@ export class ManualTerrainModeManager {
 
   _state() {
     return {
+      baseSource: this.baseSource,
       enabled: this.enabled,
+      workspaceActive: this.workspaceActive,
       selectedId: this.selectedId,
       transformMode: this.transformMode,
       placementType: this.placementType,
@@ -250,6 +255,7 @@ export class ManualTerrainModeManager {
   enable({ silent = false } = {}) {
     if (this.enabled) return;
     this.enabled = true;
+    this.workspaceActive = true;
     this._previousControlInputMode = this.controls.inputMode ?? 'all';
     this._previousPrimaryPointerFilter = this.controls.primaryPointerFilter ?? null;
     this._previousWheelFilter = this.controls.wheelFilter ?? null;
@@ -289,6 +295,22 @@ export class ManualTerrainModeManager {
   setEnabled(enabled, options) {
     if (enabled) this.enable(options);
     else this.disable();
+  }
+
+  setWorkspaceActive(active) {
+    this.workspaceActive = active !== false;
+    if (!this.workspaceActive) {
+      this.placementType = null;
+      this.dragType = null;
+      this.sculpt.enabled = false;
+      this.texturePaint.enabled = false;
+      this._sculpting = false;
+      this._surfacePainting = false;
+      this.preview.visible = false;
+      this.cursor.setVisible(false);
+    }
+    this._syncVisuals();
+    this._emit();
   }
 
   setTransformMode(mode) {
@@ -634,7 +656,8 @@ export class ManualTerrainModeManager {
 
   serialize({ includeSculpt = true, includeSurface = true } = {}) {
     return {
-      version: 4,
+      version: 5,
+      baseSource: this.baseSource,
       shapes: cloneShapes(this.shapes),
       ...(includeSculpt ? { sculpt: this.field.serializeSculpt() } : {}),
       ...(includeSurface ? { surfacePaint: this.surfaceField.serialize() } : {}),
@@ -651,6 +674,7 @@ export class ManualTerrainModeManager {
 
   load(input, { emit = true } = {}) {
     const document = normalizeManualTerrainDocument(input);
+    this.baseSource = document.baseSource;
     this.shapes = document.shapes;
     this.selectedId = null;
     this.placementType = null;
@@ -725,7 +749,7 @@ export class ManualTerrainModeManager {
 
   _syncAnchor() {
     const shape = this.selectedShape;
-    if (!this.enabled || !shape || this.sculpt.enabled || this.texturePaint.enabled) {
+    if (!this.enabled || !this.workspaceActive || !shape || this.sculpt.enabled || this.texturePaint.enabled) {
       this.transform.detach();
       this.transform.visible = false;
       this.marker.visible = false;
@@ -785,6 +809,7 @@ export class ManualTerrainModeManager {
   }
 
   _canCameraPan(event) {
+    if (!this.workspaceActive) return true;
     if (this.sculpt.enabled || this.texturePaint.enabled) return !!event.altKey;
     if (!this.enabled || this.placementType || this.dragType || this._draggingTransform || this.transform.axis) return false;
     const point = this.picker.pickEvent(event);
@@ -792,7 +817,7 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerDown(event) {
-    if (!this.enabled || event.button !== 0 || this._draggingTransform || this.transform.axis) return;
+    if (!this.enabled || !this.workspaceActive || event.button !== 0 || this._draggingTransform || this.transform.axis) return;
     if (this.texturePaint.enabled) {
       if (event.altKey) return;
       event.preventDefault();
@@ -838,19 +863,19 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerMove(event) {
-    if (this.enabled && this.texturePaint.enabled) {
+    if (this.enabled && this.workspaceActive && this.texturePaint.enabled) {
       const point = this.picker.pickEvent(event, { quality: this._surfacePainting ? 'preview' : 'final' });
       this._updateSurfaceHit(point);
       if (this._surfacePainting && point) this._stampSurface(point);
       return;
     }
-    if (this.enabled && this.sculpt.enabled) {
+    if (this.enabled && this.workspaceActive && this.sculpt.enabled) {
       const point = this.picker.pickEvent(event, { quality: this._sculpting ? 'preview' : 'final' });
       this._updateSculptHit(point);
       if (this._sculpting && point) this._stampSculpt(point);
       return;
     }
-    if (!this.enabled || !this.placementType) return;
+    if (!this.enabled || !this.workspaceActive || !this.placementType) return;
     const point = this.picker.pickEvent(event, { quality: 'preview' });
     if (!point) {
       this.preview.visible = false;
@@ -860,7 +885,7 @@ export class ManualTerrainModeManager {
   }
 
   _handleDragOver(event) {
-    if (!this.enabled || !this.dragType) return;
+    if (!this.enabled || !this.workspaceActive || !this.dragType) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     const point = this.picker.pickEvent(event, { quality: 'preview' });
@@ -868,7 +893,7 @@ export class ManualTerrainModeManager {
   }
 
   _handleDrop(event) {
-    if (!this.enabled || !this.dragType) return;
+    if (!this.enabled || !this.workspaceActive || !this.dragType) return;
     event.preventDefault();
     event.stopPropagation();
     const point = this.picker.pickEvent(event);
@@ -903,7 +928,7 @@ export class ManualTerrainModeManager {
   }
 
   _handleWheel(event) {
-    if (!this.enabled || (!this.sculpt.enabled && !this.texturePaint.enabled) || !event.shiftKey) return;
+    if (!this.enabled || !this.workspaceActive || (!this.sculpt.enabled && !this.texturePaint.enabled) || !event.shiftKey) return;
     event.preventDefault();
     event.stopPropagation();
     const factor = event.deltaY > 0 ? 0.9 : 1.1;
@@ -1026,7 +1051,7 @@ export class ManualTerrainModeManager {
   }
 
   _handleKeyDown(event) {
-    if (!this.enabled || isTypingTarget(event.target)) return;
+    if (!this.enabled || !this.workspaceActive || isTypingTarget(event.target)) return;
     if (event.key === 'Escape') {
       if (this.texturePaint.enabled) {
         event.preventDefault();
@@ -1073,7 +1098,7 @@ export class ManualTerrainModeManager {
   }
 
   update() {
-    if (!this.enabled || this._draggingTransform) return;
+    if (!this.enabled || !this.workspaceActive || this._draggingTransform) return;
     // Keep helpers sitting above a terrain whose combined height may have
     // changed because another selected shape was edited.
     for (const shape of this.shapes) {

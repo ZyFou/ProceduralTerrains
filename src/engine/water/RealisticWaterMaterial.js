@@ -219,7 +219,7 @@ float terrainHeightAt(vec2 xz) {
 }
 
 vec4 waterPaintedBiomeAt(vec2 xz) {
-  if (uPaintEnabled < 0.5 || uManualSurfaceMode > 0.5) return vec4(0.0);
+  if (uPaintEnabled < 0.5) return vec4(0.0);
   vec2 uv = xz / max(uPaintBoardSize, 1.0) + vec2(0.5);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     return vec4(0.0);

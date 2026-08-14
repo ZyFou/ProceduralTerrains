@@ -59,6 +59,56 @@ describe('atomic terrain height transitions', () => {
     expect(engine._targetTerrainVariant()).toBe('manual');
   });
 
+  it('uses the generated terrain shader for a hybrid Manual project', () => {
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'manual';
+    engine.manualTerrain = { baseSource: 'procedural' };
+    engine.params.surfaceTextureMode = false;
+    engine.params.surfaceTextureAmount = 0;
+    engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
+
+    expect(engine._manualHasGeneratedBase()).toBe(true);
+    expect(engine._generationSourceForProject()).toBe('classic');
+    expect(engine._targetTerrainVariant()).toBe('hybrid');
+  });
+
+  it('keeps a hybrid generated base in procedural surface mode until Manual paint covers it', () => {
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'manual';
+    engine.manualTerrain = { baseSource: 'procedural' };
+    engine.params = {
+      surfaceTextureSource: 'procedural',
+      surfaceTextureMode: false,
+      surfaceTextureAmount: 0,
+    };
+    engine.uniforms = {
+      uSurfMode: { value: 1 },
+      uSurfAmount: { value: 1 },
+      uSurfTint: { value: 1 },
+      uManualBaseGenerated: { value: 0 },
+      uSurfPaletteInfluence: { value: 0.6 },
+      uSurfScale: { value: 1 },
+      uSurfBreakup: { value: 0.5 },
+      uSurfBlend: { value: 0.35 },
+      uSurfNormalAmt: { value: 1 },
+      uSurfRoughAmt: { value: 1 },
+      uSurfAOAmt: { value: 1 },
+      uSurfTriplanar: { value: 1 },
+    };
+
+    engine._applySurfaceSettings();
+
+    expect(engine.uniforms.uSurfMode.value).toBe(0);
+    expect(engine.uniforms.uManualBaseGenerated.value).toBe(0);
+  });
+
+  it('keeps a Nodes graph as the generation source of a hybrid Manual project', () => {
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'manual';
+    engine.manualTerrain = { baseSource: 'nodes' };
+    expect(engine._generationSourceForProject()).toBe('graph');
+  });
+
   it('compiles only the visible canvas terrain variant when node-project water is disabled', async () => {
     const program = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;
     const engine = heightTransitionHarness();
