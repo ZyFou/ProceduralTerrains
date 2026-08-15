@@ -1404,8 +1404,8 @@ export default function App() {
       }
       const k = String(e.key ?? '').toLowerCase();
       if (k === 's') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
-      else if (k === 'r' && e.shiftKey) engineRef.current?.createSpline('river');
-      else if (k === 'r') engineRef.current?.createSpline('road');
+      else if (k === 'r' && e.shiftKey && !e.altKey) engineRef.current?.createSpline('river');
+      else if (k === 'r' && e.altKey && !e.shiftKey) engineRef.current?.createSpline('road');
       else if (k === 'a') engineRef.current?.setAnalysisSettings({ enabled: !analysisState.enabled });
     };
     window.addEventListener('keydown', onKey);
