@@ -14,6 +14,7 @@ import {
 } from '../src/engine/props/ProceduralPropsManager.js';
 import { macroDensity, shouldPlaceType } from '../src/engine/props/PropPlacement.js';
 import { getPropType, PROP_TYPES, scoreProp } from '../src/engine/props/propCatalog.js';
+import { createPropAsset } from '../src/engine/props/PropAssetLibrary.js';
 
 function sampleAt(x = 0, z = 0, patch = {}) {
   return {
@@ -185,6 +186,30 @@ describe('optimized prop performance architecture', () => {
     manager.dispose();
   });
 
+  it('uses the editable asset library without adding render batches', () => {
+    const manager = new ProceduralPropsManager(new THREE.Scene());
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+    camera.position.set(0, 50, 80);
+    const sampler = makeSampler();
+    const base = propParams({
+      propsDensity: 2,
+      propsFlowers: 0,
+      propsRocks: 0,
+      propsTreeDensity: 0,
+      propsAssets: [{ ...createPropAsset('meadow-grass', 'custom-grass'), enabled: false }],
+    });
+    manager.update({ mode: 'studio', camera, params: base, boardSize: 128, sampler, terrainRevision: 1 });
+    expect(sampler.sampleAt).not.toHaveBeenCalled();
+
+    const custom = { ...createPropAsset('dry-grass', 'custom-grass'), scale: 1.4, width: 1.2 };
+    manager.update({ mode: 'studio', camera, params: { ...base, propsAssets: [custom] }, boardSize: 128, sampler, terrainRevision: 1 });
+    const grass = [...manager._sectors.values()].flatMap((sector) => sector.grass);
+    expect(grass.length).toBeGreaterThan(0);
+    expect(grass.every((item) => item.assetId === 'custom-grass')).toBe(true);
+    expect(manager.getDiagnostics().drawCalls).toBeLessThanOrEqual(2);
+    manager.dispose();
+  });
+
   it('does no terrain sampling when only the camera rotates', () => {
     const manager = new ProceduralPropsManager(new THREE.Scene());
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
@@ -351,7 +376,7 @@ describe('optimized prop performance architecture', () => {
     expect([...performance].every((position) => high.has(position))).toBe(true);
 
     expect(PROPS_RESET_KEYS).toEqual(expect.arrayContaining([
-      'propsGrassDensity', 'propsTreeDensity', 'propsTreeScale',
+      'propsGrassDensity', 'propsTreeDensity', 'propsTreeScale', 'propsAssets',
     ]));
     const reset = patchParamsFromDefaults({
       propsGrassDensity: 0, propsTreeDensity: 0, propsTreeScale: 2,

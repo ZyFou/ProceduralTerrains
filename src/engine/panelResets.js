@@ -37,6 +37,7 @@ export const PROPS_RESET_KEYS = [
   'propsEnabled', 'propsDensity', 'propsGrassDensity', 'propsFlowers', 'propsGrass',
   'propsRocks', 'propsRockScale', 'propsTreeDensity', 'propsTreeScale',
   'propsWind', 'propsWindSpeed', 'propsGust', 'propsCullDistance', 'propsLodDistance',
+  'propsAssets',
 ];
 
 export const WORLD_RESET_KEYS = [

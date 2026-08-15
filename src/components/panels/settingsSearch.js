@@ -191,6 +191,7 @@ const SETTINGS_INDEX = [
   { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterAmbientResponse', label: 'Water Ambient Response', keywords: 'water ambient sky bounce lighting night' },
   { panelId: 'lighting', sectionLabel: 'Water Lighting', settingId: 'lighting.waterFoamLighting', label: 'Water Foam Lighting', keywords: 'water foam lighting night brightness shoreline whitecaps' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsDensity', label: 'Master Density', keywords: 'props grass flowers rocks trees density scatter' },
+  { panelId: 'props', sectionLabel: 'Asset Library', settingId: 'props.assetLibrary', label: 'Props Asset Library', keywords: 'props assets library preview add replace duplicate remove edit grass flowers rocks trees' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsGrassDensity', label: 'Grass Density', keywords: 'props grass meadow density scatter' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsFlowers', label: 'Flower Density', keywords: 'props flowers meadow scatter' },
   { panelId: 'props', sectionLabel: 'Distribution', settingId: 'props.propsRocks', label: 'Rock Density', keywords: 'props rocks boulders stones terrain color' },

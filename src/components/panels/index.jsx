@@ -29,6 +29,7 @@ import PlanetSummaryCard from '../ui/PlanetSummaryCard.jsx';
 import { LodPanel, CameraPanel } from '../RightPanels.jsx';
 import PerfSettings, { SurfacePropertiesSettings } from './PerfSettings.jsx';
 import SurfaceLibraryPanel from '../ui/SurfaceLibraryPanel.jsx';
+import PropsAssetLibrary from '../ui/PropsAssetLibrary.jsx';
 import NoiseLayersPanel from '../NoiseLayersPanel.jsx';
 import SplinesPanel from './SplinesPanel.jsx';
 import { AnalysisContent } from './AnalysisPanel.jsx';
@@ -368,11 +369,24 @@ const PROP_SLIDERS = {
 function PropsPanel({ ctx }) {
   const { params, onParam, worldMode, perf, onPerfSetting } = ctx;
   const enabled = !!params.propsEnabled;
+  const [subTab, setSubTab] = useState('assets');
+  useEffect(() => {
+    const settingId = ctx.settingsTarget?.settingId;
+    if (!settingId?.startsWith('props.')) return;
+    setSubTab(settingId === 'props.assetLibrary' ? 'assets' : 'settings');
+  }, [ctx.settingsTarget]);
   return (
-    <SidePanel title="Props" description="Biome-aware grass, flowers, rocks and trees." onClose={ctx.onClose}>
+    <SidePanel title="Props" description="Manage, preview and scatter optimized 3D terrain assets." onClose={ctx.onClose}>
       <ToggleRow label="Procedural Props" value={enabled} onChange={(v) => onParam('propsEnabled', v)}
         info="Scatter optimized grass, flowers, terrain-matched boulders, broadleaf trees and conifers in every world mode." />
-      {enabled && (
+      <PanelTabs active={subTab} onChange={setSubTab} tabs={[
+        { id: 'assets', label: 'Asset Library' },
+        { id: 'settings', label: 'Scatter Settings' },
+      ]} />
+      {subTab === 'assets' && (
+        <PropsAssetLibrary value={params.propsAssets} onChange={(assets) => onParam('propsAssets', assets)} />
+      )}
+      {subTab === 'settings' && enabled && (
         <>
           <ControlSection id="props-distribution" title="Distribution" defaultOpen settingId="props.section.distribution">
             <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
@@ -407,6 +421,9 @@ function PropsPanel({ ctx }) {
             </p>
           </ControlSection>
         </>
+      )}
+      {subTab === 'settings' && !enabled && (
+        <p className="section-hint">Enable Procedural Props to adjust distribution, look and performance settings.</p>
       )}
       <PanelResetButton label="Reset Props Settings" onClick={() => ctx.onResetPanel?.('props')} settingId="props.reset" />
     </SidePanel>
