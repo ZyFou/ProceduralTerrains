@@ -265,11 +265,15 @@ export function normalizeManualShape(input = {}, index = 0) {
 
 export function normalizeManualTerrainDocument(input) {
   const source = input && typeof input === 'object' ? input : {};
+  const baseSource = source.baseSource === 'procedural' || source.baseSource === 'nodes'
+    ? source.baseSource
+    : 'flat';
   const shapes = Array.isArray(source.shapes)
     ? source.shapes.slice(0, 256).map(normalizeManualShape)
     : [];
   return {
-    version: 4,
+    version: 5,
+    baseSource,
     shapes,
     sculpt: source.sculpt && typeof source.sculpt === 'object' ? source.sculpt : null,
     surfacePaint: source.surfacePaint && typeof source.surfacePaint === 'object' ? source.surfacePaint : null,

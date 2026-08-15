@@ -57,6 +57,8 @@ export class GpuHeightSampler {
     this._cz = 0;
     this._valid = false;
     this._gen = -1;
+    this._batchLocked = false;
+    this.readbackCount = 0;
     this._cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
     this._cam.up.set(0, 0, -1);
   }
@@ -73,11 +75,24 @@ export class GpuHeightSampler {
    *  that area hits one cached readback (no mid-loop re-renders). */
   prime(x, z) { this._ensureTile(x, z); }
 
+  /** Lock a placement batch to one cached surface tile. Samples outside it use
+   *  the analytic fallback rather than recentering and stalling on readPixels. */
+  beginBatch(x, z) {
+    this._ensureTile(x, z);
+    this._batchLocked = true;
+  }
+
+  endBatch() { this._batchLocked = false; }
+
   // -------------------------------------------------------------- sampling
 
   /** World-space terrain height at (x, z). */
   heightAt(x, z) {
-    this._ensureTile(x, z);
+    if (this._batchLocked) {
+      if (!this._sampleFitsTile(x, z)) return this.cpu.heightAt(x, z);
+    } else {
+      this._ensureTile(x, z);
+    }
     if (!this._valid) return this.cpu.heightAt(x, z);
 
     const N = this.tileSize;
@@ -147,6 +162,14 @@ export class GpuHeightSampler {
     this._gen = gen;
   }
 
+  _sampleFitsTile(x, z) {
+    if (!this._valid || this.getGeneration() !== this._gen) return false;
+    const half = this.tileWorld / 2;
+    const texel = this.tileWorld / this.tileSize;
+    return Math.abs(x - this._cx) <= half - texel
+      && Math.abs(z - this._cz) <= half - texel;
+  }
+
   _renderTile(cx, cz) {
     const r = this.renderer;
     const N = this.tileSize;
@@ -186,6 +209,7 @@ export class GpuHeightSampler {
     r.clear();
     r.render(this.scene, cam);
     r.readRenderTargetPixels(this._rt, 0, 0, N, N, this._data);
+    this.readbackCount++;
     r.setRenderTarget(null);
     this.uniforms.uColorMode.value = 0;
 

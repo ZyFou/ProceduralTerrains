@@ -23,6 +23,7 @@ import {
 import { loadUiPrefs, saveUiPrefs } from './components/ui/uiPrefs.js';
 import UiSettingsPanel from './components/ui/UiSettingsPanel.jsx';
 import SettingsSearchOverlay from './components/ui/SettingsSearchOverlay.jsx';
+import ManualTerrainImportDialog from './components/ui/ManualTerrainImportDialog.jsx';
 import BottomToolbar from './components/BottomToolbar.jsx';
 import CreatorToolbar from './components/CreatorToolbar.jsx';
 import WorldModeBar from './components/WorldModeBar.jsx';
@@ -40,7 +41,12 @@ import { usePopup } from './components/ui/PopupProvider.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
-import { normalizeProject, projectStore } from './project/ProjectStore.js';
+import {
+  createManualProjectCopy,
+  importTerrainIntoManualProject,
+  normalizeProject,
+  projectStore,
+} from './project/ProjectStore.js';
 import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
 import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
@@ -84,7 +90,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     const before = JSON.parse(beforeSnapshot);
     const after = JSON.parse(afterSnapshot);
     if (before.worldMode !== after.worldMode) return 'Changed world mode';
-    if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain texture';
+    if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain surface or props';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
     if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
@@ -150,6 +156,7 @@ export default function App() {
   const appShellRef = useRef(null);
   const [paintState, setPaintState] = useState({ enabled: false });
   const [manualTerrainState, setManualTerrainState] = useState({
+    baseSource: 'flat',
     enabled: false,
     selectedId: null,
     transformMode: 'translate',
@@ -174,8 +181,10 @@ export default function App() {
     },
     texturePaint: {
       enabled: false,
+      mode: 'surface',
       tool: 'paint',
       material: 'grass',
+      propType: 'grass',
       brushSize: 110,
       strength: 0.45,
       falloff: 0.72,
@@ -215,6 +224,13 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
+  const [manualImportDialog, setManualImportDialog] = useState({
+    open: false,
+    loading: false,
+    busy: false,
+    projects: [],
+  });
+  const [manualWorkspace, setManualWorkspace] = useState('manual');
   const [manualLibraryHeight, setManualLibraryHeight] = useState(loadManualLibraryHeight);
   const [terrainGraph, setTerrainGraph] = useState(null);
   const [graphView, setGraphView] = useState({ x: 0, y: 0, zoom: 1 });
@@ -528,7 +544,10 @@ export default function App() {
     const project = json.terrain ? normalizeProject(json) : null;
     const terrain = project?.terrain ?? normalizeProject({ terrain: json }).terrain;
     const name = project?.metadata?.name ?? 'terrain project';
-    if (terrain.editorMode === 'nodes') loadNodeWorkspace().catch(() => {});
+    if (terrain.editorMode === 'nodes' || terrain.manualTerrain?.baseSource === 'nodes') {
+      loadNodeWorkspace().catch(() => {});
+    }
+    setManualWorkspace('manual');
 
     return loadingRef.current.run('project-load', {
       blocking: true,
@@ -627,6 +646,127 @@ export default function App() {
       }
     });
   }, [setCurrentProject, showToast]);
+
+  const openInManualTerrain = useCallback(async () => {
+    const eng = engineRef.current;
+    if (!eng || worldModeRef.current !== 'studio' || realTerrainMode
+        || !['procedural', 'nodes'].includes(projectMode)) return false;
+    const sourceMode = projectMode;
+    const sourceName = String(projectNameRef.current || 'Untitled terrain').trim() || 'Untitled terrain';
+    const confirmed = await showConfirm({
+      title: 'Open in Manual Terrain?',
+      message: `A new independent Manual copy of “${sourceName}” will be created. The ${sourceMode === 'nodes' ? 'Nodes graph' : 'Procedural generator'} and all current Tile edits will remain editable.`,
+      confirmLabel: 'Create Manual copy',
+    });
+    if (!confirmed) return false;
+
+    let createdProject = null;
+    try {
+      createdProject = createManualProjectCopy(
+        {
+          ...(activeProjectRef.current || {}),
+          metadata: { ...(activeProjectRef.current?.metadata || {}), name: sourceName },
+        },
+        eng.createProjectPayload(),
+        sourceMode,
+      );
+      createdProject = await projectStore.save(createdProject);
+      await loadProjectJSON(createdProject);
+      setManualWorkspace('manual');
+      engineRef.current?.setManualWorkspaceActive(true);
+      showToast(`Created ${createdProject.metadata.name}`, 'success');
+      return true;
+    } catch (error) {
+      if (createdProject?.id) {
+        try { await projectStore.remove(createdProject.id); } catch { /* best effort */ }
+      }
+      showToast(error instanceof Error ? error.message : 'Could not create the Manual copy', 'error');
+      return false;
+    }
+  }, [loadProjectJSON, projectMode, realTerrainMode, showConfirm, showToast]);
+
+  const openManualTerrainImport = useCallback(async () => {
+    if (projectMode !== 'manual' || realTerrainMode || worldModeRef.current !== 'studio') return;
+    setManualImportDialog({ open: true, loading: true, busy: false, projects: [] });
+    try {
+      const projects = (await projectStore.list()).filter((project) => {
+        const terrain = project?.terrain;
+        const sourceMode = terrain?.editorMode;
+        const sourceWorldMode = terrain?.worldMode === 'infinite' || terrain?.worldMode === 'planet'
+          ? terrain.worldMode
+          : 'studio';
+        return ['procedural', 'nodes'].includes(sourceMode)
+          && sourceWorldMode === 'studio'
+          && !terrain?.realWorldSource
+          && terrain?.workspacePreset !== 'real-terrain';
+      });
+      setManualImportDialog({ open: true, loading: false, busy: false, projects });
+    } catch (error) {
+      setManualImportDialog((current) => ({ ...current, open: false, loading: false }));
+      showToast(error instanceof Error ? error.message : 'Could not load terrain projects', 'error');
+    }
+  }, [projectMode, realTerrainMode, showToast]);
+
+  const importTerrainIntoManual = useCallback(async (sourceProject) => {
+    const eng = engineRef.current;
+    if (!eng || projectMode !== 'manual' || !sourceProject) return false;
+    const currentPayload = eng.createProjectPayload();
+    const currentProject = normalizeProject({
+      ...(activeProjectRef.current || {}),
+      id: activeProjectRef.current?.id,
+      metadata: {
+        ...(activeProjectRef.current?.metadata || {}),
+        name: String(projectNameRef.current || 'Untitled terrain').trim() || 'Untitled terrain',
+      },
+      terrain: currentPayload,
+    });
+    let importedProject;
+    try {
+      importedProject = importTerrainIntoManualProject(
+        currentProject,
+        currentPayload,
+        sourceProject,
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'This terrain cannot be imported', 'error');
+      return false;
+    }
+
+    setManualImportDialog((current) => ({ ...current, busy: true }));
+    let importedLoaded = false;
+    try {
+      await loadProjectJSON(importedProject);
+      importedLoaded = true;
+      setManualWorkspace('manual');
+      engineRef.current?.setManualWorkspaceActive(true);
+
+      let thumbnail = importedProject.metadata.thumbnail;
+      try { thumbnail = engineRef.current?.capturePreviewThumbnail?.() || thumbnail; } catch { /* best effort */ }
+      const saved = await projectStore.save(normalizeProject({
+        ...importedProject,
+        metadata: { ...importedProject.metadata, thumbnail },
+        // Save the live document after its Manual fields have reprojected onto
+        // the imported Tile bounds.
+        terrain: engineRef.current?.createProjectPayload?.() || importedProject.terrain,
+      }));
+      setCurrentProject(saved);
+      setManualImportDialog({ open: false, loading: false, busy: false, projects: [] });
+      showToast(`Imported ${sourceProject.metadata?.name || 'terrain'} into Manual Terrain`, 'success');
+      return true;
+    } catch (error) {
+      if (importedLoaded) {
+        try {
+          await loadProjectJSON(currentProject);
+          setCurrentProject(currentProject);
+          setManualWorkspace('manual');
+          engineRef.current?.setManualWorkspaceActive(true);
+        } catch { /* loadSeedJSON already keeps its own rollback snapshot */ }
+      }
+      setManualImportDialog((current) => ({ ...current, busy: false }));
+      showToast(error instanceof Error ? error.message : 'Could not import this terrain', 'error');
+      return false;
+    }
+  }, [loadProjectJSON, projectMode, setCurrentProject, showToast]);
 
   const loadProjectFile = useCallback((file) => {
     if (!file) return;
@@ -1266,8 +1406,8 @@ export default function App() {
       }
       const k = String(e.key ?? '').toLowerCase();
       if (k === 's') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
-      else if (k === 'r' && e.shiftKey) engineRef.current?.createSpline('river');
-      else if (k === 'r') engineRef.current?.createSpline('road');
+      else if (k === 'r' && e.shiftKey && !e.altKey) engineRef.current?.createSpline('river');
+      else if (k === 'r' && e.altKey && !e.shiftKey) engineRef.current?.createSpline('road');
       else if (k === 'a') engineRef.current?.setAnalysisSettings({ enabled: !analysisState.enabled });
     };
     window.addEventListener('keydown', onKey);
@@ -1310,16 +1450,26 @@ export default function App() {
   const isPlanet = worldMode === 'planet';
   const paintMode = !!paintState?.enabled;
   const manualMode = projectMode === 'manual';
+  const manualBaseSource = manualTerrainState?.baseSource === 'nodes'
+    ? 'nodes'
+    : manualTerrainState?.baseSource === 'procedural'
+      ? 'procedural'
+      : 'flat';
+  const hybridManualMode = manualMode && manualBaseSource !== 'flat';
+  const manualWorkspaceActive = manualMode && (!hybridManualMode || manualWorkspace === 'manual');
+  const workspaceProjectMode = hybridManualMode && manualWorkspace === 'base'
+    ? manualBaseSource
+    : projectMode;
   const exploring = exploreMode !== 'none' && exploreMode !== 'freecam';
   const planetExploring = isPlanet && exploring;
   const fpsView = isInfinite || planetExploring;
   const touchExplore = isInfinite || exploring;
   const studioLike = isStudio || (isPlanet && !exploring);
   const showStudioUI = !previewMode && !paintMode && studioLike;
-  const nodeToolsVisible = !['nodes', 'manual'].includes(projectMode) || uiPrefs.nodeToolsVisible !== false;
+  const nodeToolsVisible = !['nodes', 'manual'].includes(workspaceProjectMode) || uiPrefs.nodeToolsVisible !== false;
   const showToolPanels = !previewMode && !paintMode && !planetExploring && nodeToolsVisible;
-  const searchEnabled = showToolPanels && projectMode === 'procedural';
-  const nodesWorkspaceActive = projectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
+  const searchEnabled = showToolPanels && workspaceProjectMode === 'procedural';
+  const nodesWorkspaceActive = workspaceProjectMode === 'nodes' && isStudio && !previewMode && !paintMode && !landing?.visible;
 
   const handleTerrainGraphChange = useCallback((next, meta = {}) => {
     setTerrainGraph(next);
@@ -1711,7 +1861,7 @@ export default function App() {
 
   const projectPanelAvailable = (id) => {
     if (realTerrainMode) return REAL_TERRAIN_PANEL_IDS.includes(id);
-    return !['nodes', 'manual'].includes(projectMode) || NODE_PANEL_IDS.includes(id);
+    return !['nodes', 'manual'].includes(workspaceProjectMode) || NODE_PANEL_IDS.includes(id);
   };
   const togglePanel = (id) => {
     if (!projectPanelAvailable(id)) return;
@@ -1997,7 +2147,7 @@ export default function App() {
   return (
     <div
       id="app"
-      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}${manualMode ? ' manual-workspace-open' : ''}`}
+      className={`${previewMode ? 'preview-mode' : ''}${landingMode ? ' landing-mode' : ''}${fpsView ? ' infinite-mode' : ''}${touchExplore ? ' fps-explore-mode' : ''}${exploreMode === 'plane' ? ' plane-mode' : ''}${drawerOpen ? ' side-drawer-open' : ''}${perfOverlay.settings.open ? ' perf-overlay-open' : ''}${nodesWorkspaceActive ? ' nodes-workspace-open' : ''}${manualWorkspaceActive ? ' manual-workspace-open' : ''}`}
       onDragEnter={landingMode ? undefined : onFileDragEnter}
       onDragOver={landingMode ? undefined : onFileDragOver}
       onDragLeave={landingMode ? undefined : onFileDragLeave}
@@ -2025,6 +2175,19 @@ export default function App() {
         onSave={() => saveCurrentProject()}
         onDownload={downloadCurrentProject}
         onLoadJSON={loadProjectJSON}
+        canOpenInManual={worldMode === 'studio' && !realTerrainMode && ['procedural', 'nodes'].includes(projectMode)}
+        onOpenInManual={openInManualTerrain}
+        canImportTerrain={worldMode === 'studio' && !realTerrainMode && projectMode === 'manual'}
+        onImportTerrain={openManualTerrainImport}
+        manualBaseSource={hybridManualMode ? manualBaseSource : null}
+        manualWorkspace={manualWorkspace}
+        onManualWorkspace={(workspace) => {
+          const next = workspace === 'base' ? 'base' : 'manual';
+          setManualWorkspace(next);
+          setActivePanel(null);
+          engineRef.current?.setManualWorkspaceActive(next === 'manual');
+          if (next === 'base' && manualBaseSource === 'nodes') loadNodeWorkspace().catch(() => {});
+        }}
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
         nodeToolsVisible={uiPrefs.nodeToolsVisible !== false}
@@ -2052,6 +2215,18 @@ export default function App() {
         onToggleNotificationLogging={toggleNotificationLogging}
       />
 
+      <ManualTerrainImportDialog
+        open={manualImportDialog.open}
+        loading={manualImportDialog.loading}
+        busy={manualImportDialog.busy}
+        projects={manualImportDialog.projects}
+        onClose={() => {
+          if (manualImportDialog.busy) return;
+          setManualImportDialog({ open: false, loading: false, busy: false, projects: [] });
+        }}
+        onImport={importTerrainIntoManual}
+      />
+
       <div
         id="main"
         className="app-shell"
@@ -2074,7 +2249,7 @@ export default function App() {
             onLayoutChange={handleToolsRailLayout}
             shellRef={appShellRef}
             showLabels={uiPrefs.toolbarLabels}
-            panelIds={realTerrainMode ? REAL_TERRAIN_PANEL_IDS : ['nodes', 'manual'].includes(projectMode) ? NODE_PANEL_IDS : undefined}
+            panelIds={realTerrainMode ? REAL_TERRAIN_PANEL_IDS : ['nodes', 'manual'].includes(workspaceProjectMode) ? NODE_PANEL_IDS : undefined}
             realTerrainMode={realTerrainMode}
           />
         )}
@@ -2130,7 +2305,7 @@ export default function App() {
             />
           )}
 
-          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && !manualMode && !realTerrainMode && (
+          {showStudioUI && isStudio && !landingMode && !nodesWorkspaceActive && workspaceProjectMode === 'procedural' && !realTerrainMode && (
             <CreatorToolbar
               active={splineState.enabled}
               onToggle={() => engine().setSplineEditingEnabled(!splineState.enabled)}
@@ -2148,7 +2323,7 @@ export default function App() {
             />
           )}
 
-          {manualMode && isStudio && !previewMode && !landingMode && (
+          {manualWorkspaceActive && isStudio && !previewMode && !landingMode && (
             <ManualTerrainPanel
               state={manualTerrainState}
               boardSize={boardSize}
@@ -2183,6 +2358,7 @@ export default function App() {
               }}
               onTexturePaintSetting={(key, value) => engine().setManualTexturePaintSetting(key, value)}
               onClearTexturePaint={() => engine().clearManualTexturePaint()}
+              onClearPropPaint={() => engine().clearManualPropPaint()}
             />
           )}
 

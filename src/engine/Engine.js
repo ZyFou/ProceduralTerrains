@@ -82,6 +82,7 @@ import { createBlankGraph, migrateGraphDocument } from './terrain/graph/GraphDoc
 import { downloadPlanetStyleJSON, parsePlanetStyleJSON } from './export/TerrainPresetExporter.js';
 import { PaintModeManager } from '../paint/PaintModeManager.js';
 import { ManualTerrainModeManager } from '../manual/ManualTerrainModeManager.js';
+import { normalizeManualTerrainDocument } from '../manual/ManualShapeCatalog.js';
 import { ProceduralPropsManager } from './props/ProceduralPropsManager.js';
 import { FlatPropSampler } from './props/TerrainPropSampler.js';
 import { WaterSystem } from './water/WaterSystem.js';
@@ -746,6 +747,11 @@ export class Engine {
         + this._sampleManualHeightOffset(x, z)
         + this._sampleSplineHeightOffset(x, z)
       ),
+      getBaseHeightAt: (x, z) => (
+        this._getCpuHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)
+        + this._samplePaintHeightOffset(x, z)
+        + this._sampleSplineHeightOffset(x, z)
+      ),
       gpuTier: this.gpuTier,
       onChange: (state, meta = {}) => {
         this.manualTerrainState = state;
@@ -770,13 +776,15 @@ export class Engine {
     const uniforms = this.uniforms;
     if (!uniforms || !this.paintMode?.layers) return;
     const manual = this.projectMode === 'manual' && this.manualTerrain?.surfaceField;
+    uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
+    uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
     if (manual) {
       this.manualTerrain.surfaceField.bind(uniforms);
       uniforms.uManualSurfaceMode.value = 1;
+      uniforms.uManualBaseGenerated.value = this._manualHasGeneratedBase() ? 1 : 0;
     } else {
-      uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
-      uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
       uniforms.uManualSurfaceMode.value = 0;
+      uniforms.uManualBaseGenerated.value = 0;
     }
   }
 
@@ -828,7 +836,9 @@ export class Engine {
       sampler: this._getMinimapSampler(),
       getPaintHeightOffset: (x, z) => this._samplePaintHeightOffset(x, z) + this._sampleManualHeightOffset(x, z),
       getPaintBiomeWeights: (x, z) => this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null,
-      getPropsMask: (x, z) => this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 },
+      getPropsMask: (x, z) => this.projectMode === 'manual'
+        ? (this.manualTerrain?.propField?.sampleMask(x, z) ?? { grass: 0, flowers: 0, rocks: 0, trees: 0, mixed: 0 })
+        : (this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 }),
       getWaterLevel: () => this.params.seaLevel,
       getChunkCount: () => this.params.chunkCount,
     });
@@ -847,6 +857,22 @@ export class Engine {
 
   _samplePaintHeightOffset(x, z) {
     return (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
+  }
+
+  _manualBaseSource(document = null) {
+    if (this.projectMode !== 'manual') return this.projectMode === 'nodes' ? 'nodes' : 'procedural';
+    const source = document?.baseSource ?? this.manualTerrain?.baseSource;
+    return source === 'procedural' || source === 'nodes' ? source : 'flat';
+  }
+
+  _manualHasGeneratedBase(document = null) {
+    return this.projectMode === 'manual' && this._manualBaseSource(document) !== 'flat';
+  }
+
+  _generationSourceForProject(document = null) {
+    return this.projectMode === 'nodes' || this._manualBaseSource(document) === 'nodes'
+      ? 'graph'
+      : 'classic';
   }
 
   _sampleManualHeightOffset(x, z) {
@@ -981,6 +1007,19 @@ export class Engine {
     return shape === 'circle' ? Math.hypot(cx, cz) <= e + 1e-6 : Math.abs(cx) <= e && Math.abs(cz) <= e;
   }
   _hasTile(cx, cz) { return this.tiles.some((t) => t.cx === cx && t.cz === cz); }
+
+  _containsPropPoint(x, z) {
+    if (this.worldMode !== 'studio') return true;
+    const cs = Math.max(1, this.cellSize);
+    const cx = Math.floor((x + cs * 0.5) / cs);
+    const cz = Math.floor((z + cs * 0.5) / cs);
+    if (!this._hasTile(cx, cz)) return false;
+    if (this.tileAssemblyShape === 'circle') {
+      const radius = (this.diskRadiusCells + 0.5) * cs;
+      if (Math.hypot(x, z) > radius) return false;
+    }
+    return true;
+  }
 
   // Validate a loaded/restored tiles array: integer cells, deduped, origin
   // guaranteed, kept inside the 5×5 grid. Falls back to a single origin tile.
@@ -2251,6 +2290,13 @@ export class Engine {
     if (this.projectMode === 'procedural' && PRESETS[presetKey]) {
       this.params = applyPreset(this.params, presetKey);
     }
+    // New procedural projects showcase the optimized prop layer immediately.
+    // Loaded projects still keep their serialized propsEnabled value.
+    if (this.projectMode === 'procedural') {
+      this.params.propsEnabled = true;
+      this.perf = sanitizePerfSettings({ ...this.perf, propQuality: 1, preset: 'custom' });
+      this.qualityPreset = this.perf.preset;
+    }
     const noiseStackRecipe = this.projectMode === 'procedural'
       ? buildNoiseStackPresetRecipe(noiseStackPresetKey)
       : null;
@@ -2320,11 +2366,11 @@ export class Engine {
     this.paintMode?.setState({ layerOpacity: 1 });
     this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
     this.manualTerrain?.setEnabled(false);
-    this.manualTerrain?.clear({ emit: false });
+    this.manualTerrain?.load({ version: 5, baseSource: 'flat', shapes: [] }, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
     this.terrainAnalysis?.load();
-    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
+    this.generationSource = this._generationSourceForProject();
     this.terrainGraph = this.projectMode === 'nodes' ? createBlankGraph() : null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
@@ -2352,6 +2398,7 @@ export class Engine {
     // every preset field through setParam(). Publish that finished snapshot so
     // React panels do not keep rendering the previous project's stack.
     this.cb.onParams(this._paramsSnapshot());
+    if (this.projectMode === 'procedural') this._notifyPerf();
     this.applyAll({ force: true });
     this._onErosionChanged();
     this._notifyTiles();
@@ -3220,13 +3267,16 @@ export class Engine {
     const terrainVariant = this._targetTerrainVariant();
     const liveTerrainVariant = this.terrainMaterial?.userData?.terrainVariant ?? null;
     const qualityVariants = ['base', 'detail', 'surface', 'full'];
+    const hybridQualityVariants = ['hybrid-surface', 'hybrid'];
     const liveMinimalVariant = this.worldMode === 'studio'
       && this.terrainMaterial?.userData?.minimalFragment === true;
     const liveQualityVariant = !this.terrainMaterial?.userData?.minimalFragment
       && (!liveTerrainVariant
         || liveTerrainVariant === terrainVariant
         || (qualityVariants.includes(liveTerrainVariant)
-          && qualityVariants.includes(terrainVariant)));
+          && qualityVariants.includes(terrainVariant))
+        || (hybridQualityVariants.includes(liveTerrainVariant)
+          && hybridQualityVariants.includes(terrainVariant)));
     // Presets commonly change only uniforms. Do not touch WebGL when the live
     // studio program already matches the requested structural variant.
     if (this.worldMode === 'studio'
@@ -4051,15 +4101,22 @@ export class Engine {
     const surfaceTextureSource = normalizeSurfaceTextureSource(p);
     p.surfaceTextureSource = surfaceTextureSource;
     p.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
-    u.uSurfMode.value = (this.projectMode === 'manual' || p.surfaceTextureMode) ? 1.0 : 0.0;
+    const flatManual = this.projectMode === 'manual' && !this._manualHasGeneratedBase();
+    // A generated Manual base keeps the source project's surface mode. Manual
+    // paint still samples the atlas through uManualSurfaceMode, but an
+    // unpainted procedural base must not be replaced by an uninitialised atlas.
+    u.uSurfMode.value = (flatManual || p.surfaceTextureMode) ? 1.0 : 0.0;
+    u.uManualBaseGenerated.value = this._manualHasGeneratedBase()
+      && p.surfaceTextureMode === true
+      && (p.surfaceTextureAmount ?? 1) > 0.001 ? 1.0 : 0.0;
     u.uSurfAmount.value = 1.0;
     u.uSurfTint.value = 0.0;
     if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
-    u.uSurfPaletteInfluence.value = this.projectMode === 'manual' ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
+    u.uSurfPaletteInfluence.value = flatManual ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
     u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
     if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
-    u.uSurfBreakup.value = this.projectMode === 'manual' ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
+    u.uSurfBreakup.value = flatManual ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
     if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };
     u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
@@ -6904,9 +6961,19 @@ export class Engine {
   setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
   setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
   clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
-  setManualTexturePaintEnabled(enabled) { this.manualTerrain?.setTexturePaintEnabled(enabled); }
-  setManualTexturePaintSetting(key, value) { this.manualTerrain?.setTexturePaintSetting(key, value); }
+  setManualTexturePaintEnabled(enabled) {
+    if (enabled && this.manualTerrain?.texturePaint?.mode === 'props' && !this.params.propsEnabled) {
+      this.setParam('propsEnabled', true);
+    }
+    this.manualTerrain?.setTexturePaintEnabled(enabled);
+  }
+  setManualTexturePaintSetting(key, value) {
+    if (key === 'mode' && value === 'props' && !this.params.propsEnabled) this.setParam('propsEnabled', true);
+    this.manualTerrain?.setTexturePaintSetting(key, value);
+  }
   clearManualTexturePaint() { return this.manualTerrain?.clearTexturePaint(); }
+  clearManualPropPaint() { return this.manualTerrain?.clearPropPaint(); }
+  setManualWorkspaceActive(active) { this.manualTerrain?.setWorkspaceActive(active); }
 
   // ---------------------------------------------------------- creator tools
 
@@ -7895,6 +7962,9 @@ export class Engine {
           ? (this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null) : null),
         getPaintMask: (x, z) => {
           if (this.worldMode !== 'studio') return null;
+          if (this.projectMode === 'manual') {
+            return this.manualTerrain?.propField?.sampleMask(x, z) ?? null;
+          }
           const base = this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 };
           const exclusion = this.splineManager?.getPropExclusion(x, z) ?? 0;
           // Negative density is represented by zero availability; placement
@@ -8293,11 +8363,14 @@ export class Engine {
 
   /** Water quality uniforms — per water material, never shared with terrain. */
   _targetTerrainVariant() {
-    if (this.projectMode === 'manual') return 'manual';
-    const surfaceEnabled = this.params?.surfaceTextureMode === true
-      && (this.params?.surfaceTextureAmount ?? 1) > 0.001;
+    if (this.projectMode === 'manual' && !this._manualHasGeneratedBase()) return 'manual';
+    const hybridManual = this.projectMode === 'manual' && this._manualHasGeneratedBase();
+    const surfaceEnabled = this.projectMode === 'manual'
+      || (this.params?.surfaceTextureMode === true
+        && (this.params?.surfaceTextureAmount ?? 1) > 0.001);
     const detailEnabled = (this.perf?.terrainDetailQuality ?? 3) > 0
       && (this.perf?.terrainDetailOpacity ?? 1) > 0.001;
+    if (hybridManual) return detailEnabled ? 'hybrid' : 'hybrid-surface';
     if (surfaceEnabled && detailEnabled) return 'full';
     if (surfaceEnabled) return 'surface';
     if (detailEnabled) return 'detail';
@@ -8773,7 +8846,7 @@ export class Engine {
           : 1,
       },
     };
-    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 4, shapes: [], sculpt: null, surfacePaint: null };
+    if (this.projectMode === 'manual') data.manualTerrain = this.manualTerrain?.serialize() ?? { version: 5, baseSource: 'flat', shapes: [], sculpt: null, surfacePaint: null };
     const realWorldSource = normalizeRealWorldSource(this.realWorldSource);
     if (realWorldSource) data.realWorldSource = realWorldSource;
     // Only embed paint pixel data when something was actually painted —
@@ -8841,18 +8914,21 @@ export class Engine {
         : json?.editorMode === 'procedural'
           ? 'procedural'
           : json?.generationSource === 'graph' ? 'nodes' : 'procedural';
+    const manualDocument = this.projectMode === 'manual'
+      ? normalizeManualTerrainDocument(json?.manualTerrain)
+      : null;
     this.workspacePreset = json?.workspacePreset === 'real-terrain' ? 'real-terrain' : null;
-    if (this.projectMode === 'manual') {
+    if (this.projectMode === 'manual' && manualDocument.baseSource === 'flat') {
       this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.BUILT_IN;
       this.params.surfaceTextureMode = true;
       this.params.surfaceTexturePaletteInfluence = 0;
       this.params.surfaceTextureBreakup = 0;
     }
-    this.terrainGraph = this.projectMode === 'nodes'
+    this.terrainGraph = this.projectMode === 'nodes' || manualDocument?.baseSource === 'nodes'
       ? (json?.graph ? migrateGraphDocument(json.graph, this.noiseStack) : createBlankGraph())
       : null;
     this.graphView = { ...this.graphView, ...(json?.graphView || {}) };
-    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
+    this.generationSource = this._generationSourceForProject(manualDocument);
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
     this._graphProgram = compiled?.ok ? compiled.program : null;
     this._graphDiagnostics = compiled?.diagnostics || [];
@@ -8880,7 +8956,7 @@ export class Engine {
       ? 'flat'
       : 'generated';
     this.paintMode?.setBaseMode(
-      this.projectMode === 'manual' ? 'flat' : savedPaintBase,
+      this.projectMode === 'manual' && manualDocument.baseSource === 'flat' ? 'flat' : savedPaintBase,
     );
     const savedPaintOpacity = Number(json?.paintState?.layerOpacity);
     this.paintMode?.setState({
@@ -8890,7 +8966,7 @@ export class Engine {
     });
     if (json?.paint) this.paintMode?.load(json.paint);
     this.manualTerrain?.setEnabled(false);
-    this.manualTerrain?.load(this.projectMode === 'manual' ? json?.manualTerrain : null, { emit: false });
+    this.manualTerrain?.load(this.projectMode === 'manual' ? manualDocument : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
     // Install all authored height sources before invalidating and starting the
@@ -9006,9 +9082,9 @@ export class Engine {
       generationSource: this.generationSource,
       terrainGraph: this.terrainGraph ? structuredClone(this.terrainGraph) : null,
       graphView: { ...this.graphView },
-      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 4, shapes: [] },
+      manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 5, baseSource: 'flat', shapes: [] },
       manualSculptRev: this.manualTerrain?.field?.sculptRevision ?? 0,
-      manualSurfaceRev: this.manualTerrain?.surfaceField?.revision ?? 0,
+      manualSurfaceRev: this.manualTerrain?.surfaceRevision ?? 0,
     };
   }
 
@@ -9027,7 +9103,7 @@ export class Engine {
     return this.manualTerrain?.serializeSculpt() ?? null;
   }
 
-  /** Heavy Manual Texture Paint weight maps, deduplicated by revision in App history. */
+  /** Heavy Manual Surface/Props Paint maps, deduplicated by revision in App history. */
   serializeManualSurface() {
     return this.manualTerrain?.serializeSurfacePaint() ?? null;
   }
@@ -9114,21 +9190,28 @@ export class Engine {
     this.params.noiseStack = this.noiseStack;
     this._stackGLSL = generateStackGLSL(this.noiseStack);
     this._stackSig = this._stackGLSL.sig;
-    this.terrainGraph = snap.terrainGraph ? migrateGraphDocument(snap.terrainGraph, this.noiseStack) : null;
-    this.graphView = { ...this.graphView, ...(snap.graphView || {}) };
-    if (this.terrainGraph) {
-      const compiled = compileTerrainGraph(this.terrainGraph);
-      this._graphProgram = compiled.ok ? compiled.program : this._graphProgram;
-      this._graphDiagnostics = compiled.diagnostics || [];
-    }
-    this.projectMode = snap.projectMode === 'nodes'
+    const restoredProjectMode = snap.projectMode === 'nodes'
       ? 'nodes'
       : snap.projectMode === 'manual'
         ? 'manual'
         : snap.projectMode === 'procedural'
           ? 'procedural'
           : snap.generationSource === 'graph' ? 'nodes' : 'procedural';
-    this.generationSource = this.projectMode === 'nodes' ? 'graph' : 'classic';
+    const restoredManualDocument = restoredProjectMode === 'manual'
+      ? normalizeManualTerrainDocument(snap.manualTerrain)
+      : null;
+    this.terrainGraph = (restoredProjectMode === 'nodes' || restoredManualDocument?.baseSource === 'nodes')
+      && snap.terrainGraph
+      ? migrateGraphDocument(snap.terrainGraph, this.noiseStack)
+      : null;
+    this.graphView = { ...this.graphView, ...(snap.graphView || {}) };
+    if (this.terrainGraph) {
+      const compiled = compileTerrainGraph(this.terrainGraph);
+      this._graphProgram = compiled.ok ? compiled.program : this._graphProgram;
+      this._graphDiagnostics = compiled.diagnostics || [];
+    }
+    this.projectMode = restoredProjectMode;
+    this.generationSource = this._generationSourceForProject(restoredManualDocument);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
@@ -9151,7 +9234,11 @@ export class Engine {
     if (this.paintMode) {
       if (snap.paint) this.paintMode.load(snap.paint);
       else this.paintMode.layers.clear();
-      this.paintMode.setBaseMode(this.projectMode === 'manual' ? 'flat' : (snap.paintBaseMode ?? 'generated'));
+      this.paintMode.setBaseMode(
+        this.projectMode === 'manual' && restoredManualDocument.baseSource === 'flat'
+          ? 'flat'
+          : (snap.paintBaseMode ?? 'generated'),
+      );
       this.paintMode.setState({
         layerOpacity: Number.isFinite(Number(snap.paintLayerOpacity))
           ? Math.max(0, Math.min(1, Number(snap.paintLayerOpacity)))
@@ -9160,7 +9247,7 @@ export class Engine {
     }
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual'
-      ? { ...(snap.manualTerrain || {}), sculpt: snap.manualSculpt ?? null, surfacePaint: snap.manualSurface ?? null }
+      ? { ...restoredManualDocument, sculpt: snap.manualSculpt ?? null, surfacePaint: snap.manualSurface ?? null }
       : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
@@ -9842,13 +9929,25 @@ export class Engine {
       mode: this.worldMode,
       camera: this.camera,
       params: this.params,
+      perf: this.perf,
       boardSize: this.boardSize,
       sampler: this.worldMode === 'planet' ? null : this._getPropSampler(),
       planetSampler: this.worldMode === 'planet' ? this._getPlanetPropSampler() : null,
-      paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
+      paintLayers: this.worldMode === 'studio'
+        ? (this.projectMode === 'manual' ? this.manualTerrain?.propField : this.paintMode?.layers)
+        : null,
       splineRevision: this.worldMode === 'studio' ? this.splineManager?.baker?.revision : -1,
       terrainRevision: this._terrainGen,
+      containsPoint: this.worldMode === 'studio' ? (x, z) => this._containsPropPoint(x, z) : null,
+      centerOverride: this.worldMode === 'studio' && this.exploreMode === 'none'
+        ? this.controls?.target : null,
+      dirtyBounds: this.worldMode === 'studio'
+        ? (this.projectMode === 'manual'
+          ? this.manualTerrain?.propField?.consumePropDirtyBounds?.()
+          : this.paintMode?.layers?.consumePropDirtyBounds?.())
+        : null,
     });
+    if ((this.propsManager?.getDiagnostics?.().queuedSectors ?? 0) > 0) this._needsRender = true;
 
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
@@ -10492,6 +10591,10 @@ export class Engine {
           this.waterSystem?.getPerformanceDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
+      props: this.propsManager?.getDiagnostics?.() ?? {
+        instances: { grass: 0, flowers: 0, rocks: 0, trees: 0 },
+        drawCalls: 0, triangles: 0, queuedSectors: 0,
+      },
     };
 
     if (this.worldMode === 'infinite' && this.infiniteWorld) {

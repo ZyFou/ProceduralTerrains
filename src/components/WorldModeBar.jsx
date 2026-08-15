@@ -1,8 +1,7 @@
-import { Earth, Globe2, Grid2x2, Map } from 'lucide-react';
+import { Globe2, Grid2x2, Map } from 'lucide-react';
 
 const MODES = [
   { id: 'studio', label: 'Tile', Icon: Grid2x2 },
-  { id: 'real', label: 'Real terrain', Icon: Earth },
   { id: 'infinite', label: 'Infinite World', Icon: Map },
   { id: 'planet', label: 'Planet', Icon: Globe2 },
 ];

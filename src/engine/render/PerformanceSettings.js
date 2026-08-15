@@ -47,6 +47,7 @@ export const PERF_LIMITS = {
   waterWaves:            { min: 0,       max: 1.5 },
   waterDistance:         { min: 0.25,    max: 1.0 },
   fogDistance:           { min: 0.4,     max: 2.0 },
+  propQuality:           { min: 0,       max: 3 },
   terrainDetailQuality:  { min: 0,       max: 3 },
   terrainDetailOpacity:  { min: 0,       max: 1.0 },
   terrainDetailScale:    { min: 0.04,    max: 0.60 },
@@ -79,6 +80,7 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.5,
     waterQuality: 0, waterReflection: 0.6, waterDetail: 0.4, waterWaves: 0.7,
     waterDistance: 0.6, fogDistance: 0.8,
+    propQuality: 0,
     terrainDetailQuality: 1, terrainDetailScale: 0.12, terrainDetailStrength: 0.42,
     terrainDetailNormal: 0.18, terrainDetailNear: 52, terrainDetailFar: 128,
     terrainRockSlope: 0.34, terrainRockSharpness: 0.16, terrainTriplanar: true,
@@ -97,6 +99,7 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.2,
     waterQuality: 1, waterReflection: 0.85, waterDetail: 0.7, waterWaves: 0.85,
     waterDistance: 0.8, fogDistance: 0.9,
+    propQuality: 1,
     terrainDetailQuality: 2, terrainDetailScale: 0.16, terrainDetailStrength: 0.66,
     terrainDetailNormal: 0.32, terrainDetailNear: 70, terrainDetailFar: 168,
     terrainRockSlope: 0.30, terrainRockSharpness: 0.15, terrainTriplanar: true,
@@ -115,6 +118,7 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 1.0,
     waterQuality: 2, waterReflection: 1.0, waterDetail: 1.0, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.0,
+    propQuality: 2,
     terrainDetailQuality: 3, terrainDetailScale: 0.20, terrainDetailStrength: 0.88,
     terrainDetailNormal: 0.50, terrainDetailNear: 80, terrainDetailFar: 190,
     terrainRockSlope: 0.28, terrainRockSharpness: 0.14, terrainTriplanar: true,
@@ -133,6 +137,7 @@ export const PERF_PRESETS = {
     cullingAggressiveness: 0.8,
     waterQuality: 2, waterReflection: 1.2, waterDetail: 1.2, waterWaves: 1.0,
     waterDistance: 1.0, fogDistance: 1.2,
+    propQuality: 3,
     terrainDetailQuality: 3, terrainDetailScale: 0.24, terrainDetailStrength: 1.02,
     terrainDetailNormal: 0.62, terrainDetailNear: 96, terrainDetailFar: 240,
     terrainRockSlope: 0.25, terrainRockSharpness: 0.12, terrainTriplanar: true,
@@ -270,6 +275,11 @@ export function sanitizePerfSettings(settings) {
   s.waterWaves = clamp(+s.waterWaves || 0, PERF_LIMITS.waterWaves);
   s.waterDistance = clamp(+s.waterDistance || 1, PERF_LIMITS.waterDistance);
   s.fogDistance = clamp(+s.fogDistance || 1, PERF_LIMITS.fogDistance);
+  {
+    const presetDefault = { performance: 0, balanced: 1, high: 2, ultra: 3 }[s.preset] ?? 2;
+    const raw = Number(s.propQuality);
+    s.propQuality = Math.round(clamp(Number.isFinite(raw) ? raw : presetDefault, PERF_LIMITS.propQuality));
+  }
   s.terrainDetailQuality = Math.round(clamp(+s.terrainDetailQuality || 0, PERF_LIMITS.terrainDetailQuality));
   s.terrainDetailScale = clamp(+s.terrainDetailScale || 0.16, PERF_LIMITS.terrainDetailScale);
   s.terrainDetailStrength = clamp(+s.terrainDetailStrength || 0, PERF_LIMITS.terrainDetailStrength);

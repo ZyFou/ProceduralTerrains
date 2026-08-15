@@ -8,6 +8,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  Flower2,
   GripVertical,
   Layers3,
   Mountain,
@@ -19,6 +20,8 @@ import {
   RotateCw,
   Scaling,
   SlidersHorizontal,
+  Sprout,
+  TreePine,
   Trash2,
   Waves,
 } from 'lucide-react';
@@ -60,6 +63,13 @@ const TEXTURE_TOOLS = [
   { id: 'paint', label: 'Paint', Icon: Palette },
   { id: 'blend', label: 'Blend', Icon: Waves },
   { id: 'erase', label: 'Erase', Icon: Eraser },
+];
+
+const PROP_PAINT_TYPES = [
+  { id: 'grass', label: 'Grass', Icon: Sprout, color: '#65a30d' },
+  { id: 'flowers', label: 'Flowers', Icon: Flower2, color: '#f472b6' },
+  { id: 'rocks', label: 'Rocks', Icon: Mountain, color: '#a8a29e' },
+  { id: 'trees', label: 'Trees', Icon: TreePine, color: '#15803d' },
 ];
 
 const MIN_LIBRARY_HEIGHT = 150;
@@ -200,6 +210,7 @@ export default function ManualTerrainPanel({
   onTexturePaintEnabled,
   onTexturePaintSetting,
   onClearTexturePaint,
+  onClearPropPaint,
 }) {
   const shapes = state?.shapes ?? [];
   const selected = shapes.find((shape) => shape.id === state?.selectedId) ?? null;
@@ -362,8 +373,8 @@ export default function ManualTerrainPanel({
           type="button"
           className={state?.texturePaint?.enabled ? 'active texture-active' : ''}
           onClick={() => onTexturePaintEnabled(!state?.texturePaint?.enabled)}
-          title="Texture Paint (T)"
-          aria-label="Toggle Texture Paint (T)"
+          title="Surface & Props Paint (T)"
+          aria-label="Toggle Surface & Props Paint (T)"
           aria-pressed={!!state?.texturePaint?.enabled}
         >
           <Palette size={18} aria-hidden />
@@ -483,7 +494,9 @@ export default function ManualTerrainPanel({
           <header className="node-dock-header manual-inspector-header">
             <div className="node-dock-heading">
               <span className="node-dock-kicker">Manual terrain</span>
-              <strong>{state?.texturePaint?.enabled ? 'Texture Paint' : state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector'}</strong>
+              <strong>{state?.texturePaint?.enabled
+                ? (state.texturePaint.mode === 'props' ? 'Prop Paint' : 'Texture Paint')
+                : state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector'}</strong>
             </div>
             {selected && !state?.sculpt?.enabled && !state?.texturePaint?.enabled ? (
               <div className="manual-shape-actions">
@@ -499,11 +512,38 @@ export default function ManualTerrainPanel({
 
           {state?.texturePaint?.enabled ? (
             <div className="manual-inspector-body">
-              <p className="manual-inspector-description">Paint the shipped terrain materials directly onto the final surface. Soft weights and triplanar projection keep transitions continuous.</p>
+              <p className="manual-inspector-description">
+                {state.texturePaint.mode === 'props'
+                  ? 'Paint independent grass, flower, rock, and tree density directly onto Manual Terrain.'
+                  : 'Paint the shipped terrain materials directly onto the final surface. Soft weights and triplanar projection keep transitions continuous.'}
+              </p>
               <section className="manual-inspector-section">
-                <h3>Texture Tool</h3>
-                <div className="manual-sculpt-tool-grid manual-texture-tool-grid" role="toolbar" aria-label="Texture paint tools">
-                  {TEXTURE_TOOLS.map(({ id, label, Icon }) => (
+                <h3>Paint Layer</h3>
+                <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-paint-layer-grid" role="tablist" aria-label="Manual paint layer">
+                  <button
+                    type="button"
+                    className={state.texturePaint.mode === 'surface' ? 'active' : ''}
+                    onClick={() => onTexturePaintSetting('mode', 'surface')}
+                    aria-selected={state.texturePaint.mode === 'surface'}
+                    role="tab"
+                  >
+                    <Palette size={14} aria-hidden /><span>Surface</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={state.texturePaint.mode === 'props' ? 'active' : ''}
+                    onClick={() => onTexturePaintSetting('mode', 'props')}
+                    aria-selected={state.texturePaint.mode === 'props'}
+                    role="tab"
+                  >
+                    <Sprout size={14} aria-hidden /><span>Props</span>
+                  </button>
+                </div>
+              </section>
+              <section className="manual-inspector-section">
+                <h3>{state.texturePaint.mode === 'props' ? 'Prop Tool' : 'Texture Tool'}</h3>
+                <div className="manual-sculpt-tool-grid manual-texture-tool-grid" role="toolbar" aria-label={state.texturePaint.mode === 'props' ? 'Prop paint tools' : 'Texture paint tools'}>
+                  {TEXTURE_TOOLS.filter(({ id }) => state.texturePaint.mode === 'surface' || id !== 'blend').map(({ id, label, Icon }) => (
                     <button
                       key={id}
                       type="button"
@@ -518,13 +558,15 @@ export default function ManualTerrainPanel({
                 </div>
                 <p className="manual-sculpt-tool-description">
                   {state.texturePaint.tool === 'paint'
-                    ? 'Crossfade the selected material over existing terrain textures.'
+                    ? (state.texturePaint.mode === 'props'
+                      ? 'Add the selected prop layer without removing other painted prop types.'
+                      : 'Crossfade the selected material over existing terrain textures.')
                     : state.texturePaint.tool === 'blend'
                       ? 'Smooth neighboring material weights without flattening the terrain.'
                       : 'Fade painted materials back to the original manual terrain surface.'}
                 </p>
               </section>
-              {state.texturePaint.tool === 'paint' ? (
+              {state.texturePaint.tool === 'paint' && state.texturePaint.mode === 'surface' ? (
                 <section className="manual-inspector-section">
                   <h3>Material</h3>
                   <div className="manual-material-grid" role="listbox" aria-label="Terrain material">
@@ -543,6 +585,26 @@ export default function ManualTerrainPanel({
                     ))}
                   </div>
                 </section>
+              ) : state.texturePaint.tool === 'paint' ? (
+                <section className="manual-inspector-section">
+                  <h3>Prop Type</h3>
+                  <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-prop-type-grid" role="listbox" aria-label="Terrain prop type">
+                    {PROP_PAINT_TYPES.map(({ id, label, Icon, color }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className={state.texturePaint.propType === id ? 'active' : ''}
+                        onClick={() => onTexturePaintSetting('propType', id)}
+                        aria-selected={state.texturePaint.propType === id}
+                        role="option"
+                        style={{ '--manual-prop-color': color }}
+                      >
+                        <Icon size={14} aria-hidden />
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
               ) : null}
               <section className="manual-inspector-section manual-inspector-controls">
                 <h3>Brush</h3>
@@ -556,8 +618,13 @@ export default function ManualTerrainPanel({
                 <span>Shift + wheel: brush size</span>
                 <span>Right drag: orbit</span>
               </div>
-              <button type="button" className="manual-clear-sculpt" onClick={onClearTexturePaint} disabled={!state.texturePaint.hasData}>
-                <Trash2 size={14} aria-hidden /> Clear texture layer
+              <button
+                type="button"
+                className="manual-clear-sculpt"
+                onClick={state.texturePaint.mode === 'props' ? onClearPropPaint : onClearTexturePaint}
+                disabled={!state.texturePaint.hasData}
+              >
+                <Trash2 size={14} aria-hidden /> Clear {state.texturePaint.mode === 'props' ? 'prop' : 'texture'} layer
               </button>
             </div>
           ) : state?.sculpt?.enabled ? (

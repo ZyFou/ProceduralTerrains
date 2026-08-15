@@ -40,8 +40,11 @@ uniform sampler2D uPaintHeightTexture;
 uniform sampler2D uPaintBiomeTexture;
 uniform sampler2D uPaintPropsTexture;
 uniform float uManualSurfaceMode;
+uniform float uManualBaseGenerated;
 uniform vec2 uManualSurfaceOrigin;
 uniform vec2 uManualSurfaceSpan;
+uniform sampler2D uManualSurfaceTextureA;
+uniform sampler2D uManualSurfaceTextureB;
 uniform float uManualEnabled;
 uniform vec2 uManualOrigin;
 uniform vec2 uManualSpan;
@@ -361,13 +364,13 @@ vec2 manualSurfaceUvAt(vec2 xz) {
 vec4 manualSurfaceWeightsAAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uPaintBiomeTexture, uv);
+  return texture2D(uManualSurfaceTextureA, uv);
 }
 
 vec4 manualSurfaceWeightsBAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uPaintPropsTexture, uv);
+  return texture2D(uManualSurfaceTextureB, uv);
 }
 `;
 

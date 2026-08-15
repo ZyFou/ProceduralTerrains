@@ -37,8 +37,8 @@ import { DEFAULT_PLANET_STYLE } from '../style/PlanetStyleConfig.js';
 // ============================================================================
 
 const MANUAL_ACTIVE_COMMON_SAMPLERS = new Set([
-  'uPaintBiomeTexture',
-  'uPaintPropsTexture',
+  'uManualSurfaceTextureA',
+  'uManualSurfaceTextureB',
   'uManualHeightTexture',
   'uTileOccupancy',
 ]);
@@ -89,6 +89,17 @@ float terrainCachedHeightAt(vec2 xz) {
 }
 `;
 
+// Hybrid Manual projects are Tile-only. Keeping the Infinite World cache in
+// their shader would reserve three texture units that can never be used, and
+// the generated base + Manual height/surface maps would then exceed the common
+// WebGL limit of 16 active texture units. Evaluate the same world-coordinate
+// height function directly instead.
+const HYBRID_TILE_TERRAIN_CACHE_GLSL = /* glsl */ `
+float terrainCachedHeightAt(vec2 xz) {
+  return heightAt(xz);
+}
+`;
+
 const MANUAL_TERRAIN_CLIMATE_GLSL = /* glsl */ `
 Climate terrainCachedClimateAt(vec2 xz) {
   return climateAt(xz * uFrequency + uSeedOffset);
@@ -96,14 +107,19 @@ Climate terrainCachedClimateAt(vec2 xz) {
 `;
 
 const buildVertex = (heightGLSL, variant = 'full') => {
-  const manual = variant === 'manual';
+  const features = resolveTerrainVariant(variant);
+  const manual = features.manual;
   const preview = variant === 'preview';
   return /* glsl */ `
 ${manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
-${manual ? MANUAL_TERRAIN_CACHE_GLSL : INFINITE_FIELD_CACHE_GLSL}
+${manual
+    ? MANUAL_TERRAIN_CACHE_GLSL
+    : features.tileOnly
+      ? HYBRID_TILE_TERRAIN_CACHE_GLSL
+      : INFINITE_FIELD_CACHE_GLSL}
 
 uniform float uSkirtDepth;
 uniform float uPlinthBaseY;
@@ -356,6 +372,12 @@ function resolveTerrainVariant(variant = 'full') {
   if (variant === 'manual') {
     return { name: 'manual', detail: true, surface: true, manual: true };
   }
+  if (variant === 'hybrid-surface') {
+    return { name: 'hybrid-surface', detail: false, surface: true, manual: false, tileOnly: true };
+  }
+  if (variant === 'hybrid') {
+    return { name: 'hybrid', detail: true, surface: true, manual: false, tileOnly: true };
+  }
   if (variant === 'base') return { name: 'base', detail: false, surface: false };
   if (variant === 'detail') return { name: 'detail', detail: true, surface: false };
   if (variant === 'surface') return { name: 'surface', detail: false, surface: true };
@@ -377,8 +399,16 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
 ${features.manual ? '' : TERRAIN_HEIGHT_TEX_GLSL}
-${features.manual ? MANUAL_TERRAIN_CACHE_GLSL : INFINITE_FIELD_CACHE_GLSL}
-${features.manual ? MANUAL_TERRAIN_CLIMATE_GLSL : TERRAIN_CLIMATE_CACHE_GLSL}
+${features.manual
+    ? MANUAL_TERRAIN_CACHE_GLSL
+    : features.tileOnly
+      ? HYBRID_TILE_TERRAIN_CACHE_GLSL
+      : INFINITE_FIELD_CACHE_GLSL}
+${features.manual
+    ? MANUAL_TERRAIN_CLIMATE_GLSL
+    : features.tileOnly
+      ? ''
+      : TERRAIN_CLIMATE_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${graphColorGLSL}
@@ -601,7 +631,7 @@ void main() {
     ? 'terrainCachedClimateAt(xz)'
     : 'climateAt(xz * uFrequency + uSeedOffset)'};
   BiomeWeights bw = biomeWeightsAt(cl);
-  vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'uManualSurfaceMode > 0.5 ? vec4(0.0) : paintBiomeAt(xz)'};
+  vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'paintBiomeAt(xz)'};
   vec4 splineMask = ${features.manual ? 'vec4(0.0)' : 'splineMaskAt(xz)'};
   bw.desert = clamp(max(bw.desert, paintedBiome.r), 0.0, 1.0);
   bw.canyon = clamp(max(bw.canyon, max(paintedBiome.g, splineMask.r * (1.0 - splineMask.b))), 0.0, 1.0);
@@ -1097,8 +1127,11 @@ export function createTerrainUniforms() {
     uPaintBiomeTexture: { value: null },
     uPaintPropsTexture: { value: null },
     uManualSurfaceMode: { value: 0 },
+    uManualBaseGenerated: { value: 0 },
     uManualSurfaceOrigin: { value: new THREE.Vector2(-512, -512) },
     uManualSurfaceSpan: { value: new THREE.Vector2(1024, 1024) },
+    uManualSurfaceTextureA: { value: null },
+    uManualSurfaceTextureB: { value: null },
     uManualEnabled: { value: 0 },
     uManualOrigin: { value: new THREE.Vector2(-512, -512) },
     uManualSpan: { value: new THREE.Vector2(1024, 1024) },

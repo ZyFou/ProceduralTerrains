@@ -65,8 +65,8 @@ describe('Manual Terrain surface painting', () => {
       resolution: 96,
     });
     const uniforms = {
-      uPaintBiomeTexture: { value: null },
-      uPaintPropsTexture: { value: null },
+      uManualSurfaceTextureA: { value: null },
+      uManualSurfaceTextureB: { value: null },
       uManualSurfaceOrigin: { value: new THREE.Vector2() },
       uManualSurfaceSpan: { value: new THREE.Vector2() },
     };
@@ -80,6 +80,26 @@ describe('Manual Terrain surface painting', () => {
     expect(uniforms.uManualSurfaceSpan.value.toArray()).toEqual([512, 256]);
     expect(field.sampleWeights(-20, 12)[1]).toBeGreaterThan(before * 0.8);
     expect(field.sampleWeights(300, 12)[1]).toBe(0);
+    field.dispose();
+  });
+
+  it('binds Manual material weights without replacing standard Paint textures', () => {
+    const field = new ManualSurfacePaintField({ getBounds: bounds, resolution: 24 });
+    const paintBiome = { id: 'paint-biome' };
+    const paintProps = { id: 'paint-props' };
+    const uniforms = {
+      uPaintBiomeTexture: { value: paintBiome },
+      uPaintPropsTexture: { value: paintProps },
+      uManualSurfaceTextureA: { value: null },
+      uManualSurfaceTextureB: { value: null },
+      uManualSurfaceOrigin: { value: new THREE.Vector2() },
+      uManualSurfaceSpan: { value: new THREE.Vector2() },
+    };
+    field.bind(uniforms);
+    expect(uniforms.uPaintBiomeTexture.value).toBe(paintBiome);
+    expect(uniforms.uPaintPropsTexture.value).toBe(paintProps);
+    expect(uniforms.uManualSurfaceTextureA.value).toBe(field.textureA);
+    expect(uniforms.uManualSurfaceTextureB.value).toBe(field.textureB);
     field.dispose();
   });
 

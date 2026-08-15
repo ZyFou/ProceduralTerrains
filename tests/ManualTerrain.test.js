@@ -70,7 +70,8 @@ describe('Manual Terrain shapes', () => {
         seed: -5,
       }],
     });
-    expect(document.version).toBe(4);
+    expect(document.version).toBe(5);
+    expect(document.baseSource).toBe('flat');
     expect(document.surfacePaint).toBeNull();
     expect(document.shapes).toHaveLength(1);
     expect(document.shapes[0]).toMatchObject({
@@ -126,7 +127,7 @@ describe('Manual Terrain shapes', () => {
         }],
       }],
     });
-    expect(document.version).toBe(4);
+    expect(document.version).toBe(5);
     expect(document.shapes[0].layers).toEqual([expect.objectContaining({
       id: 'weather',
       type: 'weathering',
@@ -213,6 +214,27 @@ describe('Manual Terrain shapes', () => {
     field.stamp({ x: 0, z: 0, radius: 40, strength: 1, falloff: 0.7, tool: 'raise' });
     expect(field.sampleHeightOffset(0, 28)).toBeGreaterThan(0);
     expect(field.sampleHeightOffset(0, 48)).toBeCloseTo(0, 5);
+    field.dispose();
+  });
+
+  it('flattens the final surface while storing only a delta over a generated base', () => {
+    const uniforms = {
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    };
+    const baseHeightAt = (x, z) => 80 + x * 0.25 - z * 0.1;
+    const field = new ManualTerrainField({
+      uniforms,
+      getBounds: () => ({ origin: { x: -128, z: -128 }, span: { x: 256, z: 256 } }),
+      getBaseHeightAt: baseHeightAt,
+      resolution: 96,
+    });
+    field.rebuild([]);
+    field.stamp({ x: 0, z: 0, radius: 36, strength: 1, falloff: 0.7, tool: 'flatten', targetHeight: 25 });
+
+    expect(baseHeightAt(0, 0) + field.sampleHeightOffset(0, 0)).toBeCloseTo(25, 0);
+    expect(field.sampleHeightOffset(0, 0)).toBeCloseTo(-55, 0);
     field.dispose();
   });
 

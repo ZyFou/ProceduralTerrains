@@ -43,11 +43,28 @@ export class FlatPropSampler {
   /** Cheap paint-mask density (0..1) for the density pre-gate — no terrain eval. */
   paintDensityAt(x, z) {
     const m = this.getPaintMask(x, z);
-    return m ? Math.max(m.grass, m.flowers, m.mixed) : 0;
+    return m ? Math.max(m.grass || 0, m.flowers || 0, m.mixed || 0, m.rocks || 0, m.trees || 0) : 0;
+  }
+
+  paintDensityForTypeAt(type, x, z) {
+    const m = this.getPaintMask(x, z);
+    if (!m) return 0;
+    if (type === 'grass') return (m.grass || 0) + (m.mixed || 0) * 0.55;
+    if (type === 'flower') return (m.flowers || 0) + (m.mixed || 0) * 0.45;
+    if (type === 'rock') return m.rocks || 0;
+    if (type === 'broadleaf' || type === 'conifer') return m.trees || 0;
+    return 0;
   }
 
   /** Center the faceted-surface readback tile on the build area up-front. */
   prime(cx, cz) { this.surfaceField?.prime(cx, cz); }
+
+  beginBatch(cx, cz) {
+    if (this.surfaceField?.beginBatch) this.surfaceField.beginBatch(cx, cz);
+    else this.surfaceField?.prime(cx, cz);
+  }
+
+  endBatch() { this.surfaceField?.endBatch?.(); }
 
   sampleAt(x, z) {
     const waterLevel = this.getWaterLevel();

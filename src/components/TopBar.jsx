@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FolderInput,
   FolderOpen,
   HelpCircle,
   LayoutTemplate,
@@ -43,6 +44,9 @@ export default function TopBar({
   projectName = 'Untitled terrain',
   onProjectNameChange,
   previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
+  canOpenInManual = false, onOpenInManual,
+  canImportTerrain = false, onImportTerrain,
+  manualBaseSource = null, manualWorkspace = 'manual', onManualWorkspace,
   onTogglePreview, onToggleHelp, onResetView,
   nodeToolsVisible = true, onToggleNodeTools,
   onOpenPanel, activePanel,
@@ -214,6 +218,18 @@ export default function TopBar({
               <Download size={14} strokeWidth={1.75} aria-hidden /> Download
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.download} className="tb-menu-shortcut" />
             </button>
+            {canOpenInManual ? <>
+              <div className="tb-menu-divider" role="separator" />
+              <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenInManual)}>
+                <Mountain size={14} strokeWidth={1.75} aria-hidden /> Open in Manual Terrain
+              </button>
+            </> : null}
+            {canImportTerrain ? <>
+              <div className="tb-menu-divider" role="separator" />
+              <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onImportTerrain)}>
+                <FolderInput size={14} strokeWidth={1.75} aria-hidden /> Import terrain…
+              </button>
+            </> : null}
           </div>
         </div>
 
@@ -326,7 +342,13 @@ export default function TopBar({
             <span className="tb-text">{loading.label}</span>
           </span>
         )}
-        {projectMode === 'nodes' ? (
+        {projectMode === 'manual' && manualBaseSource ? (
+          <div className="tb-workspace-switch" role="tablist" aria-label="Manual Terrain workspace">
+            <span><Mountain size={13} aria-hidden /> Manual · {manualBaseSource === 'nodes' ? 'Nodes' : 'Procedural'}</span>
+            <button type="button" role="tab" aria-selected={manualWorkspace === 'base'} className={manualWorkspace === 'base' ? 'active' : ''} onClick={() => onManualWorkspace?.('base')}>Base</button>
+            <button type="button" role="tab" aria-selected={manualWorkspace === 'manual'} className={manualWorkspace === 'manual' ? 'active' : ''} onClick={() => onManualWorkspace?.('manual')}>Manual</button>
+          </div>
+        ) : projectMode === 'nodes' ? (
           <span className="tb-workspace-pill"><Boxes size={13} aria-hidden /> Nodes workspace</span>
         ) : projectMode === 'manual' ? (
           <span className="tb-workspace-pill"><Mountain size={13} aria-hidden /> Manual Terrain</span>

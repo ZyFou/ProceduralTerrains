@@ -83,6 +83,24 @@ export default function MinimapOverlay({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  useEffect(() => {
+    if (docked) return undefined;
+
+    const onKeyDown = (event) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
+      if (String(event.key ?? '').toLowerCase() !== 'm') return;
+
+      event.preventDefault();
+      setCollapsed((value) => !value);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [docked]);
+
   return (
     <div className={`minimap-overlay-container${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}${docked ? ' docked' : ''}`}>
       {!docked && <button

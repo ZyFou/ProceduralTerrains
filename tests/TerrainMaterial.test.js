@@ -233,11 +233,11 @@ describe('shared Tile and Infinite terrain program', () => {
     const fragmentSamplers = [...tile.fragmentShader.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g)];
     // Four rolling field samplers were added: three Infinite cache levels and
     // the Studio climate bake.
-    expect(fragmentSamplers).toHaveLength(20);
+    expect(fragmentSamplers).toHaveLength(22);
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');
-    expect(tile.fragmentShader).toContain('(manualMode ? 1.0 : roleBlend)');
+    expect(tile.fragmentShader).toContain('(useManualWeights ? 1.0 : roleBlend)');
   });
 
   it('keeps the dedicated Manual Terrain shader below the 16 texture-unit limit', () => {
@@ -253,16 +253,16 @@ describe('shared Tile and Infinite terrain program', () => {
 
     expect(manual.userData.terrainVariant).toBe('manual');
     expect(fragmentSamplers).toEqual([
-      'uPaintBiomeTexture',
-      'uPaintPropsTexture',
+      'uManualSurfaceTextureA',
+      'uManualSurfaceTextureB',
       'uManualHeightTexture',
       'uTileOccupancy',
       'uSurfDiffuse',
       'uSurfProps',
     ]);
     expect(vertexSamplers).toEqual([
-      'uPaintBiomeTexture',
-      'uPaintPropsTexture',
+      'uManualSurfaceTextureA',
+      'uManualSurfaceTextureB',
       'uManualHeightTexture',
       'uTileOccupancy',
     ]);
@@ -270,6 +270,21 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(manual.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
     expect(manual.fragmentShader).not.toContain('uniform sampler2D uInfiniteFieldTex0');
     expect(manual.fragmentShader).not.toContain('uniform sampler2D uImportImageryTex');
+  });
+
+  it('removes Infinite World cache samplers from the Tile-only hybrid shader', () => {
+    const uniforms = createTerrainUniforms();
+    const hybrid = createTerrainMaterial(uniforms, 5, undefined, { variant: 'hybrid' });
+    materials.push(hybrid);
+
+    expect(hybrid.userData.terrainVariant).toBe('hybrid');
+    expect(hybrid.vertexShader).not.toContain('uniform sampler2D uInfiniteFieldTex0');
+    expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uInfiniteFieldTex0');
+    expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uTerrainBiomeTex');
+    expect(hybrid.fragmentShader).not.toContain('infiniteFieldSampleAt');
+    expect(hybrid.fragmentShader).toContain('return heightAt(xz);');
+    expect(hybrid.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
+    expect(hybrid.fragmentShader).toContain('if (amount < 0.002) return res;');
   });
 
   it('defines manual surface samplers before the planet surface material uses them', () => {

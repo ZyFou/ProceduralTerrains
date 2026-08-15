@@ -66,6 +66,7 @@ export class PaintLayerManager {
     this.biomeData = new Uint8Array(res * res * 4);
     this.propsData = new Uint8Array(res * res * 4);
     this.revision = 0;
+    this._propDirtyBounds = null;
     this._heightUploadPending = false;
     this._biomeUploadPending = false;
     this._propsUploadPending = false;
@@ -121,6 +122,22 @@ export class PaintLayerManager {
 
   setBoardSize(boardSize) {
     this.boardSize = boardSize;
+  }
+
+  _markPropDirty(x, z, radius) {
+    const next = { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
+    const current = this._propDirtyBounds;
+    if (!current || current.all) { this._propDirtyBounds = next; return; }
+    current.minX = Math.min(current.minX, next.minX);
+    current.maxX = Math.max(current.maxX, next.maxX);
+    current.minZ = Math.min(current.minZ, next.minZ);
+    current.maxZ = Math.max(current.maxZ, next.maxZ);
+  }
+
+  consumePropDirtyBounds() {
+    const dirty = this._propDirtyBounds;
+    this._propDirtyBounds = null;
+    return dirty;
   }
 
   worldToPixel(x, z) {
@@ -352,7 +369,10 @@ export class PaintLayerManager {
       }
     }
     this._queueUploads({ height: heightChanged, biome: biomeChanged, props: propsChanged });
-    if (heightChanged || biomeChanged || propsChanged) this.revision++;
+    if (heightChanged || biomeChanged || propsChanged) {
+      this.revision++;
+      this._markPropDirty(x, z, radius);
+    }
   }
 
   clear() {
@@ -361,6 +381,7 @@ export class PaintLayerManager {
     this.propsData.fill(0);
     this._uploadHeight();
     this._queueUploads({ biome: true, props: true });
+    this._propDirtyBounds = { all: true };
     this.revision++;
   }
 
@@ -406,6 +427,7 @@ export class PaintLayerManager {
     this.boardSize = data.boardSize ?? this.boardSize;
     this._uploadHeight();
     this._queueUploads({ biome: true, props: true });
+    this._propDirtyBounds = { all: true };
     this.revision++;
     return true;
   }
