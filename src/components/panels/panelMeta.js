@@ -18,7 +18,7 @@ export const PANEL_META = {
   },
   biomes: { label: 'Biomes', title: 'Biomes', desc: 'Climate distribution and masks.', icon: PANEL_ICONS.biomes },
   water: { label: 'Water', title: 'Water', desc: 'Ocean surface, quality modes and volumetric settings.', icon: PANEL_ICONS.water },
-  props: { label: 'Props', title: 'Props', desc: 'Procedural grass, flowers and rocks.', icon: PANEL_ICONS.props },
+  props: { label: 'Props', title: 'Props', desc: 'Biome-aware grass, flowers, rocks and trees.', icon: PANEL_ICONS.props },
   clouds: { label: 'Clouds', title: 'Clouds', desc: 'Volumetric cloud layer.', icon: PANEL_ICONS.clouds },
   visuals: { label: 'Visuals', title: 'Visuals', desc: 'Tile post effects, HDR sky and terrain surface polish.', icon: PANEL_ICONS.visuals, modes: ['studio'] },
   skybox: { label: 'Skybox', title: 'Skybox', desc: 'Sky environment, time of day and atmosphere.', icon: PANEL_ICONS.skybox },

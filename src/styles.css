@@ -5924,6 +5924,9 @@ input[type="color"].palette-color-input {
   background: rgba(192, 132, 252, .1);
 }
 .manual-texture-tool-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.manual-paint-layer-grid,
+.manual-prop-type-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.manual-prop-type-grid button svg { color: var(--manual-prop-color, currentColor); }
 .manual-texture-tool-grid button.active {
   color: #7ee2a8;
   border-color: rgba(74, 222, 128, .38);

@@ -12,7 +12,7 @@ describe('procedural project templates', () => {
   });
 
   it('uses a workflow-specific versioned preview cache', () => {
-    expect(projectTemplatePreviewCacheKey('mountain')).toBe('terrain-template-preview:procedural-v3:mountain');
+    expect(projectTemplatePreviewCacheKey('mountain')).toBe('terrain-template-preview:procedural-v4:mountain');
     expect(projectTemplatePreviewCacheKey('mountain')).not.toContain('nodes-v2');
   });
 

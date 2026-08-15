@@ -21,5 +21,5 @@ export function getProjectTemplate(id) {
 // cache independently so a shader/transition fix cannot keep serving an older
 // flat render for a procedural template.
 export function projectTemplatePreviewCacheKey(id) {
-  return `terrain-template-preview:procedural-v3:${id}`;
+  return `terrain-template-preview:procedural-v4:${id}`;
 }

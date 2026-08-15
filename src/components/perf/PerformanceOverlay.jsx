@@ -269,6 +269,21 @@ export default function PerformanceOverlay({
           {lod.map((c, i) => <Row key={i} label={`LOD${i}`} value={c} />)}
         </Section>
 
+        <Section id="props" title="Terrain Props" collapsed={collapsed.props} onToggle={onToggleSection}>
+          {diag?.props ? (
+            <>
+              <Row label="Quality tier" value={diag.props.quality ?? '–'} />
+              <Row label="Grass / flowers" value={`${fmtNum(diag.props.instances?.grass || 0)} / ${fmtNum(diag.props.instances?.flowers || 0)}`} />
+              <Row label="Rocks / trees" value={`${fmtNum(diag.props.instances?.rocks || 0)} / ${fmtNum(diag.props.instances?.trees || 0)}`} />
+              <Row label="Draw calls" value={diag.props.drawCalls ?? 0} warn={diag.props.drawCalls > 9} />
+              <Row label="Triangles" value={fmtNum(diag.props.triangles || 0)} warn={diag.props.triangles > 65000} />
+              <Row label="Sectors / queued" value={`${diag.props.sectors || 0} / ${diag.props.queuedSectors || 0}`} />
+              <Row label="Last update" value={fmtMs(diag.props.buildMs)} warn={diag.props.buildMs > 8} />
+              <Row label="Surface readbacks" value={diag.props.surfaceReadbacks || 0} />
+            </>
+          ) : <Row label="Props" value="unavailable" />}
+        </Section>
+
         <Section id="clouds" title="Clouds" collapsed={collapsed.clouds} onToggle={onToggleSection}>
           {diag?.clouds && (
             <>

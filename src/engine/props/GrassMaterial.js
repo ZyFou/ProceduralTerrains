@@ -1,10 +1,11 @@
 // ============================================================================
 // Wind material factory for animated props.
 //
-// Built on MeshLambertMaterial via onBeforeCompile so the props keep the scene's
-// standard lighting, fog and shadows, and we only inject the vertex-shader wind
-// from windGLSL.js. The base stays rooted (aBend = 0) and the tip bends
-// (aBend = 1), so animated props never lift off the terrain.
+// Built on MeshBasicMaterial via onBeforeCompile. The foliage atlas carries its
+// own soft directional shading, which keeps thin double-sided cards legible in
+// valleys where the scene may have no useful diffuse contribution. The base
+// stays rooted (aBend = 0) and the tip bends (aBend = 1), so animated props
+// never lift off the terrain.
 // ============================================================================
 
 import * as THREE from 'three';
@@ -17,8 +18,10 @@ import { WIND_VERT_DECL, WIND_VERT_BODY } from './windGLSL.js';
  * @param {string} [opts.name]
  */
 export function makeWindMaterial(windUniforms, { strengthMul = 1, name = 'wind' } = {}) {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
   mat.name = name;
+  // The atlas-backed ambient albedo floor is applied by the prop manager once
+  // the shared texture is available.
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = windUniforms.uTime;
     shader.uniforms.uWindDir = windUniforms.uWindDir;

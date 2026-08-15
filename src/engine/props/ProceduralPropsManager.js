@@ -1,240 +1,315 @@
 import * as THREE from 'three';
-import { chooseCandidate, fillChance, hashInt } from './PropPlacement.js';
-import { grassTint, terrainRockTint } from './propCatalog.js';
+import { hashInt, macroDensity, shouldPlaceType } from './PropPlacement.js';
+import {
+  ALIGN, PROP_TYPES, flowerTint, grassTint, terrainRockTint, treeTint,
+} from './propCatalog.js';
 import { createWindUniforms } from './windGLSL.js';
 import { makeWindMaterial } from './GrassMaterial.js';
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-function makeGrassTuftGeometry({ bladeCount = 14, segments = 4, height = 1, radius = 0.22, clusters = 1, carpetCount = 18 } = {}) {
-  const positions = [];
-  const colors = [];
-  const bends = [];
-  const indices = [];
-  const bottom = new THREE.Color(0x1f5529);
-  const mid = new THREE.Color(0x4a9340);
-  const tip = new THREE.Color(0x92bc58);
+export const PROP_QUALITY_BUDGETS = Object.freeze([
+  Object.freeze({ grass: 900, flowers: 80, rocks: 180, trees: 440, distanceScale: 0.65, buildMs: 1.5, grassDistance: 140, nearDistance: 80 }),
+  Object.freeze({ grass: 1800, flowers: 180, rocks: 320, trees: 900, distanceScale: 1, buildMs: 2.5, grassDistance: 220, nearDistance: 180 }),
+  Object.freeze({ grass: 2800, flowers: 260, rocks: 480, trees: 1400, distanceScale: 1.15, buildMs: 3, grassDistance: 320, nearDistance: 280 }),
+  Object.freeze({ grass: 5000, flowers: 450, rocks: 800, trees: 2500, distanceScale: 1.35, buildMs: 4, grassDistance: 480, nearDistance: 420 }),
+]);
 
-  const pushVertex = (x, y, z, t, shade) => {
-    positions.push(x, y, z);
-    bends.push(t);   // 0 at the rooted base → 1 at the tip (wind bend weight)
-    const col = (t < 0.68 ? bottom.clone().lerp(mid, t / 0.68) : mid.clone().lerp(tip, (t - 0.68) / 0.32));
-    col.multiplyScalar(shade);
-    colors.push(col.r, col.g, col.b);
-  };
+const ATLAS_GRID = 4;
+const ATLAS_SIZE = 512;
+const ATLAS_TILES = Object.freeze({ grass: 0, flower: 1, broadleaf: 2, conifer: 3, bark: 4 });
 
-  for (let b = 0; b < bladeCount; b++) {
-    const bladeSeed = b * 12.9898;
-    const clusterSeed = Math.floor(b * clusters / Math.max(1, bladeCount));
-    const clusterAng = clusterSeed * 2.39996 + Math.sin(clusterSeed * 17.17) * 0.4;
-    const clusterR = clusters <= 1 ? 0 : radius * (0.12 + 0.68 * Math.abs(Math.sin(clusterSeed * 3.31)));
-    const clusterX = Math.cos(clusterAng) * clusterR;
-    const clusterZ = Math.sin(clusterAng) * clusterR;
-    const localRadius = radius * (clusters <= 1 ? 1 : 0.34);
-    const angle = (b / bladeCount) * Math.PI * 2 + Math.sin(bladeSeed) * 0.45;
-    const baseR = localRadius * (0.18 + 0.82 * Math.abs(Math.sin(bladeSeed * 1.7)));
-    const baseX = Math.cos(angle) * baseR;
-    const baseZ = Math.sin(angle) * baseR;
-    const tall = Math.abs(Math.sin(bladeSeed * 9.19)) > 0.82 ? 1.0 : 0.62;
-    const h = height * tall * (0.55 + 0.42 * Math.abs(Math.sin(bladeSeed * 2.31)));
-    const width = 0.034 + 0.05 * Math.abs(Math.cos(bladeSeed * 0.77));
-    const lean = 0.16 + 0.34 * Math.abs(Math.sin(bladeSeed * 0.41));
-    const leanAngle = angle + Math.sin(bladeSeed * 3.1) * 0.9;
-    const sideX = Math.cos(angle + Math.PI * 0.5);
-    const sideZ = Math.sin(angle + Math.PI * 0.5);
-    const start = positions.length / 3;
-    const shade = 0.78 + 0.28 * Math.abs(Math.sin(bladeSeed * 5.3));
-
-    for (let s = 0; s <= segments; s++) {
-      const t = s / segments;
-      const bend = t * t;
-      const taper = Math.pow(1 - t, 1.25);
-      const curl = Math.sin(t * Math.PI) * 0.035 * Math.sin(bladeSeed);
-      const cx = clusterX + baseX + Math.cos(leanAngle) * lean * bend + Math.cos(angle) * curl;
-      const cy = h * t;
-      const cz = clusterZ + baseZ + Math.sin(leanAngle) * lean * bend + Math.sin(angle) * curl;
-      const w = width * taper;
-      pushVertex(cx - sideX * w, cy, cz - sideZ * w, t, shade);
-      pushVertex(cx + sideX * w, cy, cz + sideZ * w, t, shade);
-    }
-
-    for (let s = 0; s < segments; s++) {
-      const a = start + s * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-  }
-
-  for (let l = 0; l < carpetCount; l++) {
-    const seed = l * 19.191;
-    const angle = seed * 2.39996 + Math.sin(seed * 2.7) * 0.6;
-    const r = radius * (0.18 + 0.82 * Math.abs(Math.sin(seed * 1.31)));
-    const x = Math.cos(angle) * r;
-    const z = Math.sin(angle) * r;
-    const len = radius * (0.32 + 0.38 * Math.abs(Math.sin(seed * 0.73)));
-    const wid = 0.06 + 0.06 * Math.abs(Math.cos(seed * 1.71));
-    const lift = 0.025 + 0.04 * Math.abs(Math.sin(seed * 4.1));
-    const sx = Math.cos(angle + Math.PI * 0.5);
-    const sz = Math.sin(angle + Math.PI * 0.5);
-    const dx = Math.cos(angle);
-    const dz = Math.sin(angle);
-    const shade = 0.62 + 0.30 * Math.abs(Math.sin(seed * 3.33));
-    const start = positions.length / 3;
-    const carpet = bottom.clone().lerp(mid, 0.38 + 0.34 * Math.abs(Math.sin(seed)));
-    carpet.multiplyScalar(shade);
-    const verts = [
-      [x - sx * wid, lift, z - sz * wid, 0.05],
-      [x + sx * wid, lift, z + sz * wid, 0.05],
-      [x + dx * len + sx * wid * 0.35, lift + height * 0.08, z + dz * len + sz * wid * 0.35, 0.25],
-      [x + dx * len - sx * wid * 0.35, lift + height * 0.08, z + dz * len - sz * wid * 0.35, 0.25],
-    ];
-    for (const v of verts) {
-      positions.push(v[0], v[1], v[2]);
-      bends.push(v[3]);
-      colors.push(carpet.r, carpet.g, carpet.b);
-    }
-    indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.setAttribute('aBend', new THREE.Float32BufferAttribute(bends, 1));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function makeRockGeometry({ radius = 1, detail = 0, squash = 0.55 } = {}) {
-  const geo = new THREE.DodecahedronGeometry(radius, detail);
-  const pos = geo.getAttribute('position');
-  const colors = [];
-  const base = new THREE.Color(0x8a8277);
-  const hi = new THREE.Color(0xb2aa9c);
-  const lo = new THREE.Color(0x4d4943);
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const shade = clamp(0.58 + y * 0.22 + Math.sin(x * 7.1 + z * 4.7) * 0.16, 0, 1);
-    const col = shade < 0.5
-      ? lo.clone().lerp(base, shade / 0.5)
-      : base.clone().lerp(hi, (shade - 0.5) / 0.5);
-    colors.push(col.r, col.g, col.b);
-    pos.setY(i, Math.max(-radius * 0.46, y * squash));
-    pos.setX(i, x * (0.82 + 0.22 * Math.sin(z * 3.7)));
-    pos.setZ(i, z * (0.86 + 0.18 * Math.cos(x * 4.1)));
-  }
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-  return geo;
-}
-
-// A few flower "species" — each builds a proper stem + radial petals + center.
-// Geometry base sits at y = 0 so instances anchor cleanly on the terrain.
-function makeFlowerKinds() {
+function atlasUv(tile, u, v) {
+  const col = tile % ATLAS_GRID;
+  const row = Math.floor(tile / ATLAS_GRID);
+  const pad = 2 / (ATLAS_SIZE / ATLAS_GRID);
   return [
-    { // daisy — many slim white petals, yellow disk
-      stemHeight: 0.95, stemWidth: 0.022, leafLen: 0.26,
-      petalCount: 12, petalLen: 0.30, petalWidth: 0.05, tilt: 0.22,
-      petalColor: 0xf3f1e8, centerColor: 0xf2c044, centerRadius: 0.11,
-    },
-    { // poppy — few broad red petals, dark cup
-      stemHeight: 0.82, stemWidth: 0.024, leafLen: 0.22,
-      petalCount: 5, petalLen: 0.34, petalWidth: 0.17, tilt: 0.55,
-      petalColor: 0xd83a30, centerColor: 0x241f18, centerRadius: 0.09,
-    },
-    { // cornflower — blue/violet star
-      stemHeight: 0.90, stemWidth: 0.020, leafLen: 0.24,
-      petalCount: 7, petalLen: 0.30, petalWidth: 0.08, tilt: 0.40,
-      petalColor: 0x6a78d8, centerColor: 0x3a3f73, centerRadius: 0.07,
-    },
-    { // buttercup — bright yellow cup
-      stemHeight: 0.70, stemWidth: 0.022, leafLen: 0.20,
-      petalCount: 5, petalLen: 0.26, petalWidth: 0.15, tilt: 0.45,
-      petalColor: 0xf4c224, centerColor: 0xe6951f, centerRadius: 0.07,
-    },
-    { // pink aster — medium petals
-      stemHeight: 0.88, stemWidth: 0.020, leafLen: 0.24,
-      petalCount: 9, petalLen: 0.28, petalWidth: 0.06, tilt: 0.30,
-      petalColor: 0xe46fa6, centerColor: 0xf2d24b, centerRadius: 0.08,
-    },
+    (col + pad + u * (1 - pad * 2)) / ATLAS_GRID,
+    (row + pad + v * (1 - pad * 2)) / ATLAS_GRID,
   ];
 }
 
-function makeFlowerGeometry(kind) {
-  const positions = [];
-  const colors = [];
-  const bends = [];
-  const indices = [];
-  const invSh = 1 / Math.max(kind.stemHeight, 1e-3);
-
-  const addTri = (a, b, c, col) => {
-    const i = positions.length / 3;
-    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-    for (const v of [a, b, c]) bends.push(Math.max(0, Math.min(1, v[1] * invSh)));
-    for (let k = 0; k < 3; k++) colors.push(col.r, col.g, col.b);
-    indices.push(i, i + 1, i + 2);
+// One self-contained foliage atlas. It is generated deterministically once and
+// uploaded as a normal mipmapped texture, so there are no external asset loads.
+function makeFoliageAtlas() {
+  const data = new Uint8Array(ATLAS_SIZE * ATLAS_SIZE * 4);
+  const tileSize = ATLAS_SIZE / ATLAS_GRID;
+  const setPixel = (tile, px, py, color, alpha) => {
+    const col = tile % ATLAS_GRID;
+    const row = Math.floor(tile / ATLAS_GRID);
+    const x = col * tileSize + px;
+    const y = row * tileSize + py;
+    const i = (y * ATLAS_SIZE + x) * 4;
+    data[i] = color[0]; data[i + 1] = color[1]; data[i + 2] = color[2]; data[i + 3] = alpha;
   };
-  const addQuad = (a, b, c, d, col) => { addTri(a, b, c, col); addTri(a, c, d, col); };
+  const noise = (x, y, salt) => hashInt(x + salt * 13, y - salt * 7, salt * 97);
 
-  const stemColor = new THREE.Color(0x3c7d2e);
-  const leafColor = new THREE.Color(0x4f9d42);
-  const petalColor = new THREE.Color(kind.petalColor);
-  const centerColor = new THREE.Color(kind.centerColor);
+  for (let y = 0; y < tileSize; y++) {
+    const v = y / (tileSize - 1);
+    for (let x = 0; x < tileSize; x++) {
+      const u = x / (tileSize - 1);
+      // Give transparent texels a representative edge colour. Standard
+      // mipmap generation averages RGB independently of alpha; leaving those
+      // texels black turns thin blades and tree crowns into dark silhouettes
+      // as soon as a lower mip is selected.
+      setPixel(ATLAS_TILES.grass, x, y, [72, 138, 56], 0);
+      setPixel(ATLAS_TILES.flower, x, y, [82, 145, 66], 0);
+      setPixel(ATLAS_TILES.broadleaf, x, y, [82, 146, 72], 0);
+      setPixel(ATLAS_TILES.conifer, x, y, [62, 116, 78], 0);
+      // Grass card: several tapered blades with irregular lean.
+      let grassAlpha = 0;
+      for (let blade = 0; blade < 9; blade++) {
+        const base = 0.08 + blade * 0.105;
+        const height = 0.48 + noise(blade, 3, 1) * 0.5;
+        if (v > height) continue;
+        const t = v / height;
+        const center = base + Math.sin(t * 2.4 + blade) * (0.025 + blade % 2 * 0.01);
+        const width = (0.022 + noise(blade, 5, 2) * 0.018) * (1 - t * 0.9);
+        if (Math.abs(u - center) < width) grassAlpha = 255;
+      }
+      if (grassAlpha) {
+        const shade = 0.72 + v * 0.28 + noise(x, y, 3) * 0.08;
+        setPixel(ATLAS_TILES.grass, x, y, [82 * shade, 156 * shade, 66 * shade], grassAlpha);
+      }
 
-  const sh = kind.stemHeight;
-  const sw = kind.stemWidth;
+      // Wildflower cluster: stems, leaves and a pale tintable flower head.
+      const stem = Math.abs(u - 0.5 - Math.sin(v * 5) * 0.012) < 0.018 && v < 0.78;
+      const leaf = v > 0.28 && v < 0.54 && Math.abs(u - (0.5 + (v - 0.4) * 1.2)) < 0.04;
+      const dx = u - 0.5, dy = v - 0.82;
+      const ang = Math.atan2(dy, dx) * 5;
+      const petalR = 0.12 + Math.cos(ang) * 0.035;
+      const flower = Math.hypot(dx, dy) < petalR;
+      if (stem || leaf || flower) {
+        const color = flower ? [250, 242, 221] : [78, 151, 63];
+        setPixel(ATLAS_TILES.flower, x, y, color, 255);
+      }
 
-  // Stem: two crossed tapered quads so it reads from any angle.
-  addQuad([-sw, 0, 0], [sw, 0, 0], [sw * 0.5, sh, 0], [-sw * 0.5, sh, 0], stemColor);
-  addQuad([0, 0, -sw], [0, 0, sw], [0, sh, sw * 0.5], [0, sh, -sw * 0.5], stemColor);
+      // Broadleaf crown: ragged ellipse with small transparent gaps.
+      const bx = (u - 0.5) / 0.47;
+      const by = (v - 0.52) / 0.46;
+      const broadEdge = bx * bx + by * by + (noise(x >> 2, y >> 2, 4) - 0.5) * 0.24;
+      const broadHole = noise(x, y, 5) > 0.985 && broadEdge < 0.78;
+      if (broadEdge < 1 && !broadHole) {
+        const shade = 0.72 + v * 0.25 + noise(x >> 1, y >> 1, 6) * 0.16;
+        setPixel(ATLAS_TILES.broadleaf, x, y, [91 * shade, 158 * shade, 79 * shade], 255);
+      }
 
-  // A single leaf partway up the stem.
-  const ll = kind.leafLen;
-  addTri([0, sh * 0.38, 0], [ll, sh * 0.46, ll * 0.35], [ll * 0.25, sh * 0.62, 0], leafColor);
+      // Conifer crown: three layered triangular branch tiers.
+      let conifer = false;
+      for (let layer = 0; layer < 3; layer++) {
+        const y0 = 0.08 + layer * 0.23;
+        const y1 = 0.62 + layer * 0.18;
+        if (v >= y0 && v <= y1) {
+          const t = (v - y0) / (y1 - y0);
+          const half = (0.46 - layer * 0.08) * (1 - t);
+          conifer ||= Math.abs(u - 0.5) < half;
+        }
+      }
+      if (conifer && noise(x, y, 7) > 0.025) {
+        const shade = 0.68 + v * 0.2 + noise(x >> 1, y >> 1, 8) * 0.12;
+        setPixel(ATLAS_TILES.conifer, x, y, [68 * shade, 126 * shade, 84 * shade], 255);
+      }
 
-  // Petals radiating from the top of the stem.
-  const cx = 0, cy = sh, cz = 0;
-  const n = kind.petalCount;
-  const pl = kind.petalLen;
-  const pw = kind.petalWidth;
-  const tilt = kind.tilt;
-  for (let p = 0; p < n; p++) {
-    const ang = (p / n) * Math.PI * 2;
-    const dx = Math.cos(ang), dz = Math.sin(ang);
-    const sx = Math.cos(ang + Math.PI / 2), sz = Math.sin(ang + Math.PI / 2);
-    const mid = [cx + dx * pl * 0.5, cy + tilt * pl * 0.55, cz + dz * pl * 0.5];
-    const tip = [cx + dx * pl, cy + tilt * pl, cz + dz * pl];
-    const center = [cx, cy, cz];
-    const left = [mid[0] + sx * pw, mid[1], mid[2] + sz * pw];
-    const right = [mid[0] - sx * pw, mid[1], mid[2] - sz * pw];
-    addTri(center, left, tip, petalColor);
-    addTri(center, tip, right, petalColor);
+      const barkShade = 0.62 + noise(x >> 2, y, 9) * 0.28 + Math.sin(u * 44) * 0.08;
+      setPixel(ATLAS_TILES.bark, x, y, [145 * barkShade, 106 * barkShade, 72 * barkShade], 255);
+    }
   }
 
-  // Center disk.
-  const cr = kind.centerRadius;
-  const seg = 7;
-  const top = cy + tilt * 0.04 + 0.02;
-  for (let s = 0; s < seg; s++) {
-    const a0 = (s / seg) * Math.PI * 2;
-    const a1 = ((s + 1) / seg) * Math.PI * 2;
-    addTri(
-      [cx, top, cz],
-      [cx + Math.cos(a0) * cr, top, cz + Math.sin(a0) * cr],
-      [cx + Math.cos(a1) * cr, top, cz + Math.sin(a1) * cr],
-      centerColor,
+  const texture = new THREE.DataTexture(data, ATLAS_SIZE, ATLAS_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.name = 'procedural-props-foliage-atlas';
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function geometryBuilder() {
+  const positions = [], colors = [], bends = [], uvs = [], indices = [];
+  const addVertex = (p, uv, bend, color = [1, 1, 1]) => {
+    positions.push(p[0], p[1], p[2]);
+    uvs.push(uv[0], uv[1]);
+    bends.push(bend);
+    colors.push(color[0], color[1], color[2]);
+    return positions.length / 3 - 1;
+  };
+  const addQuad = (a, b, c, d, tile, bendBottom = 0, bendTop = 1, color = [1, 1, 1]) => {
+    const i = positions.length / 3;
+    addVertex(a, atlasUv(tile, 0, 0), bendBottom, color);
+    addVertex(b, atlasUv(tile, 1, 0), bendBottom, color);
+    addVertex(c, atlasUv(tile, 1, 1), bendTop, color);
+    addVertex(d, atlasUv(tile, 0, 1), bendTop, color);
+    indices.push(i, i + 1, i + 2, i, i + 2, i + 3);
+  };
+  const finish = (name) => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.name = name;
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('aBend', new THREE.Float32BufferAttribute(bends, 1));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    return geometry;
+  };
+  return { addQuad, finish };
+}
+
+function addCard(builder, { angle = 0, width = 1, height = 1, y = 0, x = 0, z = 0, tile, bendBottom = 0, bendTop = 1 }) {
+  const sx = Math.cos(angle) * width * 0.5;
+  const sz = Math.sin(angle) * width * 0.5;
+  builder.addQuad(
+    [x - sx, y, z - sz], [x + sx, y, z + sz],
+    [x + sx, y + height, z + sz], [x - sx, y + height, z - sz],
+    tile, bendBottom, bendTop,
+  );
+}
+
+function makeCardGeometry({ name, cards, tile, width = 1, height = 1 }) {
+  const builder = geometryBuilder();
+  for (let i = 0; i < cards; i++) {
+    addCard(builder, { angle: (i / cards) * Math.PI, width, height, tile });
+  }
+  return builder.finish(name);
+}
+
+function addTrunk(builder, { height, bottomRadius, topRadius, segments = 6 }) {
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    builder.addQuad(
+      [Math.cos(a0) * bottomRadius, 0, Math.sin(a0) * bottomRadius],
+      [Math.cos(a1) * bottomRadius, 0, Math.sin(a1) * bottomRadius],
+      [Math.cos(a1) * topRadius, height, Math.sin(a1) * topRadius],
+      [Math.cos(a0) * topRadius, height, Math.sin(a0) * topRadius],
+      ATLAS_TILES.bark, 0, 0.12,
     );
   }
+}
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.setAttribute('aBend', new THREE.Float32BufferAttribute(bends, 1));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
+function makeTreeGeometry(kind, far = false) {
+  const tile = kind === 'conifer' ? ATLAS_TILES.conifer : ATLAS_TILES.broadleaf;
+  if (far) return makeCardGeometry({ name: `${kind}-far`, cards: 2, tile, width: kind === 'conifer' ? 0.58 : 0.72, height: 1 });
+  const builder = geometryBuilder();
+  if (kind === 'conifer') {
+    addTrunk(builder, { height: 0.78, bottomRadius: 0.045, topRadius: 0.018 });
+    const layers = [
+      { y: 0.18, h: 0.55, w: 0.62 }, { y: 0.38, h: 0.48, w: 0.49 }, { y: 0.57, h: 0.43, w: 0.36 },
+    ];
+    for (const layer of layers) {
+      for (let i = 0; i < 3; i++) addCard(builder, { angle: i * Math.PI / 3, width: layer.w, height: layer.h, y: layer.y, tile, bendBottom: 0.22, bendTop: 0.72 });
+    }
+  } else {
+    addTrunk(builder, { height: 0.64, bottomRadius: 0.06, topRadius: 0.025 });
+    const crowns = [
+      [-0.12, 0.43, 0.02, 0.56, 0.48], [0.14, 0.48, -0.05, 0.52, 0.46], [0, 0.55, 0.09, 0.62, 0.45],
+    ];
+    for (const [x, y, z, w, h] of crowns) {
+      addCard(builder, { angle: 0.15, width: w, height: h, x, y, z, tile, bendBottom: 0.25, bendTop: 0.8 });
+      addCard(builder, { angle: Math.PI * 0.5 + 0.15, width: w, height: h, x, y, z, tile, bendBottom: 0.25, bendTop: 0.8 });
+    }
+  }
+  return builder.finish(`${kind}-near`);
+}
+
+function makeRockGeometry(detail, name) {
+  const geometry = new THREE.IcosahedronGeometry(1, detail);
+  geometry.name = name;
+  const position = geometry.getAttribute('position');
+  const colors = [];
+  for (let i = 0; i < position.count; i++) {
+    const x = position.getX(i), y = position.getY(i), z = position.getZ(i);
+    const warp = 0.84 + Math.sin(x * 4.9 + z * 2.7) * 0.1 + Math.cos(y * 6.1 - x * 2.2) * 0.06;
+    position.setXYZ(i, x * warp, Math.max(-0.72, y * (0.82 + Math.sin(z * 3.8) * 0.08)), z * warp);
+    const shade = clamp(0.68 + y * 0.17 + Math.sin(x * 8.1 + z * 5.7) * 0.09, 0.42, 1);
+    colors.push(shade, shade * 0.98, shade * 0.92);
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function configureCutoutMaterial(material, atlas, alphaTest = 0.42) {
+  material.map = atlas;
+  // Most foliage cards face sideways, so terrain lights alone can leave both
+  // sides almost unlit in valleys. Reuse the atlas as a modest ambient albedo
+  // term: the cutouts retain their authored colour while direct light still
+  // provides the main contrast and the instance tint remains on the diffuse
+  // contribution.
+  if (material.emissive) {
+    material.emissive.setHex(0xffffff);
+    material.emissiveMap = atlas;
+    material.emissiveIntensity = 0.48;
+  }
+  material.alphaTest = alphaTest;
+  material.transparent = false;
+  material.depthWrite = true;
+  material.side = THREE.DoubleSide;
+  material.needsUpdate = true;
+  return material;
+}
+
+// Dithered fades keep foliage alpha-tested (depth-writing, no transparent
+// sorting) while softening both LOD changes and the final cull boundary.
+function configureDistanceFade(material) {
+  const originalCompile = material.onBeforeCompile;
+  const originalCacheKey = material.customProgramCacheKey?.bind(material);
+  const fadeUniforms = {
+    center: { value: new THREE.Vector3() },
+    ranges: { value: new THREE.Vector4(0, 0, 1e6, 1e6 + 1) },
+  };
+  material.userData.propFadeUniforms = fadeUniforms;
+  material.onBeforeCompile = (shader, renderer) => {
+    originalCompile?.(shader, renderer);
+    shader.uniforms.uPropFadeCenter = fadeUniforms.center;
+    shader.uniforms.uPropFadeRanges = fadeUniforms.ranges;
+    shader.vertexShader = `varying vec3 vPropWorldPosition;\n${shader.vertexShader}`.replace(
+      '#include <project_vertex>',
+      `vec4 propWorldPosition = vec4(transformed, 1.0);
+      #ifdef USE_BATCHING
+        propWorldPosition = batchingMatrix * propWorldPosition;
+      #endif
+      #ifdef USE_INSTANCING
+        propWorldPosition = instanceMatrix * propWorldPosition;
+      #endif
+      vPropWorldPosition = (modelMatrix * propWorldPosition).xyz;
+      #include <project_vertex>`,
+    );
+    shader.fragmentShader = `
+      uniform vec3 uPropFadeCenter;
+      uniform vec4 uPropFadeRanges;
+      varying vec3 vPropWorldPosition;
+      float propDither(vec2 p) {
+        return fract(52.9829189 * fract(dot(floor(p), vec2(0.06711056, 0.00583715))));
+      }
+    ${shader.fragmentShader}`.replace(
+      '#include <alphatest_fragment>',
+      `#include <alphatest_fragment>
+      float propDistance = distance(vPropWorldPosition, uPropFadeCenter);
+      float propFadeIn = uPropFadeRanges.y <= 0.0
+        ? 1.0 : smoothstep(uPropFadeRanges.x, uPropFadeRanges.y, propDistance);
+      float propFadeOut = 1.0 - smoothstep(
+        uPropFadeRanges.z, uPropFadeRanges.w, propDistance
+      );
+      if (propDither(gl_FragCoord.xy) > propFadeIn * propFadeOut) discard;`,
+    );
+  };
+  material.customProgramCacheKey = () => `${originalCacheKey?.() ?? material.type}:prop-distance-fade-v1`;
+  return material;
+}
+
+function qualityIndex(perf) {
+  if (Number.isFinite(Number(perf?.propQuality))) return clamp(Math.round(perf.propQuality), 0, 3);
+  return { performance: 0, balanced: 1, high: 2, ultra: 3 }[perf?.preset] ?? 2;
+}
+
+function emptyBuckets() {
+  return { grass: [], flower: [], rock: [], broadleaf: [], conifer: [] };
 }
 
 export class ProceduralPropsManager {
@@ -244,31 +319,44 @@ export class ProceduralPropsManager {
     this.group.name = 'procedural-props';
     this.scene.add(this.group);
 
-    // Dense, short clusters so grass reads as a planted lawn near the camera
-    // rather than tall isolated spikes (which look detached on coarse LOD).
-    this.grassNearGeometry = makeGrassTuftGeometry({ bladeCount: 34, segments: 3, height: 0.58, radius: 1.2, clusters: 6, carpetCount: 34 });
-    this.grassMidGeometry = makeGrassTuftGeometry({ bladeCount: 16, segments: 2, height: 0.48, radius: 1.3, clusters: 4, carpetCount: 18 });
-    this.rockGeometries = [
-      makeRockGeometry({ radius: 1.0, detail: 0, squash: 0.48 }),
-      makeRockGeometry({ radius: 1.0, detail: 0, squash: 0.62 }),
-      makeRockGeometry({ radius: 1.0, detail: 1, squash: 0.42 }),
-    ];
-    this.flowerKinds = makeFlowerKinds();
-    this.flowerGeometries = this.flowerKinds.map((k) => makeFlowerGeometry(k));
+    this.atlas = makeFoliageAtlas();
+    this.grassNearGeometry = makeCardGeometry({ name: 'grass-near', cards: 3, tile: ATLAS_TILES.grass, width: 1.1 });
+    this.grassMidGeometry = makeCardGeometry({ name: 'grass-mid', cards: 2, tile: ATLAS_TILES.grass, width: 1.25 });
+    this.flowerGeometry = makeCardGeometry({ name: 'flowers', cards: 2, tile: ATLAS_TILES.flower, width: 0.56 });
+    this.rockNearGeometry = makeRockGeometry(1, 'rock-near'); // 80 triangles
+    this.rockFarGeometry = makeRockGeometry(0, 'rock-far');  // 20 triangles
+    this.broadleafNearGeometry = makeTreeGeometry('broadleaf', false);
+    this.broadleafFarGeometry = makeTreeGeometry('broadleaf', true);
+    this.coniferNearGeometry = makeTreeGeometry('conifer', false);
+    this.coniferFarGeometry = makeTreeGeometry('conifer', true);
 
-    // Shared wind block (one uTime tick animates everything that uses it).
     this.windUniforms = createWindUniforms();
-    this.grassNearMaterial = makeWindMaterial(this.windUniforms, { strengthMul: 1.0, name: 'grass-near' });
-    this.grassMidMaterial = makeWindMaterial(this.windUniforms, { strengthMul: 1.0, name: 'grass-mid' });
-    this.flowerMaterial = makeWindMaterial(this.windUniforms, { strengthMul: 0.6, name: 'flower' });
-    this.rockMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    this.grassNearMaterial = configureDistanceFade(configureCutoutMaterial(makeWindMaterial(this.windUniforms, { strengthMul: 1, name: 'grass-near' }), this.atlas));
+    this.grassMidMaterial = configureDistanceFade(configureCutoutMaterial(makeWindMaterial(this.windUniforms, { strengthMul: 0.72, name: 'grass-mid' }), this.atlas));
+    this.flowerMaterial = configureDistanceFade(configureCutoutMaterial(makeWindMaterial(this.windUniforms, { strengthMul: 0.62, name: 'flowers' }), this.atlas));
+    this.treeMaterial = configureDistanceFade(configureCutoutMaterial(makeWindMaterial(this.windUniforms, { strengthMul: 0.18, name: 'trees' }), this.atlas, 0.46));
+    // Rock vertex colours already bake a coarse face-to-face albedo variation;
+    // an unlit base keeps distant boulders readable under every sky preset.
+    this.rockMaterial = configureDistanceFade(new THREE.MeshBasicMaterial({
+      vertexColors: true,
+    }));
 
     this.meshes = [];
     this._meshPool = new Map();
-    this._lastKey = '';
+    this._sectors = new Map();
+    this._desiredSectors = new Set();
+    this._buildQueue = [];
+    this._queued = new Set();
+    this._scatterKey = '';
+    this._centerSectorKey = '';
     this._lastPaintRevision = -1;
+    this._lastPlanetKey = '';
+    this._planetBuildState = null;
     this._lastCenter = new THREE.Vector3(Infinity, Infinity, Infinity);
-    this._lastForward = new THREE.Vector3(0, 0, 0);
+    this._sectorSize = 192;
+    this._quality = 2;
+    this._qualityBudget = PROP_QUALITY_BUDGETS[2];
+    this._containsPoint = null;
     this._tmpMat = new THREE.Matrix4();
     this._tmpPos = new THREE.Vector3();
     this._tmpScale = new THREE.Vector3();
@@ -277,291 +365,457 @@ export class ProceduralPropsManager {
     this._qYaw = new THREE.Quaternion();
     this._qIdentity = new THREE.Quaternion();
     this._up = new THREE.Vector3(0, 1, 0);
-    this._tmpColor = new THREE.Color();
-    this._cameraDir = new THREE.Vector3();
-    this._centerScratch = new THREE.Vector3();
-    this._viewForward = new THREE.Vector3();
     this._tmpNormal = new THREE.Vector3();
+    this._tmpColor = new THREE.Color();
+    this._centerScratch = new THREE.Vector3();
     this._planetCamDir = new THREE.Vector3();
     this._planetRef = new THREE.Vector3();
     this._planetT1 = new THREE.Vector3();
     this._planetT2 = new THREE.Vector3();
     this._planetDir = new THREE.Vector3();
-    this._planetProbe = new THREE.Vector3();
-    this._planetForward = new THREE.Vector3();
+    this._diagnostics = {
+      instances: { grass: 0, flowers: 0, rocks: 0, trees: 0 },
+      lod: {}, buildMs: 0, samples: 0, sectors: 0, queuedSectors: 0,
+      cacheHits: 0, cacheMisses: 0, surfaceReadbacks: 0, triangles: 0, drawCalls: 0,
+    };
   }
 
   update({
-    mode,
-    camera,
-    params,
-    boardSize,
-    sampler,
-    planetSampler,
-    paintLayers,
-    splineRevision = -1,
-    terrainRevision = -1,
+    mode, camera, params, perf = null, boardSize, sampler, planetSampler,
+    paintLayers, splineRevision = -1, terrainRevision = -1, containsPoint = null,
+    centerOverride = null, dirtyBounds = null,
   }) {
     const enabled = !!params.propsEnabled;
     this.group.visible = enabled;
     if (!enabled || !camera) return;
-
+    const started = performance.now();
+    this._quality = qualityIndex(perf);
+    this._qualityBudget = PROP_QUALITY_BUDGETS[this._quality];
+    this._sectorSize = clamp((params.chunkSize || 128) * 1.5, 128, 256);
+    this._containsPoint = containsPoint;
+    const center = this._resolveCenter(mode, camera, boardSize, centerOverride);
     const paintRevision = paintLayers?.revision ?? -1;
-    const center = this._resolveCenter(mode, camera, boardSize);
-    const moved = center.distanceToSquared(this._lastCenter) > Math.pow(Math.max(60, params.propsCullDistance * 0.22), 2);
-    const viewForward = camera.getWorldDirection(this._viewForward).normalize();
-    const turned = this._lastForward.lengthSq() < 0.5 || viewForward.dot(this._lastForward) < 0.92;
-    const key = [
-      mode, params.seed, params.propsDensity, params.propsGrass, params.propsFlowers,
-      params.propsRocks, params.propsRockScale, params.propsWindSpeed, params.propsGust,
-      params.propsCullDistance, params.propsLodDistance, params.seaLevel, boardSize,
+    const scatterKey = [
+      mode, params.seed, params.propsDensity, params.propsGrassDensity,
+      params.propsGrass, params.propsFlowers, params.propsRocks, params.propsRockScale,
+      params.propsTreeDensity, params.propsTreeScale, params.seaLevel, boardSize,
       splineRevision, terrainRevision,
     ].join('|');
-
-    if (key === this._lastKey && paintRevision === this._lastPaintRevision && !moved && !turned) return;
-    this._lastKey = key;
+    const structuralChanged = scatterKey !== this._scatterKey;
+    const paintChanged = paintRevision !== this._lastPaintRevision;
+    const scatterChanged = structuralChanged || (paintChanged && (!dirtyBounds || dirtyBounds.all));
+    this._scatterKey = scatterKey;
     this._lastPaintRevision = paintRevision;
-    this._lastCenter.copy(center);
-    this._lastForward.copy(viewForward);
+
+    if (!structuralChanged && paintChanged && dirtyBounds && !dirtyBounds.all && mode !== 'planet') {
+      this._invalidateBounds(dirtyBounds);
+    }
 
     if (mode === 'planet') {
-      this._buildPlanet({ camera, params, planetSampler });
+      this._updatePlanet({ camera, center, params, planetSampler, scatterChanged });
     } else {
-      this._buildFlat({ mode, center, camera, params, boardSize, sampler });
+      this._updateFlat({ mode, center, params, sampler, scatterChanged, synchronous: !perf });
     }
+    this._diagnostics.buildMs = performance.now() - started;
+    this._diagnostics.surfaceReadbacks = sampler?.surfaceField?.readbackCount ?? sampler?.surfaceReadbacks ?? 0;
   }
 
-  _resolveCenter(mode, camera, boardSize) {
+  _resolveCenter(mode, camera, boardSize, centerOverride = null) {
     if (mode === 'studio') {
+      if (centerOverride) return this._centerScratch.set(centerOverride.x, 0, centerOverride.z);
       const half = boardSize / 2;
-      return this._centerScratch.set(
-        clamp(camera.position.x, -half, half),
-        0,
-        clamp(camera.position.z, -half, half)
-      );
+      return this._centerScratch.set(clamp(camera.position.x, -half, half), 0, clamp(camera.position.z, -half, half));
     }
     return this._centerScratch.copy(camera.position);
   }
 
-  _clearMeshes() {
-    for (const mesh of this._meshPool.values()) {
-      this.group.remove(mesh);
-    }
-    this._meshPool.clear();
-    this.meshes = [];
-  }
-
-  _flatViewForward(camera) {
-    camera.getWorldDirection(this._cameraDir);
-    this._cameraDir.y = 0;
-    if (this._cameraDir.lengthSq() < 0.03) return null;
-    return this._cameraDir.normalize();
-  }
-
-  _buildFlat({ mode, center, camera, params, boardSize, sampler }) {
+  _updateFlat({ mode, center, params, sampler, scatterChanged, synchronous }) {
     if (!sampler) return;
-    // Center the faceted-surface readback on the build area so every sample in
-    // this rebuild hits one cached GPU tile.
-    sampler.prime?.(center.x, center.z);
-    const radius = params.propsCullDistance;
-    const density = clamp(params.propsDensity, 0, 2);
-    const cell = lerp(56, 14, Math.sqrt(density / 2));
-    const minX = Math.floor((center.x - radius) / cell);
-    const maxX = Math.ceil((center.x + radius) / cell);
-    const minZ = Math.floor((center.z - radius) / cell);
-    const maxZ = Math.ceil((center.z + radius) / cell);
-    const half = boardSize / 2;
-    const grassNear = [];
-    const grassMid = [];
-    const flowers = [];
-    const rocks = [];
-    const maxInstances = Math.round(900 + density * 1800);
-    const forward = this._flatViewForward(camera);
-
-    for (let gz = minZ; gz <= maxZ; gz++) {
-      for (let gx = minX; gx <= maxX; gx++) {
-        if (grassNear.length + grassMid.length + flowers.length + rocks.length >= maxInstances) break;
-        const h0 = hashInt(gx, gz, params.seed);
-        const h1 = hashInt(gx + 91, gz - 37, params.seed);
-        const x = gx * cell + (h0 - 0.5) * cell;
-        const z = gz * cell + (h1 - 0.5) * cell;
-        if (Math.hypot(x - center.x, z - center.z) > radius) continue;
-        if (forward) {
-          const vx = x - camera.position.x;
-          const vz = z - camera.position.z;
-          if (vx * forward.x + vz * forward.z < -cell * 2.0) continue;
-        }
-        if (mode === 'studio' && (Math.abs(x) > half || Math.abs(z) > half)) continue;
-
-        // Cheap density pre-gate BEFORE the expensive terrain sample.
-        const paintD = sampler.paintDensityAt ? sampler.paintDensityAt(x, z) : 0;
-        if (hashInt(gx - 17, gz + 53, params.seed) > fillChance(params, paintD)) continue;
-
-        const sample = sampler.sampleAt(x, z);
-        const desc = chooseCandidate(sample, params, { pick: hashInt(gx + 131, gz + 89, params.seed) });
-        if (!desc) continue;
-
-        const item = this._composeItem(desc, sample, gx, gz, params, h0);
-        const dist = Math.hypot(x - center.x, z - center.z);
-        this._bucketItem(desc, item, dist, params, grassNear, grassMid, flowers, rocks);
+    if (scatterChanged) {
+      this._sectors.clear();
+      this._buildQueue.length = 0;
+      this._queued.clear();
+    }
+    const requestedRadius = Math.max(32, params.propsCullDistance || 760);
+    const radius = requestedRadius * this._qualityBudget.distanceScale;
+    const centerMoved = this._lastCenter.distanceToSquared(center) >= 16;
+    const centerSx = Math.floor(center.x / this._sectorSize);
+    const centerSz = Math.floor(center.z / this._sectorSize);
+    const centerSectorKey = `${centerSx}:${centerSz}:${this._quality}`;
+    const desired = new Set();
+    const range = Math.ceil(radius / this._sectorSize) + 1;
+    const queued = [];
+    for (let sz = centerSz - range; sz <= centerSz + range; sz++) {
+      for (let sx = centerSx - range; sx <= centerSx + range; sx++) {
+        const cx = (sx + 0.5) * this._sectorSize;
+        const cz = (sz + 0.5) * this._sectorSize;
+        if (Math.hypot(cx - center.x, cz - center.z) > radius + this._sectorSize * 0.72) continue;
+        const key = `${sx},${sz}`;
+        desired.add(key);
+        if (!this._sectors.has(key) && !this._queued.has(key)) queued.push({ key, sx, sz, d: Math.hypot(cx - center.x, cz - center.z) });
       }
     }
+    for (const key of this._sectors.keys()) if (!desired.has(key)) this._sectors.delete(key);
+    queued.sort((a, b) => a.d - b.d);
+    for (const entry of queued) { this._buildQueue.push(entry); this._queued.add(entry.key); }
+    this._desiredSectors = desired;
+    const activeChanged = scatterChanged || centerMoved || centerSectorKey !== this._centerSectorKey || queued.length > 0;
+    this._centerSectorKey = centerSectorKey;
+    this._lastCenter.copy(center);
 
-    this._replaceMeshes(grassNear, grassMid, flowers, rocks);
+    let built = false;
+    const start = performance.now();
+    const batchActive = this._buildQueue.length > 0;
+    if (batchActive) sampler.beginBatch?.(center.x, center.z);
+    try {
+      while (this._buildQueue.length) {
+        if (!synchronous && built && performance.now() - start >= this._qualityBudget.buildMs) break;
+        const entry = this._buildQueue.shift();
+        this._queued.delete(entry.key);
+        if (!this._desiredSectors.has(entry.key)) continue;
+        this._sectors.set(entry.key, this._buildFlatSector(entry.sx, entry.sz, params, sampler));
+        built = true;
+      }
+    } finally {
+      if (batchActive) sampler.endBatch?.();
+    }
+    if (activeChanged || built) this._commitFlat(center, radius, params);
+    else this._diagnostics.cacheHits++;
+    this._diagnostics.sectors = this._sectors.size;
+    this._diagnostics.queuedSectors = this._buildQueue.length;
   }
 
-  // Build a render item (position/normal/yaw/scale/alignment) from a chosen
-  // descriptor + terrain sample. No per-instance "bury" — anchor at the sampled
-  // surface and apply the descriptor's small fixed rootDepth to hide the LOD
-  // facet gap uniformly.
-  _composeItem(desc, sample, gx, gz, params, h0) {
-    const scaleRand = hashInt(gx + 29, gz + 11, params.seed);
-    let scale = lerp(desc.scaleRange[0], desc.scaleRange[1], scaleRand);
-    if (desc.id === 'grass') scale *= clamp(params.propsGrass, 0.2, 2);
-    if (desc.id === 'rock') scale *= clamp(params.propsRockScale ?? 1, 0.2, 2.5);
-    const [px, py, pz] = sample.position;
-    const stretch = desc.id === 'rock' ? [
-      scale * lerp(0.75, 1.45, hashInt(gx + 61, gz - 23, params.seed)),
-      scale * lerp(0.45, 0.95, hashInt(gx - 19, gz + 67, params.seed)),
-      scale * lerp(0.70, 1.35, hashInt(gx + 101, gz + 7, params.seed)),
-    ] : scale;
+  _invalidateBounds(bounds) {
+    const minSx = Math.floor(bounds.minX / this._sectorSize);
+    const maxSx = Math.floor(bounds.maxX / this._sectorSize);
+    const minSz = Math.floor(bounds.minZ / this._sectorSize);
+    const maxSz = Math.floor(bounds.maxZ / this._sectorSize);
+    for (let sz = minSz; sz <= maxSz; sz++) {
+      for (let sx = minSx; sx <= maxSx; sx++) {
+        const key = `${sx},${sz}`;
+        this._sectors.delete(key);
+        if (this._queued.has(key)) {
+          this._queued.delete(key);
+          this._buildQueue = this._buildQueue.filter((entry) => entry.key !== key);
+        }
+      }
+    }
+  }
+
+  _buildFlatSector(sx, sz, params, sampler) {
+    const buckets = emptyBuckets();
+    const minX = sx * this._sectorSize;
+    const minZ = sz * this._sectorSize;
+    const maxX = minX + this._sectorSize;
+    const maxZ = minZ + this._sectorSize;
+    const master = clamp(params.propsDensity ?? 0.65, 0, 2);
+    for (let typeIndex = 0; typeIndex < PROP_TYPES.length; typeIndex++) {
+      const desc = PROP_TYPES[typeIndex];
+      const cell = desc.cellSize;
+      const minGx = Math.floor(minX / cell);
+      const maxGx = Math.ceil(maxX / cell);
+      const minGz = Math.floor(minZ / cell);
+      const maxGz = Math.ceil(maxZ / cell);
+      const typeDensity = clamp(params[desc.densityParam] ?? 1, 0, 2);
+      if (master <= 0 || typeDensity <= 0) continue;
+      for (let gz = minGz; gz < maxGz; gz++) {
+        for (let gx = minGx; gx < maxGx; gx++) {
+          const salt = 31 + typeIndex * 101;
+          const jitterX = hashInt(gx + salt, gz - 17, params.seed);
+          const jitterZ = hashInt(gx - 43, gz + salt, params.seed);
+          const x = gx * cell + (jitterX - 0.5) * cell * 0.84;
+          const z = gz * cell + (jitterZ - 0.5) * cell * 0.84;
+          if (x < minX || x >= maxX || z < minZ || z >= maxZ) continue;
+          if (this._containsPoint && !this._containsPoint(x, z)) continue;
+          if ((desc.id === 'broadleaf' || desc.id === 'conifer') && !this._treeSpacingWinner(gx, gz, params.seed, salt)) continue;
+          const priority = hashInt(gx + salt * 2, gz - salt * 3, params.seed);
+          const paintDensity = sampler.paintDensityForTypeAt?.(desc.id, x, z)
+            ?? ((desc.id === 'grass' || desc.id === 'flower') ? (sampler.paintDensityAt?.(x, z) ?? 0) : 0);
+          const upperBound = clamp(master * (typeDensity + paintDensity) * (desc.density ?? 1), 0, 1);
+          if (priority > upperBound) continue;
+          const sample = sampler.sampleAt(x, z);
+          this._diagnostics.samples++;
+          const macro = macroDensity(x, z, params.seed, salt);
+          if (!shouldPlaceType(desc, sample, params, { roll: priority, macro })) continue;
+          buckets[desc.render].push(this._composeItem(desc, sample, gx, gz, params, priority));
+        }
+      }
+    }
+    this._diagnostics.cacheMisses++;
+    return buckets;
+  }
+
+  _treeSpacingWinner(gx, gz, seed, salt) {
+    const value = hashInt(gx + salt, gz - salt, seed);
+    return value >= hashInt(gx - 1 + salt, gz - salt, seed)
+      && value >= hashInt(gx + 1 + salt, gz - salt, seed)
+      && value >= hashInt(gx + salt, gz - 1 - salt, seed)
+      && value >= hashInt(gx + salt, gz + 1 - salt, seed);
+  }
+
+  _composeItem(desc, sample, gx, gz, params, priority, planetDir = null) {
+    const scaleSeed = hashInt(gx + 29, gz + 11, params.seed);
+    let scale = lerp(desc.scaleRange[0], desc.scaleRange[1], scaleSeed);
+    if (desc.scaleParam) scale *= clamp(params[desc.scaleParam] ?? 1, 0.05, 2.5);
+    const rootDepth = desc.rootDepth ?? scale * (desc.rootDepthRatio ?? 0);
+    let pos;
+    let normal;
+    let alignAmount = desc.alignAmount ?? (desc.alignMode === ALIGN.NORMAL ? 1 : 0);
+    if (planetDir) {
+      const surfaceRadius = sample.surfaceRadius - rootDepth;
+      pos = [planetDir.x * surfaceRadius, planetDir.y * surfaceRadius, planetDir.z * surfaceRadius];
+      if (desc.alignMode === ALIGN.UPRIGHT) normal = [planetDir.x, planetDir.y, planetDir.z];
+      else {
+        normal = [
+          lerp(planetDir.x, sample.normal.x, alignAmount),
+          lerp(planetDir.y, sample.normal.y, alignAmount),
+          lerp(planetDir.z, sample.normal.z, alignAmount),
+        ];
+      }
+      alignAmount = 1;
+    } else {
+      const [x, y, z] = sample.position;
+      pos = [x, y - rootDepth, z];
+      normal = [sample.normal.x, sample.normal.y, sample.normal.z];
+    }
+    let finalScale = scale;
+    if (desc.id === 'grass') {
+      const patch = lerp(0.85, 1.8, hashInt(gx + 61, gz - 23, params.seed));
+      finalScale = [patch, scale, patch];
+    } else if (desc.id === 'rock') {
+      finalScale = [
+        scale * lerp(0.75, 1.45, hashInt(gx + 61, gz - 23, params.seed)),
+        scale * lerp(0.55, 0.95, hashInt(gx - 19, gz + 67, params.seed)),
+        scale * lerp(0.7, 1.35, hashInt(gx + 101, gz + 7, params.seed)),
+      ];
+    }
+    const tint = desc.id === 'grass' ? grassTint(sample)
+      : desc.id === 'rock' ? terrainRockTint(sample)
+        : desc.id === 'broadleaf' ? treeTint(sample, false)
+          : desc.id === 'conifer' ? treeTint(sample, true)
+            : flowerTint(hashInt(gx + 3, gz + 41, params.seed));
     return {
-      render: desc.render,
-      pos: [px, py - (desc.rootDepth || 0), pz],
-      normal: [sample.normal.x, sample.normal.y, sample.normal.z],
-      yaw: h0 * Math.PI * 2,
-      scale: stretch,
-      alignAmount: desc.alignAmount ?? (desc.alignMode === 'normal' ? 1 : 0),
-      tint: desc.render === 'grass' ? grassTint(sample) : (desc.render === 'rock' ? terrainRockTint(sample) : null),
-      variant: desc.render === 'flower'
-        ? Math.floor(hashInt(gx + 3, gz + 41, params.seed) * this.flowerGeometries.length)
-        : desc.render === 'rock'
-          ? Math.floor(hashInt(gx + 5, gz + 73, params.seed) * this.rockGeometries.length)
-        : 0,
+      render: desc.render, pos, normal, yaw: hashInt(gx, gz, params.seed) * Math.PI * 2,
+      scale: finalScale, alignAmount, tint, priority,
     };
   }
 
-  _bucketItem(desc, item, dist, params, grassNear, grassMid, flowers, rocks) {
-    if (desc.render === 'flower') { flowers.push(item); return; }
-    if (desc.render === 'rock') { rocks.push(item); return; }
-    // Grass renders near-camera only: on coarse far LOD the flat mesh dips below
-    // the smooth height and isolated blades read as floating. Keep it close.
-    const grassMax = Math.min(params.propsCullDistance, Math.max(160, params.propsLodDistance * 1.5));
-    if (dist > grassMax) return;
-    if (dist < params.propsLodDistance) grassNear.push(item);
-    else grassMid.push(item);
+  _commitFlat(center, radius, params) {
+    const all = emptyBuckets();
+    for (const sector of this._sectors.values()) {
+      for (const key of Object.keys(all)) all[key].push(...sector[key]);
+    }
+    this._commitBuckets(all, center, radius, params, false);
   }
 
-  /** Advance the shared wind animation. Call once per frame from the engine. */
-  tickWind(timeSeconds, params) {
-    const u = this.windUniforms;
-    u.uTime.value = timeSeconds;
-    const strength = params?.propsWind == null ? 0.6 : params.propsWind;
-    u.uWindStrength.value = 0.30 * Math.max(0, strength);
-    u.uWindSpeed.value = params?.propsWindSpeed == null ? 1.6 : params.propsWindSpeed;
-    u.uGustIntensity.value = params?.propsGust == null ? 0.45 : params.propsGust;
-  }
-
-  _buildPlanet({ camera, params, planetSampler }) {
+  _updatePlanet({ camera, params, planetSampler, scatterChanged }) {
     if (!planetSampler) return;
-    const camDir = this._planetCamDir.copy(camera.position).normalize();
-    const ref = Math.abs(camDir.y) < 0.96
-      ? this._planetRef.set(0, 1, 0)
-      : this._planetRef.set(1, 0, 0);
-    const t1 = this._planetT1.crossVectors(ref, camDir).normalize();
-    const t2 = this._planetT2.crossVectors(camDir, t1).normalize();
-    const radius = params.propsCullDistance;
-    const density = clamp(params.propsDensity, 0, 2);
-    const cell = lerp(70, 22, Math.sqrt(density / 2));
-    const min = Math.floor(-radius / cell);
-    const max = Math.ceil(radius / cell);
-    const grassNear = [];
-    const grassMid = [];
-    const flowers = [];
-    const rocks = [];
-    const maxInstances = Math.round(700 + density * 1300);
-    const cameraForward = camera.getWorldDirection(this._planetForward).normalize();
-    const probe = this._planetProbe;
+    const dir = this._planetCamDir.copy(camera.position).normalize();
+    const radius = Math.max(32, params.propsCullDistance || 760) * this._qualityBudget.distanceScale;
+    const planetRadius = Math.max(1, params.planetRadius || 16000);
+    const altitude = Math.max(0, camera.position.length() - planetRadius);
+    const angularStep = this._sectorSize / Math.max(1, params.planetRadius || 16000);
+    const lat = Math.asin(clamp(dir.y, -1, 1));
+    const lon = Math.atan2(dir.z, dir.x);
+    const nearSurface = altitude <= Math.max(1000, radius * 1.5);
+    const altitudeBand = nearSurface ? Math.round(altitude / Math.max(8, radius * 0.08)) : 'orbit';
+    const planetKey = `${Math.round(lat / angularStep)}:${Math.round(lon / angularStep)}:${altitudeBand}:${this._quality}:${this._scatterKey}`;
 
-    for (let gy = min; gy <= max; gy++) {
-      for (let gx = min; gx <= max; gx++) {
-        if (grassNear.length + grassMid.length + flowers.length + rocks.length >= maxInstances) break;
-        const h0 = hashInt(gx, gy, params.seed);
-        const h1 = hashInt(gx + 43, gy - 71, params.seed);
-        const ox = gx * cell + (h0 - 0.5) * cell;
-        const oy = gy * cell + (h1 - 0.5) * cell;
-        const dist = Math.hypot(ox, oy);
-        if (dist > radius) continue;
+    // Physical props cannot contribute at whole-planet viewing distances. Do
+    // no scatter work there, but retain a distinct cache key so entering Walk
+    // or low-altitude Plane mode starts a fresh incremental surface build.
+    if (!nearSurface) {
+      if (scatterChanged || planetKey !== this._lastPlanetKey || this._planetBuildState) {
+        this._planetBuildState = null;
+        this._lastPlanetKey = planetKey;
+        this._commitBuckets(emptyBuckets(), camera.position, radius, params, true);
+        this._diagnostics.sectors = 0;
+        this._diagnostics.queuedSectors = 0;
+      } else {
+        this._diagnostics.cacheHits++;
+      }
+      return;
+    }
 
-        // Cheap density pre-gate BEFORE the expensive terrain sample (no paint on planet).
-        if (hashInt(gx - 17, gy + 53, params.seed) > fillChance(params, 0)) continue;
+    const needsBuild = scatterChanged || planetKey !== this._lastPlanetKey;
+    if (!needsBuild && !this._planetBuildState) { this._diagnostics.cacheHits++; return; }
+    this._lastPlanetKey = planetKey;
 
-        const dir = this._planetDir.copy(camDir).multiplyScalar(params.planetRadius)
-          .addScaledVector(t1, ox)
-          .addScaledVector(t2, oy)
-          .normalize();
-        probe.copy(dir).multiplyScalar(params.planetRadius);
-        if (probe.sub(camera.position).dot(cameraForward) < -cell * 2.0) continue;
-        const sample = planetSampler.sampleAt3D(dir.x, dir.y, dir.z);
-        const desc = chooseCandidate(sample, params, { pick: hashInt(gx + 131, gy + 89, params.seed) });
-        if (!desc) continue;
+    if (needsBuild) {
+      const ref = Math.abs(dir.y) < 0.96 ? this._planetRef.set(0, 1, 0) : this._planetRef.set(1, 0, 0);
+      const t1 = this._planetT1.crossVectors(ref, dir).normalize();
+      const t2 = this._planetT2.crossVectors(dir, t1).normalize();
+      this._commitBuckets(emptyBuckets(), camera.position, radius, params, true);
+      this._planetBuildState = this._createPlanetBuildState({
+        key: planetKey, dir, t1, t2, radius, params, planetSampler,
+      });
+    }
 
-        const scaleRand = hashInt(gx + 29, gy + 11, params.seed);
-        let scale = lerp(desc.scaleRange[0], desc.scaleRange[1], scaleRand);
-        if (desc.id === 'grass') scale *= clamp(params.propsGrass, 0.2, 2);
-        if (desc.id === 'rock') scale *= clamp(params.propsRockScale ?? 1, 0.2, 2.5);
-        const surfaceRadius = sample.surfaceRadius - (desc.rootDepth || 0);
-        const stretch = desc.id === 'rock' ? [
-          scale * lerp(0.75, 1.45, hashInt(gx + 61, gy - 23, params.seed)),
-          scale * lerp(0.45, 0.95, hashInt(gx - 19, gy + 67, params.seed)),
-          scale * lerp(0.70, 1.35, hashInt(gx + 101, gy + 7, params.seed)),
-        ] : scale;
-        const item = {
-          render: desc.render,
-          pos: [dir.x * surfaceRadius, dir.y * surfaceRadius, dir.z * surfaceRadius],
-          normal: [sample.normal.x, sample.normal.y, sample.normal.z],
-          yaw: h0 * Math.PI * 2,
-          scale: stretch,
-          alignAmount: desc.alignAmount ?? (desc.alignMode === 'normal' ? 1 : 0),
-          tint: desc.render === 'grass' ? grassTint(sample) : (desc.render === 'rock' ? terrainRockTint(sample) : null),
-          variant: desc.render === 'flower'
-            ? Math.floor(hashInt(gx + 3, gy + 41, params.seed) * this.flowerGeometries.length)
-            : desc.render === 'rock'
-              ? Math.floor(hashInt(gx + 5, gy + 73, params.seed) * this.rockGeometries.length)
-            : 0,
-        };
-        this._bucketItem(desc, item, dist, params, grassNear, grassMid, flowers, rocks);
+    const state = this._planetBuildState;
+    const changed = this._processPlanetBuild(state);
+    if (changed || state.complete) this._commitBuckets(state.buckets, camera.position, radius, params, true);
+    this._diagnostics.sectors = 1;
+    this._diagnostics.queuedSectors = state.complete ? 0 : 1;
+    if (state.complete) {
+      this._diagnostics.cacheMisses++;
+      this._planetBuildState = null;
+    }
+  }
+
+  _createPlanetBuildState({ key, dir, t1, t2, radius, params, planetSampler }) {
+    const master = clamp(params.propsDensity ?? 0.65, 0, 2);
+    const treeCaps = [Math.ceil(this._qualityBudget.trees * 0.55), Math.floor(this._qualityBudget.trees * 0.45)];
+    const caps = {
+      grass: this._qualityBudget.grass,
+      flower: this._qualityBudget.flowers,
+      rock: this._qualityBudget.rocks,
+      broadleaf: treeCaps[0],
+      conifer: treeCaps[1],
+    };
+    const types = PROP_TYPES.map((desc, typeIndex) => {
+      const range = Math.ceil(radius / desc.cellSize);
+      const typeDensity = clamp(params[desc.densityParam] ?? 1, 0, 2);
+      const densityGate = clamp(master * typeDensity * (desc.density ?? 1), 0, 1);
+      const estimatedCells = Math.max(1, Math.PI * (radius / desc.cellSize) ** 2);
+      return {
+        desc, typeIndex, range, gx: -range, gy: -range,
+        salt: 31 + typeIndex * 101,
+        // Oversample enough to absorb biome/slope rejection without asking
+        // the expensive Planet sampler to evaluate tens of thousands of cells.
+        preGate: Math.min(densityGate, caps[desc.id] * 1.7 / estimatedCells),
+      };
+    });
+    return {
+      key, dir: dir.clone(), t1: t1.clone(), t2: t2.clone(), radius,
+      params, planetSampler, types, typeIndex: 0, buckets: emptyBuckets(),
+      complete: false,
+    };
+  }
+
+  _processPlanetBuild(state) {
+    if (!state || state.complete) return false;
+    const started = performance.now();
+    let changed = false;
+    let iterations = 0;
+    while (state.typeIndex < state.types.length) {
+      const cursor = state.types[state.typeIndex];
+      const { desc, range, salt } = cursor;
+      if (cursor.gy > range) { state.typeIndex++; continue; }
+      const gx = cursor.gx;
+      const gy = cursor.gy;
+      cursor.gx++;
+      if (cursor.gx > range) { cursor.gx = -range; cursor.gy++; }
+      iterations++;
+
+      if (cursor.preGate > 0
+        && (!(desc.id === 'broadleaf' || desc.id === 'conifer') || this._treeSpacingWinner(gx, gy, state.params.seed, salt))) {
+        const ox = gx * desc.cellSize + (hashInt(gx + salt, gy - 17, state.params.seed) - 0.5) * desc.cellSize * 0.84;
+        const oy = gy * desc.cellSize + (hashInt(gx - 43, gy + salt, state.params.seed) - 0.5) * desc.cellSize * 0.84;
+        if (Math.hypot(ox, oy) <= state.radius) {
+          const priority = hashInt(gx + salt * 2, gy - salt * 3, state.params.seed);
+          if (priority <= cursor.preGate) {
+            const sampleDir = this._planetDir.copy(state.dir).multiplyScalar(state.params.planetRadius)
+              .addScaledVector(state.t1, ox).addScaledVector(state.t2, oy).normalize();
+            const sample = state.planetSampler.sampleAt3D(sampleDir.x, sampleDir.y, sampleDir.z);
+            this._diagnostics.samples++;
+            const macro = macroDensity(gx * desc.cellSize, gy * desc.cellSize, state.params.seed, salt);
+            if (shouldPlaceType(desc, sample, state.params, { roll: priority, macro })) {
+              state.buckets[desc.render].push(this._composeItem(
+                desc, sample, gx, gy, state.params, priority, sampleDir,
+              ));
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if ((iterations & 63) === 0
+        && performance.now() - started >= this._qualityBudget.buildMs) return changed;
+    }
+    state.complete = true;
+    return changed;
+  }
+
+  _commitBuckets(all, center, radius, params, spherical = false) {
+    const budget = this._qualityBudget;
+    const distanceOf = spherical
+      ? (item) => Math.hypot(item.pos[0] - center.x, item.pos[1] - center.y, item.pos[2] - center.z)
+      : (item) => Math.hypot(item.pos[0] - center.x, item.pos[2] - center.z);
+    const select = (items, cap, maxDistance = radius) => items
+      .filter((item) => distanceOf(item) <= maxDistance)
+      .sort((a, b) => b.priority - a.priority)
+      .slice(0, cap);
+    const grassMax = Math.min(radius, budget.grassDistance);
+    const flowerMax = Math.min(grassMax, budget.grassDistance * 0.78);
+    const grass = select(all.grass, budget.grass, grassMax);
+    const flowers = select(all.flower, budget.flowers, flowerMax);
+    const rocks = select(all.rock, budget.rocks);
+    const broadleafCap = Math.ceil(budget.trees * 0.55);
+    const broadleaf = select(all.broadleaf, broadleafCap);
+    const conifer = select(all.conifer, Math.max(0, budget.trees - broadleafCap));
+    const requestedLod = Math.max(24, params.propsLodDistance || 280);
+    const nearDistance = Math.min(requestedLod, budget.nearDistance);
+    const split = (items, distance = nearDistance) => {
+      const near = [], far = [];
+      for (const item of items) (distanceOf(item) < distance ? near : far).push(item);
+      return [near, far];
+    };
+    const [grassNear, grassMid] = split(grass, Math.min(nearDistance, grassMax * 0.6));
+    const [rockNear, rockFar] = split(rocks);
+    const [broadleafNear, broadleafFar] = split(broadleaf);
+    const [coniferNear, coniferFar] = split(conifer);
+    const lodFade = clamp(nearDistance * 0.12, 6, 28);
+    const grassLod = Math.min(nearDistance, grassMax * 0.6);
+    const grassCullFade = clamp(grassMax * 0.1, 8, 36);
+    const flowerCullFade = clamp(flowerMax * 0.12, 6, 28);
+    const cullFade = clamp(radius * 0.06, 10, 42);
+    this._fadeRanges = {
+      grassNear: [0, 0, grassLod - lodFade, grassLod + lodFade],
+      grassMid: [grassLod - lodFade, grassLod + lodFade, grassMax - grassCullFade, grassMax],
+      flowers: [0, 0, flowerMax - flowerCullFade, flowerMax],
+      rocksNear: [0, 0, nearDistance - lodFade, nearDistance + lodFade],
+      rocksFar: [nearDistance - lodFade, nearDistance + lodFade, radius - cullFade, radius],
+      broadleafNear: [0, 0, nearDistance - lodFade, nearDistance + lodFade],
+      broadleafFar: [nearDistance - lodFade, nearDistance + lodFade, radius - cullFade, radius],
+      coniferNear: [0, 0, nearDistance - lodFade, nearDistance + lodFade],
+      coniferFar: [nearDistance - lodFade, nearDistance + lodFade, radius - cullFade, radius],
+    };
+    this._replaceMeshes({ grassNear, grassMid, flowers, rockNear, rockFar, broadleafNear, broadleafFar, coniferNear, coniferFar });
+  }
+
+  _replaceMeshes(batches) {
+    const active = new Set();
+    const specs = [
+      ['grass-near', this.grassNearGeometry, this.grassNearMaterial, batches.grassNear],
+      ['grass-mid', this.grassMidGeometry, this.grassMidMaterial, batches.grassMid],
+      ['flowers', this.flowerGeometry, this.flowerMaterial, batches.flowers],
+      ['rocks-near', this.rockNearGeometry, this.rockMaterial, batches.rockNear],
+      ['rocks-far', this.rockFarGeometry, this.rockMaterial, batches.rockFar],
+      ['broadleaf-near', this.broadleafNearGeometry, this.treeMaterial, batches.broadleafNear],
+      ['broadleaf-far', this.broadleafFarGeometry, this.treeMaterial, batches.broadleafFar],
+      ['conifer-near', this.coniferNearGeometry, this.treeMaterial, batches.coniferNear],
+      ['conifer-far', this.coniferFarGeometry, this.treeMaterial, batches.coniferFar],
+    ];
+    let triangles = 0, drawCalls = 0;
+    for (const [name, geometry, material, items] of specs) {
+      this._updateInstanced(name, geometry, material, items, active);
+      if (items.length) {
+        drawCalls++;
+        const tri = geometry.index ? geometry.index.count / 3 : geometry.getAttribute('position').count / 3;
+        triangles += tri * items.length;
       }
     }
-
-    this._replaceMeshes(grassNear, grassMid, flowers, rocks);
-  }
-
-  _replaceMeshes(grassNear, grassMid, flowers, rocks) {
-    const active = new Set();
-    this._updateInstanced('grass-near', this.grassNearGeometry, this.grassNearMaterial, grassNear, active);
-    this._updateInstanced('grass-mid', this.grassMidGeometry, this.grassMidMaterial, grassMid, active);
-    // Group flowers by species so each variant gets its own instanced mesh.
-    const byVariant = [];
-    for (const f of flowers) {
-      const v = f.variant || 0;
-      (byVariant[v] || (byVariant[v] = [])).push(f);
-    }
-    for (let v = 0; v < this.flowerGeometries.length; v++) {
-      this._updateInstanced(`flowers-${v}`, this.flowerGeometries[v], this.flowerMaterial, byVariant[v] || [], active);
-    }
-    const rocksByVariant = [];
-    for (const r of rocks) {
-      const v = r.variant || 0;
-      (rocksByVariant[v] || (rocksByVariant[v] = [])).push(r);
-    }
-    for (let v = 0; v < this.rockGeometries.length; v++) {
-      this._updateInstanced(`rocks-${v}`, this.rockGeometries[v], this.rockMaterial, rocksByVariant[v] || [], active);
-    }
-    for (const [name, mesh] of this._meshPool) {
-      if (!active.has(name)) mesh.count = 0;
-    }
+    for (const [name, mesh] of this._meshPool) if (!active.has(name)) mesh.count = 0;
     this.meshes = [...this._meshPool.values()];
+    this._diagnostics.instances = {
+      grass: batches.grassNear.length + batches.grassMid.length,
+      flowers: batches.flowers.length,
+      rocks: batches.rockNear.length + batches.rockFar.length,
+      trees: batches.broadleafNear.length + batches.broadleafFar.length + batches.coniferNear.length + batches.coniferFar.length,
+    };
+    this._diagnostics.lod = Object.fromEntries(Object.entries(batches).map(([key, items]) => [key, items.length]));
+    this._diagnostics.triangles = triangles;
+    this._diagnostics.drawCalls = drawCalls;
   }
 
   _updateInstanced(name, geometry, material, items, active) {
@@ -573,45 +827,77 @@ export class ProceduralPropsManager {
       mesh = new THREE.InstancedMesh(geometry, material, capacity);
       mesh.name = `procedural-${name}`;
       mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this._meshPool.set(name, mesh);
       this.group.add(mesh);
     }
     mesh.count = items.length;
     active.add(name);
+    const fadeKey = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    const fade = this._fadeRanges?.[fadeKey] || [0, 0, 1e6, 1e6 + 1];
+    mesh.userData.propFadeRanges = fade;
+    mesh.onBeforeRender = (_renderer, _scene, camera) => {
+      const uniforms = mesh.material.userData.propFadeUniforms;
+      if (!uniforms) return;
+      uniforms.center.value.copy(camera.position);
+      uniforms.ranges.value.fromArray(mesh.userData.propFadeRanges);
+    };
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      this._tmpPos.set(item.pos[0], item.pos[1], item.pos[2]);
-      this._tmpNormal.set(item.normal[0], item.normal[1], item.normal[2]).normalize();
+      this._tmpPos.fromArray(item.pos);
+      this._tmpNormal.fromArray(item.normal).normalize();
       this._qFull.setFromUnitVectors(this._up, this._tmpNormal);
-      // partial alignment: slerp from upright (identity) toward full normal-align
-      const amount = item.alignAmount == null ? 1 : item.alignAmount;
-      this._qAlign.copy(this._qIdentity).slerp(this._qFull, amount);
+      this._qAlign.copy(this._qIdentity).slerp(this._qFull, item.alignAmount ?? 1);
       this._qYaw.setFromAxisAngle(this._up, item.yaw);
       this._qAlign.multiply(this._qYaw);
-      if (Array.isArray(item.scale)) this._tmpScale.set(item.scale[0], item.scale[1], item.scale[2]);
+      if (Array.isArray(item.scale)) this._tmpScale.fromArray(item.scale);
       else this._tmpScale.setScalar(item.scale);
       this._tmpMat.compose(this._tmpPos, this._qAlign, this._tmpScale);
       mesh.setMatrixAt(i, this._tmpMat);
-      if (item.tint) {
-        // per-instance biome tint, multiplied onto the vertex-color gradient
-        this._tmpColor.setRGB(item.tint[0], item.tint[1], item.tint[2]);
-        mesh.setColorAt(i, this._tmpColor);
-      }
+      this._tmpColor.fromArray(item.tint || [1, 1, 1]);
+      mesh.setColorAt(i, this._tmpColor);
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
+  tickWind(timeSeconds, params) {
+    const uniforms = this.windUniforms;
+    uniforms.uTime.value = timeSeconds;
+    uniforms.uWindStrength.value = 0.3 * Math.max(0, params?.propsWind ?? 0.6);
+    uniforms.uWindSpeed.value = params?.propsWindSpeed ?? 1.6;
+    uniforms.uGustIntensity.value = params?.propsGust ?? 0.45;
+  }
+
+  getDiagnostics() {
+    return {
+      ...this._diagnostics,
+      instances: { ...this._diagnostics.instances },
+      lod: { ...this._diagnostics.lod },
+      quality: this._quality,
+    };
+  }
+
+  _clearMeshes() {
+    for (const mesh of this._meshPool.values()) this.group.remove(mesh);
+    this._meshPool.clear();
+    this.meshes = [];
+  }
+
   dispose() {
     this._clearMeshes();
+    this._sectors.clear();
+    this._planetBuildState = null;
+    this._buildQueue.length = 0;
     this.scene.remove(this.group);
-    this.grassNearGeometry.dispose();
-    this.grassMidGeometry.dispose();
-    this.flowerGeometries.forEach((g) => g.dispose());
-    this.rockGeometries.forEach((g) => g.dispose());
-    this.grassNearMaterial.dispose();
-    this.grassMidMaterial.dispose();
-    this.flowerMaterial.dispose();
-    this.rockMaterial.dispose();
+    [
+      this.grassNearGeometry, this.grassMidGeometry, this.flowerGeometry,
+      this.rockNearGeometry, this.rockFarGeometry,
+      this.broadleafNearGeometry, this.broadleafFarGeometry,
+      this.coniferNearGeometry, this.coniferFarGeometry,
+    ].forEach((geometry) => geometry.dispose());
+    [this.grassNearMaterial, this.grassMidMaterial, this.flowerMaterial, this.treeMaterial, this.rockMaterial]
+      .forEach((material) => material.dispose());
+    this.atlas.dispose();
   }
 }

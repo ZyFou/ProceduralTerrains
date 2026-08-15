@@ -836,7 +836,9 @@ export class Engine {
       sampler: this._getMinimapSampler(),
       getPaintHeightOffset: (x, z) => this._samplePaintHeightOffset(x, z) + this._sampleManualHeightOffset(x, z),
       getPaintBiomeWeights: (x, z) => this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null,
-      getPropsMask: (x, z) => this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 },
+      getPropsMask: (x, z) => this.projectMode === 'manual'
+        ? (this.manualTerrain?.propField?.sampleMask(x, z) ?? { grass: 0, flowers: 0, rocks: 0, trees: 0, mixed: 0 })
+        : (this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 }),
       getWaterLevel: () => this.params.seaLevel,
       getChunkCount: () => this.params.chunkCount,
     });
@@ -1005,6 +1007,19 @@ export class Engine {
     return shape === 'circle' ? Math.hypot(cx, cz) <= e + 1e-6 : Math.abs(cx) <= e && Math.abs(cz) <= e;
   }
   _hasTile(cx, cz) { return this.tiles.some((t) => t.cx === cx && t.cz === cz); }
+
+  _containsPropPoint(x, z) {
+    if (this.worldMode !== 'studio') return true;
+    const cs = Math.max(1, this.cellSize);
+    const cx = Math.floor((x + cs * 0.5) / cs);
+    const cz = Math.floor((z + cs * 0.5) / cs);
+    if (!this._hasTile(cx, cz)) return false;
+    if (this.tileAssemblyShape === 'circle') {
+      const radius = (this.diskRadiusCells + 0.5) * cs;
+      if (Math.hypot(x, z) > radius) return false;
+    }
+    return true;
+  }
 
   // Validate a loaded/restored tiles array: integer cells, deduped, origin
   // guaranteed, kept inside the 5×5 grid. Falls back to a single origin tile.
@@ -2275,6 +2290,13 @@ export class Engine {
     if (this.projectMode === 'procedural' && PRESETS[presetKey]) {
       this.params = applyPreset(this.params, presetKey);
     }
+    // New procedural projects showcase the optimized prop layer immediately.
+    // Loaded projects still keep their serialized propsEnabled value.
+    if (this.projectMode === 'procedural') {
+      this.params.propsEnabled = true;
+      this.perf = sanitizePerfSettings({ ...this.perf, propQuality: 1, preset: 'custom' });
+      this.qualityPreset = this.perf.preset;
+    }
     const noiseStackRecipe = this.projectMode === 'procedural'
       ? buildNoiseStackPresetRecipe(noiseStackPresetKey)
       : null;
@@ -2376,6 +2398,7 @@ export class Engine {
     // every preset field through setParam(). Publish that finished snapshot so
     // React panels do not keep rendering the previous project's stack.
     this.cb.onParams(this._paramsSnapshot());
+    if (this.projectMode === 'procedural') this._notifyPerf();
     this.applyAll({ force: true });
     this._onErosionChanged();
     this._notifyTiles();
@@ -6938,9 +6961,18 @@ export class Engine {
   setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
   setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
   clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
-  setManualTexturePaintEnabled(enabled) { this.manualTerrain?.setTexturePaintEnabled(enabled); }
-  setManualTexturePaintSetting(key, value) { this.manualTerrain?.setTexturePaintSetting(key, value); }
+  setManualTexturePaintEnabled(enabled) {
+    if (enabled && this.manualTerrain?.texturePaint?.mode === 'props' && !this.params.propsEnabled) {
+      this.setParam('propsEnabled', true);
+    }
+    this.manualTerrain?.setTexturePaintEnabled(enabled);
+  }
+  setManualTexturePaintSetting(key, value) {
+    if (key === 'mode' && value === 'props' && !this.params.propsEnabled) this.setParam('propsEnabled', true);
+    this.manualTerrain?.setTexturePaintSetting(key, value);
+  }
   clearManualTexturePaint() { return this.manualTerrain?.clearTexturePaint(); }
+  clearManualPropPaint() { return this.manualTerrain?.clearPropPaint(); }
   setManualWorkspaceActive(active) { this.manualTerrain?.setWorkspaceActive(active); }
 
   // ---------------------------------------------------------- creator tools
@@ -7930,6 +7962,9 @@ export class Engine {
           ? (this.paintMode?.layers?.sampleBiomeMask(x, z) ?? null) : null),
         getPaintMask: (x, z) => {
           if (this.worldMode !== 'studio') return null;
+          if (this.projectMode === 'manual') {
+            return this.manualTerrain?.propField?.sampleMask(x, z) ?? null;
+          }
           const base = this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 };
           const exclusion = this.splineManager?.getPropExclusion(x, z) ?? 0;
           // Negative density is represented by zero availability; placement
@@ -9049,7 +9084,7 @@ export class Engine {
       graphView: { ...this.graphView },
       manualTerrain: this.manualTerrain?.serialize({ includeSculpt: false, includeSurface: false }) ?? { version: 5, baseSource: 'flat', shapes: [] },
       manualSculptRev: this.manualTerrain?.field?.sculptRevision ?? 0,
-      manualSurfaceRev: this.manualTerrain?.surfaceField?.revision ?? 0,
+      manualSurfaceRev: this.manualTerrain?.surfaceRevision ?? 0,
     };
   }
 
@@ -9068,7 +9103,7 @@ export class Engine {
     return this.manualTerrain?.serializeSculpt() ?? null;
   }
 
-  /** Heavy Manual Texture Paint weight maps, deduplicated by revision in App history. */
+  /** Heavy Manual Surface/Props Paint maps, deduplicated by revision in App history. */
   serializeManualSurface() {
     return this.manualTerrain?.serializeSurfacePaint() ?? null;
   }
@@ -9894,13 +9929,25 @@ export class Engine {
       mode: this.worldMode,
       camera: this.camera,
       params: this.params,
+      perf: this.perf,
       boardSize: this.boardSize,
       sampler: this.worldMode === 'planet' ? null : this._getPropSampler(),
       planetSampler: this.worldMode === 'planet' ? this._getPlanetPropSampler() : null,
-      paintLayers: this.worldMode === 'studio' ? this.paintMode?.layers : null,
+      paintLayers: this.worldMode === 'studio'
+        ? (this.projectMode === 'manual' ? this.manualTerrain?.propField : this.paintMode?.layers)
+        : null,
       splineRevision: this.worldMode === 'studio' ? this.splineManager?.baker?.revision : -1,
       terrainRevision: this._terrainGen,
+      containsPoint: this.worldMode === 'studio' ? (x, z) => this._containsPropPoint(x, z) : null,
+      centerOverride: this.worldMode === 'studio' && this.exploreMode === 'none'
+        ? this.controls?.target : null,
+      dirtyBounds: this.worldMode === 'studio'
+        ? (this.projectMode === 'manual'
+          ? this.manualTerrain?.propField?.consumePropDirtyBounds?.()
+          : this.paintMode?.layers?.consumePropDirtyBounds?.())
+        : null,
     });
+    if ((this.propsManager?.getDiagnostics?.().queuedSectors ?? 0) > 0) this._needsRender = true;
 
     if (this.worldMode === 'infinite') {
       this._tickInfinite(dt, now);
@@ -10544,6 +10591,10 @@ export class Engine {
           this.waterSystem?.getPerformanceDiagnostics?.() ?? null,
       },
       underwater: this._underwaterDiagnostics(),
+      props: this.propsManager?.getDiagnostics?.() ?? {
+        instances: { grass: 0, flowers: 0, rocks: 0, trees: 0 },
+        drawCalls: 0, triangles: 0, queuedSectors: 0,
+      },
     };
 
     if (this.worldMode === 'infinite' && this.infiniteWorld) {

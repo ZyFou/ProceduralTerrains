@@ -350,42 +350,54 @@ function WaterPanel({ ctx }) {
 }
 
 const PROP_SLIDERS = {
-  propsDensity: { label: 'Density', min: 0, max: 2, step: 0.05, digits: 2 },
-  propsGrass: { label: 'Grass Scale', min: 0.05, max: 2, step: 0.05, digits: 2 },
-  propsRocks: { label: 'Rock Mix', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsDensity: { label: 'Master Density', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsGrassDensity: { label: 'Grass Density', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsGrass: { label: 'Grass Height', min: 0.05, max: 2, step: 0.05, digits: 2 },
+  propsRocks: { label: 'Rock Density', min: 0, max: 2, step: 0.05, digits: 2 },
   propsRockScale: { label: 'Rock Scale', min: 0.05, max: 2.5, step: 0.05, digits: 2 },
+  propsTreeDensity: { label: 'Tree Density', min: 0, max: 2, step: 0.05, digits: 2 },
+  propsTreeScale: { label: 'Tree Scale', min: 0.25, max: 2.5, step: 0.05, digits: 2 },
   propsWind: { label: 'Wind', min: 0, max: 1.5, step: 0.05, digits: 2 },
   propsWindSpeed: { label: 'Animation Speed', min: 0, max: 4, step: 0.05, digits: 2 },
   propsGust: { label: 'Gust Motion', min: 0, max: 1.5, step: 0.05, digits: 2 },
-  propsFlowers: { label: 'Flower Mix', min: 0, max: 1, step: 0.01, digits: 2 },
+  propsFlowers: { label: 'Flower Density', min: 0, max: 1, step: 0.01, digits: 2 },
   propsCullDistance: { label: 'Cull Distance', min: 120, max: 1800, step: 20, digits: 0, unit: ' u' },
   propsLodDistance: { label: 'LOD Distance', min: 60, max: 900, step: 10, digits: 0, unit: ' u' },
 };
 
 function PropsPanel({ ctx }) {
-  const { params, onParam, worldMode } = ctx;
+  const { params, onParam, worldMode, perf, onPerfSetting } = ctx;
   const enabled = !!params.propsEnabled;
   return (
-    <SidePanel title="Props" description="Procedural grass, flowers and rocks." onClose={ctx.onClose}>
+    <SidePanel title="Props" description="Biome-aware grass, flowers, rocks and trees." onClose={ctx.onClose}>
       <ToggleRow label="Procedural Props" value={enabled} onChange={(v) => onParam('propsEnabled', v)}
-        info="Scatter lightweight procedural grass patches, flowers and terrain-matched rocks in Tile, Infinite World, and Planet modes." />
+        info="Scatter optimized grass, flowers, terrain-matched boulders, broadleaf trees and conifers in every world mode." />
       {enabled && (
         <>
           <ControlSection id="props-distribution" title="Distribution" defaultOpen settingId="props.section.distribution">
             <SliderCtl def={PROP_SLIDERS.propsDensity} value={params.propsDensity} onChange={(v) => onParam('propsDensity', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsGrassDensity} value={params.propsGrassDensity ?? 1} onChange={(v) => onParam('propsGrassDensity', v)} />
             <SliderCtl def={PROP_SLIDERS.propsFlowers} value={params.propsFlowers} onChange={(v) => onParam('propsFlowers', v)} />
             <SliderCtl def={PROP_SLIDERS.propsRocks} value={params.propsRocks ?? 0.8} onChange={(v) => onParam('propsRocks', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsTreeDensity} value={params.propsTreeDensity ?? 0.65} onChange={(v) => onParam('propsTreeDensity', v)} />
           </ControlSection>
 
           <ControlSection id="props-look" title="Look" defaultOpen settingId="props.section.look">
             <SliderCtl def={PROP_SLIDERS.propsGrass} value={params.propsGrass} onChange={(v) => onParam('propsGrass', v)} />
-            <SliderCtl def={PROP_SLIDERS.propsRockScale} value={params.propsRockScale ?? 0.65} onChange={(v) => onParam('propsRockScale', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsRockScale} value={params.propsRockScale ?? 1} onChange={(v) => onParam('propsRockScale', v)} />
+            <SliderCtl def={PROP_SLIDERS.propsTreeScale} value={params.propsTreeScale ?? 1} onChange={(v) => onParam('propsTreeScale', v)} />
             <SliderCtl def={PROP_SLIDERS.propsWind} value={params.propsWind ?? 0.6} onChange={(v) => onParam('propsWind', v)} />
             <SliderCtl def={PROP_SLIDERS.propsWindSpeed} value={params.propsWindSpeed ?? 1.6} onChange={(v) => onParam('propsWindSpeed', v)} />
             <SliderCtl def={PROP_SLIDERS.propsGust} value={params.propsGust ?? 0.45} onChange={(v) => onParam('propsGust', v)} />
           </ControlSection>
 
           <ControlSection id="props-performance" title="Performance" defaultOpen settingId="props.section.performance">
+            <SelectRow label="Prop Quality" value={perf?.propQuality ?? 2} options={[
+              { value: 0, label: 'Performance' },
+              { value: 1, label: 'Balanced' },
+              { value: 2, label: 'High' },
+              { value: 3, label: 'Ultra' },
+            ]} onChange={(v) => onPerfSetting?.('propQuality', Number(v))} settingId="props.propQuality" />
             <SliderCtl def={PROP_SLIDERS.propsCullDistance} value={params.propsCullDistance} onChange={(v) => onParam('propsCullDistance', v)} />
             <SliderCtl def={PROP_SLIDERS.propsLodDistance} value={params.propsLodDistance} onChange={(v) => onParam('propsLodDistance', v)} />
             <p className="section-hint">

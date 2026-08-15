@@ -90,7 +90,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     const before = JSON.parse(beforeSnapshot);
     const after = JSON.parse(afterSnapshot);
     if (before.worldMode !== after.worldMode) return 'Changed world mode';
-    if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain texture';
+    if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain surface or props';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
     if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
@@ -181,8 +181,10 @@ export default function App() {
     },
     texturePaint: {
       enabled: false,
+      mode: 'surface',
       tool: 'paint',
       material: 'grass',
+      propType: 'grass',
       brushSize: 110,
       strength: 0.45,
       falloff: 0.72,
@@ -2356,6 +2358,7 @@ export default function App() {
               }}
               onTexturePaintSetting={(key, value) => engine().setManualTexturePaintSetting(key, value)}
               onClearTexturePaint={() => engine().clearManualTexturePaint()}
+              onClearPropPaint={() => engine().clearManualPropPaint()}
             />
           )}
 
