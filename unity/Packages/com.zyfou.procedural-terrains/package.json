@@ -1,8 +1,8 @@
 {
   "name": "com.zyfou.procedural-terrains",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "displayName": "Procedural Terrains",
-  "description": "Imports versioned Procedural Terrains runtime documents into Unity.",
+  "description": "Imports Procedural Terrains ZIP exports and builds validated Unity Terrain scenes.",
   "unity": "6000.3",
   "author": {
     "name": "ZyFou"
