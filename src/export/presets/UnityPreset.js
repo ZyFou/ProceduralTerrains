@@ -1,15 +1,18 @@
 export const UnityPreset = {
   id: 'unity',
   label: 'Unity Terrain',
-  description: '16-bit RAW heightmap, terrain masks, and Unity scale metadata.',
+  description: 'Versioned runtime document, Unity vertex-grid RAW heightmaps, and terrain masks.',
   defaults: {
     format: 'glb', meshRes: '512', texRes: '2048', includeMesh: false,
+    heightRes: '1025', heightmapVertexGrid: true, exportTileMode: 'separate',
     bakeColor: true, bakeNormal: true, exportHeightmap: true, exportSplat: true,
     exportCollision: true, collisionRes: '128', exportWater: true,
     exportWaterMask: true, exportWaterMetadata: true,
+    exportPreset: false,
   },
   layout: {
     root: 'Terrain', heightmapRawPath: 'Terrain/heightmap.raw',
+    runtimeDocumentPath: 'Terrain/project.ptrterrain',
     paths: {
       'terrain.glb': 'Terrain/terrain.glb', 'terrain.obj': 'Terrain/terrain.obj',
       'collision.glb': 'Terrain/collision.glb',

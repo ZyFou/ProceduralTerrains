@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "com.unity.test-framework": "1.6.0",
+    "com.zyfou.procedural-terrains": "file:../../Packages/com.zyfou.procedural-terrains"
+  },
+  "testables": [
+    "com.zyfou.procedural-terrains"
+  ]
+}

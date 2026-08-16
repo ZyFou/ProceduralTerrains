@@ -1,0 +1,8 @@
+/Library/
+/Logs/
+/Temp/
+/UserSettings/
+/obj/
+*.csproj
+*.sln
+/TestResults.xml

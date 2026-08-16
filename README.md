@@ -118,10 +118,12 @@ Full export (ZIP with optional contents):
 
 The Export panel includes a preflight **Production Check** and target presets for **Unity
 Terrain**, **Unreal Landscape**, **Godot Terrain3D**, **Blender Scene**, and **Three.js Viewer
-Assets**. Engine presets package files into import-oriented folders with a `terrain.json` and
-`README.txt`; Unity and Unreal use a little-endian unsigned 16-bit raw heightmap (`.raw` / `.r16`).
-The checker blocks invalid asset selections and flags high-memory maps or missing water masks
-before the GPU bake begins.
+Assets**. Unity packages a deterministic `Terrain/project.ptrterrain` runtime document with
+little-endian unsigned 16-bit RAW vertex grids at 513, 1025, 2049, or 4097 samples per side.
+Extract the exported `Terrain` folder under a Unity project's `Assets` folder to import it with
+the local package in `unity/Packages/com.zyfou.procedural-terrains`. Other engine presets retain
+their import-oriented `terrain.json` and `README.txt` bundles. The checker blocks invalid asset
+selections and flags high-memory maps or missing water masks before the GPU bake begins.
 
 Planet mode has a dedicated planet exporter with cubemap height baking.
 

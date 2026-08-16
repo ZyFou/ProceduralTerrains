@@ -1,0 +1,16 @@
+{
+  "name": "com.zyfou.procedural-terrains",
+  "version": "0.1.0-alpha.0",
+  "displayName": "Procedural Terrains",
+  "description": "Imports versioned Procedural Terrains runtime documents into Unity.",
+  "unity": "6000.3",
+  "author": {
+    "name": "ZyFou"
+  },
+  "license": "MIT",
+  "keywords": [
+    "terrain",
+    "procedural",
+    "importer"
+  ]
+}

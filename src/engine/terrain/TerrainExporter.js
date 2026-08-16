@@ -22,6 +22,10 @@ import {
 } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
+import {
+  decodePackedHeight01,
+  encodeUnityRaw16FromPackedPixels,
+} from '../../export/runtime/HeightfieldEncoding.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
@@ -59,6 +63,7 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
   uniform vec2 uCellOffset;     // world XZ of the baked region center
   uniform int uBakeMode;       // 0 = heightmap, 1 = normalmap, 2 = color, 3 = biome splat
   uniform bool uBakeLighting;
+  uniform float uHeightVertexGrid; // >1 remaps height pixels to inclusive vertex samples
 
   varying vec2 vUv;
 
@@ -76,7 +81,14 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
   void main() {
     // Map UV back to world coordinates for the baked region (one cell, or the
     // whole assembly for the union-wide auxiliary maps).
-    vec2 xz = uCellOffset + (vUv - 0.5) * uBoardSizeXZ;
+    vec2 bakeUv = vUv;
+    if (uBakeMode == 0 && uHeightVertexGrid > 1.5) {
+      // A fragment center arrives at (i + 0.5) / resolution. Remap it to
+      // i / (resolution - 1) so the first/last samples land exactly on tile
+      // borders and neighboring RAW files share bit-identical edge inputs.
+      bakeUv = (vUv * uHeightVertexGrid - 0.5) / (uHeightVertexGrid - 1.0);
+    }
+    vec2 xz = uCellOffset + (bakeUv - 0.5) * uBoardSizeXZ;
 
     Climate cl = climateAt(xz * uFrequency + uSeedOffset);
     BiomeWeights bw = biomeWeightsAt(cl);
@@ -183,13 +195,15 @@ export class TerrainExporter {
     const includeBase = !!options.includeBase;
     const bakeColor = !!options.bakeColor;
     const texRes = parseInt(options.texRes, 10) || 1024;
+    const heightRes = parseInt(options.heightRes, 10) || texRes;
+    const heightmapVertexGrid = options.heightmapVertexGrid === true;
     const bakeLighting = !!options.bakeLighting;
     const bakeNormal = !!options.bakeNormal;
     const exportHeightmap = !!options.exportHeightmap;
     const exportCollision = !!options.exportCollision;
     const collisionRes = parseInt(options.collisionRes, 10) || 128;
     const exportWater = !!options.exportWater;
-    const exportPreset = !!options.exportPreset;
+    const exportPreset = !!options.exportPreset && options.exportPresetId !== 'unity';
 
     // Tile assembly: cellSize == the single-board size (boardSize). For one tile
     // this is the classic centered board. tileMode controls multi-tile output.
@@ -230,6 +244,7 @@ export class TerrainExporter {
       uCellOffset: { value: new THREE.Vector2(0, 0) },
       uBakeMode: { value: 0 },
       uBakeLighting: { value: bakeLighting },
+      uHeightVertexGrid: { value: 0 },
       uEps: { value: Math.max(0.35, boardSize / 4096) }
     };
     // Copy active engine uniforms
@@ -267,6 +282,7 @@ export class TerrainExporter {
       });
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = 0;
+      bakeUniforms.uHeightVertexGrid.value = 0;
       renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
       const px = new Uint8Array(wpx * hpx * 4);
@@ -284,6 +300,7 @@ export class TerrainExporter {
       const rt = new THREE.WebGLRenderTarget(res, res);
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = mode;
+      bakeUniforms.uHeightVertexGrid.value = 0;
       renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
       const c = rtToCanvas(renderer, rt, res, res);
@@ -291,37 +308,60 @@ export class TerrainExporter {
       rt.dispose();
       return c;
     };
-    const bakeHeightAsset = (ox, oz, sx, sz) => {
-      const visualRT = new THREE.WebGLRenderTarget(texRes, texRes);
+    const renderHeightPixels = (ox, oz, sx, sz, resolution, vertexGrid = false) => {
+      const visualRT = new THREE.WebGLRenderTarget(resolution, resolution, {
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      });
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = 0;
+      bakeUniforms.uHeightVertexGrid.value = vertexGrid ? resolution : 0;
       renderer.setRenderTarget(visualRT);
       renderer.render(quadScene, quadCam);
-      const visualPixels = new Uint8Array(texRes * texRes * 4);
-      renderer.readRenderTargetPixels(visualRT, 0, 0, texRes, texRes, visualPixels);
+      const pixels = new Uint8Array(resolution * resolution * 4);
+      renderer.readRenderTargetPixels(visualRT, 0, 0, resolution, resolution, pixels);
       renderer.setRenderTarget(null);
       visualRT.dispose();
+      return pixels;
+    };
+
+    const bakeHeightAsset = (ox, oz, sx, sz) => {
+      const visualPixels = renderHeightPixels(ox, oz, sx, sz, texRes, false);
 
       const canvas = document.createElement('canvas');
       canvas.width = texRes;
       canvas.height = texRes;
       const ctx = canvas.getContext('2d');
       const img = ctx.createImageData(texRes, texRes);
-      const raw16 = new Uint8Array(texRes * texRes * 2);
-      const rawView = new DataView(raw16.buffer);
       for (let y = 0; y < texRes; y++) {
         const srcRow = (texRes - 1 - y) * texRes * 4;
         const dstRow = y * texRes * 4;
         for (let x = 0; x < texRes; x++) {
           const sIdx = srcRow + x * 4;
           const dIdx = dstRow + x * 4;
-          const height01 = (visualPixels[sIdx] * 65536 + visualPixels[sIdx + 1] * 256 + visualPixels[sIdx + 2]) / 16777215;
+          const height01 = decodePackedHeight01(visualPixels, sIdx / 4);
           const val = Math.round(height01 * 255);
           img.data[dIdx] = val; img.data[dIdx + 1] = val; img.data[dIdx + 2] = val; img.data[dIdx + 3] = 255;
-          rawView.setUint16((y * texRes + x) * 2, Math.round(height01 * 65535), true);
         }
       }
       ctx.putImageData(img, 0, 0);
+      let raw16 = null;
+      if (options.heightmapRawPath && heightmapVertexGrid) {
+        const vertexPixels = renderHeightPixels(ox, oz, sx, sz, heightRes, true);
+        raw16 = encodeUnityRaw16FromPackedPixels(vertexPixels, heightRes, heightRes);
+      } else if (options.heightmapRawPath) {
+        // Preserve the existing engine-preset RAW contract outside Unity:
+        // texture-sized samples with the same top-down row order as the PNG.
+        raw16 = new Uint8Array(texRes * texRes * 2);
+        const rawView = new DataView(raw16.buffer);
+        for (let y = 0; y < texRes; y++) {
+          const srcRow = (texRes - 1 - y) * texRes;
+          for (let x = 0; x < texRes; x++) {
+            rawView.setUint16((y * texRes + x) * 2,
+              Math.round(decodePackedHeight01(visualPixels, srcRow + x) * 65535), true);
+          }
+        }
+      }
       return { canvas, raw16 };
     };
 
@@ -468,7 +508,7 @@ export class TerrainExporter {
     // D. Union-wide grayscale heightmap (one image covering the whole assembly)
     let heightCanvas = null;
     let heightRaw16 = null;
-    if (exportHeightmap) {
+    if (exportHeightmap && (!separateTileExport || options.exportPresetId !== 'unity')) {
       onToast('Baking grayscale heightmap...');
       const asset = bakeHeightAsset(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
       heightCanvas = asset.canvas;
@@ -477,7 +517,7 @@ export class TerrainExporter {
 
     // E. Union-wide splat / biome map
     let splatCanvas = null;
-    if (exportHeightmap && options.exportSplat) {
+    if (exportHeightmap && options.exportSplat && (!separateTileExport || options.exportPresetId !== 'unity')) {
       onToast('Baking splat map...');
       splatCanvas = bakeRegionCanvas(3, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
     }

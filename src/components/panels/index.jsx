@@ -800,6 +800,12 @@ const TEX_OPTIONS = [
   { value: '512', label: '512 × 512' }, { value: '1024', label: '1024 × 1024' },
   { value: '2048', label: '2048 × 2048 (Crisp)' }, { value: '4096', label: '4096 × 4096 (UHD)' },
 ];
+const UNITY_HEIGHT_OPTIONS = [
+  { value: '513', label: '513 × 513' },
+  { value: '1025', label: '1025 × 1025 (Recommended)' },
+  { value: '2049', label: '2049 × 2049' },
+  { value: '4097', label: '4097 × 4097 (Very large)' },
+];
 const COLL_OPTIONS = [
   { value: '32', label: '32 × 32' }, { value: '64', label: '64 × 64' },
   { value: '128', label: '128 × 128 (Recommended)' }, { value: '256', label: '256 × 256' },
@@ -808,6 +814,7 @@ const COLL_OPTIONS = [
 function ExportPanel({ ctx }) {
   const [opt, setOpt] = useState({
     exportPresetId: 'custom', packageRoot: null, packagePaths: null, heightmapRawPath: null,
+    runtimeDocumentPath: null, heightRes: null, heightmapVertexGrid: false,
     format: 'glb', meshRes: '512', includeMesh: true, includeSkirts: true, includeBase: true,
     bakeColor: true, texRes: '2048', bakeLighting: false, bakeNormal: true,
     exportHeightmap: false, exportSplat: false, exportCollision: false, collisionRes: '128',
@@ -824,7 +831,12 @@ function ExportPanel({ ctx }) {
   const showTex = opt.bakeColor || opt.bakeNormal || opt.exportHeightmap;
   const multiTile = ctx.worldMode === 'studio' && (ctx.tiles?.length ?? 1) > 1;
   const circleTiles = ctx.tileAssemblyShape === 'circle';
-  const productionChecks = validateExport(opt, { worldMode: ctx.worldMode, boardSize: ctx.boardSize });
+  const productionChecks = validateExport(opt, {
+    worldMode: ctx.worldMode,
+    boardSize: ctx.boardSize,
+    tileAssemblyShape: ctx.tileAssemblyShape,
+    tiles: ctx.tiles,
+  });
   const exportBlocked = hasExportErrors(productionChecks);
   const selectedPreset = getExportPreset(opt.exportPresetId);
   const applyPreset = (id) => setOpt((current) => applyExportPreset(current, id));
@@ -909,6 +921,9 @@ function ExportPanel({ ctx }) {
 
       <ControlSection id="export-assets" title="Additional Assets" defaultOpen={false} settingId="export.section.assets">
         <ToggleRow label="Export Heightmap" value={opt.exportHeightmap} onChange={(v) => set('exportHeightmap', v)} />
+        {opt.exportHeightmap && opt.exportPresetId === 'unity' && (
+          <SelectRow label="Unity Height Grid" value={opt.heightRes} options={UNITY_HEIGHT_OPTIONS} onChange={(v) => set('heightRes', v)} />
+        )}
         {opt.exportHeightmap && (
           <ToggleRow label="Include Biome Splat Map" value={opt.exportSplat} onChange={(v) => set('exportSplat', v)} />
         )}

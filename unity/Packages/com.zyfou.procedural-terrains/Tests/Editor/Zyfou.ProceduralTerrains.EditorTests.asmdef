@@ -1,0 +1,22 @@
+{
+  "name": "Zyfou.ProceduralTerrains.EditorTests",
+  "rootNamespace": "Zyfou.ProceduralTerrains.EditorTests",
+  "references": [
+    "Zyfou.ProceduralTerrains",
+    "Zyfou.ProceduralTerrains.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

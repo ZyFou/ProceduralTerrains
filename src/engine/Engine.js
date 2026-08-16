@@ -9753,7 +9753,12 @@ export class Engine {
   }
 
   async export3DTerrain(options) {
-    const checks = validateExport(options, { worldMode: this.worldMode, boardSize: this.boardSize });
+    const checks = validateExport(options, {
+      worldMode: this.worldMode,
+      boardSize: this.boardSize,
+      tileAssemblyShape: this.tileAssemblyShape,
+      tiles: this.tiles,
+    });
     const blockingCheck = checks.find((check) => check.status === 'error');
     if (hasExportErrors(checks)) {
       this.cb.onToast(`Export blocked: ${blockingCheck.message}`);
@@ -9774,7 +9779,15 @@ export class Engine {
       // separately) via extraZipFiles, so the user gets one .zip with everything.
       const exportOptions = { ...options };
       let extraZipFiles = createProductionFiles(exportOptions, {
-        seed: this.params.seed, boardSize: this.boardSize, heightScale: this.params.heightScale,
+        seed: this.params.seed,
+        boardSize: this.boardSize,
+        heightScale: this.params.heightScale,
+        seaLevel: this.params.seaLevel,
+        worldMode: this.worldMode,
+        projectMode: this.projectMode,
+        tileAssemblyShape: this.tileAssemblyShape,
+        tiles: this.tiles.map((tile) => ({ ...tile })),
+        projectPayload: this.createProjectPayload(),
       });
       let tileWaterMaskFiles = null;
       if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask
