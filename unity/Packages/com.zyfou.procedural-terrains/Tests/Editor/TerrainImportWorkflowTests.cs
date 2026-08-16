@@ -58,6 +58,8 @@ namespace Zyfou.ProceduralTerrains.EditorTests
             Assert.That(terrain.terrainData.size, Is.EqualTo(new Vector3(1000f, 560f, 1000f)));
             Assert.That(terrain.terrainData.GetHeights(0, 0, 1, 1)[0, 0], Is.EqualTo(1f).Within(0.0001f));
             Assert.That(terrain.materialTemplate, Is.Not.Null);
+            Assert.That(terrain.materialTemplate.shader.name, Does.Contain("Terrain"));
+            Assert.That(terrain.materialTemplate.enableInstancing, Is.True);
             Assert.That(terrain.terrainData.terrainLayers, Has.Length.EqualTo(1));
             Assert.That(terrain.terrainData.terrainLayers[0].diffuseTexture, Is.Not.Null);
             Assert.That(result.CreatedAssetPaths, Has.Count.EqualTo(3));

@@ -69,10 +69,10 @@ namespace Zyfou.ProceduralTerrains.Editor
             using (new EditorGUI.DisabledScope(!createInScene))
             {
                 createBakedMaterials = EditorGUILayout.ToggleLeft(
-                    "Create and assign baked Material assets",
+                    "Create and assign pipeline-compatible Terrain Material assets",
                     createBakedMaterials);
                 createTerrainLayers = EditorGUILayout.ToggleLeft(
-                    "Create a baked TerrainLayer fallback",
+                    "Create a baked TerrainLayer from exported textures",
                     createTerrainLayers);
             }
 

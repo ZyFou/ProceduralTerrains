@@ -15,8 +15,10 @@ with heightfields, colliders, baked surfaces, and connected tile neighbors.
 The importer extracts the archive into a unique folder below
 `Assets/ProceduralTerrains/Imports`, imports `project.ptrterrain`, creates one
 `TerrainData` and Terrain GameObject per tile, connects adjacent tiles, and
-creates baked Material and TerrainLayer assets from the exported color and
-normal maps. You can also drag an already imported `TerrainProjectAsset` into
+creates a pipeline-compatible Terrain Material and a baked TerrainLayer from
+the exported color and normal maps. The material uses the native Terrain shader
+for Built-in, URP, or HDRP; textures are assigned through the TerrainLayer. You
+can also drag an already imported `TerrainProjectAsset` into
 the window and rebuild its terrain hierarchy.
 
 The **Create** tab is intentionally marked as coming soon. Water, detailed

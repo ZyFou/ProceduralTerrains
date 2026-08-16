@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-alpha.1
+
+- Fixed broken Terrain rendering and instancing errors caused by assigning a generic Lit material.
+- Generated materials now use the native Terrain shader for the active Built-in, URP, or HDRP pipeline.
+- Baked color and normal textures remain assigned through a generated TerrainLayer.
+
 ## 0.2.0-alpha.0
 
 - Added a dockable ZIP import window under `Window > Procedural Terrains`.

@@ -95,7 +95,7 @@ namespace Zyfou.ProceduralTerrains.Editor
                             }
                             if (options.CreateBakedMaterials)
                             {
-                                material = CreateBakedMaterial(tileStem, textures.Color, textures.Normal);
+                                material = CreateTerrainMaterial(tileStem);
                                 if (material != null)
                                 {
                                     var materialPath = AssetDatabase.GenerateUniqueAssetPath(
@@ -105,7 +105,7 @@ namespace Zyfou.ProceduralTerrains.Editor
                                 }
                                 else
                                 {
-                                    warnings.Add($"Tile ({tile.Cx}, {tile.Cz}): no compatible Lit shader was found; the TerrainLayer remains active.");
+                                    warnings.Add($"Tile ({tile.Cx}, {tile.Cz}): no compatible Terrain Lit shader was found; Unity's default Terrain material will render the TerrainLayer.");
                                 }
                             }
                         }
@@ -277,65 +277,26 @@ namespace Zyfou.ProceduralTerrains.Editor
             };
         }
 
-        private static Material CreateBakedMaterial(string name, Texture2D color, Texture2D normal)
+        private static Material CreateTerrainMaterial(string name)
         {
-            var shader = FindLitShader();
+            var shader = FindTerrainShader();
             if (shader == null) return null;
-            var material = new Material(shader) { name = $"{name}_Baked" };
-            SetFirstTexture(material, color, "_BaseColorMap", "_BaseMap", "_MainTex");
-            SetFirstColor(material, Color.white, "_BaseColor", "_Color");
-            if (normal != null)
+            return new Material(shader)
             {
-                SetFirstTexture(material, normal, "_NormalMap", "_BumpMap");
-                material.EnableKeyword("_NORMALMAP");
-                material.EnableKeyword("_NORMALMAP_TANGENT_SPACE");
-            }
-            SetFirstFloat(material, 0f, "_Metallic");
-            SetFirstFloat(material, 0.2f, "_Smoothness", "_Glossiness");
-            return material;
+                name = $"{name}_Terrain",
+                enableInstancing = true,
+            };
         }
 
-        private static Shader FindLitShader()
+        private static Shader FindTerrainShader()
         {
             var renderPipelineName = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline?.GetType().Name ?? string.Empty;
             var preferred = renderPipelineName.IndexOf("HDRenderPipeline", StringComparison.OrdinalIgnoreCase) >= 0
-                ? new[] { "HDRP/Lit", "Universal Render Pipeline/Lit", "Standard" }
+                ? new[] { "HDRP/TerrainLit", "Universal Render Pipeline/Terrain/Lit", "Nature/Terrain/Standard" }
                 : renderPipelineName.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) >= 0
-                    ? new[] { "Universal Render Pipeline/Lit", "HDRP/Lit", "Standard" }
-                    : new[] { "Standard", "Universal Render Pipeline/Lit", "HDRP/Lit" };
+                    ? new[] { "Universal Render Pipeline/Terrain/Lit", "HDRP/TerrainLit", "Nature/Terrain/Standard" }
+                    : new[] { "Nature/Terrain/Standard", "Universal Render Pipeline/Terrain/Lit", "HDRP/TerrainLit" };
             return preferred.Select(Shader.Find).FirstOrDefault(shader => shader != null);
-        }
-
-        private static void SetFirstTexture(Material material, Texture texture, params string[] names)
-        {
-            foreach (var propertyName in names)
-            {
-                if (!material.HasProperty(propertyName)) continue;
-                material.SetTexture(propertyName, texture);
-                material.SetTextureScale(propertyName, Vector2.one);
-                material.SetTextureOffset(propertyName, Vector2.zero);
-                return;
-            }
-        }
-
-        private static void SetFirstColor(Material material, Color value, params string[] names)
-        {
-            foreach (var propertyName in names)
-            {
-                if (!material.HasProperty(propertyName)) continue;
-                material.SetColor(propertyName, value);
-                return;
-            }
-        }
-
-        private static void SetFirstFloat(Material material, float value, params string[] names)
-        {
-            foreach (var propertyName in names)
-            {
-                if (!material.HasProperty(propertyName)) continue;
-                material.SetFloat(propertyName, value);
-                return;
-            }
         }
 
         private static string CreateUniqueAssetFolder(string parent, string name)
