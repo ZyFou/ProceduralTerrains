@@ -28,10 +28,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { GITHUB_REPO_URL } from '../../constants/app.js';
+import { PLUGINS } from '../../config/plugins.js';
 
-const UNITY_PACKAGE_VERSION = '0.2.0-alpha.1';
+const UNITY_PLUGIN = PLUGINS.unity;
+const UNITY_PACKAGE_VERSION = UNITY_PLUGIN.currentVersion;
 const UNITY_VERSION = '6000.3';
-const DOWNLOAD_URL = `/downloads/plugins/procedural-terrains-unity-${UNITY_PACKAGE_VERSION}.zip`;
 const GIT_URL = `${GITHUB_REPO_URL}.git?path=/plugins/unity/Packages/com.zyfou.procedural-terrains`;
 
 const quickSteps = [
@@ -107,7 +108,7 @@ function StepList({ steps }) {
   );
 }
 
-export default function UnityPluginPage({ onOpenEditor }) {
+export default function UnityPluginPage({ onOpenEditor, onDownload }) {
   const scrollToSection = (sectionId) => {
     const section = document.getElementById(sectionId);
     if (!section) return;
@@ -126,9 +127,9 @@ export default function UnityPluginPage({ onOpenEditor }) {
             production-friendly Unity Terrain scene in a few clicks.
           </p>
           <div className="unity-hero-actions">
-            <a className="lp-primary" href={DOWNLOAD_URL} download>
+            <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}>
               <Download size={16} aria-hidden /> Download plugin
-            </a>
+            </button>
             <button type="button" className="lp-secondary" onClick={() => scrollToSection('unity-install')}>
               <MonitorDown size={16} aria-hidden /> Installation guide
             </button>
@@ -210,9 +211,9 @@ export default function UnityPluginPage({ onOpenEditor }) {
               { title: 'Add package from disk', body: 'Click the + menu, choose Add package from disk, then select package.json in the extracted folder.' },
               { title: 'Wait for compilation', body: 'Unity adds Procedural Terrains to In Project and compiles the Editor tools.' },
             ]} />
-            <a className="lp-primary unity-inline-download" href={DOWNLOAD_URL} download>
+            <button type="button" className="lp-primary unity-inline-download" onClick={() => onDownload(UNITY_PLUGIN)}>
               <Download size={15} aria-hidden /> Download v{UNITY_PACKAGE_VERSION}
-            </a>
+            </button>
           </div>
 
           <div className="unity-method-card">
@@ -365,7 +366,7 @@ export default function UnityPluginPage({ onOpenEditor }) {
           <p>Install the alpha importer, export a terrain, and keep building with native Unity tools.</p>
         </div>
         <div>
-          <a className="lp-primary" href={DOWNLOAD_URL} download><Download size={16} aria-hidden /> Download plugin</a>
+          <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}><Download size={16} aria-hidden /> Download plugin</button>
           <button type="button" className="lp-secondary" onClick={onOpenEditor}>Open terrain editor <ExternalLink size={15} aria-hidden /></button>
         </div>
       </section>

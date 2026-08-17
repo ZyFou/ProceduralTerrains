@@ -20,6 +20,21 @@ npm run dev
 
 The API listens on `http://localhost:6062`. MySQL must already contain the database and user configured in `.env`.
 
+If startup reports `auth_gssapi_client`, the configured MariaDB account is using
+GSSAPI authentication, which the Node `mysql2` driver does not implement. Use a
+password-authenticated account instead. For the existing account, run this from
+an administrator MariaDB client, replace the placeholder password, then put the
+same value in `DB_PASSWORD`:
+
+```sql
+ALTER USER 'terrain'@'127.0.0.1'
+  IDENTIFIED VIA mysql_native_password USING PASSWORD('replace-with-a-long-password');
+```
+
+Alternatively create a dedicated account with `CREATE USER ... IDENTIFIED BY ...`
+and grant it access to `procedural_terrains`. MariaDB documents `auth_gssapi_client`
+as a native Connector/C plugin; it is not available to `mysql2`.
+
 ## Linux deployment with PM2
 
 Install and configure MySQL directly on the Linux machine. The API uses a normal TCP connection to `127.0.0.1:3306`.
@@ -149,6 +164,7 @@ DELETE /api/v1/me/avatar
 PUT  /api/v1/me/password
 GET  /api/v1/users/:userId/avatar
 POST /api/v1/analytics/visit
+POST /api/v1/analytics/plugin-event
 GET  /api/v1/admin/overview
 GET  /api/v1/admin/users
 PATCH /api/v1/admin/users/:userId
@@ -192,7 +208,7 @@ All browser requests must use credentials so the `HttpOnly` session cookie is se
 
 Set `ADMIN_EMAILS` to a short comma-separated list of exact account emails. These accounts are protected bootstrap administrators and cannot be demoted in the dashboard. Additional administrators can be promoted from the Users page after signing in with a bootstrap administrator.
 
-Run `npm run migrate` before starting the updated API. Migration `0006_admin_dashboard.sql` adds roles, visit analytics, security events, and immutable administrator audit records.
+Run `npm run migrate` before starting the updated API. Migration `0006_admin_dashboard.sql` adds roles, visit analytics, security events, and immutable administrator audit records. Migration `0007_plugin_events.sql` adds privacy-safe plugin download/support events.
 
 The dashboard never returns terrain document contents. It exposes terrain metadata only. Visit and security records store a monthly rotating HMAC of the network address rather than the raw address. Set a private, random `PRIVACY_HASH_SECRET` with at least 32 characters in production.
 

@@ -58,15 +58,23 @@ try {
 
   for (const name of files) {
     const sql = await readFile(join(migrationsDirectory, name), 'utf8');
-    const checksum = createHash('sha256').update(sql).digest('hex');
+    // Migrations are often checked out on Windows (CRLF) and applied on Linux
+    // (LF), or vice versa. SQL is unchanged by that conversion, so checksum
+    // the canonical LF form while accepting the old raw checksum for databases
+    // that were initialized by an earlier runner version.
+    const canonicalSql = sql.replace(/\r\n/g, '\n');
+    const checksum = createHash('sha256').update(canonicalSql).digest('hex');
+    const legacyChecksum = createHash('sha256').update(sql).digest('hex');
     const [rows] = await connection.execute('SELECT checksum FROM schema_migrations WHERE name = ?', [name]);
     if (rows[0]) {
-      if (rows[0].checksum !== checksum) throw new Error(`Applied migration ${name} has been modified`);
+      if (rows[0].checksum !== checksum && rows[0].checksum !== legacyChecksum) {
+        throw new Error(`Applied migration ${name} has been modified`);
+      }
       console.log(`skip  ${name}`);
       continue;
     }
     console.log(`apply ${name}`);
-    await connection.query(sql);
+    await connection.query(canonicalSql);
     await connection.execute('INSERT INTO schema_migrations (name, checksum) VALUES (?, ?)', [name, checksum]);
   }
 

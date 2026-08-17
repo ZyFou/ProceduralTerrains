@@ -4,6 +4,7 @@
 - Source visual truth (Unity): `C:\Users\G11D8~1.BON\AppData\Local\Temp\codex-clipboard-f301042e-ef41-4e19-92c6-be41ede94cf6.png`
 - Unity implementation: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\plugins-unity-import-anchor-fixed.png`
 - Blender implementation: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\plugins-blender-anchor-fixed.png`
+- Blender hover implementation: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\plugins-blender-hover-orange-fixed.png`
 - Mobile implementation: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\plugins-blender-mobile-anchor-fixed.png`
 - Combined comparison: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\plugins-anchor-design-comparison.png`
 - Viewports: 1280 × 720 CSS px desktop and 390 × 844 CSS px mobile at 1× density
@@ -18,6 +19,7 @@ The comparison focuses on the two requested regressions while retaining the site
 
 - Unity import anchor: the sticky tab header ends at y=129 px and the section aside starts at y=236.38 px, leaving 107.38 px of visible clearance. The title icon starts 2 px below the heading top, so the icon and copy read as one horizontal heading.
 - Blender build anchor: the sticky tab header ends at y=129 px and the section aside starts at y=235.97 px, leaving 106.97 px of visible clearance. The icon-to-heading offset is 2 px.
+- Blender primary-button hover: the focused implementation capture shows the download CTA retaining the Blender orange treatment while becoming darker on hover, matching Unity's interaction logic. Browser-computed hover values are `rgb(184, 90, 34)` for both background and border, with an orange shadow; all three Blender primary buttons use the same verified selector.
 - Mobile Blender install anchor: the tab header ends at y=122 px and the target section begins at y=144.06 px. The heading icon remains inline with a 2 px optical offset and the page has no horizontal overflow.
 
 ## Required fidelity surfaces
@@ -33,6 +35,7 @@ The comparison focuses on the two requested regressions while retaining the site
 - Confirmed Unity and Blender quick links scroll to the intended sections without placing the heading under the sticky engine tabs.
 - Confirmed desktop and 390 px mobile layouts have no horizontal overflow.
 - Confirmed the Unity/Blender tab switch still works after anchor navigation.
+- Confirmed all three Blender primary buttons resolve to orange hover styling; the hero, inline installation, and final CTA buttons were each tested in the browser.
 - Browser console warnings/errors: none.
 - Production build: passed; only the existing chunk-size advisory remains.
 
@@ -40,6 +43,7 @@ The comparison focuses on the two requested regressions while retaining the site
 
 1. Source screenshots showed a P2 anchor-offset issue: target headings could settle beneath the sticky engine tabs, hiding the section icon. A shared 88 px sticky clearance now drives both `scroll-margin-top` and the desktop sticky aside offset. Post-fix measurements leave more than 106 px between the tab edge and the anchored aside on both desktop engine pages.
 2. Source screenshots showed a P2 hierarchy issue: the section icon sat above the title. Each documentation heading now uses a two-column icon/text grid. Post-fix screenshots show a consistent 2 px optical vertical offset on Unity, Blender, and mobile.
+3. A later interaction pass found a P2 cascade issue: the shared blue `.lp-primary:hover:not(:disabled)` rule appeared after the Blender override and won at equal specificity. The Blender selector now includes `:not(:disabled)` and adds an orange hover shadow. A follow-up corrected the interaction direction to match Unity: the orange changes from `rgb(211, 107, 41)` to the darker `rgb(184, 90, 34)` instead of becoming brighter. Post-fix browser checks show all three primary buttons using the intended darker orange hover, with no console warnings or errors.
 
 ## Findings
 

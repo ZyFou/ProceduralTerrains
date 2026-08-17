@@ -6,6 +6,7 @@ const DELETE_BATCH_SIZE = 5_000;
 const RETENTION_QUERIES = Object.freeze([
   'DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP(3) LIMIT 5000',
   'DELETE FROM visit_events WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 90 DAY LIMIT 5000',
+  'DELETE FROM plugin_events WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 90 DAY LIMIT 5000',
   'DELETE FROM security_events WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 180 DAY LIMIT 5000',
   'DELETE FROM admin_audit_logs WHERE created_at < UTC_TIMESTAMP(3) - INTERVAL 1 YEAR LIMIT 5000',
 ]);

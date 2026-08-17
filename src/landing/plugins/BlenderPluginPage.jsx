@@ -25,10 +25,11 @@ import {
   Workflow,
   Zap,
 } from 'lucide-react';
+import { PLUGINS } from '../../config/plugins.js';
 
-const BLENDER_PACKAGE_VERSION = '0.2.0';
+const BLENDER_PLUGIN = PLUGINS.blender;
+const BLENDER_PACKAGE_VERSION = BLENDER_PLUGIN.currentVersion;
 const BLENDER_VERSION = '5.2';
-const DOWNLOAD_URL = `/downloads/plugins/procedural-terrains-blender-${BLENDER_PACKAGE_VERSION}.zip`;
 
 const quickSteps = [
   {
@@ -79,7 +80,7 @@ function StepList({ steps }) {
   );
 }
 
-export default function BlenderPluginPage({ onOpenEditor }) {
+export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
   const scrollToSection = (sectionId) => {
     const section = document.getElementById(sectionId);
     if (!section) return;
@@ -98,9 +99,9 @@ export default function BlenderPluginPage({ onOpenEditor }) {
             Blender meshes with aligned tiles, UVs, packed textures, and project metadata.
           </p>
           <div className="unity-hero-actions">
-            <a className="lp-primary" href={DOWNLOAD_URL} download>
+            <button type="button" className="lp-primary" onClick={() => onDownload(BLENDER_PLUGIN)}>
               <Download size={16} aria-hidden /> Download plugin
-            </a>
+            </button>
             <button type="button" className="lp-secondary" onClick={() => scrollToSection('blender-install')}>
               <MonitorDown size={16} aria-hidden /> Installation guide
             </button>
@@ -190,9 +191,9 @@ export default function BlenderPluginPage({ onOpenEditor }) {
               { title: 'Choose Install from Disk', body: 'Open the extensions menu, select Install from Disk, then choose the downloaded ZIP.' },
               { title: 'Enable Procedural Terrains', body: 'If needed, enable the extension. Its tools appear in File > Import and the 3D View Terrain sidebar.' },
             ]} />
-            <a className="lp-primary unity-inline-download" href={DOWNLOAD_URL} download>
+            <button type="button" className="lp-primary unity-inline-download" onClick={() => onDownload(BLENDER_PLUGIN)}>
               <Download size={15} aria-hidden /> Download v{BLENDER_PACKAGE_VERSION}
-            </a>
+            </button>
           </div>
           <div className="unity-note">
             <CircleAlert size={17} aria-hidden />
@@ -329,7 +330,7 @@ export default function BlenderPluginPage({ onOpenEditor }) {
           <p>Install the importer, export a terrain, and continue with native Blender tools.</p>
         </div>
         <div>
-          <a className="lp-primary" href={DOWNLOAD_URL} download><Download size={16} aria-hidden /> Download plugin</a>
+          <button type="button" className="lp-primary" onClick={() => onDownload(BLENDER_PLUGIN)}><Download size={16} aria-hidden /> Download plugin</button>
           <button type="button" className="lp-secondary" onClick={onOpenEditor}>Open terrain editor <ExternalLink size={15} aria-hidden /></button>
         </div>
       </section>

@@ -525,7 +525,11 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   background: #d36b29;
   box-shadow: 0 9px 24px rgba(211, 107, 41, .2);
 }
-.blender-page .lp-primary:hover { border-color: #f09254; background: #df7936; }
+.blender-page .lp-primary:hover:not(:disabled) {
+  border-color: #b85a22;
+  background: #b85a22;
+  box-shadow: 0 10px 26px rgba(184, 90, 34, .28);
+}
 .blender-page .unity-hero-panel { border-color: rgba(239, 135, 67, .25); }
 .blender-page .unity-window-icon,
 .blender-page .unity-method-heading > span {
@@ -613,6 +617,133 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .unity-final-cta { margin: 58px 0; padding: 24px; }
   .unity-final-cta > div:last-child { align-items: stretch; flex-direction: column; width: 100%; }
   .unity-final-cta .lp-primary, .unity-final-cta .lp-secondary { width: 100%; }
+}
+
+/* ============ OPTIONAL SUPPORT DOWNLOAD PROMPT ============ */
+.support-download-backdrop {
+  position: fixed;
+  z-index: 16000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 3, 7, .76);
+  backdrop-filter: blur(9px);
+  animation: app-popup-fade .16s ease both;
+}
+.support-download-dialog {
+  width: min(560px, 100%);
+  max-height: min(780px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 15px;
+  outline: none;
+  background: #0e1118;
+  color: #dce1ec;
+  font-family: var(--font, Inter, sans-serif);
+  box-shadow: 0 34px 100px rgba(0, 0, 0, .68), inset 0 1px rgba(255, 255, 255, .045);
+  animation: app-popup-dialog-enter .24s cubic-bezier(.22, 1, .36, 1) both;
+}
+.support-download-header {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 30px;
+  gap: 12px;
+  align-items: start;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, .075);
+}
+.support-download-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(245, 158, 11, .3);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(245, 158, 11, .18), rgba(239, 68, 68, .08));
+  color: #ffbf68;
+}
+.support-download-header > div { display: grid; gap: 4px; min-width: 0; }
+.support-download-header > div > span { color: #e6ab5e; font: 650 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+.support-download-header h2 { margin: 0; color: #f5f7fc; font-size: 17px; font-weight: 680; letter-spacing: -.015em; line-height: 1.3; }
+.support-download-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #7f899b;
+  cursor: var(--cursor-pointer);
+}
+.support-download-close:hover { background: rgba(255, 255, 255, .07); color: #f2f5fb; }
+.support-download-close:focus-visible,
+.support-download-footer button:focus-visible,
+.support-kofi-fallback:focus-visible { outline: 2px solid #8cb5ff; outline-offset: 2px; }
+.support-download-body { overflow-y: auto; padding: 18px 22px 20px; }
+.support-download-message { display: grid; gap: 7px; }
+.support-download-message p { margin: 0; color: #9aa4b5; font-size: 12px; line-height: 1.55; }
+.support-download-message p:last-child { color: #c7cedb; }
+.support-kofi { display: grid; gap: 9px; margin-top: 17px; }
+.support-kofi-frame {
+  position: relative;
+  height: 208px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 10px;
+  background: #090b10;
+}
+.support-kofi-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: white; }
+.support-kofi-frame.is-error iframe { display: none; }
+.support-kofi-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #768195;
+  font-size: 10px;
+  pointer-events: none;
+  opacity: .9;
+}
+.support-kofi-frame.is-loaded .support-kofi-loading { display: none; }
+.support-kofi-loading svg { animation: support-kofi-spin 1.1s linear infinite; }
+.support-kofi-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(245, 158, 11, .25);
+  border-radius: 7px;
+  background: rgba(245, 158, 11, .07);
+  color: #f5b96d;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.support-kofi-fallback:hover { border-color: rgba(245, 158, 11, .5); background: rgba(245, 158, 11, .12); color: #ffd091; }
+.support-download-optional { margin: 14px 0 0; color: #737e91; font-size: 10px; line-height: 1.5; text-align: center; }
+.support-download-footer { display: flex; justify-content: flex-end; gap: 9px; padding: 13px 22px; border-top: 1px solid rgba(255, 255, 255, .075); background: rgba(255, 255, 255, .018); }
+.support-download-footer button { min-height: 37px; font-size: 11px; }
+.support-download-footer .support-download-skip { color: #aab3c1; }
+@keyframes support-kofi-spin { to { transform: rotate(360deg); } }
+@media (max-width: 620px) {
+  .support-download-backdrop { align-items: end; padding: 10px; }
+  .support-download-dialog { max-height: calc(100vh - 20px); }
+  .support-download-header { padding: 16px; }
+  .support-download-body { padding: 16px; }
+  .support-download-footer { align-items: stretch; flex-direction: column-reverse; padding: 12px 16px; }
+  .support-download-footer button { width: 100%; }
+  .support-kofi-frame { height: 190px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .support-download-backdrop, .support-download-dialog, .support-kofi-loading svg { animation: none; }
 }
 
 /* ============ ADMIN DASHBOARD ============ */

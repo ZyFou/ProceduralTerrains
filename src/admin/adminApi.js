@@ -18,4 +18,8 @@ export const adminApi = {
   audit: (params) => apiRequest(`/admin/audit${queryString(params)}`),
   security: () => apiRequest('/admin/security'),
   trackVisit: (path) => apiRequest('/analytics/visit', { method: 'POST', body: { path } }),
+  trackPluginEvent: (eventName, payload) => apiRequest('/analytics/plugin-event', {
+    method: 'POST',
+    body: { eventName, ...payload },
+  }),
 };

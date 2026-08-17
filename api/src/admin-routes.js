@@ -8,6 +8,14 @@ const noStore = (reply) => reply.header('Cache-Control', 'no-store');
 const isBootstrapAdmin = (email) => config.adminEmails.includes(String(email ?? '').toLowerCase());
 const effectiveRole = (row) => row.role === 'admin' || isBootstrapAdmin(row.email) ? 'admin' : 'user';
 const deviceType = (agent) => /tablet|ipad/i.test(agent ?? '') ? 'Tablet' : /mobile|android|iphone/i.test(agent ?? '') ? 'Mobile' : 'Desktop';
+const PLUGIN_EVENT_NAMES = new Set([
+  'plugin_download_clicked',
+  'support_modal_opened',
+  'support_modal_skipped',
+  'support_kofi_clicked',
+  'plugin_download_started',
+]);
+const PLUGIN_IDS = new Set(['unity', 'blender', 'three', 'threejs', 'godot', 'unreal']);
 const jsonValue = (value) => {
   if (!value || typeof value === 'object') return value ?? null;
   try { return JSON.parse(value); } catch { return null; }
@@ -50,6 +58,24 @@ export async function registerAdminRoutes(app) {
       `INSERT INTO visit_events (user_id, ip_hash, path, referrer_host, user_agent)
        VALUES (?, ?, ?, ?, ?)`,
       [sessionUser?.id ?? null, requestIpHash(request), path, referrerHost, requestUserAgent(request)],
+    );
+    return reply.code(204).send();
+  });
+
+  app.post('/api/v1/analytics/plugin-event', {
+    config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const eventName = String(request.body?.eventName ?? '').trim();
+    const plugin = String(request.body?.plugin ?? '').trim().toLowerCase();
+    const version = String(request.body?.version ?? '').trim();
+    if (!PLUGIN_EVENT_NAMES.has(eventName) || !PLUGIN_IDS.has(plugin) || !version) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid plugin analytics event.' } });
+    }
+
+    await db.execute(
+      `INSERT INTO plugin_events (ip_hash, event_name, plugin, version)
+       VALUES (?, ?, ?, ?)`,
+      [requestIpHash(request), eventName.slice(0, 48), plugin.slice(0, 32), version.slice(0, 64)],
     );
     return reply.code(204).send();
   });

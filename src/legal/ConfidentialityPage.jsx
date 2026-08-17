@@ -27,7 +27,7 @@ export default function ConfidentialityPage({ onBack }) {
         <section>
           <h2>Information we process</h2>
           <p>We process the information needed to provide the service: your email address, username, profile settings, password hash, active sessions, and terrains you choose to sync. Passwords are never stored in readable form.</p>
-          <p>For reliability, security, and product analytics, we record page paths, visit time, referral host, limited browser/device information, authentication outcomes, and a rotating one-way network identifier. The service does not store raw IP addresses in analytics or security logs.</p>
+          <p>For reliability, security, and product analytics, we record page paths, visit time, referral host, plugin download/support events, limited browser/device information, authentication outcomes, and a rotating one-way network identifier. The service does not store raw IP addresses in analytics or security logs.</p>
         </section>
         <section>
           <h2>How information is used</h2>
@@ -41,6 +41,7 @@ export default function ConfidentialityPage({ onBack }) {
           <h2>Retention</h2>
           <div className="confidentiality-retention">
             <span><Database size={14} /><strong>Visit analytics</strong> deleted after 90 days</span>
+            <span><Database size={14} /><strong>Plugin events</strong> deleted after 90 days</span>
             <span><Database size={14} /><strong>Security events</strong> deleted after 180 days</span>
             <span><Database size={14} /><strong>Admin audit events</strong> deleted after 1 year</span>
           </div>

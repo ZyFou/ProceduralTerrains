@@ -3,7 +3,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { config } from './config.js';
-import { closeDatabase, db } from './db.js';
+import { closeDatabase, db, explainDatabaseStartupError } from './db.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerProjectRoutes } from './project-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
@@ -60,7 +60,15 @@ app.get('/api/v1/health', async () => {
 await registerAuthRoutes(app);
 await registerProjectRoutes(app);
 await registerAdminRoutes(app);
-const stopRetentionScheduler = await startRetentionScheduler({ database: db, logger: app.log });
+let stopRetentionScheduler = () => {};
+try {
+  stopRetentionScheduler = await startRetentionScheduler({ database: db, logger: app.log });
+} catch (error) {
+  const startupError = explainDatabaseStartupError(error);
+  app.log.error({ err: startupError }, startupError.message);
+  await closeDatabase();
+  process.exit(1);
+}
 app.addHook('onClose', async () => stopRetentionScheduler());
 
 app.setNotFoundHandler((request, reply) => {
