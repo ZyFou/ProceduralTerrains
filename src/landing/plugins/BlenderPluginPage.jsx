@@ -95,8 +95,8 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
           <div className="unity-eyebrow"><Boxes size={14} aria-hidden /> Blender integration</div>
           <h1 id="blender-plugin-title">Your terrains, <em>native in Blender.</em></h1>
           <p>
-            Turn Procedural Terrains exports into editable, production-friendly
-            Blender meshes with aligned tiles, UVs, packed textures, and project metadata.
+            Generate editor-compatible terrain directly in Blender, or turn exports
+            into editable meshes with aligned tiles, UVs, packed textures, and metadata.
           </p>
           <div className="unity-hero-actions">
             <button type="button" className="lp-primary" onClick={() => onDownload(BLENDER_PLUGIN)}>
@@ -147,14 +147,14 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
       <div className="unity-compatibility" aria-label="Plugin compatibility">
         <span><strong>Blender {BLENDER_VERSION}+</strong><small>Manifest-based extension</small></span>
         <span><strong>Eevee · Cycles</strong><small>Principled baked materials</small></span>
-        <span><strong>ZIP + .ptrterrain</strong><small>Validated native imports</small></span>
+        <span><strong>Create + Import</strong><small>Noise Stack and validated packages</small></span>
       </div>
 
       <section className="unity-section unity-quickstart" aria-labelledby="blender-quickstart-title">
         <div className="unity-section-heading">
           <span>Quick start</span>
-          <h2 id="blender-quickstart-title">From terrain editor to editable geometry</h2>
-          <p>Three steps, with tile placement, UV alignment, and material setup handled for you.</p>
+          <h2 id="blender-quickstart-title">Create terrain or continue an exported world</h2>
+          <p>Native generation and package import both produce editable Blender geometry.</p>
         </div>
         <div className="unity-step-grid">
           {quickSteps.map(({ icon: Icon, ...step }) => (
@@ -186,7 +186,7 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
               <div><strong>Install from Disk</strong><small>Blender 5.2</small></div>
             </div>
             <StepList steps={[
-              { title: 'Download the extension ZIP', body: 'Do not extract procedural-terrains-blender-0.2.0.zip.' },
+              { title: 'Download the extension ZIP', body: `Do not extract procedural-terrains-blender-${BLENDER_PACKAGE_VERSION}.zip.` },
               { title: 'Open Blender Preferences', body: 'Go to Edit > Preferences > Get Extensions.' },
               { title: 'Choose Install from Disk', body: 'Open the extensions menu, select Install from Disk, then choose the downloaded ZIP.' },
               { title: 'Enable Procedural Terrains', body: 'If needed, enable the extension. Its tools appear in File > Import and the 3D View Terrain sidebar.' },
@@ -280,6 +280,8 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <h3>Available now</h3>
             <ul>
               <li>Secure ZIP and .ptrterrain validation</li>
+              <li>Native seeded Noise Stack terrain generation</li>
+              <li>Custom dimensions and origin/cursor placement</li>
               <li>Tiled editable mesh reconstruction</li>
               <li>Aligned UVs and baked normal materials</li>
               <li>Packed images and source custom properties</li>
@@ -289,10 +291,10 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <span className="unity-scope-icon upcoming"><Sparkles size={20} aria-hidden /></span>
             <h3>Planned next</h3>
             <ul>
-              <li>Procedural generation inside Blender</li>
               <li>Detailed biome shader reconstruction</li>
               <li>Water, props, and spline objects</li>
               <li>Non-destructive reimport workflows</li>
+              <li>Node graph and erosion authoring</li>
             </ul>
           </div>
         </div>
@@ -307,6 +309,10 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
           <details>
             <summary>Can I sculpt or modify the imported terrain?<ChevronRight size={16} aria-hidden /></summary>
             <p>Yes. Every tile is a standard Blender mesh, so sculpting, modifiers, Geometry Nodes, material edits, and regular mesh operations remain available.</p>
+          </details>
+          <details>
+            <summary>Can I create terrain without exporting first?<ChevronRight size={16} aria-hidden /></summary>
+            <p>Yes. The Create workflow includes seeded presets and an advanced editable Noise Stack, tiled dimensions, regeneration, and a Blender-native height/slope preview material.</p>
           </details>
           <details>
             <summary>Why does Automatic use 513 × 513 vertices?<ChevronRight size={16} aria-hidden /></summary>

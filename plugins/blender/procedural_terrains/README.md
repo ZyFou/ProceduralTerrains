@@ -1,50 +1,70 @@
 # Procedural Terrains for Blender 5.2
 
-This alpha extension imports validated Procedural Terrains ZIP exports and
-renderer-neutral `.ptrterrain` documents. It builds a collection of native,
-editable Blender mesh objects from the authoritative RAW heightfields, creates
-UVs, applies baked color and tangent-space normal textures, and stores project
-and tile metadata as custom properties.
+Version 0.3.3 creates editable procedural terrain directly in Blender and
+imports validated Procedural Terrains ZIP/`.ptrterrain` exports. Both workflows
+produce ordinary Blender mesh objects with UVs and source metadata.
 
 ## Install
 
-1. In Blender 5.2, open **Edit > Preferences > Get Extensions**.
-2. Open the menu and choose **Install from Disk**.
-3. Select `procedural-terrains-blender-0.2.0.zip`.
-4. Enable **Procedural Terrains** if Blender does not enable it automatically.
+1. Open **Edit > Preferences > Get Extensions** in Blender 5.2.
+2. Open the extensions menu and choose **Install from Disk**.
+3. Select `procedural-terrains-blender-0.3.3.zip` and enable the extension.
+4. Open **3D View > Sidebar > Terrain**.
 
-## Import
+## Create terrain
 
-1. In Procedural Terrains, select the **Blender Scene** production preset and
-   export the ZIP.
-2. In Blender, choose **File > Import > Procedural Terrains
-   (.zip/.ptrterrain)**, or use **3D View > Sidebar > Terrain**.
-3. Select the exported ZIP and choose the desired editable mesh resolution.
-4. Click **Import Procedural Terrain**.
+Choose **Create**, select a terrain preset, seed, dimensions, tile grid, and
+mesh resolution, then click **Generate Terrain**. The default is a 1000 × 1000
+× 560 m Highlands terrain with a 257 × 257 grid.
 
-The default Automatic setting uses at most 513 x 513 vertices per tile while
-sampling the complete source height range. Use Full source resolution only
-when the extra density is intentional; a 4097 grid contains more than 16
-million vertices per tile.
+Advanced Noise Stack controls expose the editor's 13 layer types, blend modes,
+height/noise/slope/biome masks, normalization, smoothing, climate controls, and
+all current stack presets. Generated tiles share global sample coordinates, so
+their border vertices remain identical.
+
+Generated collections store their complete recipe. Select a generated tile,
+click **Load Selected**, edit the settings, and use **Regenerate Selected**.
+Only generated tile objects are replaced; unrelated objects in the collection
+are retained. All creation and regeneration operators support Blender undo.
+
+The preview surface is a Blender-native height/slope material. Geometry matches
+the Procedural Terrains CPU generation model; exact editor surface appearance is
+available by importing baked color and normal textures.
+
+## Import terrain
+
+1. Export with the **Blender Scene** production preset.
+2. In Blender, choose **File > Import > Procedural Terrains**, or choose
+   **Import** in the Terrain sidebar.
+3. Select the ZIP or `project.ptrterrain` document.
+4. Keep **Source Dimensions**, or choose **Custom Dimensions** and enter the
+   target total width and depth. Vertical Scale controls elevation separately.
+5. Choose World Origin or 3D Cursor placement and click **Import and Build**.
+
+Imports are centered as one assembly at the selected placement. The source
+minimum elevation maps to the placement Z. Original and effective dimensions
+are retained as collection/object custom properties.
+
+Automatic mesh detail uses at most 513 × 513 vertices per tile. Full source
+resolution should be intentional: a 4097 grid contains more than 16 million
+vertices for one tile. ZIP texture images are always packed before temporary
+extraction data is removed.
 
 ## Coordinate mapping
 
-The interchange document is Y-up. The add-on applies the right-handed mapping
-`source (X, Y, Z) -> Blender (X, -Z, Y)`. Tile centers, heights, UVs, and normal
-maps all use this mapping consistently. Units remain meters.
+Runtime documents are Y-up. Import applies the right-handed mapping
+`source (X, Y, Z) -> Blender (X, -Z, Y)`. Units remain meters. Native generated
+terrain uses Blender X/Y horizontally and Z for elevation.
 
-## Alpha scope
+## Parity boundary
 
-Available now:
+Native creation covers procedural Noise Stack terrain geometry. Node graphs,
+manual sculpt/paint documents, erosion fields, detailed biome surfaces, water,
+props, and splines remain authoritative baked-import features. Unsupported
+scene features are preserved in metadata and reported as import warnings.
 
-- ZIP and `.ptrterrain` schema validation
-- safe, bounded ZIP extraction
-- one editable mesh object per heightfield tile
-- baked color and normal materials
-- packed ZIP texture images
-- project, feature, splat, and generation metadata as custom properties
-- undo for completed imports
+## Performance
 
-Water, props, splines, procedural generation inside Blender, and detailed
-biome reconstruction remain deferred. They are reported as warnings and the
-baked terrain remains authoritative.
+The sidebar reports the estimated vertex count, warns above one million, and
+blocks generation above sixteen million vertices. Start with 129 or 257 while
+designing, then regenerate at 513 or 1025 only when the added density is useful.

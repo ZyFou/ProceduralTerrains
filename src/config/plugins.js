@@ -11,8 +11,8 @@ export const PLUGINS = Object.freeze({
   blender: Object.freeze({
     id: 'blender',
     name: 'Blender',
-    currentVersion: '0.2.0',
-    downloadUrl: '/downloads/plugins/procedural-terrains-blender-0.2.0.zip',
+    currentVersion: '0.3.3',
+    downloadUrl: '/downloads/plugins/procedural-terrains-blender-0.3.3.zip',
     license: 'GPL-3.0-or-later',
     releaseLabel: 'Alpha release',
     supportMessage: 'Maintaining the Blender integration and compatibility with new Blender releases takes ongoing development work.',

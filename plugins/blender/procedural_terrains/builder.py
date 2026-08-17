@@ -12,6 +12,7 @@ from typing import Any
 import bpy
 
 from .heightfield import HeightfieldError, loop_uvs, quad_faces, read_raw_heightfield, vertices
+from .transforms import ImportTransform, import_transform
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,11 @@ class BuildOptions:
     smooth_shading: bool = True
     pack_images: bool = True
     select_imported: bool = True
+    dimension_mode: str = "SOURCE"
+    target_width: float = 1000.0
+    target_depth: float = 1000.0
+    vertical_scale: float = 1.0
+    placement: str = "ORIGIN"
 
 
 @dataclass(frozen=True)
@@ -144,6 +150,7 @@ def _create_mesh_object(
     tracked_objects: list[Any],
     tracked_materials: list[Any],
     tracked_images: list[Any],
+    transform: ImportTransform,
 ):
     descriptor = tile["heightfield"]
     raw_path = _artifact_path(root, descriptor["path"])
@@ -151,8 +158,12 @@ def _create_mesh_object(
     name = f"Terrain_{tile['cx']}_{tile['cz']}"
     mesh = bpy.data.meshes.new(name)
     tracked_meshes.append(mesh)
+    transformed_vertices = (
+        (x * transform.scale_x, y * transform.scale_y, z * transform.scale_z)
+        for x, y, z in vertices(grid, tile["size"], descriptor["minHeight"], descriptor["maxHeight"])
+    )
     mesh.from_pydata(
-        list(vertices(grid, tile["size"], descriptor["minHeight"], descriptor["maxHeight"])),
+        list(transformed_vertices),
         [],
         list(quad_faces(grid.resolution)),
     )
@@ -171,10 +182,8 @@ def _create_mesh_object(
     obj = bpy.data.objects.new(name, mesh)
     tracked_objects.append(obj)
     collection.objects.link(obj)
-    obj.location = (
-        float(tile["centerX"]),
-        -float(tile["centerZ"]),
-        float(descriptor["minHeight"]),
+    obj.location = transform.point(
+        float(tile["centerX"]), float(tile["centerZ"]), float(descriptor["minHeight"])
     )
     obj["ptr_tile_cx"] = tile["cx"]
     obj["ptr_tile_cz"] = tile["cz"]
@@ -186,6 +195,9 @@ def _create_mesh_object(
     obj["ptr_mesh_resolution"] = grid.resolution
     obj["ptr_min_height_m"] = descriptor["minHeight"]
     obj["ptr_max_height_m"] = descriptor["maxHeight"]
+    obj["ptr_effective_tile_size_x_m"] = float(tile["size"]) * transform.scale_x
+    obj["ptr_effective_tile_size_y_m"] = float(tile["size"]) * transform.scale_y
+    obj["ptr_vertical_scale"] = transform.scale_z
     if tile.get("splat"):
         obj["ptr_splat_json"] = json.dumps(tile["splat"], separators=(",", ":"), sort_keys=True)
 
@@ -198,7 +210,9 @@ def _create_mesh_object(
     return obj
 
 
-def _set_collection_metadata(collection, document: dict[str, Any], source_path: str) -> None:
+def _set_collection_metadata(
+    collection, document: dict[str, Any], source_path: str, transform: ImportTransform
+) -> None:
     producer = document["producer"]
     project = document["project"]
     collection["ptr_format"] = document["format"]
@@ -210,6 +224,15 @@ def _set_collection_metadata(collection, document: dict[str, Any], source_path: 
     collection["ptr_seed"] = project["seed"]
     collection["ptr_source_path"] = source_path
     collection["ptr_coordinates"] = "source (X,Y,Z) -> Blender (X,-Z,Y)"
+    collection["ptr_effective_width_m"] = transform.effective_width
+    collection["ptr_effective_depth_m"] = transform.effective_depth
+    collection["ptr_effective_height_m"] = transform.effective_height
+    collection["ptr_scale_x"] = transform.scale_x
+    collection["ptr_scale_y"] = transform.scale_y
+    collection["ptr_scale_z"] = transform.scale_z
+    collection["ptr_placement_json"] = json.dumps(
+        [transform.target_x, transform.target_y, transform.target_z], separators=(",", ":")
+    )
     collection["ptr_bounds_json"] = json.dumps(document["bounds"], separators=(",", ":"), sort_keys=True)
     collection["ptr_features_json"] = json.dumps(document["features"], separators=(",", ":"), sort_keys=True)
     collection["ptr_unsupported_features_json"] = json.dumps(document.get("unsupportedFeatures", []))
@@ -242,6 +265,18 @@ def build_project(
     options: BuildOptions,
 ) -> BuildResult:
     warnings = _validate_artifacts(document, document_root)
+    target = (0.0, 0.0, 0.0)
+    if options.placement == "CURSOR":
+        cursor = context.scene.cursor.location
+        target = (float(cursor.x), float(cursor.y), float(cursor.z))
+    transform = import_transform(
+        document,
+        options.dimension_mode,
+        options.target_width,
+        options.target_depth,
+        options.vertical_scale,
+        target,
+    )
     collection = None
     objects: list[Any] = []
     meshes: list[Any] = []
@@ -251,7 +286,7 @@ def build_project(
         project_name = _safe_name(Path(source_path).stem)
         collection = bpy.data.collections.new(f"Procedural Terrain - {project_name}")
         context.scene.collection.children.link(collection)
-        _set_collection_metadata(collection, document, source_path)
+        _set_collection_metadata(collection, document, source_path, transform)
         window_manager = context.window_manager
         window_manager.progress_begin(0, len(document["tiles"]))
         try:
@@ -265,6 +300,7 @@ def build_project(
                     objects,
                     materials,
                     images,
+                    transform,
                 )
                 window_manager.progress_update(index + 1)
         finally:

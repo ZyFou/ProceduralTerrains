@@ -1,10 +1,10 @@
 bl_info = {
     "name": "Procedural Terrains",
     "author": "ZyFou",
-    "version": (0, 2, 0),
+    "version": (0, 3, 3),
     "blender": (5, 2, 0),
     "location": "File > Import; 3D View > Sidebar > Terrain",
-    "description": "Import validated Procedural Terrains ZIP and .ptrterrain packages",
+    "description": "Generate native terrain or import validated ZIP and .ptrterrain packages",
     "category": "Import-Export",
 }
 
@@ -25,8 +25,21 @@ if bpy is not None:
 def register():
     if bpy is None:
         return
-    register_operators()
-    register_ui()
+    try:
+        register_operators()
+        register_ui()
+    except Exception:
+        # Do not leave a half-registered extension that fails every subsequent
+        # reinstall with "already registered as a subclass".
+        try:
+            unregister_ui()
+        except Exception:
+            pass
+        try:
+            unregister_operators()
+        except Exception:
+            pass
+        raise
 
 
 def unregister():

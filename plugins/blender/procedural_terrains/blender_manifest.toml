@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "procedural_terrains"
-version = "0.2.0"
+version = "0.3.3"
 name = "Procedural Terrains"
-tagline = "Import validated Procedural Terrains packages as editable meshes"
+tagline = "Generate terrain and import packages as editable meshes"
 maintainer = "ZyFou"
 type = "add-on"
 tags = ["Import-Export", "Mesh"]
@@ -18,9 +18,12 @@ paths = [
   "__init__.py",
   "archive.py",
   "builder.py",
+  "generation.py",
+  "generation_builder.py",
   "heightfield.py",
   "operators.py",
   "runtime_document.py",
+  "transforms.py",
   "ui.py",
   "README.md",
   "LICENSE.txt",

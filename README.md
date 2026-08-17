@@ -123,7 +123,8 @@ little-endian unsigned 16-bit RAW vertex grids at 513, 1025, 2049, or 4097 sampl
 Extract the exported `Terrain` folder under a Unity project's `Assets` folder to import it with
 the local package in `plugins/unity/Packages/com.zyfou.procedural-terrains`. Blender 5.2 users can install
 the extension in `plugins/blender/procedural_terrains` and import the Blender preset ZIP from **File >
-Import > Procedural Terrains**. Other engine presets retain
+Import > Procedural Terrains**. Blender extension 0.3.3 can also create seeded,
+tiled Noise Stack terrain natively and resize/reposition imported assemblies. Other engine presets retain
 their import-oriented `terrain.json` and `README.txt` bundles. The checker blocks invalid asset
 selections and flags high-memory maps or missing water masks before the GPU bake begins.
 
