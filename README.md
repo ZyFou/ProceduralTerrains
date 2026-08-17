@@ -118,10 +118,12 @@ Full export (ZIP with optional contents):
 
 The Export panel includes a preflight **Production Check** and target presets for **Unity
 Terrain**, **Unreal Landscape**, **Godot Terrain3D**, **Blender Scene**, and **Three.js Viewer
-Assets**. Unity packages a deterministic `Terrain/project.ptrterrain` runtime document with
+Assets**. Unity and Blender package a deterministic `project.ptrterrain` runtime document with
 little-endian unsigned 16-bit RAW vertex grids at 513, 1025, 2049, or 4097 samples per side.
 Extract the exported `Terrain` folder under a Unity project's `Assets` folder to import it with
-the local package in `unity/Packages/com.zyfou.procedural-terrains`. Other engine presets retain
+the local package in `plugins/unity/Packages/com.zyfou.procedural-terrains`. Blender 5.2 users can install
+the extension in `plugins/blender/procedural_terrains` and import the Blender preset ZIP from **File >
+Import > Procedural Terrains**. Other engine presets retain
 their import-oriented `terrain.json` and `README.txt` bundles. The checker blocks invalid asset
 selections and flags high-memory maps or missing water masks before the GPU bake begins.
 

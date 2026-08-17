@@ -65,5 +65,9 @@ temp/
 .eslintcache
 .claude/
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 .codex-remote-attachments
 .playwright-cli

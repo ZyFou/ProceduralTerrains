@@ -34,6 +34,34 @@ describe('production export presets', () => {
     expect(files['Terrain/terrain_preset.json']).toBeUndefined();
   });
 
+  it('sets Blender importer defaults and creates its canonical runtime document', () => {
+    const options = applyExportPreset({}, 'blender');
+    expect(options).toMatchObject({
+      includeMesh: false,
+      exportHeightmap: true,
+      heightRes: '1025',
+      heightmapVertexGrid: true,
+      exportTileMode: 'separate',
+      heightmapRawPath: 'Blender/heightmap.raw',
+      runtimeDocumentPath: 'Blender/project.ptrterrain',
+    });
+    const files = createProductionFiles(options, {
+      seed: 9, boardSize: 800, heightScale: 420, seaLevel: 60,
+      worldMode: 'studio', projectMode: 'procedural', tileAssemblyShape: 'square',
+      tiles: [{ cx: 0, cz: 0 }],
+      projectPayload: {
+        editorMode: 'procedural', worldMode: 'studio',
+        params: { seed: 9, heightScale: 420, seaLevel: 60 },
+      },
+    });
+    const runtime = JSON.parse(new TextDecoder().decode(files['Blender/project.ptrterrain']));
+    expect(runtime).toMatchObject({
+      format: 'procedural-terrains', schemaVersion: 1,
+      project: { mode: 'procedural', world: 'studio', seed: 9 },
+    });
+    expect(files['Blender/terrain.json']).toBeUndefined();
+  });
+
   it('exports the complete unsigned editor seed range to Unity', () => {
     const options = applyExportPreset({}, 'unity');
     const files = createProductionFiles(options, {

@@ -7,30 +7,31 @@ export function validateExport(options = {}, context = {}) {
   const add = (status, message) => checks.push({ status, message });
   const texRes = Number(options.texRes) || 0;
   const meshRes = Number(options.meshRes) || 0;
-  const unityExport = options.exportPresetId === 'unity';
+  const runtimeTerrainExport = options.runtimeDocumentPath != null;
+  const targetLabel = options.exportPresetId === 'blender' ? 'Blender' : 'Unity';
   const heightRes = Number(options.heightRes) || 0;
 
-  if (unityExport && context.worldMode !== 'studio') {
-    add('error', 'Unity runtime document v1 supports Tile mode only.');
+  if (runtimeTerrainExport && context.worldMode !== 'studio') {
+    add('error', `${targetLabel} runtime document v1 supports Tile mode only.`);
   } else if (context.worldMode === 'planet' && options.exportPresetId && options.exportPresetId !== 'custom') {
     add('warning', 'Engine presets currently package studio terrain exports; planet export keeps its native layout.');
   }
-  if (unityExport && context.tileAssemblyShape === 'circle') {
-    add('error', 'Unity runtime document v1 supports square tile assemblies only.');
+  if (runtimeTerrainExport && context.tileAssemblyShape === 'circle') {
+    add('error', `${targetLabel} runtime document v1 supports square tile assemblies only.`);
   }
-  if (unityExport && (context.tiles?.length ?? 1) > 1 && options.exportTileMode !== 'separate') {
-    add('error', 'Unity multi-tile exports require Separate tiles.');
+  if (runtimeTerrainExport && (context.tiles?.length ?? 1) > 1 && options.exportTileMode !== 'separate') {
+    add('error', `${targetLabel} multi-tile exports require Separate tiles.`);
   }
-  if (unityExport && !options.exportHeightmap) {
-    add('error', 'Unity runtime document v1 requires a RAW heightfield for every tile.');
+  if (runtimeTerrainExport && !options.exportHeightmap) {
+    add('error', `${targetLabel} runtime document v1 requires a RAW heightfield for every tile.`);
   }
   if (!(Number(context.boardSize) > 0)) add('error', 'Terrain scale is invalid.');
   else add('success', `Terrain scale valid (${Math.round(context.boardSize)} m board).`);
   if (!options.includeMesh && !options.exportHeightmap) add('error', 'Select a terrain mesh or a heightmap to export.');
-  if (unityExport && options.exportHeightmap && !UNITY_HEIGHTFIELD_RESOLUTIONS.includes(heightRes)) {
-    add('error', `Unity height grid must be ${UNITY_HEIGHTFIELD_RESOLUTIONS.join(', ')}.`);
-  } else if (unityExport && options.exportHeightmap) {
-    add(heightRes === 4097 ? 'warning' : 'success', `Unity height grid ${heightRes} × ${heightRes}${heightRes === 4097 ? ' can require substantial GPU memory.' : '.'}`);
+  if (runtimeTerrainExport && options.exportHeightmap && !UNITY_HEIGHTFIELD_RESOLUTIONS.includes(heightRes)) {
+    add('error', `${targetLabel} height grid must be ${UNITY_HEIGHTFIELD_RESOLUTIONS.join(', ')}.`);
+  } else if (runtimeTerrainExport && options.exportHeightmap) {
+    add(heightRes === 4097 ? 'warning' : 'success', `${targetLabel} height grid ${heightRes} × ${heightRes}${heightRes === 4097 ? ' can require substantial GPU memory.' : '.'}`);
   } else if (options.exportHeightmap && ![512, 1024, 2048, 4096].includes(texRes)) add('error', 'Heightmap resolution must be 512, 1024, 2048, or 4096.');
   else if (options.exportHeightmap) add('success', `Heightmap ${texRes} × ${texRes}.`);
   if (texRes > MAX_TEXTURE_RESOLUTION) add('error', 'Texture resolution exceeds the supported 4096 limit.');

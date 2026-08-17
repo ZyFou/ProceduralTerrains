@@ -1,0 +1,27 @@
+schema_version = "1.0.0"
+
+id = "procedural_terrains"
+version = "0.2.0"
+name = "Procedural Terrains"
+tagline = "Import validated Procedural Terrains packages as editable meshes"
+maintainer = "ZyFou"
+type = "add-on"
+tags = ["Import-Export", "Mesh"]
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Import terrain packages and load their baked texture maps"
+
+[build]
+paths = [
+  "__init__.py",
+  "archive.py",
+  "builder.py",
+  "heightfield.py",
+  "operators.py",
+  "runtime_document.py",
+  "ui.py",
+  "README.md",
+  "LICENSE.txt",
+]

@@ -274,7 +274,72 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .lp--unity .lp-content-scroll { gap: 0; padding-top: 0; }
 .lp--unity .lp-footer { width: 100%; }
 
-/* ============ UNITY PLUGIN PAGE ============ */
+/* ============ ENGINE PLUGINS ============ */
+.plugins-page-shell {
+  --plugin-sticky-clearance: 88px;
+  width: 100%;
+}
+.plugin-engine-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 66px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .09);
+  background: rgba(7, 9, 14, .9);
+  backdrop-filter: blur(18px);
+}
+.plugin-engine-tabs-label {
+  color: #667286;
+  font: 650 9px var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.plugin-engine-tabs > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .025);
+}
+.plugin-engine-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 126px;
+  height: 34px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 7px;
+  outline: none;
+  background: transparent;
+  color: #778296;
+  font: 650 11px var(--font);
+  cursor: var(--cursor-pointer);
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.plugin-engine-tabs button:hover { color: #c6cfdd; }
+.plugin-engine-tabs button:focus-visible { box-shadow: 0 0 0 2px rgba(91, 136, 237, .45); }
+.plugin-engine-tabs button.active.unity {
+  background: rgba(37, 99, 235, .17);
+  color: #a9c4ff;
+  box-shadow: inset 0 0 0 1px rgba(85, 132, 239, .24);
+}
+.plugin-engine-tabs button.active.blender {
+  background: rgba(234, 113, 38, .15);
+  color: #f1ad7a;
+  box-shadow: inset 0 0 0 1px rgba(238, 126, 56, .25);
+}
+.plugin-engine-panel { animation: lp-content-enter .4s cubic-bezier(.22, 1, .36, 1) both; }
+
+/* Shared Unity / Blender plugin documentation layout. */
 .unity-page {
   --unity-panel: rgba(13, 16, 23, .86);
   --unity-panel-raised: rgba(17, 21, 30, .94);
@@ -353,7 +418,7 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .unity-compatibility > span:last-child { border-right: 0; }
 .unity-compatibility strong { color: #e8edf6; font-size: 12px; }
 .unity-compatibility small { color: #6d7789; font-size: 9.5px; }
-.unity-section { padding: 88px 0; border-bottom: 1px solid var(--unity-line); scroll-margin-top: 72px; }
+.unity-section { padding: 88px 0; border-bottom: 1px solid var(--unity-line); scroll-margin-top: var(--plugin-sticky-clearance, 88px); }
 .unity-section-heading { max-width: 670px; }
 .unity-section-heading h2 { margin: 9px 0 0; color: #f6f8fc; font-size: clamp(28px, 3vw, 40px); line-height: 1.13; letter-spacing: -.035em; }
 .unity-section-heading p { margin: 12px 0 0; color: #818c9f; font-size: 13px; line-height: 1.6; }
@@ -367,8 +432,10 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .unity-step-card p { margin: 8px 0 0; color: #7f899b; font-size: 11.5px; line-height: 1.55; }
 .unity-step-link { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 20px; color: #8eb1ff; font-size: 10px; font-weight: 650; }
 .unity-doc-section { display: grid; grid-template-columns: minmax(210px, .65fr) minmax(0, 1.65fr); gap: clamp(42px, 8vw, 112px); }
-.unity-doc-aside { align-self: start; position: sticky; top: 30px; display: grid; justify-items: start; gap: 11px; }
-.unity-doc-aside > svg { margin-top: 12px; color: #81a9ff; }
+.unity-doc-aside { align-self: start; position: sticky; top: var(--plugin-sticky-clearance, 88px); display: grid; justify-items: start; gap: 14px; }
+.unity-doc-heading { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; width: 100%; }
+.unity-doc-heading > svg { margin-top: 2px; color: #81a9ff; }
+.unity-doc-heading > div { display: grid; gap: 7px; min-width: 0; }
 .unity-doc-index { color: #566176; font: 650 9px var(--mono); letter-spacing: .1em; }
 .unity-doc-aside h2 { margin: 0; color: #f1f4f9; font-size: 25px; letter-spacing: -.025em; }
 .unity-doc-aside p { max-width: 260px; margin: 0; color: #717c8e; font-size: 11.5px; line-height: 1.55; }
@@ -442,6 +509,79 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .unity-final-cta p { margin: 8px 0 0; color: #788497; font-size: 11px; }
 .unity-final-cta > div:last-child { display: flex; flex: none; gap: 9px; }
 
+/* Blender keeps the shared documentation rhythm but has its own warm accent. */
+.blender-page { --blender-accent: #ec7c36; }
+.blender-page .unity-eyebrow,
+.blender-page .unity-section-heading > span,
+.blender-page .unity-download-meta svg,
+.blender-page .unity-step-top,
+.blender-page .unity-step-link,
+.blender-page .unity-doc-heading > svg,
+.blender-page .unity-folder-tree svg,
+.blender-page .unity-final-cta > div:first-child > span { color: #f0a169; }
+.blender-page .unity-hero h1 em { color: var(--blender-accent); }
+.blender-page .lp-primary {
+  border-color: #e17833;
+  background: #d36b29;
+  box-shadow: 0 9px 24px rgba(211, 107, 41, .2);
+}
+.blender-page .lp-primary:hover { border-color: #f09254; background: #df7936; }
+.blender-page .unity-hero-panel { border-color: rgba(239, 135, 67, .25); }
+.blender-page .unity-window-icon,
+.blender-page .unity-method-heading > span {
+  border-color: rgba(236, 124, 54, .3);
+  background: rgba(236, 124, 54, .1);
+  color: #f1a26b;
+}
+.blender-page .unity-preview-button {
+  border-color: #e27b38;
+  background: #cf6726;
+  box-shadow: 0 8px 22px rgba(211, 107, 41, .2);
+}
+.blender-page .unity-step-card:hover { border-color: rgba(236, 137, 73, .4); }
+.blender-page .unity-step-card:focus-visible,
+.blender-page .unity-faq summary:focus-visible { box-shadow: 0 0 0 2px rgba(236, 124, 54, .35); }
+.blender-page .unity-numbered-steps li > span {
+  border-color: rgba(236, 124, 54, .3);
+  color: #efa16c;
+}
+.blender-page .unity-method-card.recommended { border-color: rgba(236, 124, 54, .3); }
+.blender-page .unity-export-tip {
+  border-color: rgba(236, 124, 54, .22);
+  background: rgba(236, 124, 54, .05);
+  color: #ee9a61;
+}
+.blender-page .unity-generated-grid span { background: rgba(236, 124, 54, .09); color: #efa16b; }
+.blender-page .unity-scope-grid li::before { background: #c96b31; }
+.blender-page .unity-final-cta { border-color: rgba(236, 124, 54, .27); }
+.blender-window-body { display: grid; gap: 9px; }
+.blender-field-preview {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--unity-line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .02);
+}
+.blender-field-preview span { color: #707c90; font-size: 8.5px; }
+.blender-field-preview strong { overflow: hidden; color: #cad2df; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.blender-field-preview svg { color: #8b96a8; }
+.blender-option-preview {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--unity-line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .015);
+}
+.blender-option-preview span { display: flex; align-items: center; gap: 7px; color: #8994a6; font-size: 8.5px; }
+.blender-option-preview svg { padding: 1px; border-radius: 3px; background: #d36b29; color: white; }
+.blender-window-body .unity-preview-checks,
+.blender-window-body .unity-preview-button { margin-top: 2px; }
+
 @media (max-width: 900px) {
   .lp--unity .lp-content { max-width: none; padding: 0 24px; }
   .unity-hero { grid-template-columns: 1fr; min-height: 0; padding-top: 54px; }
@@ -454,6 +594,10 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 }
 @media (max-width: 680px) {
   .lp--unity .lp-content { padding: 0 16px; }
+  .plugin-engine-tabs { align-items: stretch; flex-direction: column; gap: 8px; padding: 10px 0; }
+  .plugin-engine-tabs-label { display: none; }
+  .plugin-engine-tabs > div { width: 100%; }
+  .plugin-engine-tabs button { min-width: 0; padding: 0 12px; }
   .unity-hero { gap: 42px; padding: 42px 0 52px; }
   .unity-hero h1 { font-size: clamp(38px, 12vw, 54px); }
   .unity-hero-actions .lp-primary, .unity-hero-actions .lp-secondary { flex: 1; min-width: 170px; }

@@ -34,9 +34,11 @@ export function createProductionFiles(options, context) {
   if (!preset) return {};
   const root = preset.layout.root;
   const encode = (value) => new TextEncoder().encode(value);
-  if (preset.id === 'unity') {
+  if (preset.layout.runtimeDocumentPath) {
     const runtime = createRuntimeTerrainDocumentFile(context, options);
-    const readme = `${preset.label}\n\nExtract this Terrain folder inside a Unity project's Assets folder.\nThe Procedural Terrains Unity package imports project.ptrterrain automatically.\n`;
+    const readme = preset.id === 'unity'
+      ? `${preset.label}\n\nExtract this Terrain folder inside a Unity project's Assets folder.\nThe Procedural Terrains Unity package imports project.ptrterrain automatically.\n`
+      : `${preset.label}\n\nInstall the Procedural Terrains Blender extension, then choose File > Import > Procedural Terrains (.zip/.ptrterrain).\nThe extension validates project.ptrterrain and builds editable Blender meshes with baked materials.\n`;
     return {
       [preset.layout.runtimeDocumentPath]: runtime.bytes,
       [`${root}/README.txt`]: encode(readme),

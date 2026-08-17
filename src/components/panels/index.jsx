@@ -921,8 +921,8 @@ function ExportPanel({ ctx }) {
 
       <ControlSection id="export-assets" title="Additional Assets" defaultOpen={false} settingId="export.section.assets">
         <ToggleRow label="Export Heightmap" value={opt.exportHeightmap} onChange={(v) => set('exportHeightmap', v)} />
-        {opt.exportHeightmap && opt.exportPresetId === 'unity' && (
-          <SelectRow label="Unity Height Grid" value={opt.heightRes} options={UNITY_HEIGHT_OPTIONS} onChange={(v) => set('heightRes', v)} />
+        {opt.exportHeightmap && opt.runtimeDocumentPath && (
+          <SelectRow label={`${opt.exportPresetId === 'blender' ? 'Blender' : 'Unity'} Height Grid`} value={opt.heightRes} options={UNITY_HEIGHT_OPTIONS} onChange={(v) => set('heightRes', v)} />
         )}
         {opt.exportHeightmap && (
           <ToggleRow label="Include Biome Splat Map" value={opt.exportSplat} onChange={(v) => set('exportSplat', v)} />

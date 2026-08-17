@@ -203,7 +203,8 @@ export class TerrainExporter {
     const exportCollision = !!options.exportCollision;
     const collisionRes = parseInt(options.collisionRes, 10) || 128;
     const exportWater = !!options.exportWater;
-    const exportPreset = !!options.exportPreset && options.exportPresetId !== 'unity';
+    const runtimeTerrainExport = options.runtimeDocumentPath != null;
+    const exportPreset = !!options.exportPreset && !runtimeTerrainExport;
 
     // Tile assembly: cellSize == the single-board size (boardSize). For one tile
     // this is the classic centered board. tileMode controls multi-tile output.
@@ -508,7 +509,7 @@ export class TerrainExporter {
     // D. Union-wide grayscale heightmap (one image covering the whole assembly)
     let heightCanvas = null;
     let heightRaw16 = null;
-    if (exportHeightmap && (!separateTileExport || options.exportPresetId !== 'unity')) {
+    if (exportHeightmap && (!separateTileExport || !runtimeTerrainExport)) {
       onToast('Baking grayscale heightmap...');
       const asset = bakeHeightAsset(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
       heightCanvas = asset.canvas;
@@ -517,7 +518,7 @@ export class TerrainExporter {
 
     // E. Union-wide splat / biome map
     let splatCanvas = null;
-    if (exportHeightmap && options.exportSplat && (!separateTileExport || options.exportPresetId !== 'unity')) {
+    if (exportHeightmap && options.exportSplat && (!separateTileExport || !runtimeTerrainExport)) {
       onToast('Baking splat map...');
       splatCanvas = bakeRegionCanvas(3, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
     }

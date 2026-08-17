@@ -27,12 +27,12 @@ import {
   Workflow,
   Zap,
 } from 'lucide-react';
-import { GITHUB_REPO_URL } from '../constants/app.js';
+import { GITHUB_REPO_URL } from '../../constants/app.js';
 
 const UNITY_PACKAGE_VERSION = '0.2.0-alpha.1';
 const UNITY_VERSION = '6000.3';
-const DOWNLOAD_URL = `/downloads/procedural-terrains-unity-${UNITY_PACKAGE_VERSION}.zip`;
-const GIT_URL = `${GITHUB_REPO_URL}.git?path=/unity/Packages/com.zyfou.procedural-terrains`;
+const DOWNLOAD_URL = `/downloads/plugins/procedural-terrains-unity-${UNITY_PACKAGE_VERSION}.zip`;
+const GIT_URL = `${GITHUB_REPO_URL}.git?path=/plugins/unity/Packages/com.zyfou.procedural-terrains`;
 
 const quickSteps = [
   {
@@ -190,9 +190,13 @@ export default function UnityPluginPage({ onOpenEditor }) {
       <section className="unity-section unity-doc-section" id="unity-install" aria-labelledby="unity-install-title">
         <div className="unity-doc-aside">
           <span className="unity-doc-index">01</span>
-          <PackagePlus size={24} aria-hidden />
-          <h2 id="unity-install-title">Install the plugin</h2>
-          <p>The downloaded ZIP contains a standard Unity Package Manager package.</p>
+          <div className="unity-doc-heading">
+            <PackagePlus size={24} aria-hidden />
+            <div>
+              <h2 id="unity-install-title">Install the plugin</h2>
+              <p>The downloaded ZIP contains a standard Unity Package Manager package.</p>
+            </div>
+          </div>
         </div>
         <div className="unity-doc-content">
           <div className="unity-method-card recommended">
@@ -233,9 +237,13 @@ export default function UnityPluginPage({ onOpenEditor }) {
       <section className="unity-section unity-doc-section" id="unity-export" aria-labelledby="unity-export-title">
         <div className="unity-doc-aside">
           <span className="unity-doc-index">02</span>
-          <UploadCloud size={24} aria-hidden />
-          <h2 id="unity-export-title">Export for Unity</h2>
-          <p>Use the production preset so every required runtime file is packaged correctly.</p>
+          <div className="unity-doc-heading">
+            <UploadCloud size={24} aria-hidden />
+            <div>
+              <h2 id="unity-export-title">Export for Unity</h2>
+              <p>Use the production preset so every required runtime file is packaged correctly.</p>
+            </div>
+          </div>
         </div>
         <div className="unity-doc-content">
           <StepList steps={[
@@ -266,9 +274,13 @@ export default function UnityPluginPage({ onOpenEditor }) {
       <section className="unity-section unity-doc-section" id="unity-import" aria-labelledby="unity-import-title">
         <div className="unity-doc-aside">
           <span className="unity-doc-index">03</span>
-          <Mountain size={24} aria-hidden />
-          <h2 id="unity-import-title">Import and build</h2>
-          <p>The importer creates a native Unity Terrain hierarchy you can continue editing.</p>
+          <div className="unity-doc-heading">
+            <Mountain size={24} aria-hidden />
+            <div>
+              <h2 id="unity-import-title">Import and build</h2>
+              <p>The importer creates a native Unity Terrain hierarchy you can continue editing.</p>
+            </div>
+          </div>
         </div>
         <div className="unity-doc-content">
           <StepList steps={[
