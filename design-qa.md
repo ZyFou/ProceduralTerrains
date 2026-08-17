@@ -1,47 +1,57 @@
-# Real Terrain World Settings — Design QA
+# Unity Plugin Page — Design QA
 
-- Source visual truth: `/Users/gaetan/Desktop/Capture d’écran 2026-08-06 à 09.53.04.png`
-- Implementation screenshot: `/Users/gaetan/Desktop/Projects/ProceduralTerrains/output/playwright/real-terrain-3d-world-size.jpg`
-- Viewport: 1119 × 687 CSS px
-- Source pixels: 2238 × 1374 (2× desktop capture; normalized to 1119 × 687 CSS px)
-- Implementation pixels: 1119 × 687 at the matched CSS viewport
-- State: Real Terrain creation dialog open, default Alpine selection, 3D world size 2048 × 2048 units, geographic area size 30 km, terrain detail z12
+- Source visual truth: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\landing-source-desktop.png`
+- Implementation screenshot: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-desktop-final.png`
+- Mobile implementation screenshot: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-mobile.png`
+- Combined comparison: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-design-comparison.png`
+- Viewports: 1280 × 720 CSS px desktop and 390 × 844 CSS px mobile
+- Source pixels: 1280 × 720 at 1× density
+- Implementation pixels: 1280 × 720 desktop and 390 × 844 mobile at 1× density
+- State: public Unity plugin documentation route, logged out, dark theme, hero at top
 
 ## Full-view comparison evidence
 
-The implementation preserves the source dialog frame, header, map/sidebar split, map controls, search placement, selection rectangle, statistics, attribution, and primary action. The requested hierarchy is added in the existing sidebar: a subtle `World settings` card contains a simplified `3D world size` selector. Geographic `Area size` and `Terrain detail` remain separate import controls. The selected location differs from the source capture, but this does not affect layout comparison.
+The side-by-side comparison uses the existing landing page as the visual source and the new Unity route as the implementation. The implementation preserves the product's black canvas, compact 60 px navigation, white/accent-blue type hierarchy, restrained panel borders, button radii, small monospace metadata, footer treatment, and overall information density. The Unity page intentionally expands to the full content width because it is a long-form documentation experience rather than the landing page's split terrain-preview composition.
+
+The desktop hero remains balanced at 1280 × 720 with no horizontal overflow. The mobile layout collapses to one column at 390 × 844, hides the desktop navigation links using the existing breakpoint, keeps both primary actions readable, and preserves a 358 px content track with no horizontal overflow.
 
 ## Focused region comparison evidence
 
-The sidebar is readable in the matched full-view capture, so a separate crop was not needed. The new card uses the product's existing border, radius, background, uppercase section-label, spacing, and typography tokens. `3D world size` exposes the final scene dimensions while the compact note communicates the underlying chunk count and chunk size. Geographic controls and statistics remain visible without overflow.
+- Installation section: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-desktop-install.png` confirms the sticky section heading, numbered steps, primary download action, Git method, and copy field remain readable at desktop size.
+- FAQ section after correction: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-desktop-faq-fixed.png` confirms expanded content no longer overlaps its summary and the focus treatment uses the site's blue token.
+- Mobile installation shortcut: `C:\Users\g.bondenet\Documents\ThreeTerrain\output\playwright\unity-plugin-mobile-install.png` confirms the hero shortcut scrolls to the correct section while preserving the `#/unity` route.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: Existing application font families, weights, small-label casing, monospace values, line heights, and hierarchy are preserved.
-- Spacing and layout rhythm: The 16 px sidebar rhythm is maintained; the new settings card uses 12 px padding and does not crowd or hide persistent controls.
-- Colors and visual tokens: Existing panel, control, border, muted-text, and accent tokens are reused; contrast remains consistent with the source.
-- Image quality and asset fidelity: The existing Leaflet/Esri imagery and Lucide interface icons remain unchanged and render sharply.
-- Copy and content: `3D world size` is clearly distinguished from geographic `Area size`. Existing terrain statistics and the load action remain unchanged.
+- Fonts and typography: the existing application font and monospace stacks, display weight, compact uppercase labels, muted body copy, and blue emphasis are reused. Hero wrapping remains intentional on desktop and mobile.
+- Spacing and layout rhythm: the page uses the site's 8–12 px control rhythm, 9–14 px radii, thin borders, and generous section spacing. Desktop documentation uses a stable aside/content grid; mobile collapses cleanly to one column.
+- Colors and visual tokens: existing accent, hover, text, border, panel, success, warning, and muted tokens are reused. The route remains visually continuous with the source landing page.
+- Image quality and asset fidelity: the page uses Lucide interface icons as requested and does not introduce low-resolution raster assets. Icons remain sharp at both captured densities.
+- Copy and content: all installation and usage copy is grounded in Unity package `0.2.0-alpha.1`, Unity `6000.3`, the current ZIP importer, renderer-pipeline support, and the package README/implementation. Alpha limitations are explicit.
 
 ## Interaction and runtime checks
 
-- Opened Create terrain → Real Terrain → location dialog.
-- Verified the `World settings` heading and `3D world size` selector are exposed semantically.
-- Changed the 3D world preset from 2048 × 2048 to 4096 × 4096 units and confirmed the underlying chunk size changed from 128 to 256 while the dialog remained open.
-- Browser console errors: none.
+- Opened the dedicated `#/unity` route and confirmed the Unity Plugin navigation item is active.
+- Confirmed the Installation guide action scrolls within the documentation container and leaves the route at `#/unity`.
+- Confirmed the Git URL copy action changes to `Copied`.
+- Confirmed FAQ disclosure opens and its answer is visible.
+- Confirmed the download endpoint returns HTTP 200, `application/zip`, with a 37,795-byte package.
+- Confirmed the archive contains the package manifest, Editor importer, and Runtime asset code.
+- Checked desktop and 390 px mobile layouts for horizontal overflow; none found.
+- Browser console warnings/errors: none.
 - Production build: passed.
-- Automated tests: 415 passed.
 
 ## Findings
 
-No actionable P0, P1, or P2 differences remain. The additional card is an intentional product change requested from the source state.
+No actionable P0, P1, or P2 issues remain.
 
 ## Comparison history
 
-The first pass incorrectly treated geographic area size as world size. After the user's clarification, that P1 semantic mismatch was fixed by restoring `Area size` and adding a separate 3D scene-size selector derived from `chunk count × chunk size`. The second matched-viewport pass confirms the two concepts are distinct, readable, and fully visible.
+1. First interaction pass found a P1 routing conflict: documentation anchors replaced the app's `#/unity` hash and returned users to the home view. The anchors were replaced with internal section scrolling. Post-fix evidence shows `scrollTop: 1913`, the installation section at the top of the visible content, and the route still equal to `#/unity`.
+2. First FAQ pass found a P2 overlap and oversized default focus outline in the expanded answer. The negative answer margin was removed and the focus state was mapped to the site's blue token. The revised screenshot confirms the answer is fully visible and the disclosure remains keyboard-readable.
 
 ## Follow-up polish
 
-No P3 follow-up is required for this scoped change.
+No P3 item blocks handoff. A future release can replace the illustrative importer panel with a real Unity Editor screenshot once the public package UI is visually finalized.
 
 final result: passed

@@ -20,11 +20,12 @@ import CommunityPage from '../project/CommunityPage.jsx';
 import { usePopup } from '../components/ui/PopupProvider.jsx';
 import AdminDashboard from '../admin/AdminDashboard.jsx';
 import ConfidentialityPage from '../legal/ConfidentialityPage.jsx';
+import UnityPluginPage from './UnityPluginPage.jsx';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const VISIBILITY_ICONS = { private: Lock, unlisted: Eye, public: Globe2 };
 const AUTH_VIEWS = new Set(['login', 'register']);
-const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'admin', 'confidentiality']);
+const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'unity', 'admin', 'confidentiality']);
 const BOOT_READY_HOLD_MS = 320;
 const BOOT_REVEAL_MS = 680;
 
@@ -368,7 +369,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
 
   return (
     <div
-      className={`landing landing-overlay lp boot-${visualBootStage}${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${exiting ? ' exiting' : ''}`}
+      className={`landing landing-overlay lp boot-${visualBootStage}${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${view === 'unity' ? ' lp--unity' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${exiting ? ' exiting' : ''}`}
       onDragEnter={onFileDragEnter}
       onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave}
@@ -390,6 +391,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => showView('projects')}>Projects</button>
           <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => openTemplates()}>Templates</button>
           <button type="button" className={view === 'community' ? 'active' : ''} onClick={() => showView('community')}>Community</button>
+          <button type="button" className={view === 'unity' ? 'active' : ''} onClick={() => showView('unity')}>Plugins</button>
           <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">Docs</a>
         </nav>
         <div className="lp-nav-actions">
@@ -424,6 +426,7 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
           )}
           {view === 'profile' && user && <ProfilePage onBack={goHome} />}
           {view === 'community' && <CommunityPage onBack={() => showView('projects')} onOpen={open} ready={menuReady && !exiting} />}
+          {view === 'unity' && <UnityPluginPage onOpenEditor={goHome} />}
           {view === 'admin' && user?.role === 'admin' && <AdminDashboard user={user} onBack={goHome} />}
           {view === 'confidentiality' && <ConfidentialityPage onBack={goHome} />}
           {view === 'home' && <>
