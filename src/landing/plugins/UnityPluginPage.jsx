@@ -247,16 +247,39 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
           </div>
         </div>
         <div className="unity-doc-content">
-          <StepList steps={[
-            { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
-            { title: 'Choose a recipe', body: 'Select a terrain preset, seed, dimensions, tile grid, resolution, and placement.' },
-            { title: 'Shape the Noise Stack', body: 'Optionally edit all 13 layer types, blend modes, masks, climate controls, smoothing, and edge profiles.' },
-            { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, colliders, connected neighbors, preview TerrainLayers, and a saved recipe.' },
-            { title: 'Regenerate safely', body: 'Select the root or a tile, load its settings, then regenerate while preserving unrelated child objects.' },
-          ]} />
+          <div className="unity-method-card recommended">
+            <div className="unity-method-heading">
+              <span><Mountain size={18} aria-hidden /></span>
+              <div><strong>Create a new terrain</strong><small>Native Unity workflow</small></div>
+            </div>
+            <StepList steps={[
+              { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
+              { title: 'Name and seed the recipe', body: 'Enter a project name, choose one of the eight Terrain presets, click Apply, and set the deterministic seed.' },
+              { title: 'Set the assembly', body: 'Choose total width, depth, height scale, Tiles X/Z, and a 65, 129, 257, 513, or 1025 heightmap resolution per tile.' },
+              { title: 'Choose placement and preview', body: 'Center the assembly at World Origin or the current Scene View Pivot, then optionally enable height/slope preview TerrainLayers.' },
+              { title: 'Customize the Noise Stack', body: 'Open Advanced Noise Stack to apply a stack preset or add, duplicate, reorder, and remove layers. Every layer exposes its blend, parameters, seed offset, and optional height, noise, slope, or biome masks.' },
+              { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, Terrain GameObjects, colliders, connected neighbors, preview assets, and a saved generation recipe.' },
+            ]} />
+          </div>
+          <div className="unity-method-card">
+            <div className="unity-method-heading">
+              <span><RefreshCw size={18} aria-hidden /></span>
+              <div><strong>Edit and regenerate</strong><small>Keep the saved recipe</small></div>
+            </div>
+            <StepList steps={[
+              { title: 'Select generated terrain', body: 'Select the Procedural Terrain root or any generated Terrain tile in the Hierarchy.' },
+              { title: 'Load Selected', body: 'Click Load Selected to copy the referenced TerrainGenerationRecipe back into the Create controls.' },
+              { title: 'Adjust the recipe', body: 'Change the seed, dimensions, resolution, presets, layers, masks, or preview option.' },
+              { title: 'Regenerate Selected', body: 'Unity replaces only marked generated tiles and assets, reconnects neighbors, and preserves unrelated child GameObjects under the root.' },
+            ]} />
+          </div>
           <div className="unity-note success">
             <CheckCircle2 size={17} aria-hidden />
             <p><strong>Blender parity.</strong> Unity uses the same deterministic CPU formulas and presets, with shared world coordinates for seamless tile borders.</p>
+          </div>
+          <div className="unity-note">
+            <CircleAlert size={17} aria-hidden />
+            <p><strong>Choose resolution deliberately.</strong> The window warns above one million samples and blocks recipes above sixteen million. Use 129 or 257 while shaping, then regenerate at 513 or 1025 for final detail.</p>
           </div>
         </div>
       </section>
@@ -313,7 +336,9 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
           <StepList steps={[
             { title: 'Open the Terrain Importer', body: 'Go to Window > Procedural Terrains > Terrain Importer.' },
             { title: 'Select your export', body: 'Choose the ZIP produced by Procedural Terrains. The importer validates the document and its artifacts before building.' },
-            { title: 'Import ZIP and Build Scene', body: 'The files are extracted inside Assets and a Terrain GameObject is created for every exported tile.' },
+            { title: 'Choose build options', body: 'Keep Create Terrain objects enabled, then choose whether to create pipeline-compatible Terrain Materials and baked TerrainLayers.' },
+            { title: 'Import ZIP and Build Scene', body: 'The ZIP is extracted below Assets/ProceduralTerrains/Imports and a Terrain GameObject is created for every exported tile.' },
+            { title: 'Rebuild an imported project', body: 'Drag an existing project.ptrterrain TerrainProjectAsset into Already imported, then click Build Terrains in Current Scene.' },
             { title: 'Save the scene', body: 'Review the generated hierarchy, position it in your project, then save your Unity scene.' },
           ]} />
 
