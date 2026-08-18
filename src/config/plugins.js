@@ -2,8 +2,8 @@ export const PLUGINS = Object.freeze({
   unity: Object.freeze({
     id: 'unity',
     name: 'Unity',
-    currentVersion: '0.2.0-alpha.1',
-    downloadUrl: '/downloads/plugins/procedural-terrains-unity-0.2.0-alpha.1.zip',
+    currentVersion: '0.3.0-alpha.1',
+    downloadUrl: '/downloads/plugins/procedural-terrains-unity-0.3.0-alpha.1.zip',
     license: 'MIT licensed',
     releaseLabel: 'Alpha release',
     supportMessage: 'Maintaining the Unity integration across engine versions takes significant development and testing time.',

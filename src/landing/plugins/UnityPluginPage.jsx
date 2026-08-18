@@ -44,17 +44,17 @@ const quickSteps = [
     target: 'unity-install',
   },
   {
-    icon: FileArchive,
+    icon: Sparkles,
     label: '02',
-    title: 'Export your terrain',
-    body: 'In Procedural Terrains, select the Unity Terrain production preset and export the ZIP.',
-    target: 'unity-export',
+    title: 'Create in Unity',
+    body: 'Choose a seeded preset or build an advanced Noise Stack directly in the Unity Editor.',
+    target: 'unity-create',
   },
   {
-    icon: Mountain,
+    icon: FileArchive,
     label: '03',
-    title: 'Build the Unity scene',
-    body: 'Open the importer window, choose the ZIP, and build an editable Terrain hierarchy.',
+    title: 'Import existing worlds',
+    body: 'Export a Unity Terrain ZIP and reconstruct its editable native Terrain hierarchy.',
     target: 'unity-import',
   },
 ];
@@ -121,10 +121,10 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
       <section className="unity-hero" aria-labelledby="unity-plugin-title">
         <div className="unity-hero-copy">
           <div className="unity-eyebrow"><Puzzle size={14} aria-hidden /> Unity integration</div>
-          <h1 id="unity-plugin-title">Your terrains, <em>ready for Unity.</em></h1>
+          <h1 id="unity-plugin-title">Create terrain, <em>inside Unity.</em></h1>
           <p>
-            Export from Procedural Terrains and turn the package into an editable,
-            production-friendly Unity Terrain scene in a few clicks.
+            Generate deterministic native TerrainData from seeded presets and editable
+            Noise Stacks, or import an existing Procedural Terrains world.
           </p>
           <div className="unity-hero-actions">
             <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}>
@@ -141,25 +141,25 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
           </div>
         </div>
 
-        <div className="unity-hero-panel" aria-label="Unity import workflow preview">
+        <div className="unity-hero-panel" aria-label="Unity terrain creation preview">
           <div className="unity-window-bar">
             <span className="unity-window-icon"><Puzzle size={16} aria-hidden /></span>
-            <div><strong>Procedural Terrains</strong><small>Terrain Importer</small></div>
+            <div><strong>Procedural Terrains</strong><small>Terrain Creator</small></div>
             <span className="unity-alpha-badge">ALPHA</span>
           </div>
           <div className="unity-window-body">
-            <div className="unity-window-tabs"><span className="active">Import</span><span>Create <small>Soon</small></span></div>
+            <div className="unity-window-tabs"><span>Import</span><span className="active">Create</span></div>
             <div className="unity-drop-preview">
-              <FileArchive size={28} aria-hidden />
-              <strong>Alpine_World.zip</strong>
-              <small>Unity Terrain export · 4 tiles</small>
+              <Mountain size={28} aria-hidden />
+              <strong>Highlands · Seed 1337</strong>
+              <small>1000 × 1000 m · 257² · 4 tiles</small>
             </div>
             <div className="unity-preview-checks">
-              <span><CheckCircle2 size={13} /> Runtime document valid</span>
-              <span><CheckCircle2 size={13} /> Heightfields detected</span>
-              <span><CheckCircle2 size={13} /> Surface maps ready</span>
+              <span><CheckCircle2 size={13} /> Deterministic Noise Stack</span>
+              <span><CheckCircle2 size={13} /> Shared tile borders</span>
+              <span><CheckCircle2 size={13} /> Native TerrainData output</span>
             </div>
-            <div className="unity-preview-button"><Zap size={14} aria-hidden /> Import ZIP and Build Scene</div>
+            <div className="unity-preview-button"><Zap size={14} aria-hidden /> Generate Terrain</div>
           </div>
         </div>
       </section>
@@ -167,14 +167,14 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
       <div className="unity-compatibility" aria-label="Plugin compatibility">
         <span><strong>Unity {UNITY_VERSION}+</strong><small>Editor package</small></span>
         <span><strong>Built-in · URP · HDRP</strong><small>Native Terrain shaders</small></span>
-        <span><strong>ZIP + .ptrterrain</strong><small>Validated imports</small></span>
+        <span><strong>Create + Import</strong><small>Native TerrainData</small></span>
       </div>
 
       <section className="unity-section unity-quickstart" aria-labelledby="unity-quickstart-title">
         <div className="unity-section-heading">
           <span>Quick start</span>
-          <h2 id="unity-quickstart-title">From browser to playable terrain</h2>
-          <p>Three steps, no manual heightmap alignment or tile stitching.</p>
+          <h2 id="unity-quickstart-title">From seed to playable terrain</h2>
+          <p>Create natively or import baked worlds without manual tile stitching.</p>
         </div>
         <div className="unity-step-grid">
           {quickSteps.map(({ icon: Icon, ...step }) => (
@@ -230,14 +230,40 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
 
           <div className="unity-note">
             <CircleAlert size={17} aria-hidden />
-            <p><strong>Alpha requirement.</strong> The package currently targets Unity {UNITY_VERSION}. Keep the package in source control so your team uses the same importer version.</p>
+            <p><strong>Alpha requirement.</strong> The package currently targets Unity {UNITY_VERSION}. Keep the package in source control so your team uses the same plugin version.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="unity-section unity-doc-section" id="unity-create" aria-labelledby="unity-create-title">
+        <div className="unity-doc-aside">
+          <span className="unity-doc-index">02</span>
+          <div className="unity-doc-heading">
+            <Sparkles size={24} aria-hidden />
+            <div>
+              <h2 id="unity-create-title">Create native terrain</h2>
+              <p>Generate editable TerrainData without leaving the Unity Editor.</p>
+            </div>
+          </div>
+        </div>
+        <div className="unity-doc-content">
+          <StepList steps={[
+            { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
+            { title: 'Choose a recipe', body: 'Select a terrain preset, seed, dimensions, tile grid, resolution, and placement.' },
+            { title: 'Shape the Noise Stack', body: 'Optionally edit all 13 layer types, blend modes, masks, climate controls, smoothing, and edge profiles.' },
+            { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, colliders, connected neighbors, preview TerrainLayers, and a saved recipe.' },
+            { title: 'Regenerate safely', body: 'Select the root or a tile, load its settings, then regenerate while preserving unrelated child objects.' },
+          ]} />
+          <div className="unity-note success">
+            <CheckCircle2 size={17} aria-hidden />
+            <p><strong>Blender parity.</strong> Unity uses the same deterministic CPU formulas and presets, with shared world coordinates for seamless tile borders.</p>
           </div>
         </div>
       </section>
 
       <section className="unity-section unity-doc-section" id="unity-export" aria-labelledby="unity-export-title">
         <div className="unity-doc-aside">
-          <span className="unity-doc-index">02</span>
+          <span className="unity-doc-index">03</span>
           <div className="unity-doc-heading">
             <UploadCloud size={24} aria-hidden />
             <div>
@@ -274,7 +300,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
 
       <section className="unity-section unity-doc-section" id="unity-import" aria-labelledby="unity-import-title">
         <div className="unity-doc-aside">
-          <span className="unity-doc-index">03</span>
+          <span className="unity-doc-index">04</span>
           <div className="unity-doc-heading">
             <Mountain size={24} aria-hidden />
             <div>
@@ -308,7 +334,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
         <div className="unity-section-heading">
           <span>Alpha scope</span>
           <h2 id="unity-limitations-title">What is available today</h2>
-          <p>A clear view of what the first public importer handles—and what comes next.</p>
+          <p>A clear view of what the current editor plugin handles—and what comes next.</p>
         </div>
         <div className="unity-scope-grid">
           <div>
@@ -317,6 +343,8 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <ul>
               <li>ZIP and .ptrterrain validation</li>
               <li>TerrainData, colliders and tile neighbors</li>
+              <li>Seeded presets and editable Noise Stacks</li>
+              <li>Saved recipes, load selected and regeneration</li>
               <li>Baked color and normal TerrainLayer</li>
               <li>Built-in, URP and HDRP Terrain materials</li>
             </ul>
@@ -325,7 +353,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <span className="unity-scope-icon upcoming"><Sparkles size={20} aria-hidden /></span>
             <h3>Planned next</h3>
             <ul>
-              <li>Create procedural terrain inside Unity</li>
+              <li>Runtime terrain generation</li>
               <li>Detailed biome materials and props</li>
               <li>Splines and richer water reconstruction</li>
               <li>Expanded runtime generation tools</li>
@@ -349,8 +377,8 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <p>Yes. The importer builds regular Unity Terrain objects and TerrainData assets, so you can use Unity's standard terrain tools afterward.</p>
           </details>
           <details>
-            <summary>Why is the Create tab marked “Coming soon”?<ChevronRight size={16} aria-hidden /></summary>
-            <p>This alpha focuses on reliable, renderer-neutral imports. Procedural generation inside the Unity Editor is planned, but the exported baked terrain files are currently authoritative.</p>
+            <summary>Can Unity match Blender-generated terrain?<ChevronRight size={16} aria-hidden /></summary>
+            <p>Yes. Both plugins use the same seeded CPU Noise Stack formulas and presets. Unity adapts the result to native TerrainData and reverses the horizontal generator axis consistently.</p>
           </details>
           <details>
             <summary>Where are imported files stored?<ChevronRight size={16} aria-hidden /></summary>
@@ -363,7 +391,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
         <div>
           <span><Puzzle size={15} aria-hidden /> Unity package v{UNITY_PACKAGE_VERSION}</span>
           <h2>Bring your next world into Unity.</h2>
-          <p>Install the alpha importer, export a terrain, and keep building with native Unity tools.</p>
+          <p>Install the alpha package, create or import a terrain, and keep building with native Unity tools.</p>
         </div>
         <div>
           <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}><Download size={16} aria-hidden /> Download plugin</button>
