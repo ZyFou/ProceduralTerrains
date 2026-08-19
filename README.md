@@ -1,34 +1,89 @@
 # Procedural Terrains
 
-A shader-driven procedural terrain generator and editor built with **React + Vite + Three.js (WebGL2)**.
+GPU-driven terrain authoring for the browser, with native integrations for
+Unity and Blender.
 
-Height, normals and biome colors are computed **on the GPU** — there is no baked CPU heightmap
-driving the live view. The app ships three world modes (switchable from the top bar):
+![Procedural Terrains home screen](output/playwright/landing-source-desktop.png)
 
-| Mode | What it is |
-|---|---|
-| **Tile** | Fixed terrain board with per-chunk LOD — best for painting, multi-tile layouts and exports |
-| **Infinite World** | Streamed chunk grid around the camera with FPS walk / plane exploration |
-| **Planet** | Cube-sphere procedural planet with atmosphere, volumetric clouds and orbit camera |
+Procedural Terrains is a React + Vite + Three.js terrain studio. Height,
+normals, and biome colors are evaluated on the GPU, so the live view stays
+editable without relying on a baked CPU heightmap.
 
-## Run
+## What’s new
+
+- **Unity integration 0.3.0-alpha.1** — create seeded terrain directly in the
+  Unity Editor, generate tiled `TerrainData`, connect neighbors, and regenerate
+  saved recipes.
+- **Blender extension 0.3.3** — create editable procedural meshes in Blender
+  5.2, import validated export packages, preserve source metadata, and resize
+  imported assemblies.
+- **Real-world terrain mode** — search for a location, preview geographic
+  elevation and imagery, then load it into the editor.
+- **Production export presets** — prepare Unity, Unreal, Godot, Blender, and
+  Three.js packages with meshes, textures, masks, water data, and metadata.
+- **Local-first projects** — save versioned projects, thumbnails, templates,
+  and recent-project history in the browser without requiring an account.
+
+## Features at a glance
+
+| Capability | Description |
+| --- | --- |
+| **Tile** | Paint, assemble, and export fixed terrain boards with per-chunk LOD. |
+| **Infinite World** | Explore a streamed chunk grid with walk and fly-through controls. |
+| **Planet** | Generate a cube-sphere planet with atmosphere, clouds, and orbit controls. |
+| **Noise Stack** | Compose typed, serializable noise layers that compile to GLSL. |
+| **Manual terrain** | Import real-world elevation or shape terrain with brushes. |
+| **Water and atmosphere** | Add water, shoreline effects, sky, clouds, fog, and underwater rendering. |
+| **Export** | Bake GLB/GLTF, OBJ, color, normal, height, splat, collision, water, and preset data. |
+
+## See it in action
+
+### Terrain studio
+
+![Terrain studio with a generated mountain world](docs/images/readme-editor.png)
+
+The editor supports multiple world modes, live shader parameters, settings
+search, camera presets, performance controls, undo/redo, and project save/load.
+
+![Procedural terrain at sunset](docs/images/terrain-sunset.png)
+
+Example terrain scene with reflective water, atmospheric lighting, clouds, and
+mountain silhouettes.
+
+### Engine plugins
+
+| Unity | Blender |
+| --- | --- |
+| ![Unity plugin page captured with Playwright](docs/images/readme-plugin-unity.png) | ![Blender plugin page captured with Playwright](docs/images/readme-plugin-blender.png) |
+
+Both integrations can import the same renderer-neutral `.ptrterrain` runtime
+document and production ZIP exports. They also expose native procedural
+generation for their host application. These screenshots are generated from
+the local app with Playwright at a 1600 × 900 viewport.
+
+## Quick start
 
 ```sh
 npm install
 npm run dev
 ```
 
-The dev server starts on **http://localhost:6061** and is also reachable on your local network
-(Vite listens on all interfaces and prints the LAN URL, e.g. `http://192.168.x.x:6061`).
-If port 6061 is already in use, Vite picks the next free port.
+Open [http://localhost:6061](http://localhost:6061). Vite listens on all
+interfaces and prints a LAN URL; if port `6061` is busy, it selects the next
+available port.
 
-Production build: `npm run build` (output in `dist/`), preview it with `npm run preview`.
+Create a production build with:
 
-## Optional accounts API
+```sh
+npm run build
+npm run preview
+```
 
-Login and registration are backed by an independent, self-hostable Node.js/MySQL service in [`api/`](api/). The editor remains local-first and fully usable without an account.
+### Optional accounts API
 
-For local development, copy both environment examples and start the frontend and API in separate terminals:
+The editor is local-first and fully usable without an account. Login and
+registration are provided by the independent, self-hostable Node.js/MySQL
+service in [`api/`](api/).
 
 ```sh
 cp .env.example .env
@@ -38,109 +93,145 @@ npm run dev
 npm run dev:api
 ```
 
-Run `npm run migrate:api` once MySQL is configured. Classic Linux, PM2, MySQL and Nginx deployment instructions are in [`api/README.md`](api/README.md).
+Run `npm run migrate:api` once MySQL is configured. Deployment guidance for
+Linux, PM2, MySQL, and Nginx is in [`api/README.md`](api/README.md).
 
-## Architecture
+## Unity and Blender plugins
 
-The WebGL **engine** is framework-agnostic (`src/engine/`); the editor **UI** is React
-(`src/components/`). They talk through `Engine` methods + a callbacks object — React mirrors
-the engine's parameter state and renders the side-panel controls.
+The latest archives are available from the app and checked into
+[`public/downloads/plugins/`](public/downloads/plugins/).
 
-| Area | Key files |
-|---|---|
-| **Core** | [src/engine/Engine.js](src/engine/Engine.js) — renderer, scene, param→uniform plumbing, save/load, undo state |
-| **Tile board** | [src/engine/terrain/TerrainBoard.js](src/engine/terrain/TerrainBoard.js), [ChunkGeometry.js](src/engine/terrain/ChunkGeometry.js), [BoardPlinth.js](src/engine/terrain/BoardPlinth.js) |
-| **Infinite world** | [src/engine/terrain/InfiniteWorld.js](src/engine/terrain/InfiniteWorld.js) — streamed chunks, triangle budget, behind-camera culling |
-| **Planet** | [src/engine/terrain/PlanetWorld.js](src/engine/terrain/PlanetWorld.js), [PlanetMaterial.js](src/engine/terrain/PlanetMaterial.js), [PlanetOrbitControls.js](src/engine/PlanetOrbitControls.js) |
-| **Noise stack** | [src/engine/terrain/noise/NoiseStack.js](src/engine/terrain/noise/NoiseStack.js), [noiseStackCodegen.js](src/engine/terrain/noise/noiseStackCodegen.js) — layered, serializable noise layers compiled to GLSL |
-| **Shaders** | [src/engine/terrain/terrainGLSL.js](src/engine/terrain/terrainGLSL.js), [TerrainMaterial.js](src/engine/terrain/TerrainMaterial.js), [WaterMaterial.js](src/engine/terrain/WaterMaterial.js) |
-| **Water** | [src/engine/water/WaterSystem.js](src/engine/water/WaterSystem.js), [RealisticWaterMaterial.js](src/engine/water/RealisticWaterMaterial.js), [UnderwaterEffect.js](src/engine/render/UnderwaterEffect.js) |
-| **Sky & clouds** | [src/engine/sky/ProceduralSky.js](src/engine/sky/ProceduralSky.js), [CloudSlabLayer.js](src/engine/sky/CloudSlabLayer.js), [PlanetCloudChunks.js](src/engine/sky/PlanetCloudChunks.js), [TimeOfDay.js](src/engine/sky/TimeOfDay.js) |
-| **Style** | [src/engine/style/PlanetStyleManager.js](src/engine/style/PlanetStyleManager.js), [ColorPalette.js](src/engine/style/ColorPalette.js) |
-| **Paint** | [src/paint/PaintModeManager.js](src/paint/PaintModeManager.js) — height / biome / props brush layers (Tile mode) |
-| **Export** | [src/engine/terrain/TerrainExporter.js](src/engine/terrain/TerrainExporter.js), [PlanetExporter.js](src/engine/terrain/PlanetExporter.js) |
-| **UI** | [src/App.jsx](src/App.jsx), [src/components/panels/index.jsx](src/components/panels/index.jsx) — schema-driven side panels, settings search, performance overlay |
+| Integration | Version | Requirements | Source | Download |
+| --- | --- | --- | --- | --- |
+| **Unity** | `0.3.0-alpha.1` | Unity `6000.3+` | [`plugins/unity/Packages/com.zyfou.procedural-terrains`](plugins/unity/Packages/com.zyfou.procedural-terrains) | [`Unity ZIP`](public/downloads/plugins/procedural-terrains-unity-0.3.0-alpha.1.zip) |
+| **Blender** | `0.3.3` | Blender `5.2+` | [`plugins/blender/procedural_terrains`](plugins/blender/procedural_terrains) | [`Blender ZIP`](public/downloads/plugins/procedural-terrains-blender-0.3.3.zip) |
 
-## Key properties
+### Unity workflow
 
-- **Deterministic**: terrain is a pure function of `(world XZ, seed, params)`. The seed drives
-  a domain offset via a mulberry32 PRNG; `Math.random()` is never used for shape.
-- **Layered noise**: a stack of typed noise layers (add, carve, replace, …) is codegen'd into
-  the terrain shader and serializes with every save.
-- **No cracks**: chunk geometries carry skirt rings dropped in the vertex shader so adjacent
-  chunks at different LODs never show gaps.
-- **Live editing**: most sliders map to shader uniforms — only chunk count/size, tile layout,
-  planet radius and a few structural keys trigger a geometry rebuild.
-- **Camera never shapes terrain**: LOD is view-dependent; the height field is not.
-- **Undo / redo**: full project state (params, tiles, paint layers) with `Ctrl+Z` / `Ctrl+Y`.
-- **Save / load**: seed + all parameters as JSON from the top bar.
+1. Download the Unity ZIP or add the local package through Unity Package Manager.
+2. In Procedural Terrains, choose the **Unity Terrain** export preset.
+3. In Unity, open **Window > Procedural Terrains > Terrain Importer**.
+4. Import the ZIP, or use **Create** to generate seeded terrain natively.
 
-## Tile mode extras
+The package creates native `TerrainData`, colliders, connected tile neighbors,
+TerrainLayers, and persistent generation recipe assets. See the
+[Unity package README](plugins/unity/Packages/com.zyfou.procedural-terrains/README.md)
+and [Unity changelog](plugins/unity/Packages/com.zyfou.procedural-terrains/CHANGELOG.md)
+for current limitations and release details.
 
-- **Multi-tile assembly**: place tiles on a grid to build larger landscapes; export merged or
-  per-tile.
-- **Square or circle layout**: circle mode clips terrain to a disk, supports ring expansion,
-  and renders a radial wall that follows the terrain silhouette.
-- **Paint mode**: brush height, rivers, biomes and procedural props onto the board.
-- **Real-world heightmaps**: import location-based elevation data (preview, replace or blend).
-- **Close-range detail layer**: extra surface detail near the camera in Tile mode.
+### Blender workflow
+
+1. Download `procedural-terrains-blender-0.3.3.zip`.
+2. In Blender 5.2, open **Edit > Preferences > Get Extensions > Install from Disk**.
+3. Enable the extension and open **3D View > Sidebar > Terrain**.
+4. Use **Create** for native procedural terrain or **Import** for a ZIP/
+   `.ptrterrain` export.
+
+The extension creates ordinary editable mesh objects with UVs, source metadata,
+shared tile borders, and Blender undo support. Read the
+[Blender extension README](plugins/blender/procedural_terrains/README.md) for
+installation, coordinate mapping, and performance guidance.
+
+## World modes
+
+| Mode | Best for | Details |
+| --- | --- | --- |
+| **Tile** | Authoring and export | Fixed terrain board, multi-tile layouts, paint brushes, and close-range detail. |
+| **Infinite World** | Exploration | Streamed chunks around the camera with FPS walking and plane exploration. |
+| **Planet** | Large-scale worlds | Cube-sphere terrain with atmosphere, volumetric clouds, and orbit camera. |
+
+Tile mode also includes square or circular layouts, radial walls, real-world
+heightmap import, biome painting, river tools, and procedural prop painting.
+
+## Export pipeline
+
+The Export panel provides quick screenshots and heightmaps, plus production
+presets for:
+
+- Unity Terrain
+- Unreal Landscape
+- Godot Terrain3D
+- Blender Scene
+- Three.js viewer assets
+
+Full ZIP exports can contain:
+
+- GLB/GLTF or OBJ terrain meshes, with configurable resolution, skirts, and base slabs
+- baked color, normal, heightmap, biome splat, and collision maps
+- water surface meshes and depth, shoreline, and foam masks
+- `terrain.json`, `project.ptrterrain`, and preset metadata for downstream tools
+
+The Production Check validates selections before the GPU bake and flags
+high-memory maps or missing water masks.
 
 ## Controls
 
-**Editor camera (Tile mode)**
-- **Left-drag** — pan across the board (clamped)
+**Tile camera**
+
+- **Left-drag** — pan across the board
 - **Right-drag** — orbit
 - **Scroll** — zoom
-- Bottom toolbar: top-down / angled / reset camera
+- Bottom toolbar — top-down, angled, and reset camera views
 
-**Exploration (Infinite World & Planet)**
-- Bottom toolbar **Explore** menu: **Walk** (FPS) or **Plane** (fly-through)
-- Touch controls on mobile while exploring
+**Exploration**
+
+- Bottom toolbar **Explore** — choose **Walk** or **Plane**
+- Touch controls are available on mobile while exploring
 
 **Shortcuts**
-- `Ctrl+K` — search all settings
+
+- `Ctrl+K` — search settings
 - `Ctrl+Z` / `Ctrl+Y` — undo / redo
-- `Ctrl+Shift+P` — developer performance overlay (also via the FPS badge in the status bar)
+- `Ctrl+Shift+P` — performance overlay
 
-## Exports
+## Architecture
 
-Quick actions (Export panel):
-- **Screenshot** — PNG of the current viewport
-- **Heightmap** — orthographic grayscale bake from the same shader
+The WebGL engine is framework-agnostic in [`src/engine/`](src/engine/). The
+React editor lives in [`src/components/`](src/components/), and the two layers
+communicate through Engine methods and a callbacks object.
 
-Full export (ZIP with optional contents):
-- Terrain mesh as **GLB/GLTF** or **OBJ** (configurable resolution, skirts, base slab). Multi-tile square boards can export as one combined mesh or as per-tile packages in the ZIP.
-- Baked **color**, **normal** and **heightmap** textures
-- **Biome splat** map, **collision** mesh, water surface mesh
-- Water masks (depth, shoreline, foam) and preset JSON for re-import
+| Area | Key files |
+| --- | --- |
+| **Core** | [`src/engine/Engine.js`](src/engine/Engine.js) — renderer, scene, uniforms, save/load, undo state |
+| **Tile board** | [`src/engine/terrain/TerrainBoard.js`](src/engine/terrain/TerrainBoard.js) — board layout and chunk orchestration |
+| **Infinite world** | [`src/engine/terrain/InfiniteWorld.js`](src/engine/terrain/InfiniteWorld.js) — streamed chunks and culling |
+| **Planet** | [`src/engine/terrain/PlanetWorld.js`](src/engine/terrain/PlanetWorld.js) — cube-sphere world |
+| **Noise** | [`src/engine/terrain/noise/NoiseStack.js`](src/engine/terrain/noise/NoiseStack.js) — layered serializable noise |
+| **Shaders** | [`src/engine/terrain/terrainGLSL.js`](src/engine/terrain/terrainGLSL.js) and materials |
+| **Water** | [`src/engine/water/WaterSystem.js`](src/engine/water/WaterSystem.js) — water, reflections, and underwater effects |
+| **Paint** | [`src/paint/PaintModeManager.js`](src/paint/PaintModeManager.js) — height, biome, and prop layers |
+| **Export** | [`src/engine/terrain/TerrainExporter.js`](src/engine/terrain/TerrainExporter.js) — mesh and texture packages |
+| **UI** | [`src/App.jsx`](src/App.jsx) — application shell and editor composition |
 
-### Production presets
+## Technical properties
 
-The Export panel includes a preflight **Production Check** and target presets for **Unity
-Terrain**, **Unreal Landscape**, **Godot Terrain3D**, **Blender Scene**, and **Three.js Viewer
-Assets**. Unity and Blender package a deterministic `project.ptrterrain` runtime document with
-little-endian unsigned 16-bit RAW vertex grids at 513, 1025, 2049, or 4097 samples per side.
-Extract the exported `Terrain` folder under a Unity project's `Assets` folder to import it with
-the local package in `plugins/unity/Packages/com.zyfou.procedural-terrains`. Blender 5.2 users can install
-the extension in `plugins/blender/procedural_terrains` and import the Blender preset ZIP from **File >
-Import > Procedural Terrains**. Blender extension 0.3.3 can also create seeded,
-tiled Noise Stack terrain natively and resize/reposition imported assemblies. Other engine presets retain
-their import-oriented `terrain.json` and `README.txt` bundles. The checker blocks invalid asset
-selections and flags high-memory maps or missing water masks before the GPU bake begins.
+- **Deterministic:** terrain is a pure function of world coordinates, seed, and parameters.
+- **Layered noise:** typed layers are code-generated into the terrain shader and saved with projects.
+- **Crack-free LOD:** skirt rings hide transitions between chunks at different detail levels.
+- **Live editing:** most controls update shader uniforms without rebuilding geometry.
+- **Camera-independent terrain:** the camera affects LOD, never the generated height field.
+- **Undo/redo:** project parameters, tile layout, and paint layers are tracked together.
+- **Performance controls:** GPU-tier detection, quality presets, LOD budgets, renderer options, and a live overlay.
 
-Planet mode has a dedicated planet exporter with cubemap height baking.
+Normals are finite-differenced per fragment to keep distant terrain crisp at low
+geometric LOD. On weaker GPUs, lower pixel ratio, reduce octaves or layer count,
+or choose a lighter water quality mode. More profiling notes are in
+[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
 
-## Local projects
+## Project structure
 
-The home screen is a local-first project hub. Create a blank terrain or start from Island,
-Mountain Range, or Desert templates; then use **Save** in the editor to persist the
-project in the browser. Projects include versioned terrain data, metadata, an editor-captured
-thumbnail, and a recent-project entry. Storage uses IndexedDB with a localStorage fallback, and
-the **Projects** button reopens the hub. Existing seed JSON files can still be imported.
+```text
+src/                 React UI, engine, exporters, and editor state
+plugins/             Unity package and Blender extension
+public/downloads/    Downloadable plugin archives
+public/textures/     Built-in terrain material textures
+api/                 Optional self-hostable accounts service
+docs/                Architecture and performance notes
+tests/               Frontend and integration tests
+```
 
-## Performance notes
+## License
 
-Normals are finite-differenced per fragment (multiple height evaluations per pixel), which
-keeps distant terrain crisp at low geometric LOD. The **Performance** panel offers GPU-tier
-detection, quality presets, LOD budgets and renderer options. On weaker GPUs, lower the pixel
-ratio, reduce octaves/layer count, or switch to a lighter water quality mode.
+The core project is released under the [MIT License](LICENSE). Plugin licenses
+are documented alongside their source packages: Unity is MIT licensed and the
+Blender extension is GPL-3.0-or-later.

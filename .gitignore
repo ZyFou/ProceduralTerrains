@@ -24,6 +24,16 @@ out/
 .parcel-cache/
 .vite/
 
+# README documentation screenshots are intentionally versioned
+!output/
+!output/playwright/
+!output/playwright/*.png
+!output/playwright/*.jpg
+!output/playwright/*.jpeg
+!output/playwright/*.webp
+!docs/images/
+!docs/images/*.png
+
 # Coverage
 coverage/
 .nyc_output/
