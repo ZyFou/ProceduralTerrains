@@ -5,7 +5,7 @@
 // overlay (mode switch, export, heavy generation) or a small non-blocking
 // indicator (minor recalcs) — instead of silent freezes and scattered booleans.
 //
-// LoadingTask = { id, label, detail?, progress?, blocking }
+// LoadingTask = { id, label, detail?, progress?, blocking, opaque? }
 // ============================================================================
 import React, { createContext, useContext, useMemo, useRef, useState, useCallback } from 'react';
 
@@ -22,7 +22,10 @@ export function LoadingProvider({ children }) {
       label: opts.label ?? 'Working…',
       detail: opts.detail,
       progress: opts.progress,
+      stage: opts.stage,
+      phases: opts.phases,
       blocking: opts.blocking ?? false,
+      opaque: opts.opaque ?? false,
     };
     setTasks((prev) => {
       const without = prev.filter((t) => t.id !== id);

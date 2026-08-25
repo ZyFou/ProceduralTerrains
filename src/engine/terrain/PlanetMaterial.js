@@ -53,6 +53,12 @@ uniform vec3 uFaceOrigin;
 uniform vec3 uFaceU;
 uniform vec3 uFaceV;
 
+#ifdef USE_INSTANCING
+attribute vec3 aFaceOrigin;
+attribute vec3 aFaceU;
+attribute vec3 aFaceV;
+#endif
+
 attribute float aSkirt;
 attribute float aLod;
 
@@ -62,7 +68,11 @@ varying float vLod;
 varying float vSkirt;
 
 void main() {
-  vec3 cube = uFaceOrigin + position.x * uFaceU + position.z * uFaceV;
+  #ifdef USE_INSTANCING
+    vec3 cube = aFaceOrigin + position.x * aFaceU + position.z * aFaceV;
+  #else
+    vec3 cube = uFaceOrigin + position.x * uFaceU + position.z * uFaceV;
+  #endif
   vec3 dir = normalize(cube);
 
   float h = heightAt3D(dir);

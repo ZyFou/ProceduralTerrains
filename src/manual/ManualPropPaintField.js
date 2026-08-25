@@ -39,13 +39,22 @@ function base64ToUint8(base64) {
 export class ManualPropPaintField {
   constructor({ getBounds, gpuTier = 'high', resolution }) {
     this.getBounds = getBounds;
-    this.resolution = resolution || resolutionForTier(gpuTier);
+    this.targetResolution = resolution || resolutionForTier(gpuTier);
+    this.resolution = 1;
     this.data = new Uint8Array(this.resolution * this.resolution * 4);
     this.origin = { x: 0, z: 0 };
     this.span = { x: 1, z: 1 };
     this.revision = 0;
     this._dirtyBounds = null;
     this._syncBounds();
+  }
+
+  ensureAllocated() {
+    if (this.resolution === this.targetResolution) return false;
+    this.resolution = this.targetResolution;
+    this.data = new Uint8Array(this.resolution * this.resolution * 4);
+    this._dirtyBounds = { all: true };
+    return true;
   }
 
   _readBounds() {
@@ -154,6 +163,7 @@ export class ManualPropPaintField {
   }
 
   stamp({ x, z, radius, strength, falloff, tool = 'paint', propType = 'grass' }) {
+    this.ensureAllocated();
     this._syncBounds();
     const center = this.worldToPixel(x, z);
     const radiusX = Math.max(1, radius / this.span.x * (this.resolution - 1));
@@ -228,6 +238,8 @@ export class ManualPropPaintField {
     const source = base64ToUint8(input.data);
     const sourceResolution = Math.max(1, Math.round(Number(input.resolution) || 0));
     if (!source || source.length !== sourceResolution * sourceResolution * 4) return false;
+    this.ensureAllocated();
+    this.data.fill(0);
     if (sourceResolution === this.resolution) {
       this.data.set(source);
     } else {

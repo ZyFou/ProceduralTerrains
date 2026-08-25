@@ -272,6 +272,18 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(manual.fragmentShader).not.toContain('uniform sampler2D uImportImageryTex');
   });
 
+  it('omits the atlas graph for an empty Manual surface without changing its height/detail path', () => {
+    const uniforms = createTerrainUniforms();
+    const manual = createTerrainMaterial(uniforms, 5, undefined, { variant: 'manual-empty' });
+    materials.push(manual);
+
+    expect(manual.userData.terrainVariant).toBe('manual-empty');
+    expect(manual.vertexShader).toContain('manualHeightOffsetAt');
+    expect(manual.fragmentShader).toContain('applyTerrainDetailLayer');
+    expect(manual.fragmentShader).not.toContain('uniform sampler2D uSurfDiffuse');
+    expect(manual.fragmentShader).not.toContain('manualCoverage');
+  });
+
   it('removes Infinite World cache samplers from the Tile-only hybrid shader', () => {
     const uniforms = createTerrainUniforms();
     const hybrid = createTerrainMaterial(uniforms, 5, undefined, { variant: 'hybrid' });

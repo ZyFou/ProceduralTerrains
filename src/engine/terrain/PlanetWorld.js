@@ -6,15 +6,10 @@ import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
 // faceGrid×faceGrid grid of chunks. Every chunk reuses one of the shared
 // unit-grid LOD geometries (with radial skirts) from ChunkGeometry.js.
 //
-// Each chunk owns its OWN planet material instance: the material's terrain /
-// palette uniforms are the engine's shared uniform OBJECTS (passed by
-// reference, so every style tweak still applies everywhere), but its cube-face
-// mapping uniforms (uFaceOrigin / uFaceU / uFaceV) are private and baked once
-// at creation. A single shared material can't work here — three.js only
-// uploads a material's uniforms once per render, so per-mesh uniform mutation
-// (onBeforeRender) would collapse every chunk onto one cube cell. All chunk
-// materials share ONE compiled program (identical source + defines), so the
-// cost is just a handful of extra uniform uploads.
+// Visible leaf chunks are packed into four instanced LOD batches. Per-instance
+// cube-face origin/U/V attributes replace hundreds of mesh/material objects;
+// all four batches share the same shader program. Folded quadtree patches keep
+// their rare standalone meshes because they use variable topology.
 //
 // The chunk count is bounded (6 * faceGrid²) so they are all created once —
 // no streaming. LOD is chosen per frame by distance to the camera; chunks are
@@ -109,6 +104,7 @@ export class PlanetWorld {
     this.chunks = [];
     this.materials = [];
     this._buildChunks();
+    this._buildInstancedBatches();
 
     // stats (mirror InfiniteWorld so the HUD keeps working)
     this.activeChunkCount = this.chunks.length;
@@ -142,25 +138,13 @@ export class PlanetWorld {
             .addScaledVector(cv, 0.5)
             .normalize();
 
-          // per-chunk material: shares the engine uniform objects, owns its
-          // face mapping uniforms (baked once here)
-          const mat = this.makeMaterial();
-          mat.uniforms.uFaceOrigin.value.copy(origin);
-          mat.uniforms.uFaceU.value.copy(cu);
-          mat.uniforms.uFaceV.value.copy(cv);
-          mat.wireframe = this.wireframe;
-          this.materials.push(mat);
-
-          const mesh = new THREE.Mesh(this.geometries[3], mat);
-          mesh.frustumCulled = false;          // we cull manually (shader transform)
-          mesh.matrixAutoUpdate = false;
-          mesh.updateMatrix();
-
           const worldCenter = centerDir.clone().multiplyScalar(this.radius + this.maxHeight * 0.5);
           const boundRadius = this._patchBoundRadius(origin, cu, cv, worldCenter);
 
-          this.group.add(mesh);
-          const chunk = { mesh, centerDir, worldCenter, boundRadius, lod: 3, merged: false };
+          const chunk = {
+            origin, faceU: cu.clone(), faceV: cv.clone(), centerDir, worldCenter,
+            boundRadius, lod: 3, merged: false, visible: true,
+          };
           this.chunks.push(chunk);
           cells[j][i] = chunk;
         }
@@ -170,6 +154,55 @@ export class PlanetWorld {
       while (size < g) size *= 2;
       const root = this._buildFaceNode(o, U, V, cells, 0, 0, size, 0);
       if (root) this._faceTrees.push(root);
+    }
+  }
+
+  _buildInstancedBatches() {
+    const capacity = Math.max(1, this.chunks.length);
+    this.batches = this.geometries.map((geometry, lod) => {
+      const instancedGeometry = geometry.clone();
+      const origins = new Float32Array(capacity * 3);
+      const faceUs = new Float32Array(capacity * 3);
+      const faceVs = new Float32Array(capacity * 3);
+      instancedGeometry.setAttribute('aFaceOrigin', new THREE.InstancedBufferAttribute(origins, 3));
+      instancedGeometry.setAttribute('aFaceU', new THREE.InstancedBufferAttribute(faceUs, 3));
+      instancedGeometry.setAttribute('aFaceV', new THREE.InstancedBufferAttribute(faceVs, 3));
+      const material = this.makeMaterial();
+      material.wireframe = this.wireframe;
+      this.materials.push(material);
+      const mesh = new THREE.InstancedMesh(instancedGeometry, material, capacity);
+      mesh.name = `planet-lod-${lod}`;
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      this.group.add(mesh);
+      return { mesh, geometry: instancedGeometry, material, origins, faceUs, faceVs };
+    });
+    this._uploadInstancedBatches();
+  }
+
+  _uploadInstancedBatches() {
+    if (!this.batches) return;
+    const counts = new Uint32Array(this.batches.length);
+    for (const chunk of this.chunks) {
+      if (chunk.merged || !chunk.visible) continue;
+      const batch = this.batches[chunk.lod];
+      const index = counts[chunk.lod]++;
+      chunk.origin.toArray(batch.origins, index * 3);
+      chunk.faceU.toArray(batch.faceUs, index * 3);
+      chunk.faceV.toArray(batch.faceVs, index * 3);
+    }
+    for (let lod = 0; lod < this.batches.length; lod++) {
+      const batch = this.batches[lod];
+      batch.mesh.count = counts[lod];
+      batch.mesh.visible = counts[lod] > 0;
+      for (const name of ['aFaceOrigin', 'aFaceU', 'aFaceV']) {
+        const attribute = batch.geometry.getAttribute(name);
+        attribute.needsUpdate = true;
+        attribute.clearUpdateRanges?.();
+        attribute.addUpdateRange?.(0, counts[lod] * 3);
+      }
     }
   }
 
@@ -280,8 +313,15 @@ export class PlanetWorld {
     const old = this.geometries[lod];
     this.geometries[lod] = geo;
     this.lodSegments[lod] = res;
-    for (const c of this.chunks) {
-      if (c.lod === lod) c.mesh.geometry = geo;
+    if (this.batches?.[lod]) {
+      const batch = this.batches[lod];
+      const instancedGeometry = geo.clone();
+      instancedGeometry.setAttribute('aFaceOrigin', new THREE.InstancedBufferAttribute(batch.origins, 3));
+      instancedGeometry.setAttribute('aFaceU', new THREE.InstancedBufferAttribute(batch.faceUs, 3));
+      instancedGeometry.setAttribute('aFaceV', new THREE.InstancedBufferAttribute(batch.faceVs, 3));
+      batch.geometry.dispose();
+      batch.geometry = instancedGeometry;
+      batch.mesh.geometry = instancedGeometry;
     }
     old.dispose();
   }
@@ -362,21 +402,22 @@ export class PlanetWorld {
     // 2. Per-chunk LOD + cull (folded chunks are hidden, skip them).
     let visible = 0, culled = 0;
     for (const c of this.chunks) {
-      if (c.merged) { if (c.mesh.visible) c.mesh.visible = false; continue; }
+      if (c.merged) { c.visible = false; continue; }
       const d = this._tmp.copy(c.worldCenter).sub(cameraPos).length();
       const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
       if (!freezeLod) {
-        if (lod !== c.lod) { c.lod = lod; c.mesh.geometry = this.geometries[lod]; }
+        if (lod !== c.lod) c.lod = lod;
       }
       counts[c.lod]++;
 
-      let show = c.mesh.visible;
+      let show = c.visible;
       if (!freezeCulling) {
         show = this._isVisible(c.centerDir, c.worldCenter, c.boundRadius, camLen, horizonCos, camera);
       }
-      c.mesh.visible = show;
+      c.visible = show;
       if (show) visible++; else culled++;
     }
+    this._uploadInstancedBatches();
 
     // 3. Cull the folded patch meshes (LOD is fixed for a patch).
     for (const p of this._mergedPatches) {
@@ -453,7 +494,7 @@ export class PlanetWorld {
       node.mesh = mesh;
     }
     node.mesh.visible = true;
-    for (const c of node.chunks) { c.merged = true; c.mesh.visible = false; }
+    for (const c of node.chunks) { c.merged = true; c.visible = false; }
     this._forEachDescendantInternal(node, (d) => {
       d.merged = false;
       if (d.mesh) d.mesh.visible = false;
@@ -516,7 +557,11 @@ export class PlanetWorld {
     this._mergeGeo.clear();
     this._faceTrees = [];
     this._mergedPatches.length = 0;
-    for (const c of this.chunks) this.group.remove(c.mesh);
+    for (const batch of this.batches || []) {
+      this.group.remove(batch.mesh);
+      batch.geometry.dispose();
+    }
+    this.batches = [];
     this.chunks = [];
     for (const m of this.materials) m.dispose();
     this.materials = [];

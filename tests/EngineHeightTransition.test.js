@@ -59,6 +59,30 @@ describe('atomic terrain height transitions', () => {
     expect(engine._targetTerrainVariant()).toBe('manual');
   });
 
+  it('uses the no-atlas specialization while a Manual surface is empty', () => {
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'manual';
+    engine.manualTerrain = {
+      baseSource: 'flat',
+      surfaceField: { isEmpty: () => true },
+    };
+
+    expect(engine._targetTerrainVariant()).toBe('manual-empty');
+    engine._manualSurfaceShaderRequested = true;
+    expect(engine._targetTerrainVariant()).toBe('manual');
+  });
+
+  it('aborts a stale shader job cleanly after engine disposal', async () => {
+    const engine = heightTransitionHarness();
+    engine._disposed = true;
+    engine.renderer = null;
+
+    await expect(engine._compileMaterialVariants([{}])).resolves.toMatchObject({
+      ready: false,
+      aborted: true,
+    });
+  });
+
   it('uses the generated terrain shader for a hybrid Manual project', () => {
     const engine = heightTransitionHarness();
     engine.projectMode = 'manual';

@@ -88,7 +88,8 @@ export class ManualTerrainField {
     this.uniforms = uniforms;
     this.getBounds = getBounds;
     this.getBaseHeightAt = getBaseHeightAt;
-    this.resolution = resolution || resolutionForTier(gpuTier);
+    this.targetResolution = resolution || resolutionForTier(gpuTier);
+    this.resolution = 1;
     this.shapeHeight = new Float32Array(this.resolution * this.resolution);
     this.sculptDelta = new Float32Array(this.resolution * this.resolution);
     this.heightDelta = new Float32Array(this.resolution * this.resolution);
@@ -114,6 +115,20 @@ export class ManualTerrainField {
     this._syncBounds();
     this._upload();
     this._bindUniforms();
+  }
+
+  ensureAllocated() {
+    if (this.resolution === this.targetResolution) return false;
+    this.resolution = this.targetResolution;
+    this.shapeHeight = new Float32Array(this.resolution * this.resolution);
+    this.sculptDelta = new Float32Array(this.resolution * this.resolution);
+    this.heightDelta = new Float32Array(this.resolution * this.resolution);
+    this.heightData = new Uint16Array(this.resolution * this.resolution * 4);
+    this.texture.image.data = this.heightData;
+    this.texture.image.width = this.resolution;
+    this.texture.image.height = this.resolution;
+    this._composeAll();
+    return true;
   }
 
   _bindUniforms() {
@@ -232,6 +247,7 @@ export class ManualTerrainField {
   }
 
   rebuild(shapes) {
+    if (shapes?.length) this.ensureAllocated();
     this._syncBounds();
     this.shapeHeight.fill(0);
     const resolution = this.resolution;
@@ -407,6 +423,7 @@ export class ManualTerrainField {
     erosionDeposition = 0.65,
     erosionTalus = 1.5,
   }) {
+    this.ensureAllocated();
     this._syncBounds();
     const center = this.worldToPixel(x, z);
     const pixelRadiusX = Math.max(1, radius / this.span.x * (this.resolution - 1));
@@ -541,8 +558,9 @@ export class ManualTerrainField {
   }
 
   loadSculpt(input) {
-    this.sculptDelta.fill(0);
     const source = input?.version === 1 ? base64ToFloat32(input.data) : null;
+    if (source) this.ensureAllocated();
+    this.sculptDelta.fill(0);
     const sourceResolution = Math.max(1, Math.round(Number(input?.resolution) || 0));
     if (source && source.length === sourceResolution * sourceResolution) {
       if (sourceResolution === this.resolution) {

@@ -369,6 +369,12 @@ SurfaceTexResult applySurfaceMaterials(
 `;
 
 function resolveTerrainVariant(variant = 'full') {
+  if (variant === 'manual-empty') {
+    // With zero Manual paint coverage the atlas graph is a provable no-op.
+    // Preserve the exact terrain/detail result and defer that large graph until
+    // a surface-paint tool or loaded document actually needs it.
+    return { name: 'manual-empty', detail: true, surface: false, manual: true };
+  }
   if (variant === 'manual') {
     return { name: 'manual', detail: true, surface: true, manual: true };
   }
@@ -1290,7 +1296,7 @@ export function createTerrainMaterial(
   options = {},
 ) {
   const variant = resolveTerrainVariant(options.variant).name;
-  const h = variant === 'manual'
+  const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);
   const material = new THREE.ShaderMaterial({
@@ -1348,7 +1354,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 // served from three's cache.
 export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   const variant = resolveTerrainVariant(options.variant).name;
-  const h = variant === 'manual'
+  const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);
   mat.vertexShader = buildVertex(h, variant);

@@ -5,7 +5,7 @@ import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
 import { buildActiveSurfaceAtlas } from './engine/terrain/surface/applyTerrainSurface.js';
 import { resetSurfaceLibraryState } from './engine/terrain/surface/SurfaceLibrary.js';
-import { normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/terrain/surface/SurfaceTextureSources.js';
+import { SURFACE_TEXTURE_SOURCE, normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/terrain/surface/SurfaceTextureSources.js';
 import { colorToHex } from './engine/style/ColorPalette.js';
 import { formatTimeOfDay } from './engine/sky/TimeOfDay.js';
 import { useLoading, blockingTask, nonBlockingTask } from './state/loading.jsx';
@@ -318,7 +318,15 @@ export default function App() {
     let cancelled = false;
 
     const completeBootUi = () => {
-      if (cancelled || bootedRef.current) return;
+      if (cancelled) return;
+      // Fast Refresh preserves React refs but constructs a fresh Engine and
+      // starts a fresh `boot` task. Even when the landing was already revealed,
+      // this engine generation must retire its own cover.
+      if (bootedRef.current) {
+        if (canvas) canvas.dataset.bootState = 'ready';
+        loadingRef.current.done('boot');
+        return;
+      }
       bootedRef.current = true;
       if (canvas) canvas.dataset.bootState = 'ready';
       if (bootTimer) {
@@ -416,6 +424,23 @@ export default function App() {
               progress: undefined,
             });
             setStatus({ text: 'Graphics initialization failed', busy: false });
+          },
+          onModeProgress: ({ stage, label, overallProgress }) => {
+            const patch = {
+              detail: label || stage,
+              stage,
+              progress: overallProgress,
+            };
+            blockingUpdateRef.current?.(patch);
+            loadingRef.current.update('mode', patch);
+          },
+          onModeError: (error) => {
+            const patch = {
+              detail: error?.message || 'Mode transition failed',
+              stage: 'failed',
+            };
+            blockingUpdateRef.current?.(patch);
+            loadingRef.current.update('mode', patch);
           },
           onStats: (stats) => liveMetrics.update({ stats }),
           onBackgroundWork: setBgWork,
@@ -563,7 +588,7 @@ export default function App() {
     setProjectName(nextName);
   }, []);
 
-  const saveCurrentProject = useCallback(async (metadata = null) => {
+  const saveCurrentProject = useCallback(async (metadata = null, { captureFresh = true } = {}) => {
     const eng = engineRef.current;
     const current = activeProjectRef.current;
     const name = String(metadata?.name ?? projectNameRef.current ?? current?.metadata?.name ?? 'Untitled terrain').trim() || 'Untitled terrain';
@@ -576,7 +601,9 @@ export default function App() {
 
     try {
       let thumbnail = null;
-      try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
+      if (captureFresh) {
+        try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
+      }
       if (!thumbnail) {
         try { thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) || null; } catch { /* canvas capture is best effort */ }
       }
@@ -912,18 +939,24 @@ export default function App() {
       : nextMode === 'manual'
         ? { id: 'manual-blank', name: 'Manual Terrain', description: 'Build a terrain by composing editable procedural landforms.' }
         : getProjectTemplate(templateId);
-    const created = await loadingRef.current.run('project-create', {
-      blocking: true,
-      label: `Creating ${template.name}…`,
-      detail: 'Building terrain…',
-    }, async (update) => {
-      blockingUpdateRef.current = update;
-      try {
-        if (nextMode === 'nodes') loadNodeWorkspace().catch(() => {});
-        if ((nextMode === 'nodes' || nextMode === 'manual' || realPreset) && worldModeRef.current !== 'studio') {
-          await runModeSwitchRef.current('studio', { silent: true });
-          blockingUpdateRef.current = update;
-        }
+    let created = null;
+    try {
+      created = await loadingRef.current.run('project-create', {
+        blocking: true,
+        label: `Creating ${template.name}…`,
+        detail: 'Planning final scene…',
+        progress: 0,
+        stage: 'planning',
+        phases: ['planning', 'resources', 'geometry', 'compile', 'present'],
+        // Project callbacks update React while the detached/final scene is being
+        // prepared. Keep those changes completely hidden until presentation.
+        opaque: true,
+      }, async (update) => {
+        blockingUpdateRef.current = update;
+        try {
+        const workspaceLoad = nextMode === 'nodes'
+          ? loadNodeWorkspace()
+          : Promise.resolve(null);
         // Build the final document once. Seed and preset used to be applied
         // after newProject(), causing two extra full terrain updates and a
         // visible flash of the default/previous landscape.
@@ -931,46 +964,40 @@ export default function App() {
         const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
         const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
         const projectSeed = (baseSeed + templateOffset * 0x9e3779b9) >>> 0;
-        eng.newProject({
-          projectMode: nextMode,
-          workspacePreset: realPreset ? 'real-terrain' : null,
-          seed: projectSeed,
-          presetKey: nextMode === 'procedural' ? template.preset : null,
-          noiseStackPresetKey: nextMode === 'procedural' ? template.noiseStackPreset : null,
-        });
-        setRealTerrainMode(realPreset);
-        // A new terrain is a new document. Do not let saveCurrentProject reuse
-        // the id of whichever project was previously open.
-        setCurrentProject(null);
+        let templateGraph = null;
         if (nextMode === 'nodes') {
-          update({ detail: 'Compiling terrain graph…' });
-          let templateGraph = createNodeTemplateGraph(template.id);
+          templateGraph = createNodeTemplateGraph(template.id);
           if (typeof nodeColorsEnabled === 'boolean') {
             templateGraph = nodeColorsEnabled
               ? applyGraphColorPreset(templateGraph, nodeColorPreset || template.colorPreset || 'alpine')
               : setGraphColorEnabled(templateGraph, false);
           }
-          const graphResult = eng.setTerrainGraph(templateGraph, { structural: true, silent: true, atomic: true });
-          const result = await graphResult?.ready;
-          if (!graphResult?.ok || result?.error) {
-            throw result?.error ?? new Error('Terrain graph could not be compiled');
-          }
-        } else if (nextMode === 'procedural') {
-          const result = await eng.rebuildActiveHeightProgram({
-            label: 'Loading procedural terrain',
-            atomic: true,
-            terrainDirtyOnSwap: true,
-          });
-          if (result?.error) throw result.error;
-        } else {
-          const result = await eng.rebuildActiveHeightProgram({
-            label: 'Loading manual terrain',
-            atomic: true,
-            terrainDirtyOnSwap: true,
-          });
-          if (result?.error) throw result.error;
         }
-        await eng.waitForTerrainReady();
+        const projectSpec = {
+          projectMode: nextMode,
+          workspacePreset: realPreset ? 'real-terrain' : null,
+          seed: projectSeed,
+          presetKey: nextMode === 'procedural' ? template.preset : null,
+          noiseStackPresetKey: nextMode === 'procedural' ? template.noiseStackPreset : null,
+          initialGraph: templateGraph,
+        };
+        // A new terrain is a new document. Do not let saveCurrentProject reuse
+        // the id of whichever project was previously open.
+        setCurrentProject(null);
+        // One engine transaction now owns project construction, exact shader
+        // compilation and the two frozen presentation frames. This replaces
+        // the old visible `newProject()` followed by a second rebuild.
+        await Promise.all([
+          eng.transitionMode({
+            worldMode: 'studio',
+            projectMode: nextMode,
+            project: projectSpec,
+            reason: 'project-create',
+          }),
+          workspaceLoad,
+        ]);
+        setWorldMode('studio');
+        setRealTerrainMode(realPreset);
         // A freshly-created project owns a fresh undo timeline. Without this
         // baseline, the first edit could undo into the landing preview/default
         // procedural document — especially visible when the first Manual edit
@@ -1001,14 +1028,23 @@ export default function App() {
           : nextMode === 'manual'
             ? { name: 'Manual Terrain', description: template.description, tags: ['manual', 'terrain-shapes'] }
             : { name: template.name, description: template.description, tags: [template.id] };
-        update({ detail: 'Saving project…' });
-        const project = await saveCurrentProject(metadata);
-        if (project) showToast(`${template.name} project created`, 'success');
-        return project;
-      } finally {
-        if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
-      }
-    });
+        return metadata;
+        } finally {
+          if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+        }
+      });
+    } catch (error) {
+      if (error?.code === 'MODE_TRANSITION_CANCELLED' || eng._disposed) return null;
+      console.error('Project creation failed', error);
+      showToast(error?.message || 'Project creation failed', 'error');
+      return null;
+    }
+    // The exact final canvas has already been presented. Release the blocking
+    // cover before persistence and reuse that presented frame for the card
+    // thumbnail, avoiding another camera render/shader opportunity after reveal.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    created = await saveCurrentProject(created, { captureFresh: false });
+    if (created) showToast(`${template.name} project created`, 'success');
     if (realPreset && created) {
       setActivePanel('terrain');
       setSettingsTarget({ panelId: 'terrain', tabId: 'import', settingId: 'terrain.realWorldCustom' });
@@ -1088,17 +1124,12 @@ export default function App() {
     onImportStyle: (json) => json && engine().importPlanetStyleJSON(json),
   };
 
-  // ---- mode switching: blocking overlay + transition lock ----
-  // The heavy part is the ASYNC shader compile the engine kicks off after the
-  // synchronous geometry build (FXC can take ~15-20s on this GPU), during which
-  // the engine skips rendering. We keep the loader up until `engine._compiling`
-  // drops back to 0 so the user always sees what's happening.
+  // ---- mode switching: exact-frame blocking transition ----
   const modeLockRef = useRef(false);
   const [modeLocked, setModeLocked] = useState(false);
-  const BUILD_STEP = { studio: 'Building terrain board…', infinite: 'Streaming world chunks…', planet: 'Building spherical mesh…' };
-  // Returns a promise that resolves once the (heavy, async) mode switch has
-  // finished compiling. `silent` suppresses the success/info toasts — used by
-  // the undo/redo restore path so reverting across modes is quiet.
+  const MODE_PHASES = ['planning', 'resources', 'geometry', 'compile', 'present'];
+  // The engine promise resolves only after two exact frozen frames have been
+  // presented. No polling or safety delay can release an incomplete mode.
   const runModeSwitch = (next, { silent = false } = {}) => {
     if (next === worldMode || modeLockRef.current) return Promise.resolve();
     modeLockRef.current = true;
@@ -1106,31 +1137,18 @@ export default function App() {
     const label = MODE_LABEL[next] ?? next;
     if (!panelAvailable(activePanel, next)) setActivePanel(null);
 
-    return loading.run('mode', { blocking: true, label: `Switching to ${label} mode…`, detail: 'Preparing scene…' }, async (update) => {
+    return loading.run('mode', {
+      blocking: true,
+      opaque: true,
+      label: `Switching to ${label} mode…`,
+      detail: 'Planning final scene…',
+      progress: 0,
+      stage: 'planning',
+      phases: MODE_PHASES,
+    }, async (update) => {
       blockingUpdateRef.current = update;
-      update({ detail: BUILD_STEP[next] ?? 'Building scene…' });
-      // yield so the overlay paints the build message before the sync build
-      await new Promise((r) => setTimeout(r, 30));
-      await engine().setWorldMode(next);      // sync build; kicks off async shader compile
+      await engine().transitionMode({ worldMode: next, reason: 'ui' });
       setWorldMode(next);
-
-      // wait for the engine to finish compiling shaders (it raises onStatus
-      // 'Compiling … shaders…' which feeds this task's detail line)
-      await new Promise((resolve) => {
-        const startT = performance.now();
-        const tick = () => {
-          const e = engineRef.current;
-          if (!e || e._disposed) return resolve();
-          const elapsed = performance.now() - startT;
-          if (!e._compiling && elapsed > 160) { update({ detail: 'Finalizing…' }); return resolve(); }
-          // long compiles get a reassuring message; hard cap so it never hangs forever
-          if (e._compiling && elapsed > 6000) update({ detail: 'Compiling shaders… (this can take a while on first use)' });
-          if (elapsed > 60000) return resolve();   // safety net
-          setTimeout(tick, 120);
-        };
-        setTimeout(tick, 120);
-      });
-      await new Promise((r) => setTimeout(r, 80));
     }).then(() => {
       if (!silent) {
         showToast(`Switched to ${label} mode`, 'success');
@@ -1142,6 +1160,8 @@ export default function App() {
     }).catch((e) => {
       console.error(e);
       if (!silent) showToast('Mode switch failed', 'error');
+      if (silent) throw e;
+      return null;
     }).finally(() => {
       blockingUpdateRef.current = null;
       modeLockRef.current = false;
@@ -2052,7 +2072,13 @@ export default function App() {
 
   useEffect(() => {
     const source = normalizeSurfaceTextureSource(params);
-    if (!sourceUsesTextureAtlas(source) || !engineRef.current) return;
+    const eng = engineRef.current;
+    if (!sourceUsesTextureAtlas(source) || !eng) return;
+    // An empty Manual document cannot sample the atlas (all paint weights are
+    // zero), so defer both atlas construction and its shader graph until the
+    // user activates surface paint or loads authored surface data.
+    if (eng.projectMode === 'manual'
+        && eng._targetTerrainVariant?.() === 'manual-empty') return;
     applySurfaceTextures({ source }).catch((err) => {
       console.warn('Could not bake terrain surface textures', err);
     });
@@ -2421,7 +2447,30 @@ export default function App() {
               onClearSculpt={() => engine().clearManualSculpt()}
               onTexturePaintEnabled={(enabled) => {
                 setActivePanel(null);
-                engine().setManualTexturePaintEnabled(enabled);
+                const eng = engine();
+                const surfacePaint = manualTerrainState?.texturePaint?.mode !== 'props';
+                if (!enabled || !surfacePaint) {
+                  void eng.setManualTexturePaintEnabled(enabled);
+                  return;
+                }
+                void loading.run('manual-surface-ready', {
+                  blocking: true,
+                  opaque: true,
+                  label: 'Preparing surface paint…',
+                  detail: 'Loading built-in materials…',
+                }, async (update) => {
+                  blockingUpdateRef.current = update;
+                  try {
+                    await applySurfaceTextures({ source: SURFACE_TEXTURE_SOURCE.BUILT_IN });
+                    update({ detail: 'Compiling the surface-paint shader…' });
+                    await eng.setManualTexturePaintEnabled(true);
+                  } finally {
+                    if (blockingUpdateRef.current === update) blockingUpdateRef.current = null;
+                  }
+                }).catch((error) => {
+                  console.error('Manual surface preparation failed', error);
+                  showToast(error?.message || 'Could not prepare surface paint', 'error');
+                });
               }}
               onTexturePaintSetting={(key, value) => engine().setManualTexturePaintSetting(key, value)}
               onClearTexturePaint={() => engine().clearManualTexturePaint()}

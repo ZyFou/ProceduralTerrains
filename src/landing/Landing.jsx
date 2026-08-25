@@ -45,6 +45,7 @@ function BootTerrainProgress({ bootProgress, complete = false }) {
   const activeIndex = complete
     ? BOOT_PHASES.length
     : Math.max(0, BOOT_PHASES.findIndex(([stage]) => stage === bootProgress?.stage));
+  const activePhaseLabel = complete ? 'Ready' : BOOT_PHASES[activeIndex]?.[1] ?? 'Preparing';
 
   return (
     <div
@@ -55,36 +56,17 @@ function BootTerrainProgress({ bootProgress, complete = false }) {
       aria-valuemax="100"
       aria-valuenow={percent}
     >
-      <div className="landing-boot-progress-head">
-        <svg className="landing-boot-terrain" viewBox="0 0 72 46" aria-hidden="true">
-          <defs>
-            <clipPath id="landing-terrain-progress-clip">
-              <rect x="0" y="0" width={72 * progress} height="46" />
-            </clipPath>
-          </defs>
-          <path className="landing-boot-terrain-base" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
-          <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
-          <path className="landing-boot-terrain-fill" clipPath="url(#landing-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
-        </svg>
-        <div>
-          <span>{bootProgress?.label || 'Preparing final scene…'}</span>
-          <b>{percent}%</b>
-        </div>
-      </div>
-      <div className="landing-boot-progress-track" aria-hidden="true">
-        <i style={{ width: `${percent}%` }} />
-      </div>
-      <ol className="landing-boot-phases" aria-hidden="true">
-        {BOOT_PHASES.map(([stage, label], index) => (
-          <li
-            key={stage}
-            className={index < activeIndex || complete ? 'is-done' : index === activeIndex ? 'is-active' : ''}
-          >
-            <i />
-            <span>{label}</span>
-          </li>
-        ))}
-      </ol>
+      <svg className="landing-boot-terrain" viewBox="0 0 72 46" aria-hidden="true">
+        <defs>
+          <clipPath id="landing-terrain-progress-clip">
+            <rect x="0" y="0" width={72 * progress} height="46" />
+          </clipPath>
+        </defs>
+        <path className="landing-boot-terrain-base" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
+        <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
+        <path className="landing-boot-terrain-fill" clipPath="url(#landing-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
+      </svg>
+      <span className="landing-boot-progress-step">{activePhaseLabel}</span>
     </div>
   );
 }

@@ -51,7 +51,8 @@ function makeTexture(data, resolution) {
 export class ManualSurfacePaintField {
   constructor({ getBounds, gpuTier = 'high', resolution }) {
     this.getBounds = getBounds;
-    this.resolution = resolution || resolutionForTier(gpuTier);
+    this.targetResolution = resolution || resolutionForTier(gpuTier);
+    this.resolution = 1;
     this.weightsA = new Uint8Array(this.resolution * this.resolution * 4);
     this.weightsB = new Uint8Array(this.resolution * this.resolution * 4);
     this.textureA = makeTexture(this.weightsA, this.resolution);
@@ -67,6 +68,19 @@ export class ManualSurfacePaintField {
     this._scratchAverage = new Float32Array(CHANNEL_COUNT);
     this._scratchSample = new Float32Array(CHANNEL_COUNT);
     this._syncBounds();
+  }
+
+  ensureAllocated() {
+    if (this.resolution === this.targetResolution) return false;
+    this.resolution = this.targetResolution;
+    this.weightsA = new Uint8Array(this.resolution * this.resolution * 4);
+    this.weightsB = new Uint8Array(this.resolution * this.resolution * 4);
+    for (const [texture, data] of [[this.textureA, this.weightsA], [this.textureB, this.weightsB]]) {
+      texture.image.data = data;
+      texture.image.width = this.resolution;
+      texture.image.height = this.resolution;
+    }
+    return true;
   }
 
   _readBounds() {
@@ -266,6 +280,7 @@ export class ManualSurfacePaintField {
   }
 
   stamp({ x, z, radius, strength, falloff, tool = 'paint', materialChannel = 0 }) {
+    this.ensureAllocated();
     this._syncBounds();
     const center = this.worldToPixel(x, z);
     const pixelRadiusX = Math.max(1, radius / this.span.x * (this.resolution - 1));
@@ -405,6 +420,7 @@ export class ManualSurfacePaintField {
     if (!sourceA || !sourceB || sourceA.length !== sourceResolution * sourceResolution * 4 || sourceB.length !== sourceA.length) {
       return false;
     }
+    this.ensureAllocated();
     if (sourceResolution === this.resolution) {
       this.weightsA.set(sourceA);
       this.weightsB.set(sourceB);

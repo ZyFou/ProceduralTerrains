@@ -107,7 +107,7 @@ import {
   resolveWaterBaselineCamera,
   waterBaselineParams,
 } from './water/WaterBaseline.js';
-import { createRendererForCanvas, loseRendererContext } from './render/createWebGLRenderer.js';
+import { createRendererForCanvas } from './render/createWebGLRenderer.js';
 import {
   SURFACE_TEXTURE_SOURCE,
   normalizeSurfaceTextureParams,
@@ -133,6 +133,12 @@ import {
   FinalFrameBootPipeline,
   createBootRenderKey,
 } from './boot/FinalFrameBootPipeline.js';
+import {
+  ModeTransitionCancelledError,
+  ModeTransitionCoordinator,
+  ModeResourceCache,
+  createModeRenderKey,
+} from './mode/ModeTransitionCoordinator.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
@@ -162,6 +168,9 @@ const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
 //   onBootProgress(progress)    final-frame boot stage/progress
 //   onBootError(error)          blocking failure; UI offers explicit retry
 //   onBootComplete(result)      exact final frame has been presented
+//   onModeProgress(progress)    atomic mode-transition stage/progress
+//   onModeError(error)          target failed; previous mode was restored
+//   onModeComplete(result)      target final frame has been presented
 // ============================================================================
 
 // Deterministic PRNG used ONLY to derive noise-domain offsets from the seed.
@@ -236,6 +245,9 @@ export class Engine {
     this._bootError = null;
     this._bootPresented = false;
     this._bootPipeline = null;
+    this._modeTransitionCoordinator = null;
+    this._modeResourceCache = new ModeResourceCache({ maxInactive: 2 });
+    this._modeTransitionContext = null;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
       migrateWaterParams(migrateTerrainFormationParams(
@@ -483,15 +495,31 @@ export class Engine {
       event.preventDefault();
       this._contextLost = true;
       console.warn('[graphics] context lost; aborting boot generation');
-      this._bootPipeline?.cancel?.();
-      this._failFinalFrameBoot(new Error('Graphics context was lost while preparing the final frame'), 'renderer');
+      if (this._modeTransitionRequest) {
+        const request = this._modeTransitionRequest;
+        request.contextLost = true;
+        request.contextRestorePromise = new Promise((resolve) => { request.resolveContextRestore = resolve; });
+        this._modeTransitionCoordinator?.cancel?.();
+        this.cb.onModeProgress?.({
+          stage: this._modeTransitionCoordinator?.state || 'resources',
+          label: 'Graphics context lost — waiting for recovery…',
+        });
+      } else {
+        this._bootPipeline?.cancel?.();
+        this._failFinalFrameBoot(new Error('Graphics context was lost while preparing the final frame'), 'renderer');
+      }
       this.cb.onStatus('Graphics context lost — retry when the device recovers', false);
     };
     this._onContextRestored = () => {
       this._contextLost = false;
       this._needsRender = true;
       console.info('[graphics] context restored');
-      if (this._bootPending) this.retryBoot({ mode: this._bootMode });
+      if (this._modeTransitionRequest?.contextLost) {
+        const request = this._modeTransitionRequest;
+        request.contextLost = false;
+        request.resolveContextRestore?.();
+        request.resolveContextRestore = null;
+      } else if (this._bootPending) this.retryBoot({ mode: this._bootMode });
       else {
         this.cb.onStatus('Ready', false);
         this._needsRender = true;
@@ -559,6 +587,7 @@ export class Engine {
     // remove the loading cover. No placeholder or intermediate-quality frame
     // is ever rendered to the canvas.
     this._createFinalFrameBootPipeline();
+    this._createModeTransitionCoordinator();
     void this._startFinalFrameBoot({ mode: this._initialBootMode, reason: 'initial' });
   }
 
@@ -806,6 +835,15 @@ export class Engine {
         if (meta.surfaceChanged) {
           this._needsRender = true;
           this.minimap.requestRedraw();
+          // Blank Manual documents use an exact no-atlas specialization. A
+          // first paint keeps that last valid frame while the atlas program is
+          // compiled, then the normal warm-and-swap path publishes it.
+          if (this.projectMode === 'manual'
+              && this.terrainMaterial?.userData?.terrainVariant === 'manual-empty'
+              && !this.manualTerrain?.surfaceField?.isEmpty?.()) {
+            this._manualSurfaceShaderRequested = true;
+            void this._ensureTerrainShaderVariantAsync();
+          }
         }
         if (meta.terrainChanged) {
           this._markTerrainFieldDirty();
@@ -2330,6 +2368,7 @@ export class Engine {
     seed = null,
     presetKey = null,
     noiseStackPresetKey = null,
+    initialGraph = null,
   } = {}) {
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
     this.workspacePreset = workspacePreset === 'real-terrain' ? 'real-terrain' : null;
@@ -2415,11 +2454,16 @@ export class Engine {
     this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load({ version: 5, baseSource: 'flat', shapes: [] }, { emit: false });
+    this._manualSurfaceShaderRequested = false;
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
     this.terrainAnalysis?.load();
     this.generationSource = this._generationSourceForProject();
-    this.terrainGraph = this.projectMode === 'nodes' ? createBlankGraph() : null;
+    // Nodes receives the final template graph as part of the project
+    // transaction. Never publish/compile a transient Blank graph first.
+    this.terrainGraph = this.projectMode === 'nodes'
+      ? migrateGraphDocument(initialGraph || createBlankGraph(), this.noiseStack)
+      : null;
     this.graphView = { x: 0, y: 0, zoom: 1 };
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
     this._graphProgram = compiled?.ok ? compiled.program : null;
@@ -2447,7 +2491,10 @@ export class Engine {
     // React panels do not keep rendering the previous project's stack.
     this.cb.onParams(this._paramsSnapshot());
     if (this.projectMode === 'procedural') this._notifyPerf();
-    this.applyAll({ force: true });
+    // A blank Manual/Nodes project uses the same Studio grid whenever its
+    // dimensions are compatible. applyAll(false) still rebuilds when the
+    // previous project actually used a different chunk layout.
+    this.applyAll({ force: this.projectMode === 'procedural' });
     this._onErosionChanged();
     this._notifyTiles();
 
@@ -3422,7 +3469,7 @@ export class Engine {
           if (terrainResult?.ready === true && warm.length > 1) {
             auxiliaryResult = await this._compileMaterialVariants(warm.slice(1), {
               canvasOnly: true,
-              stagger: true,
+              stagger: false,
               timeoutMs: 120000,
               renderTarget,
               onProgress: (done) => emitProgress({
@@ -3437,7 +3484,7 @@ export class Engine {
         } else {
           compileResult = await this._compileMaterialVariants(warm, {
             canvasOnly: true,
-            stagger: true,
+            stagger: nodePreviewMaterial,
             timeoutMs: 120000,
             renderTarget,
             onProgress: (done, total) => emitProgress({
@@ -3612,7 +3659,7 @@ export class Engine {
           targetSnapshot = this._resolveCameraCompileTarget();
           const result = await this._compileMaterialVariants(warm, {
             canvasOnly: true,
-            stagger: true,
+            stagger: false,
             timeoutMs: 120000,
             renderTarget: targetSnapshot.renderTarget,
           });
@@ -4579,6 +4626,23 @@ export class Engine {
     onProgress,
     renderTarget = null,
   } = {}) {
+    // Capture the renderer for the whole operation. Vite HMR and explicit
+    // disposal can replace/null `this.renderer` while the driver is linking a
+    // shader asynchronously. Never let a completed stale job dereference the
+    // next renderer (or null) after that hand-off.
+    const renderer = this.renderer;
+    if (this._disposed || !renderer) {
+      return {
+        ready: false,
+        timedOut: false,
+        aborted: true,
+        materialCount: 0,
+        pendingCount: 0,
+        waitMs: 0,
+        syncCompileMs: 0,
+        asyncWaitMs: 0,
+      };
+    }
     const list = mats.filter(Boolean);
     if (!list.length) {
       return {
@@ -4623,20 +4687,30 @@ export class Engine {
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
-    const previousTarget = this.renderer.getRenderTarget();
+    const previousTarget = renderer.getRenderTarget();
     let pending;
     try {
-      this.renderer.setRenderTarget(renderTarget);
-      pending = this.renderer.compile(group, this.camera, this.scene);
+      renderer.setRenderTarget(renderTarget);
+      pending = renderer.compile(group, this.camera, this.scene);
     } finally {
-      this.renderer.setRenderTarget(previousTarget);
+      renderer.setRenderTarget(previousTarget);
     }
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
     const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
     const asyncWaitMs = performance.now() - waitStartedAt;
+    if (this._disposed || this.renderer !== renderer || canvasResult?.aborted) {
+      return {
+        ...canvasResult,
+        ready: false,
+        aborted: true,
+        materialCount: list.length,
+        syncCompileMs,
+        asyncWaitMs,
+      };
+    }
     const parallelCompile = Boolean(
-      this.renderer.getContext().getExtension('KHR_parallel_shader_compile')
+      renderer.getContext?.()?.getExtension?.('KHR_parallel_shader_compile')
     );
     console.info(
       `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
@@ -4653,12 +4727,12 @@ export class Engine {
       return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
     }
 
-    this.underwater._ensureTarget(this.renderer);
-    this.renderer.setRenderTarget(this.underwater._rt);
+    this.underwater._ensureTarget(renderer);
+    renderer.setRenderTarget(this.underwater._rt);
     const rtCompileStartedAt = performance.now();
-    const pendingRt = this.renderer.compile(group, this.camera, this.scene);
+    const pendingRt = renderer.compile(group, this.camera, this.scene);
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
-    this.renderer.setRenderTarget(null);
+    renderer.setRenderTarget(null);
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
@@ -4688,19 +4762,23 @@ export class Engine {
     timeoutMs = 120000,
   } = {}) {
     if (!material || !geometry) return { ready: true, pendingCount: 0 };
+    const renderer = this.renderer;
+    if (this._disposed || !renderer) {
+      return { ready: false, aborted: true, pendingCount: 0, syncCompileMs: 0 };
+    }
     const group = new THREE.Group();
     const probe = new THREE.InstancedMesh(geometry, material, 1);
     probe.count = 1;
     probe.setMatrixAt(0, new THREE.Matrix4());
     group.add(probe);
-    const previousTarget = this.renderer.getRenderTarget();
+    const previousTarget = renderer.getRenderTarget();
     const startedAt = performance.now();
     let pending;
     try {
-      this.renderer.setRenderTarget(renderTarget);
-      pending = this.renderer.compile(group, this.camera, this.scene);
+      renderer.setRenderTarget(renderTarget);
+      pending = renderer.compile(group, this.camera, this.scene);
     } finally {
-      this.renderer.setRenderTarget(previousTarget);
+      renderer.setRenderTarget(previousTarget);
     }
     const syncCompileMs = performance.now() - startedAt;
     const result = await this._waitForMaterialsReady(pending, { timeoutMs });
@@ -4713,8 +4791,18 @@ export class Engine {
    */
   _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
     const pending = new Set(materials);
-    const props = this.renderer.properties;
-    const gl = this.renderer.getContext?.();
+    const renderer = this.renderer;
+    if (this._disposed || !renderer) {
+      return Promise.resolve({
+        ready: false,
+        timedOut: false,
+        aborted: true,
+        pendingCount: pending.size,
+        waitMs: 0,
+      });
+    }
+    const props = renderer.properties;
+    const gl = renderer.getContext?.();
 
     return new Promise((resolve) => {
       if (!pending.size) {
@@ -4729,7 +4817,8 @@ export class Engine {
       const start = performance.now();
 
       const check = () => {
-        if (this._disposed || this._contextLost || gl?.isContextLost?.()) {
+        if (this._disposed || this.renderer !== renderer
+            || this._contextLost || gl?.isContextLost?.()) {
           resolve({
             ready: false,
             timedOut: false,
@@ -7251,9 +7340,15 @@ export class Engine {
   setManualSculptEnabled(enabled) { this.manualTerrain?.setSculptEnabled(enabled); }
   setManualSculptSetting(key, value) { this.manualTerrain?.setSculptSetting(key, value); }
   clearManualSculpt() { return this.manualTerrain?.clearSculpt(); }
-  setManualTexturePaintEnabled(enabled) {
+  async setManualTexturePaintEnabled(enabled) {
     if (enabled && this.manualTerrain?.texturePaint?.mode === 'props' && !this.params.propsEnabled) {
       this.setParam('propsEnabled', true);
+    }
+    if (enabled && this.projectMode === 'manual'
+        && this.manualTerrain?.texturePaint?.mode !== 'props'
+        && this.terrainMaterial?.userData?.terrainVariant === 'manual-empty') {
+      this._manualSurfaceShaderRequested = true;
+      await this._ensureTerrainShaderVariantAsync();
     }
     this.manualTerrain?.setTexturePaintEnabled(enabled);
   }
@@ -7296,17 +7391,324 @@ export class Engine {
 
   // -------------------------------------------------------------- world mode
 
-  async setWorldMode(mode) {
+  _createModeTransitionCoordinator() {
+    this._modeTransitionCoordinator?.dispose?.();
+    const labels = {
+      planning: 'Planning final scene…',
+      resources: 'Preparing mode resources…',
+      geometry: 'Building visible geometry…',
+      compile: 'Compiling final shaders…',
+      present: 'Presenting final frame…',
+      ready: 'Ready',
+    };
+    this._modeTransitionCoordinator = new ModeTransitionCoordinator({
+      hooks: {
+        planning: (context) => this._planModeTransition(context),
+        resources: (context) => this._prepareModeTransitionResources(context),
+        geometry: (context) => this._buildModeTransitionGeometry(context),
+        compile: (context) => this._compileModeTransition(context),
+        present: (context) => this._presentModeTransition(context),
+      },
+      onProgress: (progress) => {
+        const payload = {
+          ...progress,
+          label: progress.label && progress.label !== progress.stage
+            ? progress.label
+            : (labels[progress.stage] || progress.label),
+        };
+        this.cb.onModeProgress?.(payload);
+        this.cb.onStatus?.(payload.label, progress.stage !== 'ready');
+      },
+      onComplete: (result) => {
+        console.info(
+          `[mode] ${result.target} final frame ready in ${result.duration.toFixed(0)}ms`
+          + ` (cache=${result.manifest?.cacheHit === true ? 'hit' : 'miss'})`,
+        );
+        this.cb.onModeComplete?.(result);
+      },
+      onError: (error) => this.cb.onModeError?.(error),
+    });
+  }
+
+  _modeRenderKey(worldMode, projectMode = this.projectMode) {
+    const viewport = this._bootViewportSnapshot();
+    const target = this._resolveCameraCompileTarget?.() || {};
+    return createModeRenderKey({
+      backend: this.rendererBackend || this.renderer?.backend?.constructor?.name || 'webgl2',
+      viewport,
+      camera: {
+        profile: worldMode,
+        fov: worldMode === 'infinite' ? 75 : worldMode === 'planet' ? 60 : 45,
+        planetRadius: worldMode === 'planet' ? this._planetRadius() : null,
+      },
+      worldMode,
+      projectMode,
+      graphSignature: this._activeHeightProgram(worldMode)?.sig || this._stackSig,
+      terrainVariant: this._targetTerrainVariant(),
+      octaves: Math.round(this.params.octaves),
+      waterMode: resolveEffectiveWaterMode(this.params, worldMode),
+      clouds: this.params.cloudsEnabled === true
+        ? { quality: this.params.cloudQuality, chunks: this.params.cloudChunksEnabled === true }
+        : false,
+      post: this.params.visualsEnabled !== false,
+      renderTarget: {
+        width: target.width || viewport.width,
+        height: target.height || viewport.height,
+        samples: target.renderTarget?.samples || 0,
+        type: target.renderTarget?.texture?.type || null,
+        format: target.renderTarget?.texture?.format || null,
+      },
+      structure: {
+        chunkCount: this.params.chunkCount,
+        chunkSize: this.params.chunkSize,
+        planetFaceGrid: this._planetFaceGrid(),
+        viewRadius: this.perf.viewRadius,
+        lodSegments: resolveLodSegments(this.perf),
+      },
+    });
+  }
+
+  _planModeTransition(context) {
+    const requested = context.input.worldMode || context.target || this.worldMode;
+    if (!['studio', 'infinite', 'planet'].includes(requested)) {
+      throw new Error(`Unsupported world mode: ${requested}`);
+    }
+    if (this.projectMode === 'manual' && requested !== 'studio') {
+      const error = new Error('Manual Terrain is currently available in Tile mode');
+      error.code = 'MANUAL_STUDIO_ONLY';
+      throw error;
+    }
+    context.previousWorldMode = this.worldMode;
+    context.targetWorldMode = requested;
+    context.targetProjectMode = context.input.projectMode || this.projectMode;
+    context.renderKey = this._modeRenderKey(requested, context.targetProjectMode);
+    context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+    this._activeModeTransitionContext = context;
+    context.progress(context.cacheHit ? 'Reusable mode cache found' : 'Final scene planned', 1, 1);
+    return { cacheHit: context.cacheHit, from: this.worldMode, to: requested };
+  }
+
+  async _prepareModeTransitionResources(context) {
+    context.assertCurrent();
+    if (context.targetWorldMode === 'planet') {
+      context.progress('Loading planet runtime', 0, 1);
+      context.planetModules = await this._loadPlanetModules();
+      context.assertCurrent();
+    }
+    context.cachedResources = this._modeResourceCache.get(context.renderKey.serialized)?.resources || null;
+    context.progress(context.cachedResources ? 'Reusing compiled resources' : 'Resources ready', 1, 1);
+    return { reusedResources: Boolean(context.cachedResources) };
+  }
+
+  async _buildModeTransitionGeometry(context) {
+    context.progress('Building target geometry behind loader', 0, 1);
+    if (context.input.project) {
+      if (context.targetWorldMode !== 'studio') {
+        const error = new Error('Project transactions must be prepared in Studio mode');
+        error.code = 'PROJECT_TRANSITION_REQUIRES_STUDIO';
+        throw error;
+      }
+      const project = context.input.project;
+      if (project.params || project.editorMode || project.generationSource) {
+        // loadSeedJSON installs the complete document synchronously and returns
+        // the exact material/geometry readiness promise. Keep it for compile.
+        context.projectReady = this.loadSeedJSON(project, { silent: true });
+      } else {
+        this.newProject({ ...project, projectMode: context.targetProjectMode, silent: true });
+      }
+    } else if (context.targetProjectMode !== this.projectMode) {
+      if (context.targetWorldMode !== 'studio') {
+        throw new Error('Project mode changes are only supported in Studio mode');
+      }
+      this.newProject({ projectMode: context.targetProjectMode, silent: true });
+    }
+    if (context.targetWorldMode !== this.worldMode) {
+      context.compilePromise = await this._setWorldModeImmediate(context.targetWorldMode, {
+        planetModules: context.planetModules,
+        deferCompile: true,
+      });
+    }
+    // Project construction changes graph, terrain variant and structural
+    // settings. The planning key described the previous live document, so
+    // replace it with the exact target key before cache publication.
+    if (context.input.project) {
+      context.renderKey = this._modeRenderKey(
+        context.targetWorldMode,
+        context.targetProjectMode,
+      );
+      context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+    }
+    context.assertCurrent();
+    context.progress('Visible geometry ready', 1, 1);
+    return { geometryReady: true };
+  }
+
+  async _compileModeTransition(context) {
+    context.progress('Submitting exact shader set', 0, 1);
+    let result;
+    if (context.projectReady) {
+      result = await context.projectReady;
+      if (result?.error) throw result.error;
+    } else if (context.targetWorldMode === 'infinite') {
+      result = await this._warmupInfiniteShaders(Math.round(this.params.octaves), { strict: true });
+    } else if (context.targetWorldMode === 'planet') {
+      const activeCloud = this.planetCloudChunks || this.planetCloudLayer;
+      const cloudWarm = this.params.cloudsEnabled === true ? activeCloud?.warmup?.() : null;
+      result = await this._warmupPlanetShaders(Math.round(this.params.octaves), cloudWarm, { strict: true });
+    } else {
+      result = await this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
+        atomic: true,
+        terrainDirtyOnSwap: true,
+        label: 'Preparing Studio terrain',
+      });
+      if (result?.error) throw result.error;
+    }
+    context.assertCurrent();
+    context.keepaliveMaterials = result?.keepaliveMaterials || [];
+    context.progress('Final shaders ready', 1, 1);
+    // Completion manifests are immutable diagnostics. Never place live Three
+    // resources in them: freezing a material would freeze shared uniforms and
+    // break the next transition.
+    return {
+      compileReady: result?.ready !== false && !result?.error,
+      compiledMaterials: result?.materialCount ?? context.keepaliveMaterials.length,
+      cachedCompile: result?.cached === true,
+    };
+  }
+
+  _renderFrozenModeFrame() {
+    if (this.worldMode === 'studio') return this._renderInitialStudioFrame({ frozen: true });
+    const now = performance.now();
+    if (this.worldMode === 'infinite') this._tickInfinite(0, now);
+    else if (this.worldMode === 'planet') this._tickPlanet(0, now);
+    return true;
+  }
+
+  async _presentModeTransition(context) {
+    context.progress('Rendering final frame', 0, 2);
+    this._renderFrozenModeFrame();
+    context.progress('Rendering final frame', 1, 2);
+    await yieldFrame();
+    context.assertCurrent();
+    this._renderFrozenModeFrame();
+    await yieldFrame();
+    context.assertCurrent();
+    context.progress('Final frame presented', 2, 2);
+    const cacheValue = this._modeResourceCache.get(context.renderKey.serialized) || {
+      worldMode: context.targetWorldMode,
+      renderKey: context.renderKey,
+      resources: {},
+    };
+    cacheValue.resources = {
+      modules: context.planetModules || cacheValue.resources?.modules || null,
+      keepaliveMaterials: context.keepaliveMaterials?.length
+        ? context.keepaliveMaterials
+        : (cacheValue.resources?.keepaliveMaterials || []),
+    };
+    this._modeResourceCache.activate(context.renderKey.serialized, cacheValue, {
+      dispose: (entry) => {
+        for (const material of entry?.resources?.keepaliveMaterials || []) material?.dispose?.();
+      },
+    });
+    this._needsRender = false;
+    return { presentedFrames: 2 };
+  }
+
+  async transitionMode({
+    worldMode = this.worldMode,
+    projectMode = this.projectMode,
+    project = null,
+    reason = 'user',
+  } = {}) {
+    if (this._disposed) throw new ModeTransitionCancelledError('Engine is disposed');
+    if (worldMode === this.worldMode && projectMode === this.projectMode && project == null) {
+      return { unchanged: true, worldMode, projectMode };
+    }
+    const previousWorldMode = this.worldMode;
+    const previousProjectState = project != null || projectMode !== this.projectMode
+      ? {
+        ...this.serializeState(),
+        paint: this.serializePaint?.(),
+        erosion: this.serializeErosion?.(),
+        manualSculpt: this.serializeManualSculpt?.(),
+        manualSurface: this.serializeManualSurface?.(),
+      }
+      : null;
+    const request = {
+      target: worldMode,
+      input: { worldMode, projectMode, project },
+      reason,
+      resizeRevision: 0,
+    };
+    this._modeTransitionRequest = request;
+    try {
+      for (;;) {
+        try {
+          return await this._modeTransitionCoordinator.start(request);
+        } catch (error) {
+          if (error?.code !== 'MODE_TRANSITION_CANCELLED'
+              || this._modeTransitionRequest !== request
+              || (request.resizeRevision <= 0 && !request.contextLost)) throw error;
+          if (request.contextLost) {
+            await request.contextRestorePromise;
+            request.contextRestorePromise = null;
+            request.reason = 'context-restored';
+            continue;
+          }
+          // Coalesce resize bursts, then rebuild from a fresh render key. The
+          // caller keeps awaiting this same promise, so its loader cannot flash.
+          let observed = request.resizeRevision;
+          for (;;) {
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            if (observed === request.resizeRevision) break;
+            observed = request.resizeRevision;
+          }
+          request.resizeRevision = 0;
+          request.reason = 'resize';
+        }
+      }
+    } catch (error) {
+      if (error?.code === 'MODE_TRANSITION_CANCELLED') throw error;
+      if (!this._disposed && previousProjectState) {
+        try {
+          await this.restoreState(previousProjectState, { rollbackOnError: false });
+          this._renderFrozenModeFrame();
+        } catch (rollbackError) {
+          console.error('Project transition rollback failed', rollbackError);
+        }
+      } else if (!this._disposed && this.worldMode !== previousWorldMode) {
+        try {
+          await this._setWorldModeImmediate(previousWorldMode, { deferCompile: false });
+          this._renderFrozenModeFrame();
+        } catch (rollbackError) {
+          console.error('Mode transition rollback failed', rollbackError);
+        }
+      }
+      throw error;
+    } finally {
+      if (this._modeTransitionRequest === request) this._modeTransitionRequest = null;
+      if (!this._modeTransitionCoordinator?.active) this._activeModeTransitionContext = null;
+    }
+  }
+
+  setWorldMode(mode) {
+    // Preserve the lightweight prototype-harness/embedded-engine contract:
+    // hosts created before transition initialization still get the historical
+    // immediate path, while normal Engine instances always use the coordinator.
+    if (!this._modeTransitionCoordinator) return this._setWorldModeImmediate(mode);
+    return this.transitionMode({ worldMode: mode });
+  }
+
+  async _setWorldModeImmediate(mode, { planetModules = null, deferCompile = false } = {}) {
     const transitionToken = (this._worldModeToken ?? 0) + 1;
     this._worldModeToken = transitionToken;
-    if (mode === this.worldMode) return;
+    if (mode === this.worldMode) return null;
     if (this.projectMode === 'manual' && mode !== 'studio') {
       this.cb.onToast('Manual Terrain is currently available in Tile mode');
       return;
     }
 
-    let planetModules = null;
-    if (mode === 'planet') {
+    if (mode === 'planet' && !planetModules) {
       try {
         planetModules = await this._loadPlanetModules();
       } catch (error) {
@@ -7351,7 +7753,11 @@ export class Engine {
         this._waterWarmRetryTimer = null;
       }
     }
-    if (prev === 'infinite') this._disposeInfinite();
+    const activeCache = this._modeResourceCache?.entries?.get(this._modeResourceCache.activeKey)?.value;
+    const preservedMaterials = activeCache?.worldMode === prev
+      ? activeCache.resources?.keepaliveMaterials || []
+      : [];
+    if (prev === 'infinite') this._disposeInfinite({ preserveMaterials: preservedMaterials });
     else if (prev === 'planet') this._disposePlanet();
 
     this.worldMode = mode;
@@ -7369,12 +7775,12 @@ export class Engine {
     // program cache makes the recompile instant if already built this session).
     this._underwaterWarmed = false;
 
-    if (mode === 'infinite') this._enterInfiniteMode();
-    else if (mode === 'planet') this._enterPlanetMode(planetModules);
-    else this._enterStudioMode();
+    if (mode === 'infinite') return this._enterInfiniteMode({ deferCompile });
+    if (mode === 'planet') return this._enterPlanetMode(planetModules, { deferCompile });
+    return this._enterStudioMode({ deferCompile });
   }
 
-  _enterInfiniteMode() {
+  _enterInfiniteMode({ deferCompile = false } = {}) {
     this._packNoiseUniforms();
     this._syncCpuHeightProgram();
     // Infinite exploration stays fully procedural; Studio paint layers are
@@ -7400,12 +7806,15 @@ export class Engine {
     // are byte-identical to Tile terrain. Tile's compiled program remains owned
     // by terrainMaterial, so Three.js can reuse it immediately for these chunks.
     const oct = Math.round(p.octaves);
-    this._infiniteTerrainMat = createInfiniteTerrainMaterial(
+    const cachedTerrainMaterial = this._activeModeTransitionContext?.cachedResources
+      ?.keepaliveMaterials?.find((material) => material?.userData?.modeCacheRole === 'infinite-terrain');
+    this._infiniteTerrainMat = cachedTerrainMaterial || createInfiniteTerrainMaterial(
       this.uniforms,
       oct,
       this._stackGLSL,
       { variant: this._targetTerrainVariant() },
     );
+    this._infiniteTerrainMat.userData.modeCacheRole = 'infinite-terrain';
     this._infiniteTerrainMat.wireframe = p.wireframe;
     this._infiniteWaterMat = this.waterSystem.createInfiniteMaterial();
     this._infiniteWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
@@ -7443,7 +7852,7 @@ export class Engine {
     this.infiniteWorld.behindCameraCulling = this.board.behindCameraCulling;
     this.infiniteWorld.setMergeDebug(this._debug.mergeDebug);
 
-    this.infiniteCloud = new InfiniteCloudLayer(this.scene, {
+    this.infiniteCloud = p.cloudsEnabled === true ? new InfiniteCloudLayer(this.scene, {
       compile: async (mats) => {
         // Applying restored quality may request a rebuild while mode setup is
         // still synchronous. Yield so the transition gate and scene exist first.
@@ -7469,7 +7878,7 @@ export class Engine {
       renderer: this.renderer,
       chunkSize: p.chunkSize,
       viewRadius: perf.viewRadius,
-    });
+    }) : null;
     this._applyCloudSettings();
 
     const clipmapResolutions = this.gpuTier === 'low'
@@ -7517,14 +7926,15 @@ export class Engine {
 
     // Terrain already reuses Tile's compiled program. Only genuinely
     // mode-specific world materials need background preparation.
-    this._warmupInfiniteShaders(oct);
+    const warmup = deferCompile ? null : this._warmupInfiniteShaders(oct);
 
     if (!this._compiling) this.cb.onStatus('Infinite World', false);
     if (this.cb.onQualityChange) this.cb.onQualityChange(this.qualityPreset);
     if (this.cb.onTimeOfDayChange) this.cb.onTimeOfDayChange(this.timeOfDay);
+    return warmup;
   }
 
-  async _warmupInfiniteShaders(_oct) {
+  async _warmupInfiniteShaders(_oct, { strict = false } = {}) {
     const gate = this._acquireWorldCompile('infinite');
     this.cb.onStatus('Compiling world shadersâ€¦', true);
     const isCurrent = () => this._worldCompileGate === gate
@@ -7532,19 +7942,11 @@ export class Engine {
       && this.worldMode === 'infinite';
     let cachePreparation = null;
     let success = false;
+    let failure = null;
     try {
       const targetSnapshot = this._resolveCameraCompileTarget();
       const source = this.infiniteWorld?.batches?.meshes?.find(Boolean) ?? null;
-      if (!source?.geometry) return;
-      const terrainResult = await this._compileInstancedMaterialVariant(
-        this._infiniteTerrainMat, source.geometry, targetSnapshot.renderTarget,
-      );
-      if (!isCurrent() || terrainResult?.ready !== true) return;
-
-      cachePreparation = await this._prepareHeightCacheProgram(
-        'infinite', Math.round(this.params.octaves), this._stackGLSL,
-      );
-      if (!isCurrent() || cachePreparation?.result?.ready !== true) return;
+      if (!source?.geometry) throw new Error('Infinite terrain geometry is unavailable');
 
       const liveMaterials = [];
       if (this.params?.waterEnabled !== false && this._infiniteWaterMat) {
@@ -7554,24 +7956,42 @@ export class Engine {
       if (this.params?.cloudsEnabled && this.infiniteCloud?.material) {
         liveMaterials.push(this.infiniteCloud.material);
       }
-      const result = await this._compileMaterialVariants(
-        [...new Set(liveMaterials)],
-        {
-          canvasOnly: true, stagger: true, timeoutMs: 120000,
-          renderTarget: targetSnapshot.renderTarget,
-        },
-      );
-      if (!isCurrent() || result?.ready !== true) return;
+      const [terrainResult, prepared, result] = await Promise.all([
+        this._compileInstancedMaterialVariant(
+          this._infiniteTerrainMat, source.geometry, targetSnapshot.renderTarget,
+        ),
+        this._prepareHeightCacheProgram(
+          'infinite', Math.round(this.params.octaves), this._stackGLSL,
+        ),
+        this._compileMaterialVariants(
+          [...new Set(liveMaterials)],
+          {
+            canvasOnly: true, stagger: false, timeoutMs: 120000,
+            renderTarget: targetSnapshot.renderTarget,
+          },
+        ),
+      ]);
+      cachePreparation = prepared;
+      if (!isCurrent()) throw new ModeTransitionCancelledError();
+      if (terrainResult?.ready !== true || result?.ready !== true
+          || cachePreparation?.result?.ready !== true) {
+        throw new Error('Infinite shader compilation did not complete');
+      }
       const currentTarget = this._resolveCameraCompileTarget();
-      if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) return;
-      if (!this._publishHeightCachePreparation(cachePreparation)) return;
+      if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) {
+        throw new Error('Infinite render target changed during compilation');
+      }
+      if (!this._publishHeightCachePreparation(cachePreparation)) {
+        throw new Error('Infinite height cache could not be published');
+      }
       success = true;
     } catch (error) {
+      failure = error;
       console.warn('Infinite shader warmup failed', error);
     } finally {
       this._discardHeightCachePreparation(cachePreparation);
       this._worldWarmRetryCount ||= { infinite: 0, planet: 0 };
-      if (!success && isCurrent()) {
+      if (!strict && !success && isCurrent()) {
         const retry = ++this._worldWarmRetryCount.infinite;
         if (retry <= 1) {
           void this._warmupInfiniteShaders(Math.round(this.params.octaves));
@@ -7587,9 +8007,14 @@ export class Engine {
         this.cb.onStatus(this.worldMode === 'infinite' ? 'Infinite World' : 'Ready', false);
       }
     }
+    if (!success && strict) throw failure || new Error('Infinite shader warmup failed');
+    return {
+      ready: success,
+      keepaliveMaterials: success ? [this._infiniteTerrainMat] : [],
+    };
   }
   /** Dispose the infinite-world systems (does not restore studio). */
-  _disposeInfinite() {
+  _disposeInfinite({ preserveMaterials = [] } = {}) {
     if (this.infiniteCloud) {
       this.infiniteCloud.dispose();
       this.infiniteCloud = null;
@@ -7609,10 +8034,10 @@ export class Engine {
     // proceduralSky is persistent (shared with studio) — do not dispose here.
     if (this.proceduralSky) this.proceduralSky.setVisible(false);
     this.fogManager = null;
-    if (this._infiniteTerrainMat) {
+    if (this._infiniteTerrainMat && !preserveMaterials.includes(this._infiniteTerrainMat)) {
       this._infiniteTerrainMat.dispose();
-      this._infiniteTerrainMat = null;
     }
+    this._infiniteTerrainMat = null;
     if (this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
       this._infiniteWaterMat.dispose();
     }
@@ -7620,7 +8045,7 @@ export class Engine {
   }
 
   /** Restore the single-board studio scene + editor camera. */
-  _enterStudioMode() {
+  _enterStudioMode({ deferCompile = false } = {}) {
     this.board.group.visible = true;
     if (this.realWorldBuildingLayer) {
       this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible;
@@ -7638,7 +8063,7 @@ export class Engine {
     this.paintMode?._syncUniforms?.();
     this.uniforms.uManualEnabled.value = this.projectMode === 'manual'
       && (this.manualTerrain?.shapes?.length || !this.manualTerrain?.field?.isSculptEmpty?.()) ? 1 : 0;
-    const rebuildJob = this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
+    const rebuildJob = deferCompile ? null : this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
       atomic: true,
       terrainDirtyOnSwap: true,
       label: 'Preparing Studio terrain',
@@ -7656,11 +8081,12 @@ export class Engine {
 
     this._minimapDirtyAt = 0;
     this.minimap.requestRedraw();
-    Promise.resolve(rebuildJob).then((result) => {
+    if (rebuildJob) Promise.resolve(rebuildJob).then((result) => {
       if (this._disposed || this.worldMode !== 'studio') return;
       if (!result?.error) this._renderMinimapBase();
       this.cb.onStatus(result?.error ? 'Studio terrain unavailable' : 'Ready', false);
     });
+    return rebuildJob;
   }
 
   // ---------------------------------------------------------------- planet mode
@@ -8050,7 +8476,7 @@ export class Engine {
     return 1536;
   }
 
-  _enterPlanetMode(planet) {
+  _enterPlanetMode(planet, { deferCompile = false } = {}) {
     if (!planet) return;
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
@@ -8082,13 +8508,13 @@ export class Engine {
 
     // Apply the requested cloud quality before starting GPU work so a default
     // material is never compiled and immediately replaced.
-    if (p.cloudChunksEnabled === true) {
+    if (p.cloudsEnabled === true && p.cloudChunksEnabled === true) {
       this.planetCloudChunks = new planet.PlanetCloudChunks(this.scene, {
         planetRadius: this._planetRadius(),
         faceGrid: 4,
         compile: (mats) => this._compileCameraTargetMaterials(mats),
       });
-    } else {
+    } else if (p.cloudsEnabled === true) {
       this.planetCloudLayer = new planet.PlanetCloudLayer(this.scene, {
         planetRadius: this._planetRadius(),
         compile: (mats) => this._compileCameraTargetMaterials(mats),
@@ -8113,9 +8539,12 @@ export class Engine {
     this._applyPixelRatio();
 
     // compile the PLANET_MODE shader variant in the background (no freeze)
-    this._warmupPlanetShaders(Math.round(p.octaves), cloudWarmPromise);
+    const warmup = deferCompile
+      ? null
+      : this._warmupPlanetShaders(Math.round(p.octaves), cloudWarmPromise);
 
     if (!this._compiling) this.cb.onStatus('Planet', false);
+    return warmup;
   }
 
   /** Camera near/far tuned to the planet scale. */
@@ -8134,6 +8563,12 @@ export class Engine {
     if (this.worldMode === 'planet') {
       const planet = this._planetModules;
       if (!planet) return;
+      if (this.params.cloudsEnabled !== true) {
+        this.planetCloudChunks?.dispose?.();
+        this.planetCloudChunks = null;
+        this.planetCloudLayer?.dispose?.();
+        this.planetCloudLayer = null;
+      } else {
       const wantChunks = this.params.cloudChunksEnabled === true;
       if (wantChunks && !this.planetCloudChunks) {
         if (this.planetCloudLayer) {
@@ -8159,6 +8594,7 @@ export class Engine {
         });
         this.planetCloudLayer.warmup()
           .catch((e) => console.warn('Cloud shader warmup failed', e));
+      }
       }
     }
 
@@ -8300,13 +8736,14 @@ export class Engine {
       && this.params.seaLevel > 0.5;
   }
 
-  async _warmupPlanetShaders(oct, cloudWarmPromise = null) {
+  async _warmupPlanetShaders(oct, cloudWarmPromise = null, { strict = false } = {}) {
     const gate = this._acquireWorldCompile('planet');
     this.cb.onStatus('Compiling planet shadersâ€¦', true);
     let minimal = false;
     let warm = [];
     let shouldUpgrade = false;
     let success = false;
+    let failure = null;
     const isCurrent = () => this._worldCompileGate === gate
       && !this._disposed
       && this.worldMode === 'planet';
@@ -8318,29 +8755,52 @@ export class Engine {
         planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL, { minimal }),
         planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
       ];
+      warm[0].userData ||= {};
+      warm[1].userData ||= {};
+      warm[0].userData.modeCacheRole = 'planet-terrain-program';
+      warm[1].userData.modeCacheRole = 'planet-water-program';
       const targetSnapshot = this._resolveCameraCompileTarget();
-      const result = await this._compileMaterialVariants(warm, {
-        canvasOnly: true, timeoutMs: 120000, stagger: true,
-        renderTarget: targetSnapshot.renderTarget,
-      });
-      if (!isCurrent() || result?.ready !== true) return;
-      if (cloudWarmPromise) await cloudWarmPromise;
-      if (!isCurrent()) return;
-      const cacheReady = await this._preparePlanetHeightCacheAsync();
-      if (!isCurrent() || !cacheReady) return;
+      const instancedGeometry = this.planetWorld?.batches?.find((batch) => batch?.geometry)?.geometry;
+      const terrainCompile = instancedGeometry
+        ? this._compileInstancedMaterialVariant(
+          warm[0], instancedGeometry, targetSnapshot.renderTarget, { timeoutMs: 120000 },
+        )
+        : this._compileMaterialVariants(warm, {
+          canvasOnly: true, timeoutMs: 120000, stagger: false,
+          renderTarget: targetSnapshot.renderTarget,
+        });
+      const waterCompile = instancedGeometry
+        ? this._compileMaterialVariants(warm.slice(1), {
+          canvasOnly: true, timeoutMs: 120000, stagger: false,
+          renderTarget: targetSnapshot.renderTarget,
+        })
+        : Promise.resolve({ ready: true });
+      const [terrainResult, waterResult, , cacheReady] = await Promise.all([
+        terrainCompile,
+        waterCompile,
+        cloudWarmPromise || Promise.resolve(),
+        this._preparePlanetHeightCacheAsync(),
+      ]);
+      if (!isCurrent()) throw new ModeTransitionCancelledError();
+      if (terrainResult?.ready !== true || waterResult?.ready !== true || !cacheReady) {
+        throw new Error('Planet shader compilation did not complete');
+      }
       const currentTarget = this._resolveCameraCompileTarget();
-      if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) return;
+      if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) {
+        throw new Error('Planet render target changed during compilation');
+      }
       await yieldTask();
-      if (!isCurrent()) return;
+      if (!isCurrent()) throw new ModeTransitionCancelledError();
       this._ensurePlanetHeightTex();
       shouldUpgrade = minimal;
       success = true;
     } catch (error) {
+      failure = error;
       console.warn('Planet shader warmup failed', error);
     } finally {
-      this._queueWarmMaterials(warm);
+      if (!(strict && success)) this._queueWarmMaterials(warm);
       this._worldWarmRetryCount ||= { infinite: 0, planet: 0 };
-      if (!success && isCurrent()) {
+      if (!strict && !success && isCurrent()) {
         const retry = ++this._worldWarmRetryCount.planet;
         if (retry <= 1) {
           const activeCloud = this.planetCloudChunks || this.planetCloudLayer;
@@ -8361,6 +8821,11 @@ export class Engine {
     if (shouldUpgrade && !this._disposed && this.worldMode === 'planet') {
       this._upgradePlanetMaterials(oct);
     }
+    if (!success && strict) throw failure || new Error('Planet shader warmup failed');
+    return {
+      ready: success,
+      keepaliveMaterials: success && strict ? warm : [],
+    };
   }
   /**
    * Background full-fragment upgrade for the live planet chunk materials.
@@ -8653,7 +9118,10 @@ export class Engine {
 
   /** Water quality uniforms — per water material, never shared with terrain. */
   _targetTerrainVariant() {
-    if (this.projectMode === 'manual' && !this._manualHasGeneratedBase()) return 'manual';
+    if (this.projectMode === 'manual' && !this._manualHasGeneratedBase()) {
+      const surfaceHasData = !this.manualTerrain?.surfaceField?.isEmpty?.();
+      return this._manualSurfaceShaderRequested || surfaceHasData ? 'manual' : 'manual-empty';
+    }
     const hybridManual = this.projectMode === 'manual' && this._manualHasGeneratedBase();
     const surfaceEnabled = this.projectMode === 'manual'
       || (this.params?.surfaceTextureMode === true
@@ -10177,6 +10645,10 @@ export class Engine {
         }
       }, 80);
     }
+    if (changed && this._modeTransitionRequest) {
+      this._modeTransitionRequest.resizeRevision += 1;
+      this._modeTransitionCoordinator?.cancel?.();
+    }
   }
 
   _tick() {
@@ -10208,6 +10680,14 @@ export class Engine {
     // a temporal frame beneath the loading cover.
     if (this._bootPending) {
       this.profiler.setMetric('sceneState', this._bootError ? 'boot-failed' : 'loading');
+      this.profiler.endFrame();
+      return;
+    }
+    // Mode transitions own the camera, animation time and canvas presentation.
+    // The normal loop stays scheduled, but only the transition's two frozen
+    // presentation frames may draw beneath the opaque loader.
+    if (this._modeTransitionCoordinator?.active) {
+      this.profiler.setMetric('sceneState', `mode-${this._modeTransitionCoordinator.state}`);
       this.profiler.endFrame();
       return;
     }
@@ -11010,6 +11490,11 @@ export class Engine {
     this._disposed = true;
     this._bootPipeline?.dispose?.();
     this._bootPipeline = null;
+    this._modeTransitionCoordinator?.dispose?.();
+    this._modeTransitionCoordinator = null;
+    this._modeTransitionRequest?.resolveContextRestore?.();
+    this._modeTransitionRequest = null;
+    this._modeResourceCache?.clear?.();
     this._clock?.dispose?.();
     if (this._bootResizeTimer) {
       clearTimeout(this._bootResizeTimer);
@@ -11123,7 +11608,10 @@ export class Engine {
     }
     if (this._tileOccTex) { this._tileOccTex.dispose(); this._tileOccTex = null; }
     if (this.renderer) {
-      loseRendererContext(this.renderer);
+      // `forceContextLoss` makes this canvas unusable for the engine instance
+      // React Fast Refresh mounts immediately afterwards. Three's dispose
+      // already releases programs, targets and listeners; let the browser own
+      // the context lifetime so the same canvas can be reused safely.
       this.renderer.dispose();
       this.renderer = null;
     }
