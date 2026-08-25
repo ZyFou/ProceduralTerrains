@@ -86,7 +86,7 @@ export function normalizePropAsset(raw, index = 0) {
 export function normalizePropAssetLibrary(value) {
   const source = Array.isArray(value) ? value : createDefaultPropAssets();
   const seen = new Set();
-  return source.slice(0, 32).map((raw, index) => {
+  return source.map((raw, index) => {
     const asset = normalizePropAsset(raw, index);
     let id = asset.id;
     let suffix = 2;

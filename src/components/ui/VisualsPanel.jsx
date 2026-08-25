@@ -43,9 +43,9 @@ const SHORE_SLIDERS = [
 const VISUALS_TABS = [
   { id: 'post', label: 'Post FX' },
   { id: 'sky', label: 'HDR Sky' },
-  { id: 'terrain', label: 'Terrain Surface' },
+  { id: 'terrain', label: 'Surface' },
   { id: 'shoreline', label: 'Shoreline' },
-  { id: 'camera', label: 'Camera Shaders' },
+  { id: 'camera', label: 'Shaders' },
 ];
 
 const CAMERA_SLIDERS = {
@@ -91,7 +91,7 @@ export default function VisualsPanel({ ctx }) {
   const normalizedQuery = query.trim().toLowerCase();
   const matches = (label, keywords = '') => !normalizedQuery || `${label} ${keywords}`.toLowerCase().includes(normalizedQuery);
   const group = (id, label, keywords, children, tabId = id) => {
-    const settingKey = ({ pixelated: 'visualsPixelatedEnabled', dithering: 'visualsDitheringEnabled', crt: 'visualsCrtEnabled', chromatic: 'visualsChromaticAberrationEnabled' })[id];
+    const settingKey = ({ post: 'visualsPostEnabled', pixelated: 'visualsPixelatedEnabled', dithering: 'visualsDitheringEnabled', crt: 'visualsCrtEnabled', chromatic: 'visualsChromaticAberrationEnabled' })[id];
     const active = settingKey ? !!val(params, settingKey) : enabled[id] !== false;
     const setActive = settingKey
       ? (value) => onParam(settingKey, value)
@@ -115,13 +115,6 @@ export default function VisualsPanel({ ctx }) {
 
       {group('post', 'Post Processing', 'post fx exposure contrast saturation vignette bloom rays', (
         <>
-          <ToggleRow
-            label="Post Processing"
-            value={val(params, 'visualsPostEnabled') !== false}
-            onChange={(v) => onParam('visualsPostEnabled', v)}
-            settingId="visuals.visualsPostEnabled"
-            info="Tile-mode color grading, bloom, vignette, and sun rays."
-          />
           <SliderList items={POST_SLIDERS} params={params} onParam={onParam} disabled={enabled.post === false} query={query} />
         </>
       ))}
@@ -141,7 +134,7 @@ export default function VisualsPanel({ ctx }) {
         </>
       ))}
 
-      {group('terrain', 'Terrain Surface', 'terrain surface color variation height detail rock soil sand render', (
+      {group('terrain', 'Surface', 'terrain surface color variation height detail rock soil sand render', (
         <>
           <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} disabled={enabled.terrain === false} query={query} />
           {RENDER_SLIDERS.map((def) => (

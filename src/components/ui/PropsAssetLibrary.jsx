@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-  Copy, Flower2, Mountain, Move3D, Plus, RefreshCw, RotateCcw,
+  Copy, Flower2, Mountain, Move3D, Plus, RefreshCw, RotateCcw, Search,
   Sprout, Trash2, TreeDeciduous, TreePine,
 } from 'lucide-react';
 import { createPropAssetPreviewModel } from '../../engine/props/ProceduralPropsManager.js';
@@ -19,6 +19,8 @@ const PROP_TYPE_ICONS = {
   broadleaf: TreeDeciduous,
   conifer: TreePine,
 };
+
+const propTypeLabel = (type) => PROP_ASSET_TYPES.find((entry) => entry.id === type)?.label || type;
 
 function PropTypeIcon({ type, color, compact = false }) {
   const Icon = PROP_TYPE_ICONS[type] || Sprout;
@@ -199,13 +201,37 @@ export default function PropsAssetLibrary({ value, onChange }) {
   const assets = useMemo(() => normalizePropAssetLibrary(value), [value]);
   const [selectedId, setSelectedId] = useState(assets[0]?.id || null);
   const [pickerMode, setPickerMode] = useState(null);
+  const [assetQuery, setAssetQuery] = useState('');
+  const [presetQuery, setPresetQuery] = useState('');
+  const [visibleAssetCount, setVisibleAssetCount] = useState(80);
   const selected = assets.find((asset) => asset.id === selectedId) || assets[0] || null;
   const [nameDraft, setNameDraft] = useState(selected?.name || '');
+
+  const filteredAssets = useMemo(() => {
+    const query = assetQuery.trim().toLowerCase();
+    if (!query) return assets;
+    return assets.filter((asset) => `${asset.name} ${asset.type} ${propTypeLabel(asset.type)}`.toLowerCase().includes(query));
+  }, [assetQuery, assets]);
+  const selectedFilteredIndex = filteredAssets.findIndex((asset) => asset.id === selected?.id);
+  const visibleAssets = useMemo(() => {
+    const firstPage = filteredAssets.slice(0, visibleAssetCount);
+    if (selected && selectedFilteredIndex >= visibleAssetCount) {
+      return [selected, ...firstPage.filter((asset) => asset.id !== selected.id)];
+    }
+    return firstPage;
+  }, [filteredAssets, selected, selectedFilteredIndex, visibleAssetCount]);
+  const hasMoreAssets = visibleAssetCount < filteredAssets.length;
+  const filteredPresets = useMemo(() => {
+    const query = presetQuery.trim().toLowerCase();
+    if (!query) return PROP_ASSET_PRESETS;
+    return PROP_ASSET_PRESETS.filter((preset) => `${preset.name} ${preset.type} ${propTypeLabel(preset.type)}`.toLowerCase().includes(query));
+  }, [presetQuery]);
 
   useEffect(() => {
     if (!selected && assets[0]) setSelectedId(assets[0].id);
   }, [assets, selected]);
   useEffect(() => { setNameDraft(selected?.name || ''); }, [selected?.id, selected?.name]);
+  useEffect(() => { setVisibleAssetCount(80); }, [assetQuery]);
 
   const commit = (next) => onChange(normalizePropAssetLibrary(next));
   const patchSelected = (patch) => {
@@ -213,6 +239,7 @@ export default function PropsAssetLibrary({ value, onChange }) {
     commit(assets.map((asset) => asset.id === selected.id ? { ...asset, ...patch } : asset));
   };
   const choosePreset = (preset) => {
+    const mode = pickerMode;
     if (pickerMode === 'replace' && selected) {
       const replacement = createPropAsset(preset.id, selected.id);
       commit(assets.map((asset) => asset.id === selected.id ? replacement : asset));
@@ -221,7 +248,7 @@ export default function PropsAssetLibrary({ value, onChange }) {
       commit([...assets, next]);
       setSelectedId(next.id);
     }
-    setPickerMode(null);
+    if (mode === 'replace') setPickerMode(null);
   };
   const duplicate = () => {
     if (!selected) return;
@@ -242,14 +269,21 @@ export default function PropsAssetLibrary({ value, onChange }) {
     setNameDraft(name);
     patchSelected({ name });
   };
+  const togglePicker = (mode) => {
+    setPresetQuery('');
+    setPickerMode((current) => current === mode ? null : mode);
+  };
+  const assetCountLabel = filteredAssets.length === assets.length
+    ? `${assets.length} ${assets.length === 1 ? 'asset' : 'assets'}`
+    : `${filteredAssets.length} of ${assets.length}`;
 
   return (
     <div className="prop-asset-library" data-setting-id="props.assetLibrary">
       <div className="prop-library-toolbar">
-        <button type="button" className="action-btn primary" onClick={() => setPickerMode('add')}>
-          <Plus size={13} aria-hidden /> Add asset
+        <button type="button" className="action-btn primary" onClick={() => togglePicker('add')}>
+          {pickerMode === 'add' ? 'Close' : <><Plus size={13} aria-hidden /> Add asset</>}
         </button>
-        <button type="button" className="icon-btn" disabled={!selected} onClick={() => setPickerMode('replace')} title="Replace selected asset">
+        <button type="button" className="icon-btn" disabled={!selected} onClick={() => togglePicker('replace')} title="Replace selected asset">
           <RefreshCw size={14} aria-hidden />
         </button>
         <button type="button" className="icon-btn" disabled={!selected} onClick={duplicate} title="Duplicate selected asset">
@@ -264,32 +298,66 @@ export default function PropsAssetLibrary({ value, onChange }) {
         <div className="prop-preset-picker">
           <div className="prop-preset-picker-head">
             <strong>{pickerMode === 'replace' ? 'Replace asset' : 'Add asset'}</strong>
-            <button type="button" onClick={() => setPickerMode(null)}>Cancel</button>
           </div>
+          <label className="prop-search-field prop-preset-search">
+            <Search size={13} aria-hidden />
+            <input
+              type="search"
+              value={presetQuery}
+              onChange={(event) => setPresetQuery(event.target.value)}
+              placeholder="Search asset presets…"
+              aria-label="Search asset presets"
+            />
+          </label>
           <div className="prop-preset-grid">
-            {PROP_ASSET_PRESETS.map((preset) => (
+            {filteredPresets.map((preset) => (
               <button key={preset.id} type="button" onClick={() => choosePreset(preset)}>
                 <PropTypeIcon type={preset.type} color={preset.color} compact />
                 <span>{preset.name}</span>
-                <small>{PROP_ASSET_TYPES.find((type) => type.id === preset.type)?.label}</small>
+                <small>{propTypeLabel(preset.type)}</small>
               </button>
             ))}
+            {!filteredPresets.length && <p className="prop-library-empty">No matching presets.</p>}
           </div>
         </div>
       )}
 
+      <div className="prop-library-list-header">
+        <span>Library</span>
+        <small>{assetCountLabel}</small>
+      </div>
+      <label className="prop-search-field">
+        <Search size={13} aria-hidden />
+        <input
+          type="search"
+          value={assetQuery}
+          onChange={(event) => setAssetQuery(event.target.value)}
+          placeholder="Search your assets…"
+          aria-label="Search your prop assets"
+        />
+      </label>
       <div className="prop-asset-strip" role="listbox" aria-label="Terrain prop assets">
-        {assets.map((asset) => (
+        {visibleAssets.map((asset) => (
           <button key={asset.id} type="button" role="option" aria-selected={asset.id === selected?.id}
             className={`prop-asset-card${asset.id === selected?.id ? ' active' : ''}${asset.enabled ? '' : ' disabled'}`}
             onClick={() => setSelectedId(asset.id)}>
             <PropTypeIcon type={asset.type} color={asset.color} />
             <span>{asset.name}</span>
-            <small>{PROP_ASSET_TYPES.find((type) => type.id === asset.type)?.label}</small>
+            <small>{propTypeLabel(asset.type)}</small>
           </button>
         ))}
         {!assets.length && <p className="prop-library-empty">No assets. Add a preset to populate the terrain.</p>}
+        {!!assets.length && !filteredAssets.length && <p className="prop-library-empty">No matching assets.</p>}
       </div>
+      {hasMoreAssets && (
+        <button
+          type="button"
+          className="action-btn prop-load-more"
+          onClick={() => setVisibleAssetCount((count) => count + 80)}
+        >
+          Show more <span>({filteredAssets.length - visibleAssetCount} remaining)</span>
+        </button>
+      )}
 
       {selected && (
         <>
