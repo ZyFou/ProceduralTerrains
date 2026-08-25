@@ -13,6 +13,10 @@ const EDGE_LABELS = {
   bottom: 'Snap bottom',
 };
 
+// Keep the rail visually grouped without adding another layer of navigation
+// chrome. These boundaries follow the existing tool order.
+const TOOL_CATEGORY_STARTS = new Set(['water', 'biomes', 'splines', 'performance']);
+
 /**
  * Tools icon rail — desktop overlay snapped to left/right/top/bottom.
  * Reposition via right-click menu (no grab icon). Mobile: bottom strip.
@@ -158,6 +162,8 @@ export default function LeftToolbar({
     !showLabels && 'left-toolbar--icons-only',
   ].filter(Boolean).join(' ');
 
+  const visiblePanelIds = panelIds.filter((id) => id !== 'export' && panelAvailable(id, worldMode));
+
   return (
     <>
       {dragging && (
@@ -179,24 +185,28 @@ export default function LeftToolbar({
         onPointerDown={startDrag}
         onContextMenu={onContextMenu}
       >
-        {panelIds.filter((id) => panelAvailable(id, worldMode)).map((id) => {
+        {visiblePanelIds.map((id, index) => {
           const meta = PANEL_META[id];
           const display = realTerrainMode && id === 'terrain'
             ? { label: 'Real terrain' }
             : getPanelDisplay(id, worldMode);
           return (
-            <button
-              key={id}
-              type="button"
-              className={`toolbar-btn${activePanel === id ? ' active' : ''}`}
-              title={display.label}
-              aria-label={display.label}
-              aria-pressed={activePanel === id}
-              onClick={() => onSelect(id)}
-            >
-              {meta.icon}
-              {showLabels && <span className="toolbar-btn-label">{display.label}</span>}
-            </button>
+            <React.Fragment key={id}>
+              {index > 0 && TOOL_CATEGORY_STARTS.has(id) && (
+                <span className="toolbar-category-separator" aria-hidden="true" />
+              )}
+              <button
+                type="button"
+                className={`toolbar-btn${activePanel === id ? ' active' : ''}`}
+                title={display.label}
+                aria-label={display.label}
+                aria-pressed={activePanel === id}
+                onClick={() => onSelect(id)}
+              >
+                {meta.icon}
+                {showLabels && <span className="toolbar-btn-label">{display.label}</span>}
+              </button>
+            </React.Fragment>
           );
         })}
       </nav>

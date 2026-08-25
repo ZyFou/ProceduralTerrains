@@ -32,7 +32,7 @@ export const PANEL_META = {
 
 // Shared left-toolbar order. Keep this list mode-agnostic: each mode filters
 // its available panels from the same sequence.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'water', 'clouds', 'props', 'visuals', 'skybox', 'lighting', 'biomes', 'planet', 'world', 'performance', 'debug', 'export', 'splines'];
+export const PANEL_ORDER = ['terrain', 'noiseLayers', 'water', 'clouds', 'props', 'visuals', 'skybox', 'lighting', 'biomes', 'planet', 'splines', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];
