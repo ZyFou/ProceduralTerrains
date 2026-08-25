@@ -524,57 +524,24 @@ describe('water startup shaders', () => {
     engine._warmGeo.dispose();
   });
 
-  it('keeps the safe frame behind the overlay until the final terrain shader is ready', async () => {
+  it('delegates first-frame startup to the final-frame pipeline without painting a placeholder', async () => {
     const engine = Object.create(Engine.prototype);
-    const sceneTarget = {};
-    const order = [];
     Object.assign(engine, {
-      _compiling: 0,
       _disposed: false,
       _bootPending: true,
-      _bootStart: performance.now(),
-      _qualityPending: true,
-      _contextLost: false,
-      _bgWork: new Map(),
-      _waterDeferred: true,
-      _tierNotice: null,
-      params: { waterEnabled: true },
-      terrainMaterial: { userData: { minimalFragment: true } },
-      visualPost: { inputTarget: sceneTarget },
-      cb: {
-        onStatus: vi.fn(),
-        onBootComplete: vi.fn(),
-      },
-      _prepareCameraPipeline: vi.fn(() => ({ usesSceneTarget: true })),
-      _ensureTerrainHeightTex: vi.fn(),
-      _withBootDeferredObjectsDetached: vi.fn(async (task) => task()),
-      _compileSceneStaggered: vi.fn(async () => ({ ready: true })),
-      _renderBootPlaceholderFrame: vi.fn(() => {
-        order.push('placeholder');
-        expect(engine._waterDeferred).toBe(true);
-        return 1;
-      }),
-      _resumeInitialShaderWarmup: vi.fn(),
-      _scheduleErosionGPUWarmImport: vi.fn(),
-      _schedulePostFirstPaintWarmups: vi.fn(),
-      _startQualityWatchdog: vi.fn(),
-      _startBootWatchdog: vi.fn(),
-      _releaseBootFallback: vi.fn(() => {
-        engine._bootPending = false;
-        engine.cb.onBootComplete();
-        return true;
-      }),
+      _bootShaderPending: false,
+      _bootMode: 'full',
+      _bootPipeline: { start: vi.fn(async () => ({ mode: 'full' })) },
     });
 
     await engine._warmupInitialShaders();
 
-    expect(engine._compileSceneStaggered).not.toHaveBeenCalled();
-    expect(engine._resumeInitialShaderWarmup).toHaveBeenCalledWith();
-    expect(order).toEqual(['placeholder']);
+    expect(engine._bootPipeline.start).toHaveBeenCalledWith({
+      mode: 'full',
+      reason: 'legacy-entrypoint',
+    });
     expect(engine._bootPending).toBe(true);
-    expect(engine.cb.onStatus).toHaveBeenLastCalledWith('Loading terrain detail…', true);
-    expect(engine.cb.onBootComplete).not.toHaveBeenCalled();
-    expect(engine._schedulePostFirstPaintWarmups).not.toHaveBeenCalled();
+    expect(engine._bootShaderPending).toBe(true);
   });
 
   it('releases boot only after terrain, water and board are ready', () => {

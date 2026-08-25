@@ -523,7 +523,9 @@ export class VisualPostProcess {
     const next = new THREE.WebGLRenderTarget(width, height, {
       depthBuffer,
       stencilBuffer: false,
-      depthTexture,
+      // r180 treats an explicitly supplied `undefined` differently from the
+      // default `null` and attempts to attach it as a depth texture.
+      depthTexture: depthTexture ?? null,
     });
     next.texture.minFilter = THREE.LinearFilter;
     next.texture.magFilter = THREE.LinearFilter;

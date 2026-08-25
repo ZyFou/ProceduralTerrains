@@ -82,6 +82,9 @@ export class TerrainBoard {
     this._mergeDebug = false;
 
     this._tmp = new THREE.Vector3();
+    this._bootFrustum = new THREE.Frustum();
+    this._bootProjection = new THREE.Matrix4();
+    this._bootBounds = new THREE.Box3();
   }
 
   // (Re)build the chunk grid. Only called when chunk count / size changes or a
@@ -259,6 +262,55 @@ export class TerrainBoard {
     this.activeChunkCount = this.chunks.length;
     this._building = this._buildQueue.length > 0;
     return created;
+  }
+
+  _setBootFrustum(camera) {
+    camera.updateMatrixWorld(true);
+    this._bootProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._bootFrustum.setFromProjectionMatrix(this._bootProjection);
+  }
+
+  _bootJobVisible(job, dependencyHalo = 1.5) {
+    const halo = Math.max(0, dependencyHalo) * this.chunkSize;
+    this._bootBounds.min.set(
+      job.x - halo,
+      -Math.max(this._skirtDepth, halo),
+      job.z - halo,
+    );
+    this._bootBounds.max.set(
+      job.x + this.chunkSize + halo,
+      this._maxHeight + halo,
+      job.z + this.chunkSize + halo,
+    );
+    return this._bootFrustum.intersectsBox(this._bootBounds);
+  }
+
+  /**
+   * Put launch-camera contributors first without forcing the whole board to be
+   * constructed before first reveal. The halo includes neighbouring shadow,
+   * shoreline and reflection contributors used by the final camera pipeline.
+   */
+  prioritizeInitialCameraSet(camera, { dependencyHalo = 1.5 } = {}) {
+    if (!camera || !this._buildQueue.length) return 0;
+    this._setBootFrustum(camera);
+    const visible = [];
+    const deferred = [];
+    for (const job of this._buildQueue) {
+      (this._bootJobVisible(job, dependencyHalo) ? visible : deferred).push(job);
+    }
+    visible.sort((a, b) => camera.position.distanceToSquared({
+      x: a.centerX, y: 0, z: a.centerZ,
+    }) - camera.position.distanceToSquared({
+      x: b.centerX, y: 0, z: b.centerZ,
+    }));
+    this._buildQueue = [...visible, ...deferred];
+    return visible.length;
+  }
+
+  initialCameraSetReady(camera, { dependencyHalo = 1.5 } = {}) {
+    if (!camera || !this._buildQueue.length) return true;
+    this._setBootFrustum(camera);
+    return !this._buildQueue.some((job) => this._bootJobVisible(job, dependencyHalo));
   }
 
   _createChunk(job) {

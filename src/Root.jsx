@@ -9,11 +9,18 @@ import './landing/landing.css';
 import { adminApi } from './admin/adminApi.js';
 
 const EXIT_MS = 720;
+const INITIAL_BOOT_PROGRESS = Object.freeze({
+  stage: 'planning',
+  label: 'Planning final frame…',
+  progress: 0,
+});
 
 export default function Root() {
   const [visible, setVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
   const [bootReady, setBootReady] = useState(false);
+  const [bootError, setBootError] = useState(null);
+  const [bootProgress, setBootProgress] = useState(INITIAL_BOOT_PROGRESS);
   const [sessionSeed] = useState(() => randomSessionSeed());
 
   const dismiss = useCallback(() => {
@@ -37,9 +44,18 @@ export default function Root() {
   }, []);
 
   const landing = useMemo(
-    () => ({ visible, exiting, bootReady, setBootReady, dismiss, sessionSeed }),
-    [visible, exiting, bootReady, dismiss, sessionSeed],
+    () => ({ visible, exiting, bootReady, setBootReady, bootError, setBootError, bootProgress, setBootProgress, dismiss, sessionSeed }),
+    [visible, exiting, bootReady, bootError, bootProgress, dismiss, sessionSeed],
   );
+
+  const retryBoot = useCallback((mode) => {
+    setBootError(null);
+    setBootProgress({
+      ...INITIAL_BOOT_PROGRESS,
+      label: mode === 'compatibility' ? 'Planning compatibility scene…' : 'Planning final frame…',
+    });
+    window.dispatchEvent(new CustomEvent('terrain-boot:retry', { detail: { mode } }));
+  }, []);
 
   return (
     <PopupProvider>
@@ -47,7 +63,15 @@ export default function Root() {
         <LandingProvider value={landing}>
           <App />
           {visible && (
-            <Landing exiting={exiting} bootReady={bootReady} onLaunch={dismiss} sessionSeed={sessionSeed} />
+            <Landing
+              exiting={exiting}
+              bootReady={bootReady}
+              bootError={bootError}
+              bootProgress={bootProgress}
+              onRetryBoot={retryBoot}
+              onLaunch={dismiss}
+              sessionSeed={sessionSeed}
+            />
           )}
         </LandingProvider>
       </AuthProvider>

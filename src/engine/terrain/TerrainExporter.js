@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from '../render/RendererReadback.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -156,9 +157,9 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
   }
 `;
 
-function rtToCanvas(renderer, rt, w, h) {
+async function rtToCanvas(renderer, rt, w, h) {
   const pixels = new Uint8Array(w * h * 4);
-  renderer.readRenderTargetPixels(rt, 0, 0, w, h, pixels);
+  await readRenderTargetPixelsAsync(renderer, rt, 0, 0, w, h, pixels);
   
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -275,7 +276,7 @@ export class TerrainExporter {
       bakeUniforms.uCellOffset.value.set(ox, oz);
       bakeUniforms.uBoardSizeXZ.value.set(sx, sz);
     };
-    const bakeHeightGrid = (ox, oz, sx, sz, gx, gz) => {
+    const bakeHeightGrid = async (ox, oz, sx, sz, gx, gz) => {
       const wpx = gx + 1, hpx = gz + 1;
       const rt = new THREE.WebGLRenderTarget(wpx, hpx, {
         format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
@@ -287,7 +288,7 @@ export class TerrainExporter {
       renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
       const px = new Uint8Array(wpx * hpx * 4);
-      renderer.readRenderTargetPixels(rt, 0, 0, wpx, hpx, px);
+      await readRenderTargetPixelsAsync(renderer, rt, 0, 0, wpx, hpx, px);
       renderer.setRenderTarget(null);
       rt.dispose();
       const at = (i, j) => {
@@ -297,19 +298,19 @@ export class TerrainExporter {
       };
       return { wpx, hpx, px, at };
     };
-    const bakeRegionCanvas = (mode, ox, oz, sx, sz, res) => {
+    const bakeRegionCanvas = async (mode, ox, oz, sx, sz, res) => {
       const rt = new THREE.WebGLRenderTarget(res, res);
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = mode;
       bakeUniforms.uHeightVertexGrid.value = 0;
       renderer.setRenderTarget(rt);
       renderer.render(quadScene, quadCam);
-      const c = rtToCanvas(renderer, rt, res, res);
+      const c = await rtToCanvas(renderer, rt, res, res);
       renderer.setRenderTarget(null);
       rt.dispose();
       return c;
     };
-    const renderHeightPixels = (ox, oz, sx, sz, resolution, vertexGrid = false) => {
+    const renderHeightPixels = async (ox, oz, sx, sz, resolution, vertexGrid = false) => {
       const visualRT = new THREE.WebGLRenderTarget(resolution, resolution, {
         format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
         minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
@@ -320,14 +321,14 @@ export class TerrainExporter {
       renderer.setRenderTarget(visualRT);
       renderer.render(quadScene, quadCam);
       const pixels = new Uint8Array(resolution * resolution * 4);
-      renderer.readRenderTargetPixels(visualRT, 0, 0, resolution, resolution, pixels);
+      await readRenderTargetPixelsAsync(renderer, visualRT, 0, 0, resolution, resolution, pixels);
       renderer.setRenderTarget(null);
       visualRT.dispose();
       return pixels;
     };
 
-    const bakeHeightAsset = (ox, oz, sx, sz) => {
-      const visualPixels = renderHeightPixels(ox, oz, sx, sz, texRes, false);
+    const bakeHeightAsset = async (ox, oz, sx, sz) => {
+      const visualPixels = await renderHeightPixels(ox, oz, sx, sz, texRes, false);
 
       const canvas = document.createElement('canvas');
       canvas.width = texRes;
@@ -348,7 +349,7 @@ export class TerrainExporter {
       ctx.putImageData(img, 0, 0);
       let raw16 = null;
       if (options.heightmapRawPath && heightmapVertexGrid) {
-        const vertexPixels = renderHeightPixels(ox, oz, sx, sz, heightRes, true);
+        const vertexPixels = await renderHeightPixels(ox, oz, sx, sz, heightRes, true);
         raw16 = encodeUnityRaw16FromPackedPixels(vertexPixels, heightRes, heightRes);
       } else if (options.heightmapRawPath) {
         // Preserve the existing engine-preset RAW contract outside Unity:
@@ -384,16 +385,16 @@ export class TerrainExporter {
 
       for (const cell of tiles) {
         const ctr = cellCenter(cell.cx, cell.cz);
-        const { at } = bakeHeightGrid(ctr.x, ctr.z, cellSize, cellSize, meshRes, meshRes);
+        const { at } = await bakeHeightGrid(ctr.x, ctr.z, cellSize, cellSize, meshRes, meshRes);
 
         let colorTex = null, normalTex = null;
         if (bakeColor) {
-          const cv = bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes);
+          const cv = await bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes);
           colorTex = new THREE.CanvasTexture(cv);
           colorTex.colorSpace = THREE.SRGBColorSpace;
         }
         if (bakeNormal) {
-          const nv = bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes);
+          const nv = await bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes);
           normalTex = new THREE.CanvasTexture(nv);
         }
         const terrainMaterial = new THREE.MeshStandardMaterial({
@@ -511,7 +512,7 @@ export class TerrainExporter {
     let heightRaw16 = null;
     if (exportHeightmap && (!separateTileExport || !runtimeTerrainExport)) {
       onToast('Baking grayscale heightmap...');
-      const asset = bakeHeightAsset(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
+      const asset = await bakeHeightAsset(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
       heightCanvas = asset.canvas;
       heightRaw16 = asset.raw16;
     }
@@ -520,15 +521,15 @@ export class TerrainExporter {
     let splatCanvas = null;
     if (exportHeightmap && options.exportSplat && (!separateTileExport || !runtimeTerrainExport)) {
       onToast('Baking splat map...');
-      splatCanvas = bakeRegionCanvas(3, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+      splatCanvas = await bakeRegionCanvas(3, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
     }
 
     // Union-wide color / normal canvases for the separate PNG zip entries. The
     // GLB already embeds crisp per-cell textures; these are an overview of the
     // whole assembly (== the single cell when there is one tile).
     let colorCanvas = null, normalCanvas = null;
-    if (bakeColor) colorCanvas = bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
-    if (bakeNormal) normalCanvas = bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    if (bakeColor) colorCanvas = await bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    if (bakeNormal) normalCanvas = await bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
 
     // A multi-tile whole-terrain export has exactly one surface object. Re-map
     // every cell to the union texture before merging so boundary vertices share
@@ -627,8 +628,8 @@ export class TerrainExporter {
     }
 
     // --- 3. Collision Mesh ---
-    const buildCollisionModel = (ox, oz, sx, sz, name = 'Collision_Mesh') => {
-      const { at } = bakeHeightGrid(ox, oz, sx, sz, collisionRes, collisionRes);
+    const buildCollisionModel = async (ox, oz, sx, sz, name = 'Collision_Mesh') => {
+      const { at } = await bakeHeightGrid(ox, oz, sx, sz, collisionRes, collisionRes);
       const positions = [], indices = [];
       for (let j = 0; j <= collisionRes; j++) {
         const z = oz + (j / collisionRes - 0.5) * sz;
@@ -657,7 +658,7 @@ export class TerrainExporter {
     let collisionModel = null;
     if (exportCollision && !separateTileExport) {
       onToast('Generating collision geometry...');
-      collisionModel = buildCollisionModel(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
+      collisionModel = await buildCollisionModel(unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ);
     }
 
     // Separate mode serializes a self-contained model for every occupied cell.
@@ -688,18 +689,18 @@ export class TerrainExporter {
           group.add(water);
         }
 
-        const height = exportHeightmap ? bakeHeightAsset(ctr.x, ctr.z, cellSize, cellSize) : null;
+        const height = exportHeightmap ? await bakeHeightAsset(ctr.x, ctr.z, cellSize, cellSize) : null;
         tilePackages.push({
           cell,
           group,
           water,
-          colorCanvas: bakeColor ? bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
-          normalCanvas: bakeNormal ? bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          colorCanvas: bakeColor ? await bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          normalCanvas: bakeNormal ? await bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
           heightCanvas: height?.canvas ?? null,
           heightRaw16: height?.raw16 ?? null,
           splatCanvas: exportHeightmap && options.exportSplat
-            ? bakeRegionCanvas(3, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
-          collisionModel: exportCollision ? buildCollisionModel(ctr.x, ctr.z, cellSize, cellSize, `Collision_Tile_${cell.cx}_${cell.cz}`) : null,
+            ? await bakeRegionCanvas(3, ctr.x, ctr.z, cellSize, cellSize, texRes) : null,
+          collisionModel: exportCollision ? await buildCollisionModel(ctr.x, ctr.z, cellSize, cellSize, `Collision_Tile_${cell.cx}_${cell.cz}`) : null,
         });
       }
     }

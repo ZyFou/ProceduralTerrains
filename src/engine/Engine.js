@@ -1,4 +1,17 @@
 import * as THREE from 'three';
+
+function createEngineTimer() {
+  // Engine can be loaded through an older cached worker/bundle whose Three.js
+  // namespace does not expose Timer. Do not fail before a renderer exists.
+  if (typeof THREE.Timer === 'function') {
+    try {
+      return new THREE.Timer();
+    } catch {
+      // Fall through for mismatched Three.js runtimes.
+    }
+  }
+  return new THREE.Clock();
+}
 import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource, rebuildTerrainPreviewShaderSource } from './terrain/TerrainMaterial.js';
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
@@ -11,6 +24,7 @@ import {
   CLOUD_QUALITY_PRESETS,
   CLOUD_LEGACY_PERF_KEYS,
   normalizeCloudFormation,
+  resolveCloudQuality,
 } from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
 import {
@@ -114,6 +128,12 @@ import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManag
 import { ProjectHistoryManager } from '../creator/history/ProjectHistoryManager.js';
 import { createProductionFiles } from '../export/ExportPresetManager.js';
 import { hasExportErrors, validateExport } from '../export/ExportValidator.js';
+import {
+  BootPipelineCancelledError,
+  FinalFrameBootPipeline,
+  createBootRenderKey,
+} from './boot/FinalFrameBootPipeline.js';
+import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
@@ -139,6 +159,9 @@ const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
 //   onInfiniteStats(stats)      infinite mode HUD data
 //   onQualityChange(key)        quality preset changed
 //   onTimeOfDayChange(value)    time-of-day slider changed
+//   onBootProgress(progress)    final-frame boot stage/progress
+//   onBootError(error)          blocking failure; UI offers explicit retry
+//   onBootComplete(result)      exact final frame has been presented
 // ============================================================================
 
 // Deterministic PRNG used ONLY to derive noise-domain offsets from the seed.
@@ -195,10 +218,24 @@ const STACK_COMPAT_PARAM_KEYS = new Set([
 ]);
 
 export class Engine {
-  constructor({ canvas, minimapBase, minimapOverlay, callbacks, initialParams }) {
+  constructor({
+    canvas,
+    minimapBase,
+    minimapOverlay,
+    callbacks = {},
+    initialParams,
+    initialView = 'landing',
+    initialBootMode = 'full',
+  }) {
     this._bootStart = performance.now();   // boot timing baseline (see [boot] logs)
     this.canvas = canvas;
     this.cb = callbacks;
+    this._initialView = initialView === 'landing' ? 'landing' : 'editor';
+    this._initialBootMode = initialBootMode === 'compatibility' ? 'compatibility' : 'full';
+    this._bootMode = this._initialBootMode;
+    this._bootError = null;
+    this._bootPresented = false;
+    this._bootPipeline = null;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
       migrateWaterParams(migrateTerrainFormationParams(
@@ -252,7 +289,8 @@ export class Engine {
     this._lastDraws = 0;
     this._lastRenderAt = 0;        // heartbeat: redraw at least ~1 Hz when idle
     this._tickErrorLogged = false;
-    this._clock = new THREE.Clock();
+    this._clock = createEngineTimer();
+    if (typeof document !== 'undefined') this._clock.connect?.(document);
     this._disposed = false;
     this._bootPending = true;
     this._qualityPending = true;
@@ -438,22 +476,26 @@ export class Engine {
     // parity, keep every visible Tile consumer on the same live height field.
     // Infinite World and Planet retain their dedicated cache paths.
     this._studioLiveHeightField = true;
-    this._landingShowcase = false;
+    this._landingShowcase = this._initialView === 'landing';
 
     this._initRenderer();
     this._onContextLost = (event) => {
       event.preventDefault();
       this._contextLost = true;
-      console.warn('[webgl] context lost; aborting shader waits');
-      this._releaseBootFallback('WebGL context lost', { render: false });
-      this.cb.onStatus('Graphics context lost — waiting to recover…', false);
+      console.warn('[graphics] context lost; aborting boot generation');
+      this._bootPipeline?.cancel?.();
+      this._failFinalFrameBoot(new Error('Graphics context was lost while preparing the final frame'), 'renderer');
+      this.cb.onStatus('Graphics context lost — retry when the device recovers', false);
     };
     this._onContextRestored = () => {
       this._contextLost = false;
       this._needsRender = true;
-      console.info('[webgl] context restored');
-      this.cb.onStatus('Ready', false);
-      this._schedulePostFirstPaintWarmups(250);
+      console.info('[graphics] context restored');
+      if (this._bootPending) this.retryBoot({ mode: this._bootMode });
+      else {
+        this.cb.onStatus('Ready', false);
+        this._needsRender = true;
+      }
     };
     this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
     this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
@@ -470,6 +512,10 @@ export class Engine {
     this.controls.setBoardSize(this.boardSize);
     this.controls.reset(this.boardSize);
     this.controls.update(1);
+    if (this._landingShowcase) {
+      this.controls.autoOrbit = false;
+      this.controls.enabled = false;
+    }
     this.camera.updateMatrixWorld(true);
 
     this.applyAll({ force: true });
@@ -487,7 +533,11 @@ export class Engine {
     // have been cleared) and drop the accumulated hidden time.
     this._onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        this._clock.getDelta();   // discard the long hidden gap
+        if (typeof this._clock.reset === 'function') this._clock.reset();
+        else {
+          this._clock.stop?.();
+          this._clock.start?.();
+        }
         this._cloudAdaptive?.suspend(performance.now(), 6000);
         this._needsRender = true;
       }
@@ -505,9 +555,11 @@ export class Engine {
 
     console.info(`[boot] sync init (renderer+scene+board) ${(performance.now() - this._bootStart).toFixed(0)}ms · GPU tier ${this.gpuTier} · preset ${this.perf?.preset}`);
     this.renderer.setAnimationLoop(() => this._tick());
-    // Compile the first visible studio shaders immediately. Earlier idle/rAF gates
-    // could be throttled for tens of seconds by Chrome before first paint.
-    this._warmupInitialShaders();
+    // One generation-owned boot pipeline is the only authority allowed to
+    // remove the loading cover. No placeholder or intermediate-quality frame
+    // is ever rendered to the canvas.
+    this._createFinalFrameBootPipeline();
+    void this._startFinalFrameBoot({ mode: this._initialBootMode, reason: 'initial' });
   }
 
   // ----------------------------------------------------------------- setup
@@ -552,7 +604,7 @@ export class Engine {
       requestedBackendLabel: labelRendererBackend(requestedBackend),
       appliedRendererBackend: requestedBackend,
       appliedRendererBackendLabel: labelRendererBackend(requestedBackend),
-      activeBackend: 'webgl',
+      activeBackend: 'webgl2',
       activeBackendLabel: this.rendererCapabilities.detectedRenderer,
       requestedGpuPreference,
       requestedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
@@ -667,14 +719,10 @@ export class Engine {
 
     // studio/flat-board volumetric cloud slab (sits above the board; hidden
     // until enabled). Planet mode has its own spherical PlanetCloudLayer.
+    const initialCloudConfig = resolveCloudQuality({ ...this.params, ...this.perf });
     this.studioCloud = new CloudSlabLayer(this.scene, {
+      initialConfig: initialCloudConfig,
       compile: async (mats) => {
-        // Restored cloud quality can rebuild a heavy shader during applyAll().
-        // Yield until the minimal terrain safety frame has actually painted.
-        while (!this._disposed
-            && (this._bootPending || this._bootShaderPending)) {
-          await yieldFrame();
-        }
         if (this._disposed) return { ready: false, aborted: true };
         // The live Studio path normally renders into the visual-post target.
         // If that target changes while the cloud links, warm the replacement
@@ -3901,6 +3949,10 @@ export class Engine {
     );
     if (!this._bootPending) {
       this.cb.onStatus(this.board.isBuilding ? this._terrainBuildStatusText() : 'Ready', false);
+      if (!this.board.isBuilding && this._landingOrbitPending && this._landingShowcase) {
+        this._landingOrbitPending = false;
+        this.controls.autoOrbit = true;
+      }
     } else {
       this._completeBootIfInteractiveReady();
       if (!this.board.isBuilding) this._completeBootIfQualityReady();
@@ -4211,6 +4263,7 @@ export class Engine {
   }
 
   _prepareCameraPipeline() {
+    const runtimeParams = this._bootRuntimeParams || this.params;
     const cloudsNeedDepth = this.worldMode === 'studio'
       ? !!this.studioCloud?.active
       : (this.worldMode === 'infinite'
@@ -4221,9 +4274,9 @@ export class Engine {
       || !!this.waterSystem?.needsSceneRefraction?.();
     return this.visualPost.prepare(this.renderer, {
       params: {
-        ...this.params,
+        ...runtimeParams,
         ...this._pendingTerrainParams,
-        noiseStack: this._pendingNoiseStack ?? this.params.noiseStack,
+        noiseStack: this._pendingNoiseStack ?? runtimeParams.noiseStack,
       },
       perf: this.perf,
       worldMode: this.worldMode,
@@ -4900,148 +4953,378 @@ export class Engine {
     this.profiler.setMetric('waterShaderCompile', this._lastWaterShaderCompile);
   }
 
+  _createFinalFrameBootPipeline() {
+    this._bootPipeline?.dispose?.();
+    this._bootPipeline = new FinalFrameBootPipeline({
+      hooks: {
+        planning: (context) => this._planFinalFrameBoot(context),
+        renderer: (context) => this._prepareFinalRenderer(context),
+        resources: (context) => this._prepareFinalBootResources(context),
+        geometry: (context) => this._prepareInitialCameraGeometry(context),
+        compile: (context) => this._compileFinalBootGraph(context),
+        present: (context) => this._presentFinalBootFrame(context),
+      },
+      onProgress: (progress) => {
+        const labels = {
+          planning: 'Planning final scene…',
+          renderer: 'Initializing graphics backend…',
+          resources: 'Preparing terrain, water and sky…',
+          geometry: 'Building visible terrain…',
+          compile: 'Compiling final shaders…',
+          present: 'Presenting final frame…',
+          ready: 'Ready',
+        };
+        const payload = { ...progress, label: labels[progress.stage] || progress.label };
+        this.cb.onBootProgress?.(payload);
+        this.cb.onStatus?.(payload.label, progress.stage !== 'ready');
+      },
+      onError: (error) => this._failFinalFrameBoot(error, error.stage),
+      onComplete: (result) => this._completeFinalFrameBoot(result),
+    });
+  }
+
+  _bootViewportSnapshot() {
+    const rect = this.canvas?.parentElement?.getBoundingClientRect?.() || {
+      width: this.canvas?.clientWidth || 1,
+      height: this.canvas?.clientHeight || 1,
+    };
+    return {
+      width: Math.max(1, Math.round(rect.width || 1)),
+      height: Math.max(1, Math.round(rect.height || 1)),
+      pixelRatio: this.renderer?.getPixelRatio?.() || 1,
+    };
+  }
+
+  _bootCameraSnapshot() {
+    const round = (value) => Math.round((Number(value) || 0) * 1e6) / 1e6;
+    return {
+      position: this.camera.position.toArray().map(round),
+      quaternion: this.camera.quaternion.toArray().map(round),
+      fov: round(this.camera.fov),
+      near: round(this.camera.near),
+      far: round(this.camera.far),
+    };
+  }
+
+  _planFinalFrameBoot(context) {
+    context.assertCurrent();
+    this._bootPending = true;
+    this._qualityPending = true;
+    this._bootShaderPending = true;
+    this._bootPresented = false;
+    this._bootError = null;
+    this._bootMode = context.mode;
+    this._bootRuntimeParams = null;
+    this._cloudAdaptive?.suspend(performance.now(), 60 * 60 * 1000);
+    this.controls.autoOrbit = false;
+    this.controls.enabled = false;
+    this.controls.update(0);
+    this.camera.updateMatrixWorld(true);
+
+    context.renderKey = createBootRenderKey({
+      backend: context.mode === 'compatibility'
+        ? 'webgl2'
+        : (this.rendererConfig?.activeBackend || 'webgl2'),
+      mode: context.mode,
+      view: this._initialView,
+      viewport: this._bootViewportSnapshot(),
+      camera: this._bootCameraSnapshot(),
+      worldMode: this.worldMode,
+      projectMode: this.projectMode,
+      terrain: {
+        seed: this.params.seed,
+        source: this._liveGenerationSource,
+        sourceSignature: this._activeHeightProgram('studio')?.sig || null,
+        variant: context.mode === 'compatibility' ? 'base' : this._targetTerrainVariant(),
+        octaves: Math.round(this.params.octaves),
+      },
+      water: {
+        enabled: this.params.waterEnabled !== false,
+        mode: context.mode === 'compatibility'
+          ? 'legacy'
+          : resolveEffectiveWaterMode(this.params, this.worldMode),
+      },
+      clouds: context.mode === 'compatibility'
+        ? { enabled: false }
+        : {
+            enabled: !!this.params.cloudsEnabled,
+            quality: resolveCloudQuality({ ...this.params, ...this.perf }),
+          },
+      post: context.mode === 'compatibility'
+        ? { enabled: true, essentialOnly: true }
+        : {
+            enabled: this.params.visualsPostEnabled !== false,
+            pixelated: !!this.params.visualsPixelatedEnabled,
+            dithering: !!this.params.visualsDitheringEnabled,
+            crt: !!this.params.visualsCrtEnabled,
+            chromaticAberration: !!this.params.visualsChromaticAberrationEnabled,
+          },
+    });
+    return { renderKey: context.renderKey.serialized };
+  }
+
+  _prepareFinalRenderer(context) {
+    context.assertCurrent();
+    if (this._contextLost || !this.renderer) {
+      const error = new Error('Graphics backend is unavailable');
+      error.code = 'GRAPHICS_UNAVAILABLE';
+      throw error;
+    }
+    if (this.rendererCapabilities?.webgl && !this.rendererCapabilities.webgl2) {
+      const error = new Error('WebGL 2 or WebGPU is required');
+      error.code = 'WEBGL2_REQUIRED';
+      throw error;
+    }
+    this._prepareCameraPipeline();
+    return {
+      backend: this.rendererConfig?.activeBackend || 'webgl2',
+      renderer: this.rendererCapabilities?.detectedRenderer || 'Unknown',
+    };
+  }
+
+  async _applyCompatibilityBootProfile(context) {
+    if (context.mode !== 'compatibility') return;
+    context.assertCurrent();
+    this._bootCompatibilityMode = true;
+    this._bootRuntimeParams = {
+      ...this.params,
+      waterMode: 'legacy',
+      waterQualityPreset: 'legacy',
+      cloudsEnabled: false,
+      visualsBloomStrength: 0,
+      visualsSunRaysStrength: 0,
+      visualsPixelatedEnabled: false,
+      visualsDitheringEnabled: false,
+      visualsCrtEnabled: false,
+      visualsChromaticAberrationEnabled: false,
+    };
+    this.studioCloud?.setInScene(false);
+    const program = this._activeHeightProgram('studio');
+    if (this.terrainMaterial?.userData?.terrainVariant !== 'base') {
+      const replacement = createTerrainMaterial(
+        this.uniforms,
+        Math.round(this.params.octaves),
+        program,
+        { variant: 'base' },
+      );
+      const previous = this.terrainMaterial;
+      this.terrainMaterial = replacement;
+      if (this.board) {
+        this.board.material = replacement;
+        for (const chunk of this.board.chunks) chunk.mesh.material = replacement;
+      }
+      if (this.diskWall) this.diskWall.material = replacement;
+      previous?.dispose?.();
+    }
+  }
+
+  async _prepareFinalBootResources(context) {
+    await this._applyCompatibilityBootProfile(context);
+    context.assertCurrent();
+    this._prepareCameraPipeline();
+
+    const cacheReady = await this._prepareStudioHeightCacheAsync();
+    context.assertCurrent();
+    if (!cacheReady) throw new Error('Final terrain height source is not ready');
+
+    // Prepare the requested water material without compiling or attaching it.
+    // Terrain and water are intentionally submitted together in the compile
+    // stage so KHR_parallel_shader_compile can translate both heavy programs in
+    // parallel instead of paying their cold-driver waits serially.
+    const bootParams = this._bootRuntimeParams || this.params;
+    context.bootParams = bootParams;
+    const waterMode = resolveEffectiveWaterMode(bootParams, this.worldMode);
+    const waterRequired = bootParams.waterEnabled !== false
+      && isWaterActive(waterMode, bootParams.seaLevel);
+    context.waterRequired = waterRequired;
+    context.preparedWaterMaterials = waterRequired
+      ? [...(this.waterSystem?.prepareInitialMaterials(bootParams, this.worldMode) || [])]
+      : [];
+
+    if (context.mode !== 'compatibility' && this.params.cloudsEnabled) {
+      const cloudReady = await this.studioCloud?.waitUntilReady?.({
+        isCurrent: () => !this._disposed && context.runId === this._bootPipeline?.runId,
+      });
+      context.assertCurrent();
+      if (cloudReady === false) throw new Error('Final cloud material did not become ready');
+    }
+    return {
+      terrainReady: true,
+      waterPrepared: !waterRequired || context.preparedWaterMaterials.length > 0,
+      cloudsReady: context.mode === 'compatibility' || !this.params.cloudsEnabled || this.studioCloud?.ready,
+    };
+  }
+
+  async _prepareInitialCameraGeometry(context) {
+    context.assertCurrent();
+    const dependencyHalo = 1.5;
+    this.board?.prioritizeInitialCameraSet?.(this.camera, { dependencyHalo });
+    let guard = 0;
+    while (!this._disposed
+        && this.board
+        && (!this.board.initialCameraSetReady(this.camera, { dependencyHalo })
+          || this.board._lodRebuildQueue.length > 0)) {
+      context.assertCurrent();
+      this.board.processBuildQueue({ maxItems: 24, maxMs: 8 });
+      this.board.updateLOD(this.camera.position);
+      context.progress(
+        'Building visible terrain…',
+        this.board.activeChunkCount,
+        Math.max(this.board.activeChunkCount, this.board.targetChunkCount),
+      );
+      if (++guard > 10000) throw new Error('Initial-camera terrain set did not converge');
+      await yieldTask();
+    }
+    context.assertCurrent();
+    this.camera.updateMatrixWorld(true);
+    this.board?.updateLOD(this.camera.position);
+    this.board?.cull(this.camera);
+    return {
+      visibleChunks: this.board?.visibleChunkCount ?? 0,
+      activeChunks: this.board?.activeChunkCount ?? 0,
+      deferredChunks: this.board?.remainingChunks ?? 0,
+      dependencyHalo,
+    };
+  }
+
+  _finalBootMaterials(extraMaterials = []) {
+    const materials = new Set();
+    this.scene?.traverse?.((object) => {
+      const list = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of list) if (material && object.visible !== false) materials.add(material);
+    });
+    for (const material of [
+      this.visualPost?._lookMaterial,
+      this.visualPost?._cameraMaterial,
+      this.studioCloud?._lowResPass?._composite,
+      this.underwater?._material,
+    ]) if (material) materials.add(material);
+    for (const material of extraMaterials) if (material) materials.add(material);
+    return [...materials];
+  }
+
+  async _compileFinalBootGraph(context) {
+    context.assertCurrent();
+    const target = this._resolveCameraCompileTarget();
+    const materials = this._finalBootMaterials(context.preparedWaterMaterials);
+    const result = await this._compileMaterialVariants(materials, {
+      canvasOnly: true,
+      // One scene submission lets the driver's parallel compiler overlap the
+      // large terrain and water programs. Serial staggering doubled cold boot
+      // on the reference ANGLE driver (38s water + 43s terrain).
+      stagger: false,
+      timeoutMs: 120000,
+      renderTarget: target.renderTarget,
+      onProgress: (completed, total) => context.progress('Compiling final shaders…', completed, total),
+    });
+    context.assertCurrent();
+    if (result?.ready !== true) {
+      const error = new Error('Final shader graph did not become ready');
+      error.code = result?.timedOut ? 'SHADER_TIMEOUT' : 'SHADER_COMPILE_FAILED';
+      throw error;
+    }
+    if (context.waterRequired) {
+      context.assertCurrent();
+      this.waterSystem?.activateInitialMaterials(
+        context.bootParams,
+        this.worldMode,
+      );
+      this._waterDeferred = false;
+      this._waterMaterialWarmed = true;
+      this._waterWarmRetryCount = 0;
+      this._waterWarmFailed = false;
+      if (this.water?.material) this.water.visible = true;
+    }
+    return {
+      compiledMaterials: materials.length,
+      shaderCompileMs: (result.syncCompileMs || 0) + (result.asyncWaitMs || 0),
+      renderTarget: target.usesSceneTarget ? 'scene-target' : 'canvas',
+    };
+  }
+
+  async _presentFinalBootFrame(context) {
+    context.assertCurrent();
+    this._bootShaderPending = false;
+    const firstMs = this._renderInitialStudioFrame({ frozen: true });
+    if (firstMs == null) throw new Error('Final frame could not be rendered');
+    await yieldFrame();
+    context.assertCurrent();
+    const secondMs = this._renderInitialStudioFrame({ frozen: true });
+    if (secondMs == null) throw new Error('Final frame presentation could not be confirmed');
+    await yieldFrame();
+    context.assertCurrent();
+    this._bootPresented = true;
+    if (this.canvas?.dataset) this.canvas.dataset.firstFrame = 'final';
+    return { firstFrameMs: firstMs, confirmationFrameMs: secondMs };
+  }
+
+  _completeFinalFrameBoot(result) {
+    if (this._disposed || !this._bootPresented) return;
+    this._bootPending = false;
+    this._qualityPending = false;
+    this._bootShaderPending = false;
+    this._bootError = null;
+    this.cb.onStatus?.('Ready', false);
+    if (this._landingShowcase) {
+      this._landingOrbitPending = (this.board?.remainingChunks ?? 0) > 0;
+      this.controls.autoOrbit = !this._landingOrbitPending;
+      this.controls.enabled = false;
+    } else {
+      this.controls.enabled = true;
+    }
+    this._cloudAdaptive?.suspend(performance.now(), 6000);
+    if (this._tierNotice) {
+      this.cb.onToast?.(this._tierNotice);
+      this._tierNotice = null;
+    }
+    this.cb.onBootComplete?.({
+      ...result,
+      backend: this.rendererConfig?.activeBackend || 'webgl2',
+    });
+    console.info(
+      `[boot] final frame ready in ${result.duration.toFixed(0)}ms `
+      + `(${result.mode}, ${this.rendererConfig?.activeBackend || 'webgl2'})`,
+    );
+    this._scheduleErosionGPUWarmImport();
+  }
+
+  _failFinalFrameBoot(error, stage = this._bootPipeline?.state || 'failed') {
+    if (this._disposed) return;
+    const normalized = error?.cause ? error : {
+      runId: this._bootPipeline?.runId ?? 0,
+      stage,
+      code: error?.code || 'BOOT_FAILED',
+      message: error?.message || 'Graphics initialization failed',
+      retryable: true,
+      cause: error,
+    };
+    this._bootError = normalized;
+    this._bootPending = true;
+    this._bootShaderPending = true;
+    this.controls.autoOrbit = false;
+    this.controls.enabled = false;
+    this.cb.onStatus?.('Final scene could not be prepared', false);
+    this.cb.onBootError?.(normalized);
+  }
+
+  _startFinalFrameBoot({ mode = 'full', reason = 'retry' } = {}) {
+    if (this._disposed) return Promise.resolve(null);
+    this._bootPending = true;
+    this._bootShaderPending = true;
+    return this._bootPipeline.start({ mode, reason }).catch((error) => {
+      if (error instanceof BootPipelineCancelledError || error?.code === 'BOOT_CANCELLED') return null;
+      return null;
+    });
+  }
+
+  retryBoot({ mode = this._bootMode || 'full' } = {}) {
+    if (this._disposed) return Promise.resolve(null);
+    return this._startFinalFrameBoot({ mode, reason: 'retry' });
+  }
+
   /** Compile a final-quality first frame behind the loading overlay. */
   async _warmupInitialShaders() {
-    this._compiling++;
-    this.cb.onStatus('Preparing first frame…', true);
-    const startedAt = performance.now();
-    try {
-      // Allocate/size the current visual pipeline before painting the safety
-      // frame. The exact compile target is resolved later, immediately before
-      // each asynchronous warm attempt.
-      this._prepareCameraPipeline();
-      // Paint a trivial safety frame before starting live shader translation.
-      // It remains behind the opaque overlay and is never a normal editor frame.
-      this._bootShaderPending = true;
-      const paintMs = this._renderBootPlaceholderFrame();
-      this._bootFallbackFrameReady = paintMs != null;
-      if (this._bootFallbackFrameReady) this._startBootWatchdog();
-      console.info(
-        `[boot] safe placeholder ${(paintMs ?? 0).toFixed(0)}ms; `
-        + `elapsed ${(performance.now() - startedAt).toFixed(0)}ms`
-      );
-      this.cb.onStatus('Loading terrain detail…', true);
-    } catch (error) {
-      console.warn('Initial safety frame failed', error);
-    } finally {
-      this._compiling--;
-    }
-    if (!this._disposed && this._bootFallbackFrameReady) {
-      void this._resumeInitialShaderWarmup();
-    }
-  }
-
-
-  _renderBootPlaceholderFrame() {
-    if (this.worldMode !== 'studio' || this._disposed) return null;
-    const t0 = performance.now();
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111722);
-    const geometry = new THREE.PlaneGeometry(1, 1);
-    geometry.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({ color: 0x52634c });
-    const plane = new THREE.Mesh(geometry, material);
-    const width = Math.max(1, this._unionWidth?.() ?? this.boardSize ?? 1);
-    const depth = Math.max(1, this._unionDepth?.() ?? this.boardSize ?? 1);
-    const center = this._unionCenter?.() ?? { x: 0, z: 0 };
-    plane.scale.set(width, 1, depth);
-    plane.position.set(center.x, 0, center.z);
-    scene.add(plane);
-    this.controls.update(0.016);
-    this.camera.updateMatrixWorld(true);
-    const previousTarget = this.renderer.getRenderTarget();
-    try {
-      this.renderer.setRenderTarget(null);
-      this.renderer.render(scene, this.camera);
-    } finally {
-      this.renderer.setRenderTarget(previousTarget);
-      geometry.dispose();
-      material.dispose();
-    }
-    this._lastRenderAt = performance.now();
-    this._camPos.copy(this.camera.position);
-    this._camQuat.copy(this.camera.quaternion);
-    this._needsRender = false;
-    return performance.now() - t0;
-  }
-
-  async _resumeInitialShaderWarmup() {
-    if (this._disposed || !this._bootShaderPending) return;
-    // Two animation frames guarantee the placeholder is composited before a
-    // driver call can spend time translating the live terrain shader.
-    await yieldFrame();
-    await yieldFrame();
-    if (this._disposed || !this._bootShaderPending) return;
-    this._bgWorkStart('boot-shader', 'Finishing graphics initialization…');
-    const targetSnapshot = this._resolveCameraCompileTarget();
-    let result = null;
-    try {
-      const materials = [
-        this.terrainMaterial,
-        this.plinth?.material,
-        this.proceduralSky?.material,
-      ].filter(Boolean);
-      result = await this._compileMaterialVariants([...new Set(materials)], {
-        canvasOnly: true,
-        stagger: true,
-        timeoutMs: 120000,
-        renderTarget: targetSnapshot.renderTarget,
-      });
-    } catch (error) {
-      console.warn('Background first-frame shader warmup failed', error);
-    }
-    if (this._disposed) return;
-    const currentTarget = this._resolveCameraCompileTarget();
-    if (result?.ready === true
-        && !this._sameCameraCompileTarget(targetSnapshot, currentTarget)) {
-      // Post-processing/underwater toggled while the program linked. Keep the
-      // safety frame active and immediately warm the actual destination.
-      await yieldTask();
-      if (!this._disposed && this._bootShaderPending) {
-        void this._resumeInitialShaderWarmup();
-      }
-      return;
-    }
-    if (result?.ready === true) {
-      this._bootShaderPending = false;
-      this._initialShaderRetryCount = 0;
-      this._bgWorkEnd('boot-shader');
-      this._needsRender = true;
-      this._completeBootIfInteractiveReady('final terrain shader ready');
-      if (this.worldMode === 'studio') {
-        this._schedulePostFirstPaintWarmups(150);
-      }
-      return;
-    }
-    const retry = this._initialShaderRetryCount + 1;
-    this._initialShaderRetryCount = retry;
-    if (retry <= 3) {
-      const delay = Math.min(15000, 2000 * (2 ** (retry - 1)));
-      this._initialShaderRetryTimer = setTimeout(() => {
-        this._initialShaderRetryTimer = null;
-        void this._resumeInitialShaderWarmup();
-      }, delay);
-      return;
-    }
-
-    // Terminal driver failure: remain interactive with a deliberately degraded
-    // flat board instead of freezing forever or forcing an unfinished link.
-    console.warn('Initial graphics shaders unavailable; entering degraded safe mode');
-    this._bootShaderPending = false;
-    this._bgWorkEnd('boot-shader');
-    this._bootDegradedMaterial = new THREE.MeshBasicMaterial({ color: 0x52634c });
-    if (this.board) {
-      this.board.material = this._bootDegradedMaterial;
-      for (const chunk of this.board.chunks) chunk.mesh.material = this._bootDegradedMaterial;
-    }
-    if (this.plinth) this.plinth.visible = false;
-    if (this.diskWall) this.diskWall.visible = false;
-    if (this.water) this.water.visible = false;
-    this.proceduralSky?.setVisible(false);
-    this.studioCloud?.setInScene(false);
-    this._needsRender = true;
-    this.cb.onToast?.('Graphics initialization failed; running in safe mode');
-    this._completeBootIfInteractiveReady('degraded graphics mode');
+    return this._startFinalFrameBoot({ mode: this._bootMode, reason: 'legacy-entrypoint' });
   }
 
 
@@ -5113,6 +5396,10 @@ export class Engine {
   }
 
   _completeBootIfInteractiveReady(reason = 'interactive terrain ready', { alreadyRendered = false } = {}) {
+    // The final-frame coordinator is the sole release authority. Legacy
+    // readiness notifications remain callable by subsystems during migration,
+    // but they cannot reveal an intermediate scene.
+    if (this._bootPipeline?.active) return false;
     if (!this._bootPending || this._disposed || this._bootShaderPending) return false;
 
     const nodeMode = this.projectMode === 'nodes';
@@ -5158,6 +5445,7 @@ export class Engine {
   }
 
   _completeBootIfQualityReady(reason = 'quality upgrades ready') {
+    if (this._bootPipeline?.active) return false;
     if (this._qualityPending === false || this._disposed) return false;
 
     const nodeMode = this.projectMode === 'nodes';
@@ -5266,6 +5554,7 @@ export class Engine {
   }
 
   _releaseBootFallback(reason = 'fallback', { render = true } = {}) {
+    if (this._bootPipeline && this._bootPending) return false;
     if (!this._bootPending || this._disposed) return false;
 
     const log = (reason === 'quality upgrades ready' || reason === 'interactive terrain ready')
@@ -5674,6 +5963,7 @@ export class Engine {
   }
 
   _scheduleWaterWarmRetry(renderTarget = null, delayMs = 250) {
+    if (this._bootPipeline?.active) return false;
     if (this._disposed || !this._waterDeferred || this._waterWarmRetryTimer) return false;
     if (this._waterWarmRetryCount >= 3) {
       this._waterWarmFailed = true;
@@ -5689,6 +5979,7 @@ export class Engine {
   }
 
   _scheduleTerrainHeightBakeRetry(delayMs = 1000) {
+    if (this._bootPipeline?.active) return false;
     if (this._disposed || this._terrainHeightBakeRetryTimer) return false;
     if (this._terrainHeightBakeRetryCount >= 3) {
       this._terrainHeightBakeFailed = true;
@@ -6106,12 +6397,12 @@ export class Engine {
     this._underwaterWarmIdentity = null;
     void this._warmUnderwaterShaders(cameraTarget);
   }
-  _renderInitialStudioFrame() {
+  _renderInitialStudioFrame({ frozen = false } = {}) {
     if (this.worldMode !== 'studio' || !this.board?.chunks?.length) return null;
     if (this._bootShaderPending) return null;
     const t0 = performance.now();
 
-    this.controls.update(0.016);
+    this.controls.update(frozen ? 0 : 0.016);
     this.camera.updateMatrixWorld(true);
     this.board.updateLOD(this.camera.position);
     this.board.cull(this.camera);
@@ -6124,7 +6415,7 @@ export class Engine {
     );
 
     if (this.studioCloud) {
-      this.studioCloud.update(0.016, this.camera.position, this.uniforms.uSunDir.value);
+      this.studioCloud.update(frozen ? 0 : 0.016, this.camera.position, this.uniforms.uSunDir.value);
       this._syncTerrainCloudShadows();
     }
 
@@ -6228,7 +6519,7 @@ export class Engine {
     }
     if (this.worldMode !== 'studio' || !this.controls) return;
     if (active) {
-      this.controls.autoOrbit = true;
+      this.controls.autoOrbit = !this._bootPending;
       this.controls.enabled = false;
       this.controls.reset(this.boardSize);
       this._needsRender = true;
@@ -6237,7 +6528,6 @@ export class Engine {
       this.controls.enabled = true;
       this.controls.blendToDefault(this.boardSize);
       this._needsRender = true;
-      this._schedulePostFirstPaintWarmups(100);
     }
   }
 
@@ -9710,7 +10000,7 @@ export class Engine {
     return thumbnail.toDataURL('image/webp', 0.8);
   }
 
-  exportHeightmap() {
+  async exportHeightmap() {
     const SIZE = 1024;
     const rt = new THREE.WebGLRenderTarget(SIZE, SIZE);
     const half = this.boardSize / 2;
@@ -9727,7 +10017,7 @@ export class Engine {
     this.renderer.setRenderTarget(rt);
     this.renderer.render(this.scene, cam);
     const pixels = new Uint8Array(SIZE * SIZE * 4);
-    this.renderer.readRenderTargetPixels(rt, 0, 0, SIZE, SIZE, pixels);
+    await readRenderTargetPixelsAsync(this.renderer, rt, 0, 0, SIZE, SIZE, pixels);
     this.renderer.setRenderTarget(null);
 
     this.uniforms.uColorMode.value = 0;
@@ -9868,10 +10158,25 @@ export class Engine {
     const rect = this.canvas.parentElement.getBoundingClientRect();
     const w = Math.max(1, rect.width);
     const h = Math.max(1, rect.height);
+    const roundedW = Math.round(w);
+    const roundedH = Math.round(h);
+    const changed = this._lastViewportWidth != null
+      && (this._lastViewportWidth !== roundedW || this._lastViewportHeight !== roundedH);
+    this._lastViewportWidth = roundedW;
+    this._lastViewportHeight = roundedH;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this._needsRender = true;   // viewport size changed → redraw
+    if (changed && this._bootPipeline?.active) {
+      clearTimeout(this._bootResizeTimer);
+      this._bootResizeTimer = setTimeout(() => {
+        this._bootResizeTimer = null;
+        if (!this._disposed && this._bootPending) {
+          void this._startFinalFrameBoot({ mode: this._bootMode, reason: 'resize' });
+        }
+      }, 80);
+    }
   }
 
   _tick() {
@@ -9894,9 +10199,18 @@ export class Engine {
   }
 
   _tickBody() {
+    this._clock.update?.();
     const dt = Math.min(this._clock.getDelta(), 0.05);
     const now = performance.now();
     this.profiler.beginFrame(now);
+    // Boot owns camera, time, geometry publication and presentation. The
+    // animation loop stays alive for rAF scheduling but cannot advance or draw
+    // a temporal frame beneath the loading cover.
+    if (this._bootPending) {
+      this.profiler.setMetric('sceneState', this._bootError ? 'boot-failed' : 'loading');
+      this.profiler.endFrame();
+      return;
+    }
     this.uniforms.uTime.value += dt;
     this._tickDayNightCycle(dt, now);
 
@@ -10694,6 +11008,13 @@ export class Engine {
     this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
+    this._bootPipeline?.dispose?.();
+    this._bootPipeline = null;
+    this._clock?.dispose?.();
+    if (this._bootResizeTimer) {
+      clearTimeout(this._bootResizeTimer);
+      this._bootResizeTimer = null;
+    }
     if (this._erosionGPUWarmCancel) {
       this._erosionGPUWarmCancel();
       this._erosionGPUWarmCancel = null;

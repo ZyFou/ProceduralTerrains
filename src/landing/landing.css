@@ -1738,12 +1738,133 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
     opacity .44s ease,
     transform .62s cubic-bezier(.22, 1, .36, 1);
 }
+
+.landing-preview-loader.is-error .landing-preview-loader-content {
+  width: min(520px, calc(100vw - 36px));
+  padding: 22px;
+  border: 1px solid rgba(239, 68, 68, .42);
+  border-radius: 10px;
+  background: rgba(10, 13, 20, .97);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .62);
+  text-align: center;
+}
+
+.landing-preview-error-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.landing-preview-error-actions button {
+  padding: 8px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-control);
+  color: var(--text-main);
+  font: 650 12px var(--font);
+  cursor: var(--cursor-pointer);
+}
+
+.landing-preview-error-actions button:last-child {
+  border-color: rgba(91, 136, 237, .55);
+  background: rgba(37, 99, 235, .18);
+  color: #a9c3ff;
+}
 .landing-preview-loader.is-revealing .landing-preview-loader-content {
   opacity: 0;
   transform: translateY(-10px) scale(.98);
 }
 .landing-preview-loader strong { font-size: 14px; transition: color .2s ease; }
 .landing-preview-loader small { color: var(--text-muted); font-size: 12px; }
+.landing-boot-progress {
+  display: grid;
+  gap: 9px;
+  width: min(390px, calc(100vw - 48px));
+  margin-top: 8px;
+  padding: 13px 14px 11px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 9px;
+  background: rgba(13, 17, 25, .72);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .25);
+}
+.landing-boot-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.landing-boot-progress-head > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.landing-boot-progress-head span {
+  overflow: hidden;
+  color: #b9c3d4;
+  font: 600 10px var(--font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.landing-boot-progress-head b {
+  color: var(--accent);
+  font: 700 10px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.landing-boot-terrain { width: 38px; height: 25px; flex: none; overflow: visible; }
+.landing-boot-terrain-base { fill: rgba(255, 255, 255, .035); }
+.landing-boot-terrain-line { fill: none; stroke: rgba(160, 176, 203, .34); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.landing-boot-terrain-fill { fill: var(--accent); }
+.landing-boot-progress-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+}
+.landing-boot-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-bg-strong);
+  transition: width .22s ease-out;
+}
+.landing-boot-phases {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing-boot-phases li {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: #4f596a;
+  font: 600 8px var(--mono);
+  letter-spacing: .02em;
+  transition: color .18s ease;
+}
+.landing-boot-phases li i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #353d4a;
+  transition: background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.landing-boot-phases li.is-done { color: color-mix(in srgb, var(--accent) 68%, var(--text-muted)); }
+.landing-boot-phases li.is-done i { background: var(--accent); opacity: .7; }
+.landing-boot-phases li.is-active { color: var(--accent); }
+.landing-boot-phases li.is-active i {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg), 0 0 9px var(--accent);
+  transform: scale(1.08);
+}
 .landing-preview-spinner {
   position: relative;
   width: 25px;
@@ -1919,4 +2040,5 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .landing-preview-loader-content { transition: opacity .08s linear; }
   .landing-preview-loader.is-revealing .landing-preview-loader-content { transform: none; }
   .landing-preview-spinner { animation: none; border-top-color: var(--text-dim); }
+  .landing-boot-progress-track i { transition: none; }
 }

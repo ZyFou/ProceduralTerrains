@@ -320,13 +320,39 @@ export default function App() {
     const completeBootUi = () => {
       if (cancelled || bootedRef.current) return;
       bootedRef.current = true;
+      if (canvas) canvas.dataset.bootState = 'ready';
       if (bootTimer) {
         clearTimeout(bootTimer);
         bootTimer = null;
       }
+      landingRef.current?.setBootError?.(null);
+      landingRef.current?.setBootProgress?.({ stage: 'ready', label: 'Final frame ready', progress: 1 });
       loadingRef.current.done('boot');
       landingRef.current?.setBootReady(true);
     };
+
+    const retryBoot = (event) => {
+      const mode = event?.detail?.mode === 'compatibility' ? 'compatibility' : 'full';
+      landingRef.current?.setBootError?.(null);
+      landingRef.current?.setBootReady(false);
+      landingRef.current?.setBootProgress?.({
+        stage: 'planning',
+        label: mode === 'compatibility' ? 'Planning compatibility scene…' : 'Planning final frame…',
+        progress: 0,
+      });
+      loadingRef.current.start('boot', {
+        blocking: true,
+        label: mode === 'compatibility' ? 'Starting compatibility mode…' : 'Retrying final scene…',
+        detail: 'Rebuilding the complete launch frame',
+      });
+      const target = engineRef.current || engine;
+      if (target?.retryBoot) {
+        void target.retryBoot({ mode });
+      } else {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('terrain-boot:retry', retryBoot);
 
     // Engine owns the bounded degraded-release policy. This UI timer only
     // refreshes the message while the first safe interactive frame is pending.
@@ -343,6 +369,7 @@ export default function App() {
         canvas,
         minimapBase: minimapBaseRef.current,
         minimapOverlay: minimapOverlayRef.current,
+        initialView: 'landing',
         initialParams: landingRef.current?.sessionSeed != null
           ? { seed: landingRef.current.sessionSeed }
           : undefined,
@@ -360,6 +387,36 @@ export default function App() {
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
           },
           onBootComplete: completeBootUi,
+          onBootProgress: ({ stage, label, completed, total, overallProgress }) => {
+            canvas.dataset.bootState = stage;
+            const progress = Number.isFinite(overallProgress)
+              ? overallProgress
+              : Number.isFinite(completed) && Number.isFinite(total) && total > 0
+                ? completed / total
+                : undefined;
+            landingRef.current?.setBootProgress?.({ stage, label: label || stage, progress });
+            loadingRef.current.update('boot', {
+              label: 'Loading Terrain Studio…',
+              detail: label || stage,
+              progress,
+            });
+          },
+          onBootError: (error) => {
+            if (cancelled) return;
+            canvas.dataset.bootState = 'failed';
+            landingRef.current?.setBootError?.(error);
+            landingRef.current?.setBootProgress?.((current) => ({
+              ...current,
+              stage: error?.stage || current?.stage || 'failed',
+              label: error?.message || 'Graphics initialization failed',
+            }));
+            loadingRef.current.update('boot', {
+              label: 'Final scene could not be prepared',
+              detail: error?.message || 'Graphics initialization failed',
+              progress: undefined,
+            });
+            setStatus({ text: 'Graphics initialization failed', busy: false });
+          },
           onStats: (stats) => liveMetrics.update({ stats }),
           onBackgroundWork: setBgWork,
           onCompileProgress: setCompileProgress,
@@ -432,7 +489,16 @@ export default function App() {
       const message = err?.message || 'Could not create a WebGL context.';
       setWebglError(message);
       setStatus({ text: 'WebGL unavailable', busy: false });
-      completeBootUi();
+      landingRef.current?.setBootError?.({
+        code: 'GRAPHICS_INITIALIZATION_FAILED',
+        message,
+        retryable: true,
+      });
+      loadingRef.current.update('boot', {
+        label: 'Graphics initialization failed',
+        detail: message,
+        progress: undefined,
+      });
       return;
     }
 
@@ -460,6 +526,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      window.removeEventListener('terrain-boot:retry', retryBoot);
       if (bootTimer) clearTimeout(bootTimer);
       engine?.dispose();
       engineRef.current = null;

@@ -8,15 +8,6 @@ import { CloudOccupancyPass } from './CloudOccupancyPass.js';
 
 // Resolution of the planar (XZ) occupancy grid for the studio cloud slab.
 const OCC_SIZE = 64;
-const BOOT_CONFIG = {
-  steps: 8,
-  lightSteps: 1,
-  octaves: 2,
-  detailOctaves: 0,
-  useErosion: false,
-  lightMode: 1,
-};
-
 function scheduleFrames(fn, frames = 1) {
   const raf = globalThis.requestAnimationFrame;
   if (typeof raf !== 'function') return setTimeout(fn, Math.max(1, frames) * 16);
@@ -49,13 +40,16 @@ export class CloudSlabLayer {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this._compile = opts.compile || null;
-
-    this._steps = BOOT_CONFIG.steps;
-    this._lightSteps = BOOT_CONFIG.lightSteps;
-    this._octaves = BOOT_CONFIG.octaves;
-    this._detailOctaves = BOOT_CONFIG.detailOctaves;
-    this._useErosion = BOOT_CONFIG.useErosion;
-    this._lightMode = BOOT_CONFIG.lightMode;
+    // The first material is the selected final specialization. A previous
+    // bootstrap specialization was compiled first and then replaced, creating
+    // both extra startup work and a visible temporal quality phase.
+    const initial = opts.initialConfig || {};
+    this._steps = initial.steps ?? 12;
+    this._lightSteps = initial.lightSteps ?? 6;
+    this._octaves = initial.octaves ?? 5;
+    this._detailOctaves = initial.detailOctaves ?? 4;
+    this._useErosion = initial.useErosion !== false;
+    this._lightMode = initial.lightMode ?? 1;
     this._stepLOD = false;
     this._adaptiveScaleMultiplier = 1;
     this._adaptiveStepScale = 1;
@@ -77,7 +71,14 @@ export class CloudSlabLayer {
     this._prevClearColor = new THREE.Color();
     this._compileToken = 0;
     this._pendingCompile = null;
-    this._targetConfig = { ...BOOT_CONFIG };
+    this._targetConfig = {
+      steps: this._steps,
+      lightSteps: this._lightSteps,
+      octaves: this._octaves,
+      detailOctaves: this._detailOctaves,
+      useErosion: this._useErosion,
+      lightMode: this._lightMode,
+    };
 
     // planar occupancy grid (empty-space-skip acceleration), rebuilt on a throttle
     this._occData = new Uint8Array(OCC_SIZE * OCC_SIZE);
@@ -124,6 +125,28 @@ export class CloudSlabLayer {
 
   get active() {
     return this._enabled && this._inScene && this._inRange && this._ready;
+  }
+
+  get ready() {
+    return !this._enabled || (this._ready && !this._warming && this._configMatches(this._targetConfig));
+  }
+
+  async waitUntilReady({ timeoutMs = 120000, isCurrent = () => true } = {}) {
+    const startedAt = performance.now();
+    while (isCurrent()) {
+      if (this.ready) return true;
+      if (!this._warming && this._enabled && this._compile) this._compileCurrentMaterial();
+      const pending = this._pendingCompile?.promise;
+      if (pending) await Promise.race([
+        pending.catch(() => null),
+        new Promise((resolve) => setTimeout(resolve, 32)),
+      ]);
+      else await new Promise((resolve) => setTimeout(resolve, 32));
+      if (performance.now() - startedAt > timeoutMs) {
+        throw new Error('Final cloud shader did not become ready before the boot timeout');
+      }
+    }
+    return false;
   }
 
   /** Show/hide the slab for the active world mode (studio only). */

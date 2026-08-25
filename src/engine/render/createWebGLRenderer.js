@@ -7,10 +7,8 @@ import { sanitizeGpuPreference } from './RendererCapabilities.js';
 export function probeWebGL() {
   try {
     const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false })
-      || canvas.getContext('webgl', { failIfMajorPerformanceCaveat: false })
-      || canvas.getContext('experimental-webgl');
-    if (!gl) return { ok: false, reason: 'WebGL is not supported in this browser.' };
+    const gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
+    if (!gl) return { ok: false, reason: 'WebGL 2 is required by the terrain renderer.' };
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : '';
     const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
@@ -30,7 +28,7 @@ export function probeWebGL() {
 export function releaseCanvasWebGLContext(canvas) {
   if (!canvas) return;
   try {
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    const gl = canvas.getContext('webgl2');
     const ext = gl?.getExtension('WEBGL_lose_context');
     ext?.loseContext();
   } catch {
@@ -58,7 +56,7 @@ function buildRendererAttempts(gpuPreference = 'default') {
 }
 
 /**
- * Create a WebGLRenderer for the given canvas, trying progressively safer options.
+ * Create a WebGL2 renderer for the given canvas, trying progressively safer options.
  * @returns {THREE.WebGLRenderer}
  */
 export function createRendererForCanvas(canvas, settings = {}) {

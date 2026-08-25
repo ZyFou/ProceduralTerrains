@@ -29,6 +29,65 @@ const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'plugin
 const PLUGIN_VIEWS = new Set(['plugins', 'unity', 'blender']);
 const BOOT_READY_HOLD_MS = 320;
 const BOOT_REVEAL_MS = 680;
+const BOOT_PHASES = Object.freeze([
+  ['planning', 'Plan'],
+  ['renderer', 'GPU'],
+  ['resources', 'Assets'],
+  ['geometry', 'Terrain'],
+  ['compile', 'Shaders'],
+  ['present', 'Frame'],
+]);
+
+function BootTerrainProgress({ bootProgress, complete = false }) {
+  const rawProgress = complete ? 1 : Number(bootProgress?.progress);
+  const progress = Math.max(0, Math.min(1, Number.isFinite(rawProgress) ? rawProgress : 0));
+  const percent = Math.round(progress * 100);
+  const activeIndex = complete
+    ? BOOT_PHASES.length
+    : Math.max(0, BOOT_PHASES.findIndex(([stage]) => stage === bootProgress?.stage));
+
+  return (
+    <div
+      className="landing-boot-progress"
+      role="progressbar"
+      aria-label="Final terrain boot progress"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow={percent}
+    >
+      <div className="landing-boot-progress-head">
+        <svg className="landing-boot-terrain" viewBox="0 0 72 46" aria-hidden="true">
+          <defs>
+            <clipPath id="landing-terrain-progress-clip">
+              <rect x="0" y="0" width={72 * progress} height="46" />
+            </clipPath>
+          </defs>
+          <path className="landing-boot-terrain-base" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
+          <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
+          <path className="landing-boot-terrain-fill" clipPath="url(#landing-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
+        </svg>
+        <div>
+          <span>{bootProgress?.label || 'Preparing final scene…'}</span>
+          <b>{percent}%</b>
+        </div>
+      </div>
+      <div className="landing-boot-progress-track" aria-hidden="true">
+        <i style={{ width: `${percent}%` }} />
+      </div>
+      <ol className="landing-boot-phases" aria-hidden="true">
+        {BOOT_PHASES.map(([stage, label], index) => (
+          <li
+            key={stage}
+            className={index < activeIndex || complete ? 'is-done' : index === activeIndex ? 'is-active' : ''}
+          >
+            <i />
+            <span>{label}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
 
 function viewFromHash() {
   const value = window.location.hash.replace(/^#\/?/, '').split('?')[0].toLowerCase();
@@ -59,7 +118,7 @@ const relTime = (value) => {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
 };
 
-export default function Landing({ exiting, bootReady, onLaunch }) {
+export default function Landing({ exiting, bootReady, bootError, bootProgress, onRetryBoot, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
   const { showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
@@ -602,11 +661,26 @@ export default function Landing({ exiting, bootReady, onLaunch }) {
       </div>
 
       {visualBootStage !== 'ready' && (
-        <div className={`landing-preview-loader is-${visualBootStage}`} role="status" aria-live="polite">
+        <div
+          className={`landing-preview-loader is-${bootError ? 'error' : visualBootStage}`}
+          role={bootError ? 'alert' : 'status'}
+          aria-live="polite"
+        >
           <div className="landing-preview-loader-content">
-            <span className="landing-preview-spinner" aria-hidden="true" />
-            <strong>{visualBootStage === 'loading' ? 'Starting terrain editor' : 'Terrain ready'}</strong>
-            <small>{visualBootStage === 'loading' ? 'Preparing your random terrain workspace…' : 'Bringing your workspace into view…'}</small>
+            <strong>{bootError ? 'Final scene could not be prepared' : visualBootStage === 'loading' ? 'Starting terrain editor' : 'Terrain ready'}</strong>
+            <small>{bootError?.message || (visualBootStage === 'loading' ? 'The first visible frame will be the finished scene.' : 'Bringing your workspace into view…')}</small>
+            {!bootError && (
+              <BootTerrainProgress
+                bootProgress={bootProgress}
+                complete={visualBootStage !== 'loading'}
+              />
+            )}
+            {bootError && (
+              <div className="landing-preview-error-actions">
+                <button type="button" onClick={() => onRetryBoot?.('full')}>Retry full scene</button>
+                <button type="button" onClick={() => onRetryBoot?.('compatibility')}>Start compatibility mode</button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { resolveTransformControlsHelper } from './TransformControlsCompat.js';
 import { TerrainPicker } from '../engine/terrain/TerrainPicker.js';
 import { PaintBrushCursor } from '../paint/PaintBrushCursor.js';
 import { ManualTerrainField } from './ManualTerrainField.js';
@@ -168,10 +169,10 @@ export class ManualTerrainModeManager {
     this.anchor.add(this.marker);
 
     this.transform = new TransformControls(camera, domElement);
+    this.transformHelper = resolveTransformControlsHelper(this.transform);
     this.transform.size = 0.82;
     this.transform.space = 'local';
-    this.transform.visible = false;
-    this.scene.add(this.transform);
+    this.scene.add(this.transformHelper);
     this.transform.addEventListener('dragging-changed', (event) => {
       this._draggingTransform = !!event.value;
       this.controls.enabled = !event.value;
@@ -298,7 +299,6 @@ export class ManualTerrainModeManager {
     this.preview.visible = false;
     this.cursor.setVisible(false);
     this.transform.detach();
-    this.transform.visible = false;
     this.marker.visible = false;
     this._emit();
   }
@@ -790,7 +790,6 @@ export class ManualTerrainModeManager {
     const shape = this.selectedShape;
     if (!this.enabled || !this.workspaceActive || !shape || this.sculpt.enabled || this.texturePaint.enabled) {
       this.transform.detach();
-      this.transform.visible = false;
       this.marker.visible = false;
       return;
     }
@@ -806,7 +805,6 @@ export class ManualTerrainModeManager {
     }
     this.marker.visible = true;
     this.transform.attach(this.anchor);
-    this.transform.visible = true;
     this.transform.setMode(this.transformMode);
     this.transform.space = this.transformMode === 'translate' ? 'world' : 'local';
     this.transform.showX = this.transformMode !== 'rotate';
@@ -1194,9 +1192,10 @@ export class ManualTerrainModeManager {
     window.removeEventListener('keydown', this._onKeyDown, true);
     window.removeEventListener('pointerup', this._onPointerUp);
     this.domElement.removeEventListener('wheel', this._onWheel);
-    this.transform.detach();
-    this.transform.dispose();
-    this.transform.parent?.remove(this.transform);
+    this.transform.detach?.();
+    this.transformHelper?.parent?.remove(this.transformHelper);
+    this.transform.dispose?.();
+    this.transformHelper = null;
     this.group.parent?.remove(this.group);
     this.anchor.parent?.remove(this.anchor);
     for (const visual of this._visuals.values()) {

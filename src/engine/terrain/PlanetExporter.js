@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from '../render/RendererReadback.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { zipSync } from 'fflate';
@@ -106,9 +107,9 @@ const buildBakeFragment = (planetHeightGLSL) => /* glsl */ `
   }
 `;
 
-function rtToCanvas(renderer, rt, w, h) {
+async function rtToCanvas(renderer, rt, w, h) {
   const px = new Uint8Array(w * h * 4);
-  renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+  await readRenderTargetPixelsAsync(renderer, rt, 0, 0, w, h, px);
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
@@ -226,7 +227,7 @@ export class PlanetExporter {
         const rt = new THREE.WebGLRenderTarget(texRes, texRes);
         renderer.setRenderTarget(rt);
         renderer.render(quadScene, quadCam);
-        const canvas = rtToCanvas(renderer, rt, texRes, texRes);
+        const canvas = await rtToCanvas(renderer, rt, texRes, texRes);
         renderer.setRenderTarget(null);
         rt.dispose();
         map = new THREE.CanvasTexture(canvas);
