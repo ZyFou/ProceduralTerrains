@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { DrawerChromeContext, FlatPanelContext } from '../panels/PanelContext.js';
 import { renderPanel } from '../panels/index.jsx';
 import {
@@ -26,6 +27,7 @@ export default function SideDrawer({
   const [menu, setMenu] = useState(null);
   const dragRef = useRef(null);
   const menuRef = useRef(null);
+  const prefersReducedMotion = useReducedMotion();
   const searchOpen = !!ctx.settingsSearchOpen;
 
   const side = desktop ? (layout?.side ?? 'right') : 'right';
@@ -195,7 +197,23 @@ export default function SideDrawer({
       >
         <FlatPanelContext.Provider value={true}>
           <DrawerChromeContext.Provider value={chromeValue}>
-            {open && renderPanel(activePanel, { ...ctx, onClose })}
+            <AnimatePresence mode="wait" initial={false}>
+              {open && (
+                <motion.div
+                  key={activePanel}
+                  className="side-drawer-panel-transition"
+                  initial={prefersReducedMotion ? false : { opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={prefersReducedMotion ? undefined : { opacity: 0, y: -3 }}
+                  transition={prefersReducedMotion ? { duration: 0 } : {
+                    duration: 0.18,
+                    ease: [0.16, 1, 0.3, 1],
+                  }}
+                >
+                  {renderPanel(activePanel, { ...ctx, onClose })}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </DrawerChromeContext.Provider>
         </FlatPanelContext.Provider>
       </aside>

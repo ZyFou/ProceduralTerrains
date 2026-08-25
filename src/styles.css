@@ -752,6 +752,14 @@ body {
   opacity: 1;
   pointer-events: auto;
 }
+.side-drawer-panel-transition {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 
 @media (hover: hover) and (pointer: fine) and (min-width: 821px) {
   .side-drawer.side-drawer--left {
