@@ -50,3 +50,72 @@ The comparison focuses on the two requested regressions while retaining the site
 No actionable P0, P1, or P2 issues remain for the requested scope.
 
 final result: passed
+
+---
+
+# Props Viewer Design QA
+
+- Source visual truth: `/var/folders/p4/2wybsmsn2xn2_0msnyqy_wlr0000gn/T/TemporaryItems/NSIRD_screencaptureui_03AcDL/Capture d’écran 2026-08-15 à 19.03.07.png`
+- Saved source: `output/playwright/props-viewer-reference.png`
+- Normalized source: `output/playwright/props-viewer-reference-normalized.png`
+- Final implementation crop: `output/playwright/props-viewer-implementation.jpg`
+- Full browser capture: `output/playwright/props-viewer-full.jpg`
+- Browser viewport: 1280 × 720 CSS px at device scale 1
+- Source pixels: 684 × 908 at 2× density; normalized to 342 × 454
+- Implementation comparison crop: 340 × 454 at 1× density
+- State: dark Props drawer, Asset Library selected, Oak Tree selected, preview rotation reset
+
+## Full-view comparison evidence
+
+The full capture confirms that the revised library remains within the existing Props drawer, preserves the two-column asset layout, and does not obscure the terrain viewport or persistent editor controls.
+
+## Focused comparison evidence
+
+The normalized source and final drawer crop were inspected together. The focused comparison was required because icon treatment, prop framing, and the rotation affordance are too small to judge reliably in the full editor screenshot.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing product font, weights, truncation, and hierarchy are preserved.
+- Spacing and layout rhythm: the two-column cards and viewer remain aligned with the existing drawer spacing; the larger model stays inside the preview frame.
+- Colors and visual tokens: existing dark surfaces, blue selection state, semantic tint colors, borders, and radii are preserved.
+- Image and asset fidelity: colored marker bars were replaced with vector icons from `lucide-react`; the preview continues to render the real terrain LOD geometry.
+- Copy and content: the interaction hint now states that both vertical and horizontal drag are available.
+
+## Findings
+
+- No remaining P0, P1, or P2 findings.
+- P3: extreme user-authored scale values can intentionally push a model close to the preview edge; the reset control and bounded pitch remain available.
+
+## Comparison history
+
+1. Initial reference finding: the tree occupied too little of the viewer, asset cards used ambiguous color bars, and drag only changed yaw.
+   - Fix: introduced Lucide type icons, larger normalized model fitting, bounded pitch plus yaw, updated hint, and a Lucide reset control.
+2. First rendered iteration: the ground rendered but the prop could disappear after React remounted the WebGL canvas.
+   - Evidence: `output/playwright/props-viewer-iteration-1-missing-model.jpg`.
+   - Fix: always install the current asset during canvas initialization.
+3. Second rendered iteration: repeated asset fitting inherited the previous pivot scale and shrank the next model.
+   - Fix: measure the model before parenting it to the scaled pivot.
+   - Evidence: `output/playwright/props-viewer-iteration-2-sized.jpg` and the final implementation crop.
+4. Interaction verification:
+   - Vertical drag evidence: `output/playwright/props-viewer-vertical-rotation.jpg`.
+   - Horizontal drag evidence: `output/playwright/props-viewer-horizontal-rotation.jpg`.
+   - Reset button returned pitch and yaw to the neutral view.
+
+## Primary interactions tested
+
+- Select Oak Tree.
+- Drag vertically to change X-axis pitch.
+- Drag horizontally to change Y-axis yaw.
+- Reset preview rotation.
+- Checked browser console: no warnings or errors during the tested interactions.
+
+## Implementation checklist
+
+- [x] Lucide icons for every prop family
+- [x] Larger, stable automatic prop framing
+- [x] X- and Y-axis drag rotation
+- [x] Bounded vertical rotation
+- [x] Lucide reset control
+- [x] Updated accessible interaction text
+
+final result: passed

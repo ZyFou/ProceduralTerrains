@@ -5,6 +5,13 @@ import {
 } from './propCatalog.js';
 import { createWindUniforms } from './windGLSL.js';
 import { makeWindMaterial } from './GrassMaterial.js';
+import {
+  enabledAssetsForType,
+  normalizePropAsset,
+  normalizePropAssetLibrary,
+  propAssetColorRGB,
+  selectPropAsset,
+} from './PropAssetLibrary.js';
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -308,6 +315,37 @@ function qualityIndex(perf) {
   return { performance: 0, balanced: 1, high: 2, ultra: 3 }[perf?.preset] ?? 2;
 }
 
+export function createPropAssetPreviewModel(rawAsset) {
+  const asset = normalizePropAsset(rawAsset);
+  const atlas = makeFoliageAtlas();
+  let geometry;
+  let material;
+  if (asset.type === 'rock') {
+    geometry = makeRockGeometry(1, `preview-${asset.id}`);
+    material = new THREE.MeshStandardMaterial({
+      color: asset.color, vertexColors: true, roughness: 0.92, metalness: 0,
+    });
+  } else {
+    geometry = asset.type === 'grass'
+      ? makeCardGeometry({ name: `preview-${asset.id}`, cards: 3, tile: ATLAS_TILES.grass, width: 1.1 })
+      : asset.type === 'flower'
+        ? makeCardGeometry({ name: `preview-${asset.id}`, cards: 2, tile: ATLAS_TILES.flower, width: 0.56 })
+        : makeTreeGeometry(asset.type, false);
+    material = configureCutoutMaterial(new THREE.MeshStandardMaterial({
+      color: asset.color, roughness: 0.85, metalness: 0,
+    }), atlas, asset.type === 'grass' || asset.type === 'flower' ? 0.42 : 0.46);
+  }
+  const object = new THREE.Mesh(geometry, material);
+  object.name = `prop-asset-preview-${asset.id}`;
+  object.scale.set(asset.scale * asset.width, asset.scale * asset.height, asset.scale * asset.width);
+  object.userData.disposePreview = () => {
+    geometry.dispose();
+    material.dispose();
+    atlas.dispose();
+  };
+  return object;
+}
+
 function emptyBuckets() {
   return { grass: [], flower: [], rock: [], broadleaf: [], conifer: [] };
 }
@@ -395,10 +433,15 @@ export class ProceduralPropsManager {
     this._containsPoint = containsPoint;
     const center = this._resolveCenter(mode, camera, boardSize, centerOverride);
     const paintRevision = paintLayers?.revision ?? -1;
+    const assets = normalizePropAssetLibrary(params.propsAssets);
+    this._assetsByType = Object.fromEntries(PROP_TYPES.map((desc) => [
+      desc.id, enabledAssetsForType(assets, desc.id),
+    ]));
     const scatterKey = [
       mode, params.seed, params.propsDensity, params.propsGrassDensity,
       params.propsGrass, params.propsFlowers, params.propsRocks, params.propsRockScale,
       params.propsTreeDensity, params.propsTreeScale, params.seaLevel, boardSize,
+      JSON.stringify(assets),
       splineRevision, terrainRevision,
     ].join('|');
     const structuralChanged = scatterKey !== this._scatterKey;
@@ -511,13 +554,15 @@ export class ProceduralPropsManager {
     const master = clamp(params.propsDensity ?? 0.65, 0, 2);
     for (let typeIndex = 0; typeIndex < PROP_TYPES.length; typeIndex++) {
       const desc = PROP_TYPES[typeIndex];
+      const assets = this._assetsByType?.[desc.id] || [];
+      const libraryDensity = assets.length ? 1 : 0;
       const cell = desc.cellSize;
       const minGx = Math.floor(minX / cell);
       const maxGx = Math.ceil(maxX / cell);
       const minGz = Math.floor(minZ / cell);
       const maxGz = Math.ceil(maxZ / cell);
       const typeDensity = clamp(params[desc.densityParam] ?? 1, 0, 2);
-      if (master <= 0 || typeDensity <= 0) continue;
+      if (master <= 0 || typeDensity <= 0 || libraryDensity <= 0) continue;
       for (let gz = minGz; gz < maxGz; gz++) {
         for (let gx = minGx; gx < maxGx; gx++) {
           const salt = 31 + typeIndex * 101;
@@ -531,13 +576,14 @@ export class ProceduralPropsManager {
           const priority = hashInt(gx + salt * 2, gz - salt * 3, params.seed);
           const paintDensity = sampler.paintDensityForTypeAt?.(desc.id, x, z)
             ?? ((desc.id === 'grass' || desc.id === 'flower') ? (sampler.paintDensityAt?.(x, z) ?? 0) : 0);
-          const upperBound = clamp(master * (typeDensity + paintDensity) * (desc.density ?? 1), 0, 1);
+          const upperBound = clamp(master * (typeDensity + paintDensity) * libraryDensity * (desc.density ?? 1), 0, 1);
           if (priority > upperBound) continue;
           const sample = sampler.sampleAt(x, z);
           this._diagnostics.samples++;
           const macro = macroDensity(x, z, params.seed, salt);
           if (!shouldPlaceType(desc, sample, params, { roll: priority, macro })) continue;
-          buckets[desc.render].push(this._composeItem(desc, sample, gx, gz, params, priority));
+          const asset = selectPropAsset(assets, hashInt(gx - salt * 5, gz + salt * 7, params.seed));
+          if (asset) buckets[desc.render].push(this._composeItem(desc, sample, gx, gz, params, priority, null, asset));
         }
       }
     }
@@ -553,7 +599,7 @@ export class ProceduralPropsManager {
       && value >= hashInt(gx + salt, gz + 1 - salt, seed);
   }
 
-  _composeItem(desc, sample, gx, gz, params, priority, planetDir = null) {
+  _composeItem(desc, sample, gx, gz, params, priority, planetDir = null, asset = null) {
     const scaleSeed = hashInt(gx + 29, gz + 11, params.seed);
     let scale = lerp(desc.scaleRange[0], desc.scaleRange[1], scaleSeed);
     if (desc.scaleParam) scale *= clamp(params[desc.scaleParam] ?? 1, 0.05, 2.5);
@@ -589,14 +635,38 @@ export class ProceduralPropsManager {
         scale * lerp(0.7, 1.35, hashInt(gx + 101, gz + 7, params.seed)),
       ];
     }
-    const tint = desc.id === 'grass' ? grassTint(sample)
+    if (asset) {
+      const assetScale = asset.scale;
+      const assetWidth = asset.width;
+      const assetHeight = asset.height;
+      if (Array.isArray(finalScale)) {
+        finalScale = [
+          finalScale[0] * assetScale * assetWidth,
+          finalScale[1] * assetScale * assetHeight,
+          finalScale[2] * assetScale * assetWidth,
+        ];
+      } else if (assetWidth === assetHeight) {
+        finalScale *= assetScale * assetWidth;
+      } else {
+        finalScale = [
+          finalScale * assetScale * assetWidth,
+          finalScale * assetScale * assetHeight,
+          finalScale * assetScale * assetWidth,
+        ];
+      }
+    }
+    const terrainTint = desc.id === 'grass' ? grassTint(sample)
       : desc.id === 'rock' ? terrainRockTint(sample)
         : desc.id === 'broadleaf' ? treeTint(sample, false)
           : desc.id === 'conifer' ? treeTint(sample, true)
             : flowerTint(hashInt(gx + 3, gz + 41, params.seed));
+    const assetTint = propAssetColorRGB(asset);
+    const tint = asset
+      ? terrainTint.map((channel, index) => lerp(channel, assetTint[index], 0.68))
+      : terrainTint;
     return {
       render: desc.render, pos, normal, yaw: hashInt(gx, gz, params.seed) * Math.PI * 2,
-      scale: finalScale, alignAmount, tint, priority,
+      scale: finalScale, alignAmount, tint, priority, assetId: asset?.id,
     };
   }
 
@@ -675,10 +745,12 @@ export class ProceduralPropsManager {
     const types = PROP_TYPES.map((desc, typeIndex) => {
       const range = Math.ceil(radius / desc.cellSize);
       const typeDensity = clamp(params[desc.densityParam] ?? 1, 0, 2);
-      const densityGate = clamp(master * typeDensity * (desc.density ?? 1), 0, 1);
+      const assets = this._assetsByType?.[desc.id] || [];
+      const libraryDensity = assets.length ? 1 : 0;
+      const densityGate = clamp(master * typeDensity * libraryDensity * (desc.density ?? 1), 0, 1);
       const estimatedCells = Math.max(1, Math.PI * (radius / desc.cellSize) ** 2);
       return {
-        desc, typeIndex, range, gx: -range, gy: -range,
+        desc, assets, typeIndex, range, gx: -range, gy: -range,
         salt: 31 + typeIndex * 101,
         // Oversample enough to absorb biome/slope rejection without asking
         // the expensive Planet sampler to evaluate tens of thousands of cells.
@@ -720,8 +792,10 @@ export class ProceduralPropsManager {
             this._diagnostics.samples++;
             const macro = macroDensity(gx * desc.cellSize, gy * desc.cellSize, state.params.seed, salt);
             if (shouldPlaceType(desc, sample, state.params, { roll: priority, macro })) {
+              const asset = selectPropAsset(cursor.assets, hashInt(gx - salt * 5, gy + salt * 7, state.params.seed));
+              if (!asset) continue;
               state.buckets[desc.render].push(this._composeItem(
-                desc, sample, gx, gy, state.params, priority, sampleDir,
+                desc, sample, gx, gy, state.params, priority, sampleDir, asset,
               ));
               changed = true;
             }

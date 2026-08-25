@@ -8,6 +8,7 @@ import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
 import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
 import { VISUAL_DEFAULT_PARAMS } from './render/VisualSettings.js';
+import { createDefaultPropAssets } from './props/PropAssetLibrary.js';
 
 export const DEFAULT_PARAMS = {
   seed: 1337,
@@ -102,6 +103,7 @@ export const DEFAULT_PARAMS = {
   propsGust: 0.45,
   propsCullDistance: 760,
   propsLodDistance: 280,
+  propsAssets: createDefaultPropAssets(),
 
   // planet style (color layer — live shader updates, no rebuild)
   planetPreset: 'earth',
