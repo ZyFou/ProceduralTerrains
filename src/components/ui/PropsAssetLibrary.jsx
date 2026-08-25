@@ -2,15 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   Copy, Flower2, Mountain, Move3D, Plus, RefreshCw, RotateCcw, Search,
-  Sprout, Trash2, TreeDeciduous, TreePine,
+  Sprout, Trash2, TreeDeciduous, TreePine, Upload, X,
 } from 'lucide-react';
 import { createPropAssetPreviewModel } from '../../engine/props/ProceduralPropsManager.js';
 import {
   PROP_ASSET_PRESETS,
   PROP_ASSET_TYPES,
+  createImportedPropAsset,
   createPropAsset,
   normalizePropAssetLibrary,
 } from '../../engine/props/PropAssetLibrary.js';
+import {
+  disposeImportedModelParts,
+  importedModelFormat,
+  loadImportedPropModel,
+} from '../../engine/props/ImportedPropModel.js';
 
 const PROP_TYPE_ICONS = {
   grass: Sprout,
@@ -31,13 +37,31 @@ function PropTypeIcon({ type, color, compact = false }) {
   );
 }
 
-function setPreviewAsset(state, asset) {
+async function setPreviewAsset(state, asset) {
   if (!state || !asset) return;
+  const loadToken = ++state.loadToken;
   if (state.model) {
     state.pivot.remove(state.model);
     state.model.userData.disposePreview?.();
+    state.model = null;
   }
-  const model = createPropAssetPreviewModel(asset);
+  state.host.dataset.previewState = 'loading';
+  let model;
+  try {
+    model = await createPropAssetPreviewModel(asset);
+  } catch (error) {
+    if (loadToken === state.loadToken) {
+      state.host.dataset.previewState = 'error';
+      state.host.title = error?.message || 'Could not preview this model.';
+    }
+    return;
+  }
+  if (loadToken !== state.loadToken) {
+    model.userData.disposePreview?.();
+    return;
+  }
+  state.host.dataset.previewState = 'ready';
+  state.host.removeAttribute('title');
   state.model = model;
   // Measure before parenting: the preview pivot may already be scaled from a
   // previous asset and must not contaminate the next asset's fit calculation.
@@ -82,8 +106,7 @@ function Preview({ asset }) {
     const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
     const pivot = new THREE.Group();
     scene.add(pivot);
-    sceneRef.current = { pivot, model: null, view: { yaw: 0, pitch: 0 } };
-    setPreviewAsset(sceneRef.current, asset);
+    sceneRef.current = { host, pivot, model: null, loadToken: 0, view: { yaw: 0, pitch: 0 } };
 
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(1.05, 48),
@@ -155,6 +178,7 @@ function Preview({ asset }) {
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      if (sceneRef.current) sceneRef.current.loadToken++;
       sceneRef.current?.model?.userData.disposePreview?.();
       sceneRef.current = null;
       ground.geometry.dispose();
@@ -166,7 +190,7 @@ function Preview({ asset }) {
 
   useEffect(() => {
     const state = sceneRef.current;
-    setPreviewAsset(state, asset);
+    void setPreviewAsset(state, asset);
     return undefined;
   }, [asset]);
 
@@ -197,6 +221,15 @@ function MiniSlider({ label, value, min, max, step, onChange }) {
   );
 }
 
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Could not read the selected file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function PropsAssetLibrary({ value, onChange }) {
   const assets = useMemo(() => normalizePropAssetLibrary(value), [value]);
   const [selectedId, setSelectedId] = useState(assets[0]?.id || null);
@@ -204,6 +237,9 @@ export default function PropsAssetLibrary({ value, onChange }) {
   const [assetQuery, setAssetQuery] = useState('');
   const [presetQuery, setPresetQuery] = useState('');
   const [visibleAssetCount, setVisibleAssetCount] = useState(80);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const fileInputRef = useRef(null);
   const selected = assets.find((asset) => asset.id === selectedId) || assets[0] || null;
   const [nameDraft, setNameDraft] = useState(selected?.name || '');
 
@@ -273,6 +309,36 @@ export default function PropsAssetLibrary({ value, onChange }) {
     setPresetQuery('');
     setPickerMode((current) => current === mode ? null : mode);
   };
+  const importModel = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const format = importedModelFormat(file.name);
+    if (!format) {
+      setImportError('Choose a .glb, .gltf, or .obj model.');
+      return;
+    }
+    if (file.size > 40 * 1024 * 1024) {
+      setImportError('Models must be 40 MB or smaller.');
+      return;
+    }
+    setImporting(true);
+    setImportError('');
+    try {
+      const model = { name: file.name, format, size: file.size, data: await fileAsDataUrl(file) };
+      const validationParts = await loadImportedPropModel(model);
+      disposeImportedModelParts(validationParts);
+      const next = createImportedPropAsset(model, uniqueId(assets, 'imported'));
+      commit([...assets, next]);
+      setSelectedId(next.id);
+      setPickerMode(null);
+    } catch (error) {
+      const detail = format === 'gltf' ? ' Use a self-contained glTF or export as GLB.' : '';
+      setImportError(`${error?.message || 'Could not import this model.'}${detail}`);
+    } finally {
+      setImporting(false);
+    }
+  };
   const assetCountLabel = filteredAssets.length === assets.length
     ? `${assets.length} ${assets.length === 1 ? 'asset' : 'assets'}`
     : `${filteredAssets.length} of ${assets.length}`;
@@ -281,8 +347,14 @@ export default function PropsAssetLibrary({ value, onChange }) {
     <div className="prop-asset-library" data-setting-id="props.assetLibrary">
       <div className="prop-library-toolbar">
         <button type="button" className="action-btn primary" onClick={() => togglePicker('add')}>
-          {pickerMode === 'add' ? 'Close' : <><Plus size={13} aria-hidden /> Add asset</>}
+          {pickerMode === 'add' ? 'Close' : <><Plus size={13} aria-hidden /> Add preset</>}
         </button>
+        <button type="button" className="action-btn prop-import-button" disabled={importing}
+          onClick={() => fileInputRef.current?.click()}>
+          <Upload size={13} aria-hidden /> {importing ? 'Importing…' : 'Import 3D'}
+        </button>
+        <input ref={fileInputRef} className="prop-model-file-input" type="file"
+          accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" onChange={importModel} />
         <button type="button" className="icon-btn" disabled={!selected} onClick={() => togglePicker('replace')} title="Replace selected asset">
           <RefreshCw size={14} aria-hidden />
         </button>
@@ -326,6 +398,13 @@ export default function PropsAssetLibrary({ value, onChange }) {
         <span>Library</span>
         <small>{assetCountLabel}</small>
       </div>
+
+      {importError && (
+        <div className="prop-import-error" role="alert">
+          <span>{importError}</span>
+          <button type="button" onClick={() => setImportError('')} aria-label="Dismiss import error"><X size={12} /></button>
+        </div>
+      )}
       <label className="prop-search-field">
         <Search size={13} aria-hidden />
         <input
@@ -343,7 +422,7 @@ export default function PropsAssetLibrary({ value, onChange }) {
             onClick={() => setSelectedId(asset.id)}>
             <PropTypeIcon type={asset.type} color={asset.color} />
             <span>{asset.name}</span>
-            <small>{propTypeLabel(asset.type)}</small>
+            <small>{asset.model ? `Imported · ${propTypeLabel(asset.type)}` : propTypeLabel(asset.type)}</small>
           </button>
         ))}
         {!assets.length && <p className="prop-library-empty">No assets. Add a preset to populate the terrain.</p>}
@@ -364,10 +443,25 @@ export default function PropsAssetLibrary({ value, onChange }) {
           <Preview asset={selected} />
           <p className="prop-preview-hint"><Move3D size={11} aria-hidden /> Drag vertically and horizontally to rotate</p>
           <div className="prop-asset-editor">
+            {selected.model && (
+              <div className="prop-model-source">
+                <span><strong>3D model</strong><small title={selected.model.name}>{selected.model.name}</small></span>
+                <button type="button" className="icon-btn danger" title="Use the built-in mesh instead"
+                  aria-label="Remove imported model" onClick={() => patchSelected({ model: null })}>
+                  <Trash2 size={13} aria-hidden />
+                </button>
+              </div>
+            )}
             <label className="prop-asset-name">
               <span>Name</span>
               <input value={nameDraft} maxLength={48} onChange={(event) => setNameDraft(event.target.value)}
                 onBlur={commitName} onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()} />
+            </label>
+            <label className="prop-asset-name">
+              <span>Category</span>
+              <select value={selected.type} onChange={(event) => patchSelected({ type: event.target.value })}>
+                {PROP_ASSET_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
+              </select>
             </label>
             <label className="prop-asset-enabled">
               <input type="checkbox" checked={selected.enabled} onChange={(event) => patchSelected({ enabled: event.target.checked })} />

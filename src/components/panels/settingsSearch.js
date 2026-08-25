@@ -216,7 +216,7 @@ const SETTINGS_INDEX = [
 
 const SECTION_INDEX = [
   // Water
-  { panelId: 'water', sectionLabel: 'Mode', settingId: 'water.section.mode', label: 'Mode', keywords: 'water mode enable sea level', isSection: true },
+  { panelId: 'water', sectionLabel: 'Water', settingId: 'water.section.mode', label: 'Water', keywords: 'water mode enable sea level', isSection: true },
   { panelId: 'water', sectionLabel: 'Shader Quality', settingId: 'water.section.shader', label: 'Shader Quality', keywords: 'water shader quality reflection detail waves', isSection: true },
   { panelId: 'water', sectionLabel: 'Material', settingId: 'water.section.material', label: 'Material', keywords: 'water material animation colors', isSection: true },
   { panelId: 'water', sectionLabel: 'Depth', settingId: 'water.section.depth', label: 'Depth', keywords: 'water depth absorption shallow deep', isSection: true },

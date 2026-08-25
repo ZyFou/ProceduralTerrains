@@ -213,6 +213,7 @@ export default function WaterPanelInner({
   const isInfinite = worldMode === 'infinite';
   const isPlanet = worldMode === 'planet';
   const selectedPlanarReflection = mode === 'cinematic' && isStudio;
+  const waterActive = enabled && mode !== 'off';
   const worldLabel = WORLD_MODE_WATER_LABELS[worldMode] ?? worldMode;
   const effectiveMode = resolveEffectiveWaterMode(params, worldMode);
   const effectiveRealistic = isRealisticWaterMode(effectiveMode);
@@ -273,50 +274,47 @@ export default function WaterPanelInner({
 
       <ControlSection
         id={`${id}-mode`}
-        title="Mode"
+        title="Water"
         defaultOpen
+        enabled={waterActive}
+        onEnabledChange={setEnabled}
         settingId="water.section.mode"
-        forceOpen={forceSection('water.section.mode', 'Mode', ['water.water', 'water.seaLevel', 'performance.water'])}
+        forceOpen={forceSection('water.section.mode', 'Water', ['water.water', 'water.seaLevel', 'performance.water'])}
       >
-        <ToggleRow
-          label="Water Enabled"
-          value={enabled && mode !== 'off'}
-          onChange={setEnabled}
-          settingId="water.waterEnabled"
-          info="Master toggle for the water surface and underwater effects in all world modes."
-        />
-        {SEA_LEVEL_DEF && (
-          <SliderCtl
-            def={SEA_LEVEL_DEF}
-            value={params.seaLevel}
-            onChange={setSeaLevel}
-            settingId="water.seaLevel"
+        <div className={!waterActive ? 'water-section-disabled' : ''}>
+          {SEA_LEVEL_DEF && (
+            <SliderCtl
+              def={SEA_LEVEL_DEF}
+              value={params.seaLevel}
+              onChange={setSeaLevel}
+              settingId="water.seaLevel"
+            />
+          )}
+          <SelectRow
+            label="Water Mode"
+            value={mode}
+            options={WATER_MODES}
+            onChange={setMode}
+            settingId="water.waterMode"
+            info={MODE_HINTS[mode] ?? 'Select the water rendering pipeline.'}
           />
-        )}
-        <SelectRow
-          label="Water Mode"
-          value={mode}
-          options={WATER_MODES}
-          onChange={setMode}
-          settingId="water.waterMode"
-          info={MODE_HINTS[mode] ?? 'Select the water rendering pipeline.'}
-        />
-        {isInfinite && (
+          {isInfinite && (
+            <ToggleRow
+              label="Auto Downgrade in Infinite World"
+              value={!!val(params, 'waterAutoDowngradeInfinite')}
+              onChange={(v) => onParam('waterAutoDowngradeInfinite', v)}
+              settingId="water.waterAutoDowngradeInfinite"
+              info="Cap Volumetric/Cinematic to Realistic while exploring Infinite World."
+            />
+          )}
           <ToggleRow
-            label="Auto Downgrade in Infinite World"
-            value={!!val(params, 'waterAutoDowngradeInfinite')}
-            onChange={(v) => onParam('waterAutoDowngradeInfinite', v)}
-            settingId="water.waterAutoDowngradeInfinite"
-            info="Cap Volumetric/Cinematic to Realistic while exploring Infinite World."
+            label="Use Legacy on Low FPS"
+            value={!!val(params, 'waterLegacyOnLowFps')}
+            onChange={(v) => onParam('waterLegacyOnLowFps', v)}
+            settingId="water.waterLegacyOnLowFps"
+            info="Temporarily reduce expensive water effects when FPS drops below the threshold."
           />
-        )}
-        <ToggleRow
-          label="Use Legacy on Low FPS"
-          value={!!val(params, 'waterLegacyOnLowFps')}
-          onChange={(v) => onParam('waterLegacyOnLowFps', v)}
-          settingId="water.waterLegacyOnLowFps"
-          info="Temporarily reduce expensive water effects when FPS drops below the threshold."
-        />
+        </div>
       </ControlSection>
 
       {enabled && mode !== 'off' && (

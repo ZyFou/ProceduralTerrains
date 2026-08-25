@@ -57,6 +57,22 @@ export function createPropAsset(presetId, id = null) {
   };
 }
 
+export function createImportedPropAsset(model, id = null) {
+  return {
+    ...createPropAsset('granite-rock', id),
+    name: String(model?.name || 'Imported model').replace(/\.[^.]+$/, '').slice(0, 48),
+    // White preserves the model's authored materials until the user chooses
+    // to tint it in the asset editor.
+    color: '#ffffff',
+    model: {
+      name: String(model?.name || 'model.glb').slice(0, 160),
+      format: String(model?.format || '').toLowerCase(),
+      data: String(model?.data || ''),
+      size: Math.max(0, Number(model?.size) || 0),
+    },
+  };
+}
+
 export function createDefaultPropAssets() {
   // Keep the first-run library inside the physical metre ranges defined by
   // propCatalog. Users can deliberately reshape or replace these afterwards.
@@ -69,7 +85,7 @@ export function normalizePropAsset(raw, index = 0) {
   const fallbackPreset = rawPreset.type === type
     ? rawPreset
     : PROP_ASSET_PRESETS.find((preset) => preset.type === type);
-  return {
+  const asset = {
     id: typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : `${type}-asset-${index}`,
     preset: fallbackPreset.id,
     name: typeof raw?.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 48) : fallbackPreset.name,
@@ -81,6 +97,18 @@ export function normalizePropAsset(raw, index = 0) {
     height: clamp(raw?.height, 0.5, 1.6, fallbackPreset.height),
     color: validColor(raw?.color, fallbackPreset.color),
   };
+  if (raw?.model && typeof raw.model.data === 'string' && raw.model.data.startsWith('data:')) {
+    const format = String(raw.model.format || raw.model.name?.split('.').pop() || '').toLowerCase();
+    if (['glb', 'gltf', 'obj'].includes(format)) {
+      asset.model = {
+        name: typeof raw.model.name === 'string' ? raw.model.name.slice(0, 160) : `model.${format}`,
+        format,
+        data: raw.model.data,
+        size: Math.max(0, Number(raw.model.size) || 0),
+      };
+    }
+  }
+  return asset;
 }
 
 export function normalizePropAssetLibrary(value) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROP_ASSET_PRESETS,
   assetDensityForType,
+  createImportedPropAsset,
   createDefaultPropAssets,
   createPropAsset,
   normalizePropAssetLibrary,
@@ -44,5 +45,22 @@ describe('terrain prop asset library', () => {
     const disabledRocks = defaults.map((asset) => asset.type === 'rock' ? { ...asset, enabled: false } : asset);
     expect(assetDensityForType(disabledRocks, 'rock')).toBe(0);
     expect(assetDensityForType(defaults.filter((asset) => asset.type !== 'conifer'), 'conifer')).toBe(0);
+  });
+
+  it('keeps imported model data in the normalized project asset', () => {
+    const imported = createImportedPropAsset({
+      name: 'Ancient Statue.obj',
+      format: 'obj',
+      size: 128,
+      data: 'data:text/plain;base64,diAwIDAgMA==',
+    }, 'custom-statue');
+    const [normalized] = normalizePropAssetLibrary([{ ...imported, type: 'broadleaf' }]);
+    expect(normalized).toMatchObject({
+      id: 'custom-statue',
+      name: 'Ancient Statue',
+      type: 'broadleaf',
+      model: { name: 'Ancient Statue.obj', format: 'obj', size: 128 },
+    });
+    expect(normalized.model.data).toBe(imported.model.data);
   });
 });

@@ -983,25 +983,23 @@ function TilesContent({ ctx }) {
   const atGridEdge = tiles.length >= maxCells;
   return (
     <ControlSection id="inspector-tiles" title="Tiles" defaultOpen settingId="world.section.tiles" icon={PANEL_ICONS.tiles}>
-      <ControlSection id="inspector-tiles-assembly" title="Assembly" nested defaultOpen settingId="world.section.tilesAssembly">
-        <div className="settings-hint" style={{ marginBottom: 8 }}>
-          {shape === 'square'
-            ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
-            : (ctx.diskRadiusCells < extent
-              ? 'Hover around the circular edge and click the highlighted ring to expand the disk.'
-              : 'The circular terrain has reached its maximum radius.')}
-          {' '}Tiles share the same noise field and export together.
-        </div>
-        <SelectRow label="Shape" value={shape}
-          options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
-          onChange={ctx.onTileAssemblyShape} settingId="world.tileAssemblyShape"
-          info="Square supports hover-to-add tiles. Circle crops the current square chunk assembly to a disk." />
-        <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
-        {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
-        {atGridEdge && (
-          <div className="settings-hint">All {maxCells} available cells are occupied.</div>
-        )}
-      </ControlSection>
+      <div className="settings-hint" style={{ marginBottom: 8 }}>
+        {shape === 'square'
+          ? `Hover near a board edge and click the highlighted square to add a tile. Placement is limited to a ${grid}×${grid} grid centred on the origin.`
+          : (ctx.diskRadiusCells < extent
+            ? 'Hover around the circular edge and click the highlighted ring to expand the disk.'
+            : 'The circular terrain has reached its maximum radius.')}
+        {' '}Tiles share the same noise field and export together.
+      </div>
+      <SelectRow label="Shape" value={shape}
+        options={[{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }]}
+        onChange={ctx.onTileAssemblyShape} settingId="world.tileAssemblyShape"
+        info="Square supports hover-to-add tiles. Circle crops the current square chunk assembly to a disk." />
+      <div className="kv-row"><span>Tiles</span><span>{tiles.length} / {maxCells}</span></div>
+      {shape === 'circle' && <div className="kv-row"><span>Disk radius</span><span>{(ctx.diskRadiusCells ?? 0).toFixed(2)} cells</span></div>}
+      {atGridEdge && (
+        <div className="settings-hint">All {maxCells} available cells are occupied.</div>
+      )}
 
       {shape === 'square' && tiles.length > 1 && (
         <ControlSection id="inspector-tiles-remove" title="Remove a Tile" nested defaultOpen={false} settingId="world.section.tilesRemove">

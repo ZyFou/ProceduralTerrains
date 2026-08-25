@@ -143,6 +143,14 @@ export default function ControlSection({
     onToggle?.(next);
   };
 
+  const handleEnabledChange = (nextEnabled) => {
+    if (nextEnabled && !open) {
+      setOpen(true);
+      saveOpenState(sectionKey, true);
+    }
+    onEnabledChange?.(nextEnabled);
+  };
+
   if (flat) {
     const sectionKey = settingId ?? id;
     return (
@@ -158,7 +166,7 @@ export default function ControlSection({
             <span className="panel-group-title">{title}</span>
             <span className={`panel-group-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
           </button>
-          {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => onEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+          {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
         </div>
         {open && <div className="panel-group-body">{children}</div>}
       </section>
@@ -175,7 +183,7 @@ export default function ControlSection({
           </span>
           <span className={`control-section-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
         </button>
-        {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => onEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+        {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
       </div>
       <div className={`control-section-body${open ? '' : ' collapsed'}`}>{children}</div>
     </section>

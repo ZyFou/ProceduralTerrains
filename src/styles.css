@@ -1619,6 +1619,7 @@ body {
   display: none;
 }
 .visuals-section-disabled { opacity: 0.48; pointer-events: none; }
+.water-section-disabled { opacity: 0.48; pointer-events: none; }
 .toggle-row[data-setting-id="visuals.visualsDitheringEnabled"],
 .toggle-row[data-setting-id="visuals.visualsCrtEnabled"],
 .toggle-row[data-setting-id="visuals.visualsChromaticAberrationEnabled"] { display: none; }
@@ -1691,11 +1692,15 @@ body {
 
 /* Props asset library */
 .prop-asset-library { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.prop-library-toolbar { display: flex; align-items: center; gap: 6px; }
+.prop-library-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) repeat(3, 30px); align-items: center; gap: 6px; }
 .prop-library-toolbar .action-btn { margin: 0; flex: 1 1 auto; }
 .prop-library-toolbar .icon-btn { flex: 0 0 30px; width: 30px; height: 30px; }
 .prop-library-toolbar .icon-btn:disabled { opacity: .35; cursor: default; }
 .prop-library-toolbar .icon-btn.danger:hover:not(:disabled) { color: #f08080; border-color: color-mix(in srgb, #f08080 55%, transparent); }
+.prop-import-button { justify-content: center; white-space: nowrap; }
+.prop-model-file-input { display: none; }
+.prop-import-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 9px; border: 1px solid color-mix(in srgb, #f08080 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, #f08080 8%, var(--bg-panel)); color: #e7a0a0; font-size: 9px; line-height: 1.35; }
+.prop-import-error button { display: grid; flex: 0 0 auto; place-items: center; padding: 1px; border: 0; background: transparent; color: inherit; cursor: var(--cursor-pointer); }
 .prop-library-list-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--text-main); font-size: 10px; font-weight: 650; }
 .prop-library-list-header small { color: var(--text-dim); font-size: 9px; font-weight: 500; }
 .prop-search-field { display: flex; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-control); color: var(--text-dim); }
@@ -1751,13 +1756,20 @@ body {
 .prop-preview-reset { position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border-subtle); border-radius: 7px; background: color-mix(in srgb, var(--bg-control) 90%, transparent); color: var(--text-muted); cursor: var(--cursor-pointer); backdrop-filter: blur(6px); }
 .prop-preview-reset:hover { border-color: var(--border-active); color: var(--text-main); }
 .prop-asset-preview[data-preview-unavailable="true"]::after { content: '3D preview unavailable'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-dim); font-size: 11px; }
+.prop-asset-preview[data-preview-state="loading"]::after { content: 'Loading 3D model…'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-dim); font-size: 11px; }
+.prop-asset-preview[data-preview-state="error"]::after { content: 'Could not preview model'; position: absolute; inset: 0; display: grid; place-items: center; color: #e7a0a0; font-size: 11px; }
 .prop-preview-hint { display: flex; align-items: center; justify-content: center; gap: 5px; margin: -5px 0 0; color: var(--text-dim); font-size: 9px; text-align: center; }
 .prop-asset-editor { padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-panel-soft); }
 .prop-load-more { width: 100%; justify-content: center; margin: -2px 0 0; }
 .prop-load-more span { color: var(--text-dim); font-size: 9px; }
 .prop-asset-name, .prop-asset-color { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 8px; margin-bottom: 9px; color: var(--text-muted); font-size: 10px; }
-.prop-asset-name input { min-width: 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); outline: 0; background: var(--bg-control); color: var(--text-main); font: 11px var(--font); }
-.prop-asset-name input:focus { border-color: var(--border-active); }
+.prop-asset-name input, .prop-asset-name select { min-width: 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); outline: 0; background: var(--bg-control); color: var(--text-main); font: 11px var(--font); }
+.prop-asset-name input:focus, .prop-asset-name select:focus { border-color: var(--border-active); }
+.prop-model-source { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-subtle)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 6%, var(--bg-control)); }
+.prop-model-source > span { display: grid; min-width: 0; gap: 2px; }
+.prop-model-source strong { color: var(--text-main); font-size: 9px; font-weight: 650; }
+.prop-model-source small { overflow: hidden; color: var(--text-dim); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.prop-model-source .icon-btn { flex: 0 0 26px; width: 26px; height: 26px; }
 .prop-asset-enabled { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; color: var(--text-main); font-size: 10px; }
 .prop-asset-color { grid-template-columns: 64px 30px minmax(0, 1fr); }
 .prop-asset-color input { width: 30px; height: 24px; padding: 2px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-control); }

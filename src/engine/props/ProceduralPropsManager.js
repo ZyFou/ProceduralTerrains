@@ -12,6 +12,11 @@ import {
   propAssetColorRGB,
   selectPropAsset,
 } from './PropAssetLibrary.js';
+import {
+  createImportedModelObject,
+  disposeImportedModelParts,
+  loadImportedPropModel,
+} from './ImportedPropModel.js';
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -315,8 +320,15 @@ function qualityIndex(perf) {
   return { performance: 0, balanced: 1, high: 2, ultra: 3 }[perf?.preset] ?? 2;
 }
 
-export function createPropAssetPreviewModel(rawAsset) {
+export async function createPropAssetPreviewModel(rawAsset) {
   const asset = normalizePropAsset(rawAsset);
+  if (asset.model) {
+    const parts = await loadImportedPropModel(asset.model);
+    const object = createImportedModelObject(parts, `prop-asset-preview-${asset.id}`);
+    object.scale.set(asset.scale * asset.width, asset.scale * asset.height, asset.scale * asset.width);
+    object.userData.disposePreview = () => disposeImportedModelParts(parts);
+    return object;
+  }
   const atlas = makeFoliageAtlas();
   let geometry;
   let material;
@@ -381,11 +393,15 @@ export class ProceduralPropsManager {
 
     this.meshes = [];
     this._meshPool = new Map();
+    this._customModels = new Map();
     this._sectors = new Map();
     this._desiredSectors = new Set();
     this._buildQueue = [];
     this._queued = new Set();
     this._scatterKey = '';
+    this._assetLibrarySource = null;
+    this._normalizedAssets = [];
+    this._assetLibraryRevision = 0;
     this._centerSectorKey = '';
     this._lastPaintRevision = -1;
     this._lastPlanetKey = '';
@@ -416,6 +432,7 @@ export class ProceduralPropsManager {
       lod: {}, buildMs: 0, samples: 0, sectors: 0, queuedSectors: 0,
       cacheHits: 0, cacheMisses: 0, surfaceReadbacks: 0, triangles: 0, drawCalls: 0,
     };
+    this._disposed = false;
   }
 
   update({
@@ -433,7 +450,13 @@ export class ProceduralPropsManager {
     this._containsPoint = containsPoint;
     const center = this._resolveCenter(mode, camera, boardSize, centerOverride);
     const paintRevision = paintLayers?.revision ?? -1;
-    const assets = normalizePropAssetLibrary(params.propsAssets);
+    if (params.propsAssets !== this._assetLibrarySource) {
+      this._assetLibrarySource = params.propsAssets;
+      this._normalizedAssets = normalizePropAssetLibrary(params.propsAssets);
+      this._assetLibraryRevision++;
+    }
+    const assets = this._normalizedAssets;
+    this._syncCustomModels(assets);
     this._assetsByType = Object.fromEntries(PROP_TYPES.map((desc) => [
       desc.id, enabledAssetsForType(assets, desc.id),
     ]));
@@ -441,7 +464,7 @@ export class ProceduralPropsManager {
       mode, params.seed, params.propsDensity, params.propsGrassDensity,
       params.propsGrass, params.propsFlowers, params.propsRocks, params.propsRockScale,
       params.propsTreeDensity, params.propsTreeScale, params.seaLevel, boardSize,
-      JSON.stringify(assets),
+      this._assetLibraryRevision,
       splineRevision, terrainRevision,
     ].join('|');
     const structuralChanged = scatterKey !== this._scatterKey;
@@ -461,6 +484,39 @@ export class ProceduralPropsManager {
     }
     this._diagnostics.buildMs = performance.now() - started;
     this._diagnostics.surfaceReadbacks = sampler?.surfaceField?.readbackCount ?? sampler?.surfaceReadbacks ?? 0;
+  }
+
+  _syncCustomModels(assets) {
+    const wanted = new Set();
+    for (const asset of assets) {
+      if (!asset.model) continue;
+      wanted.add(asset.id);
+      const current = this._customModels.get(asset.id);
+      if (current?.source === asset.model.data) continue;
+      if (current?.parts) disposeImportedModelParts(current.parts);
+      const entry = { source: asset.model.data, parts: null, error: null };
+      this._customModels.set(asset.id, entry);
+      loadImportedPropModel(asset.model).then((parts) => {
+        if (this._disposed || this._customModels.get(asset.id) !== entry) {
+          disposeImportedModelParts(parts);
+          return;
+        }
+        entry.parts = parts.map((part) => ({
+          geometry: part.geometry,
+          material: configureDistanceFade(part.material),
+        }));
+        this._scatterKey = '';
+      }).catch((error) => {
+        if (this._customModels.get(asset.id) !== entry) return;
+        entry.error = error;
+        console.warn(`Could not load imported prop ${asset.model.name}:`, error);
+      });
+    }
+    for (const [assetId, entry] of this._customModels) {
+      if (wanted.has(assetId)) continue;
+      if (entry.parts) disposeImportedModelParts(entry.parts);
+      this._customModels.delete(assetId);
+    }
   }
 
   _resolveCenter(mode, camera, boardSize, centerOverride = null) {
@@ -661,8 +717,10 @@ export class ProceduralPropsManager {
           : desc.id === 'conifer' ? treeTint(sample, true)
             : flowerTint(hashInt(gx + 3, gz + 41, params.seed));
     const assetTint = propAssetColorRGB(asset);
-    const tint = asset
-      ? terrainTint.map((channel, index) => lerp(channel, assetTint[index], 0.68))
+    const tint = asset?.model
+      ? assetTint
+      : asset
+        ? terrainTint.map((channel, index) => lerp(channel, assetTint[index], 0.68))
       : terrainTint;
     return {
       render: desc.render, pos, normal, yaw: hashInt(gx, gz, params.seed) * Math.PI * 2,
@@ -859,23 +917,46 @@ export class ProceduralPropsManager {
 
   _replaceMeshes(batches) {
     const active = new Set();
+    const isCustom = (item) => !!this._customModels.get(item.assetId)?.parts;
     const specs = [
-      ['grass-near', this.grassNearGeometry, this.grassNearMaterial, batches.grassNear],
-      ['grass-mid', this.grassMidGeometry, this.grassMidMaterial, batches.grassMid],
-      ['flowers', this.flowerGeometry, this.flowerMaterial, batches.flowers],
-      ['rocks-near', this.rockNearGeometry, this.rockMaterial, batches.rockNear],
-      ['rocks-far', this.rockFarGeometry, this.rockMaterial, batches.rockFar],
-      ['broadleaf-near', this.broadleafNearGeometry, this.treeMaterial, batches.broadleafNear],
-      ['broadleaf-far', this.broadleafFarGeometry, this.treeMaterial, batches.broadleafFar],
-      ['conifer-near', this.coniferNearGeometry, this.treeMaterial, batches.coniferNear],
-      ['conifer-far', this.coniferFarGeometry, this.treeMaterial, batches.coniferFar],
+      ['grass-near', this.grassNearGeometry, this.grassNearMaterial, batches.grassNear.filter((item) => !isCustom(item)), 'grassNear'],
+      ['grass-mid', this.grassMidGeometry, this.grassMidMaterial, batches.grassMid.filter((item) => !isCustom(item)), 'grassMid'],
+      ['flowers', this.flowerGeometry, this.flowerMaterial, batches.flowers.filter((item) => !isCustom(item)), 'flowers'],
+      ['rocks-near', this.rockNearGeometry, this.rockMaterial, batches.rockNear.filter((item) => !isCustom(item)), 'rocksNear'],
+      ['rocks-far', this.rockFarGeometry, this.rockMaterial, batches.rockFar.filter((item) => !isCustom(item)), 'rocksFar'],
+      ['broadleaf-near', this.broadleafNearGeometry, this.treeMaterial, batches.broadleafNear.filter((item) => !isCustom(item)), 'broadleafNear'],
+      ['broadleaf-far', this.broadleafFarGeometry, this.treeMaterial, batches.broadleafFar.filter((item) => !isCustom(item)), 'broadleafFar'],
+      ['conifer-near', this.coniferNearGeometry, this.treeMaterial, batches.coniferNear.filter((item) => !isCustom(item)), 'coniferNear'],
+      ['conifer-far', this.coniferFarGeometry, this.treeMaterial, batches.coniferFar.filter((item) => !isCustom(item)), 'coniferFar'],
     ];
+    for (const [batchKey, items] of Object.entries(batches)) {
+      const byAsset = new Map();
+      for (const item of items) {
+        if (!isCustom(item)) continue;
+        if (!byAsset.has(item.assetId)) byAsset.set(item.assetId, []);
+        byAsset.get(item.assetId).push(item);
+      }
+      for (const [assetId, customItems] of byAsset) {
+        const safeId = assetId.replace(/[^a-z0-9_-]/gi, '_');
+        const parts = this._customModels.get(assetId).parts;
+        parts.forEach((part, partIndex) => {
+          specs.push([
+            `custom-${safeId}-${batchKey}-${partIndex}`,
+            part.geometry,
+            part.material,
+            customItems,
+            batchKey,
+          ]);
+        });
+      }
+    }
     let triangles = 0, drawCalls = 0;
-    for (const [name, geometry, material, items] of specs) {
-      this._updateInstanced(name, geometry, material, items, active);
+    for (const [name, geometry, material, items, fadeKey] of specs) {
+      this._updateInstanced(name, geometry, material, items, active, fadeKey);
       if (items.length) {
         drawCalls++;
-        const tri = geometry.index ? geometry.index.count / 3 : geometry.getAttribute('position').count / 3;
+        const available = geometry.index ? geometry.index.count : geometry.getAttribute('position').count;
+        const tri = Math.min(available, geometry.drawRange.count) / 3;
         triangles += tri * items.length;
       }
     }
@@ -892,12 +973,15 @@ export class ProceduralPropsManager {
     this._diagnostics.drawCalls = drawCalls;
   }
 
-  _updateInstanced(name, geometry, material, items, active) {
+  _updateInstanced(name, geometry, material, items, active, fadeKey = null) {
     let mesh = this._meshPool.get(name);
     if (!mesh && !items.length) return;
-    if (!mesh || mesh.instanceMatrix.count < items.length) {
+    if (!mesh || mesh.instanceMatrix.count < items.length || mesh.geometry !== geometry || mesh.material !== material) {
       const capacity = Math.max(16, 2 ** Math.ceil(Math.log2(items.length || 1)));
-      if (mesh) this.group.remove(mesh);
+      if (mesh) {
+        this.group.remove(mesh);
+        mesh.dispose?.();
+      }
       mesh = new THREE.InstancedMesh(geometry, material, capacity);
       mesh.name = `procedural-${name}`;
       mesh.frustumCulled = false;
@@ -907,8 +991,8 @@ export class ProceduralPropsManager {
     }
     mesh.count = items.length;
     active.add(name);
-    const fadeKey = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    const fade = this._fadeRanges?.[fadeKey] || [0, 0, 1e6, 1e6 + 1];
+    const rangeKey = fadeKey || name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    const fade = this._fadeRanges?.[rangeKey] || [0, 0, 1e6, 1e6 + 1];
     mesh.userData.propFadeRanges = fade;
     mesh.onBeforeRender = (_renderer, _scene, camera) => {
       const uniforms = mesh.material.userData.propFadeUniforms;
@@ -959,6 +1043,7 @@ export class ProceduralPropsManager {
   }
 
   dispose() {
+    this._disposed = true;
     this._clearMeshes();
     this._sectors.clear();
     this._planetBuildState = null;
@@ -972,6 +1057,10 @@ export class ProceduralPropsManager {
     ].forEach((geometry) => geometry.dispose());
     [this.grassNearMaterial, this.grassMidMaterial, this.flowerMaterial, this.treeMaterial, this.rockMaterial]
       .forEach((material) => material.dispose());
+    for (const entry of this._customModels.values()) {
+      if (entry.parts) disposeImportedModelParts(entry.parts);
+    }
+    this._customModels.clear();
     this.atlas.dispose();
   }
 }
