@@ -14,46 +14,43 @@ export function LoadingBar({ progress }) {
   );
 }
 
+const LOADING_STAGE_LABELS = {
+  planning: 'Plan',
+  renderer: 'GPU',
+  resources: 'Assets',
+  geometry: 'Terrain',
+  compile: 'Shaders',
+  present: 'Frame',
+  ready: 'Ready',
+};
+
 export default function LoadingOverlay({ task }) {
   if (!task) return null;
-  const pct = task.progress != null && !Number.isNaN(task.progress)
-    ? `${Math.round(task.progress * 100)}%`
-    : null;
-  const phases = Array.isArray(task.phases) ? task.phases : [];
-  const stageIndex = phases.indexOf(task.stage);
-  const phaseIndex = task.stage === 'ready'
-    ? phases.length
-    : Math.max(0, stageIndex);
   const iconProgress = task.progress == null ? 0.15 : Math.max(0, Math.min(1, task.progress));
+  const stepLabel = LOADING_STAGE_LABELS[task.stage] ?? task.stage ?? 'Working';
 
   return (
-    <div className={`loading-overlay${task.opaque ? ' opaque' : ''}`} role="status" aria-live="polite">
+    <div
+      className={`loading-overlay${task.opaque ? ' opaque' : ''}`}
+      role="status"
+      aria-label={task.label}
+      aria-live="polite"
+    >
       <div className="loading-card">
-        <div className="loading-card-spinner" aria-hidden>
-          <svg className="loading-terrain-icon" viewBox="0 0 32 26" width="30" height="26">
-            <path d="M2 23 10.5 9l4.2 6.2L20 4l10 19H2Z" fill="none" stroke="var(--border-subtle)" strokeWidth="2" strokeLinejoin="round" />
-            <path className="loading-terrain-progress" pathLength="1" d="M2 23 10.5 9l4.2 6.2L20 4l10 19H2Z" fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinejoin="round" style={{ strokeDasharray: `${iconProgress} 1` }} />
+        <div className="loading-card-visual">
+          <svg className="landing-boot-terrain loading-terrain-icon" viewBox="0 0 72 46" aria-hidden="true">
+            <defs>
+              <clipPath id="loading-terrain-progress-clip">
+                <rect x="0" y="0" width={72 * iconProgress} height="46" />
+              </clipPath>
+            </defs>
+            <path className="landing-boot-terrain-base" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
+            <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
+            <path className="landing-boot-terrain-fill" clipPath="url(#loading-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
           </svg>
+          <span className="landing-boot-progress-step">{stepLabel}</span>
+          <span className="loading-activity-spinner" aria-hidden="true" />
         </div>
-        <div className="loading-card-text">
-          <div className="loading-card-title">{task.label}</div>
-          {task.detail && <div className="loading-card-detail">{task.detail}</div>}
-        </div>
-        {pct && <div className="loading-card-pct">{pct}</div>}
-      </div>
-      <div className="loading-card-barwrap">
-        <LoadingBar progress={task.progress} />
-        {phases.length > 0 && (
-          <div className="loading-phases" aria-label={task.stage === 'ready'
-            ? `All ${phases.length} phases complete`
-            : `Phase ${phaseIndex + 1} of ${phases.length}`}>
-            {phases.map((phase, index) => (
-              <span key={phase} className={index < phaseIndex ? 'done' : index === phaseIndex ? 'active' : ''}>
-                <i />{phase}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

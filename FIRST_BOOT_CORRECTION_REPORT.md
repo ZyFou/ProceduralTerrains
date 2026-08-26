@@ -299,3 +299,40 @@ make ANGLE translate a structurally complex graph instantaneously.
 
 Validation after this follow-up: **59 test files / 498 tests passed**; the
 production Vite build completed successfully.
+
+### Production Custom cold-cache correction
+
+The later production trace corrected the interpretation of the 2.87-second
+development run: that result used a populated driver cache. The useful Custom
+cold-cache observation is 30,560 ms total, with 30,445 ms in the grouped
+six-material ANGLE compile and 102 ms in presentation. A subsequent uncached
+mode material required another 11,765 ms, while its final atomic presentation
+was 31 ms. The render/presentation correction is therefore holding; cold shader
+translation is now the dominant remaining duration.
+
+Compiler diagnostics now record every material's semantic role, vertex/fragment
+source length, and individual ready timestamp in a `[shader ready]` line. The
+same timeline is included in the boot completion manifest. This makes the next
+controlled cold run identify whether terrain, water, clouds, or the final post
+chain owns the 30-second critical path; a warm rerun cannot answer that because
+the browser/driver program cache changes the result by an order of magnitude.
+
+### Safe cold shader-cache reproduction
+
+A browser hard refresh does not reliably clear ANGLE or the graphics driver's
+program cache. Cold measurements can now be forced without deleting the Chrome
+profile or application data by opening the application with
+`?coldShaderRun=<unique-token>`. For example, use `?coldShaderRun=1` for one
+measurement and `?coldShaderRun=2` for the next. Each token adds an unused,
+deterministic numeric define to the submitted materials, changing their shader
+source/program keys without changing shader evaluation or rendered pixels.
+
+The console confirms the active override with `[shader cache] forced cold-run`
+and includes the token and generated source key. Reusing the same token may be
+warm and is not a valid cold measurement. Normal URLs do not add the define and
+retain the standard production cache behavior.
+
+The presentation diagnostic now reports `confirmation=reused-frame` instead of
+`cached=true`. That field describes reuse of the already-rendered final frame
+for the mandatory confirmation presentation; it never indicated whether ANGLE
+or the GPU driver shader cache was warm.

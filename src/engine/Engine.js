@@ -207,6 +207,26 @@ function yieldFrame() {
   return new Promise((resolve) => setTimeout(resolve, 16));
 }
 
+// A hard refresh does not reliably evict ANGLE or the GPU driver's program
+// cache. For controlled cold-compile measurements, a distinct URL token adds
+// an otherwise-unused define to every submitted material. The shader math is
+// unchanged, but the generated source/program key is new for each token.
+function readShaderColdRun() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = new URLSearchParams(window.location.search).get('coldShaderRun');
+    const token = raw?.trim().slice(0, 64);
+    if (!token) return null;
+    let hash = 2166136261;
+    for (let i = 0; i < token.length; i += 1) {
+      hash = Math.imul(hash ^ token.charCodeAt(i), 16777619);
+    }
+    return { token, defineValue: (hash >>> 0) || 1 };
+  } catch {
+    return null;
+  }
+}
+
 // Parameter keys that change the baked terrain height/climate field. Live sea
 // level is deliberately excluded: it moves water and presentation thresholds
 // without changing terrain geometry. The frozen formation level remains a true
@@ -245,6 +265,8 @@ export class Engine {
     this._bootError = null;
     this._bootPresented = false;
     this._bootPipeline = null;
+    this._shaderColdRun = readShaderColdRun();
+    this._shaderColdRunLogged = false;
     this._modeTransitionCoordinator = null;
     this._modeResourceCache = new ModeResourceCache({ maxInactive: 2 });
     this._modeTransitionContext = null;
@@ -4707,6 +4729,62 @@ export class Engine {
   // keep running. Avoids Three.js compileAsync crashing when currentProgram is
   // still undefined during transparent DoubleSide prepare.
 
+  _applyShaderColdRun(materials) {
+    const coldRun = this._shaderColdRun;
+    if (!coldRun?.defineValue) return false;
+    let changed = false;
+    for (const material of new Set(materials.filter(Boolean))) {
+      const defines = material.defines || {};
+      if (defines.TERRAIN_COLD_SHADER_RUN === coldRun.defineValue) continue;
+      material.defines = {
+        ...defines,
+        TERRAIN_COLD_SHADER_RUN: coldRun.defineValue,
+      };
+      material.needsUpdate = true;
+      changed = true;
+    }
+    if (changed && !this._shaderColdRunLogged) {
+      this._shaderColdRunLogged = true;
+      console.info(
+        `[shader cache] forced cold-run token=${coldRun.token}`
+        + ` source-key=${coldRun.defineValue}`
+        + ' (use a new coldShaderRun value for the next uncached measurement)',
+      );
+    }
+    return changed;
+  }
+
+  _compileMaterialDescriptor(material) {
+    let role = material?.name || material?.type || 'material';
+    const requestedWater = this.waterSystem?.getRequestedMaterial?.(this.worldMode);
+    if (material === this.terrainMaterial) {
+      role = `terrain:${material.userData?.terrainVariant || 'unknown'}`;
+    } else if (material === this._infiniteTerrainMat) {
+      role = `infinite-terrain:${material.userData?.terrainVariant || 'unknown'}`;
+    } else if (material === this.planetTerrainMat) {
+      role = 'planet-terrain';
+    } else if (material === requestedWater || material === this.water?.material
+        || material === this.infiniteWorld?.waterPlane?.material
+        || material === this.planetWater?.material) {
+      role = `water:${this.waterSystem?.getEffectiveMode?.() || 'unknown'}`;
+    } else if (material === this.visualPost?._lookMaterial) {
+      role = 'post:look';
+    } else if (material === this.visualPost?._cameraMaterial) {
+      role = 'post:camera';
+    } else if (material === this.underwater?._material) {
+      role = 'post:underwater';
+    } else if (material === this.studioCloud?.material
+        || material === this.studioCloud?.mesh?.material) {
+      role = 'cloud:studio';
+    }
+    return {
+      role,
+      id: material?.id ?? null,
+      vertexChars: material?.vertexShader?.length ?? 0,
+      fragmentChars: material?.fragmentShader?.length ?? 0,
+    };
+  }
+
   async _compileMaterialVariants(mats, {
     canvasOnly = false,
     timeoutMs,
@@ -4743,6 +4821,7 @@ export class Engine {
         asyncWaitMs: 0,
       };
     }
+    this._applyShaderColdRun(list);
     const passesPerMaterial = canvasOnly ? 1 : 2;
     const total = list.length * passesPerMaterial;
 
@@ -4809,6 +4888,15 @@ export class Engine {
       + ` pending=${canvasResult.pendingCount}`
       + ` parallel=${parallelCompile}`
     );
+    if (canvasResult.readyTimeline?.length) {
+      console.info(
+        '[shader ready] '
+        + canvasResult.readyTimeline
+          .map((entry) => `${entry.role}=${entry.readyMs.toFixed(0)}ms`
+            + `(${entry.vertexChars}+${entry.fragmentChars} chars)`)
+          .join(' '),
+      );
+    }
     onProgress?.(list.length, total);
 
     if (canvasOnly) {
@@ -4879,6 +4967,7 @@ export class Engine {
    */
   _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
     const pending = new Set(materials);
+    const readyTimeline = [];
     const renderer = this.renderer;
     if (this._disposed || !renderer) {
       return Promise.resolve({
@@ -4899,6 +4988,7 @@ export class Engine {
           timedOut: false,
           pendingCount: 0,
           waitMs: 0,
+          readyTimeline,
         });
         return;
       }
@@ -4920,7 +5010,13 @@ export class Engine {
 
         pending.forEach((material) => {
           const program = props.get(material)?.currentProgram;
-          if (program?.isReady?.()) pending.delete(material);
+          if (program?.isReady?.()) {
+            pending.delete(material);
+            readyTimeline.push({
+              ...this._compileMaterialDescriptor(material),
+              readyMs: performance.now() - start,
+            });
+          }
         });
 
         const waitMs = performance.now() - start;
@@ -4930,6 +5026,7 @@ export class Engine {
             timedOut: false,
             pendingCount: 0,
             waitMs,
+            readyTimeline,
           });
           return;
         }
@@ -4940,6 +5037,7 @@ export class Engine {
             timedOut: true,
             pendingCount: pending.size,
             waitMs,
+            readyTimeline,
           });
           return;
         }
@@ -5199,6 +5297,7 @@ export class Engine {
     this.camera.updateMatrixWorld(true);
 
     context.renderKey = createBootRenderKey({
+      shaderColdRun: this._shaderColdRun?.token || null,
       backend: context.mode === 'compatibility'
         ? 'webgl2'
         : (this.rendererConfig?.activeBackend || 'webgl2'),
@@ -5451,6 +5550,7 @@ export class Engine {
     return {
       compiledMaterials: materials.length,
       shaderCompileMs: (result.syncCompileMs || 0) + (result.asyncWaitMs || 0),
+      shaderReadyTimeline: result.readyTimeline || [],
       renderTarget: target.usesSceneTarget ? 'scene-target' : 'canvas',
     };
   }
@@ -5485,7 +5585,7 @@ export class Engine {
     console.info(
       `[boot] presentation first=${firstMs.toFixed(0)}ms`
       + ` confirm=${secondMs.toFixed(0)}ms`
-      + ` cached=${cachedPresentation}`
+      + ` confirmation=${cachedPresentation ? 'reused-frame' : 'full-render'}`
       + ` raf=${firstWaitMs.toFixed(0)}+${secondWaitMs.toFixed(0)}ms`
       + (plan
         ? ` output=${plan.outputWidth}x${plan.outputHeight}`

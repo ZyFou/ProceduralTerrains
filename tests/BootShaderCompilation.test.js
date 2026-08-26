@@ -10,6 +10,27 @@ function engineHarness() {
 }
 
 describe('boot shader compilation', () => {
+  it('forces a distinct shader source key only when a cold-run token is active', () => {
+    const engine = engineHarness();
+    const material = { defines: { EXISTING_DEFINE: 1 }, needsUpdate: false };
+    engine._shaderColdRun = { token: 'benchmark-1', defineValue: 123456 };
+    engine._shaderColdRunLogged = true;
+
+    expect(engine._applyShaderColdRun([material, material])).toBe(true);
+    expect(material.defines).toEqual({
+      EXISTING_DEFINE: 1,
+      TERRAIN_COLD_SHADER_RUN: 123456,
+    });
+    expect(material.needsUpdate).toBe(true);
+
+    material.needsUpdate = false;
+    expect(engine._applyShaderColdRun([material])).toBe(false);
+    expect(material.needsUpdate).toBe(false);
+
+    engine._shaderColdRun = null;
+    expect(engine._applyShaderColdRun([material])).toBe(false);
+  });
+
   it('collects only materials whose complete parent chain is visible', () => {
     const engine = engineHarness();
     const visibleMaterial = { id: 'visible' };
