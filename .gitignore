@@ -63,6 +63,12 @@ Thumbs.db
 
 # Testing
 jest-cache/
+.playwright-cli/
+
+# Local QA and progress reports
+design-qa.md
+FIRST_BOOT_CORRECTION_REPORT.md
+progress.md
 
 # Temporary files
 tmp/
