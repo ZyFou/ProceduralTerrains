@@ -381,16 +381,21 @@ vec4 manualSurfaceWeightsBAt(vec2 xz) {
 // shader deliberately removes the imagery sampler.
 export const IMPORTED_IMAGERY_ALBEDO_GLSL = /* glsl */ `
 vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) {
+  // Keep a definitely-initialized result on every control-flow path. Some
+  // ANGLE/D3D compilers warn about the conditional early-return form even
+  // though the source has a fallback return.
+  vec3 result = baseAlbedo;
   if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
     vec2 imageryUv = importHeightUvAt(xz);
     if (imageryUv.x >= 0.0 && imageryUv.x <= 1.0 && imageryUv.y >= 0.0 && imageryUv.y <= 1.0) {
       vec3 imageryColor = texture2D(uImportImageryTex, clamp(imageryUv, 0.0, 1.0)).rgb;
-      return (uImportImageryMode > 2.5)
-        ? mix(baseAlbedo, imageryColor, uImportImageryBlend)
-        : imageryColor;
+      result = imageryColor;
+      if (uImportImageryMode > 2.5) {
+        result = mix(baseAlbedo, imageryColor, uImportImageryBlend);
+      }
     }
   }
-  return baseAlbedo;
+  return result;
 }
 `;
 

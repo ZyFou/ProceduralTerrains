@@ -205,3 +205,97 @@ Browser verification on the same Quadro P2200 observed no console errors while
 opening Blank Nodes, opening Manual, activating Manual surface paint, and
 performing two full Vite hot reloads. In particular, neither `getContext` on
 `null` nor WebGL reinitialization failure recurred.
+
+## First-boot compiler regression correction (2026-08-26)
+
+The reported browser freeze and the accompanying shader warning had separate
+causes in the final-graph boot stage. Material discovery checked only each
+object's own `visible` flag; children of an invisible Planet, Infinite, cloud,
+or helper group were still
+added to the landing compiler submission. The observed landing graph therefore
+contained 35 materials even though most could not contribute to the frame.
+Discovery now validates the complete parent visibility chain and adds only the
+post, cloud-composite, and underwater passes enabled by the exact camera plan.
+The same landing scene now submits 5 unique materials.
+
+Separately, ANGLE reported `f_applyImportedImageryAlbedo` as potentially
+uninitialized. The function now initializes one result on every control-flow
+path and assigns imported imagery into it without conditional early returns.
+The shader math and result are unchanged, and the warning did not recur in the
+browser validation.
+
+An incremental-submit experiment proved unsuitable for this driver. Although
+its five synchronous translation calls totalled only 4 ms, task delivery was
+delayed while each submitted program linked; terrain and water were effectively
+serialized and the diagnostic cold run reached 93,542 ms. The final correction
+keeps the 5-material visibility filter but submits that small exact graph once,
+allowing `KHR_parallel_shader_compile` to overlap terrain and water. It does not
+restore the former 35-program saturation.
+
+Current warm-cache browser traces were 3,301 ms, 4,539 ms, and 5,235 ms from
+pipeline start through the two confirmed presentation frames. In those runs,
+the grouped shader submission used 5 materials, synchronous compiler work was
+2 ms, and compile-stage waits ranged from 328 ms to 2,462 ms. A current
+cold-cache number is intentionally not claimed because the driver cache was
+already populated by the diagnostic run; the reproduction procedure above is
+required for a controlled cold result.
+
+Validation after this correction: **58 test files / 495 tests passed**; the
+Three.js `0.185.1` production build completed successfully. The completion log
+now also prints every boot stage duration so future cold traces distinguish
+geometry, driver compilation, and presentation without inference.
+
+## First-frame execution and sustained GPU correction (2026-08-26)
+
+The subsequent cold trace isolated a different bottleneck from material
+discovery: 63,144 ms in driver compilation and 115,691 ms in presentation for
+an exact six-material Custom scene. Geometry and resource preparation together
+were only 1 ms. The presentation path was executing the terrain graph once for
+the water-free opaque/refraction target and then again for the combined main
+scene. Cinematic reflection could execute it a third time. Boot repeated that
+entire camera pipeline on the confirmation frame.
+
+The camera pipeline now retains the exact opaque color and depth buffers and
+draws only the objects intentionally excluded from that capture (water, clouds,
+and editor overlays) into it. This preserves normal Three.js depth testing and
+transparent ordering while removing the duplicate full terrain submission.
+The frozen boot confirmation frame re-runs the same final post chain from the
+retained completed input instead of executing terrain/refraction/reflection a
+second time. Canvas-only configurations retain the exact second-render
+fallback. New presentation diagnostics report the first render, confirmation,
+rAF waits, output size, and scene-target size separately.
+
+Sustained rendering now uses interaction-aware pacing: input, simulation,
+streaming, and animation time continue every rAF, while passive landing and
+medium-tier views submit at 30 fps (low tier at 24 fps). Interaction and Explore
+mode remain uncapped. The rendered-frame counter and automatic performance
+logic understand this intentional cadence, so it cannot be mistaken for a GPU
+failure or trigger a post-reveal water quality change. Medium-tier HiDPI output
+also has a 1.5 DPR safety ceiling rather than the former 2.0 ceiling, reducing
+the worst-case pixel workload by 43.75% without changing saved project or
+material settings.
+
+Unit coverage verifies retained-frame presentation, overlay-only shared-depth
+composition, exact layer/background restoration, and cadence behavior. The
+in-app Chromium validation (medium-tier GPU, 1280×720 High scene) reported:
+
+- cold driver run: 54,179 ms total, 51,785 ms shader wait, **36 ms present**;
+- presentation detail: first frame 26 ms, cached confirmation 0 ms, rAF waits
+  8+2 ms;
+- warm driver run after the compile/geometry overlap: 3,390 ms total, with the
+  3,294 ms link fully hidden inside the 3,347 ms geometry stage and a 32 ms
+  presentation;
+- no console warnings or errors, and the final landing terrain remained intact
+  after opaque/depth reuse.
+
+The supplied trace used a Custom preset while this validation used High, so the
+178,837 ms → 54,179 ms totals are useful diagnostic evidence but not a
+controlled before/after benchmark. The presentation collapse from minutes to
+tens of milliseconds does directly exercise the corrected retained-frame path;
+the requested 30-run fixed-preset benchmark remains outstanding. Shader
+translation is still the cold-path bottleneck because this correction removes
+duplicate GPU execution and overlaps independent work; it does not claim to
+make ANGLE translate a structurally complex graph instantaneously.
+
+Validation after this follow-up: **59 test files / 498 tests passed**; the
+production Vite build completed successfully.

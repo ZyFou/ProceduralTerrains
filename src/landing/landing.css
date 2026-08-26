@@ -1849,8 +1849,8 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .landing-confirm-actions button.danger { border-color: rgba(239, 68, 68, .45); background: rgba(239, 68, 68, .12); color: var(--danger); }
 .landing-confirm-actions button.danger:hover { background: rgba(239, 68, 68, .2); border-color: var(--danger); }
 .landing-confirm-actions button:disabled { opacity: .55; cursor: default; }
-.landing-create-backdrop { background: rgba(0,0,0,.78); backdrop-filter: blur(7px); }
-.landing-create-dialog { width: min(910px, 100%); padding: 22px; border: 1px solid var(--border-strong); border-radius: 12px; background: #0a0a0a; box-shadow: 0 28px 100px rgba(0,0,0,.78); }
+.landing-create-backdrop { background: rgba(0,0,0,.78); backdrop-filter: blur(7px); animation: landing-create-backdrop-in .2s ease-out both; }
+.landing-create-dialog { width: min(910px, 100%); padding: 22px; border: 1px solid var(--border-strong); border-radius: 12px; background: #0a0a0a; box-shadow: 0 28px 100px rgba(0,0,0,.78); animation: landing-create-dialog-in .28s cubic-bezier(.22, 1, .36, 1) both; }
 .landing-create-dialog > header { display: flex; align-items: flex-start; gap: 18px; }
 .landing-create-dialog > header > div { flex: 1; }
 .landing-create-dialog > header span { color: var(--accent); font: 650 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
@@ -1859,7 +1859,10 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .landing-create-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; flex: none; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: var(--cursor-pointer); }
 .landing-create-dialog > header > button:hover { border-color: var(--border-subtle); background: var(--bg-control); color: var(--text-main); }
 .landing-create-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; }
-.landing-create-options > button { min-height: 210px; display: flex; flex-direction: column; align-items: flex-start; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); color: var(--text-main); text-align: left; cursor: var(--cursor-pointer); transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.landing-create-options > button { min-height: 210px; display: flex; flex-direction: column; align-items: flex-start; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); color: var(--text-main); text-align: left; cursor: var(--cursor-pointer); transition: border-color .15s ease, background .15s ease, transform .15s ease; animation: landing-create-option-in .3s cubic-bezier(.22, 1, .36, 1) both; }
+.landing-create-options > button:nth-child(2) { animation-delay: .035s; }
+.landing-create-options > button:nth-child(3) { animation-delay: .07s; }
+.landing-create-options > button:nth-child(4) { animation-delay: .105s; }
 .landing-create-options > button:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--border-active); background: #101010; }
 .landing-create-options > button:disabled { opacity: .55; cursor: default; }
 .landing-create-icon { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 18px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--bg-control); color: var(--text-muted); }
@@ -1870,6 +1873,9 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .landing-create-options small { margin-top: 7px; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
 .landing-create-action { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 20px; color: var(--accent); font-size: 11px; font-weight: 650; }
 .landing-create-dialog > footer { display: flex; justify-content: center; flex-wrap: wrap; gap: 18px; margin-top: 16px; }
+@keyframes landing-create-backdrop-in { from { opacity: 0; } }
+@keyframes landing-create-dialog-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes landing-create-option-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* ============ Responsive ============ */
 @media (max-width: 1180px) {
@@ -1975,4 +1981,7 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .landing-preview-loader-content { transition: opacity .08s linear; }
   .landing-preview-loader.is-revealing .landing-preview-loader-content { transform: none; }
   .landing-preview-spinner { animation: none; border-top-color: var(--text-dim); }
+  .landing-create-backdrop,
+  .landing-create-dialog,
+  .landing-create-options > button { animation: none; }
 }

@@ -300,6 +300,7 @@ export class Engine {
     this._lastTris = 0;
     this._lastDraws = 0;
     this._lastRenderAt = 0;        // heartbeat: redraw at least ~1 Hz when idle
+    this._lastSharedOpaqueStats = { triangles: 0, drawCalls: 0 };
     this._tickErrorLogged = false;
     this._clock = createEngineTimer();
     if (typeof document !== 'undefined') this._clock.connect?.(document);
@@ -4294,7 +4295,14 @@ export class Engine {
     // On a low-tier GPU, cap the ceiling lower so a 2× HiDPI panel doesn't make
     // a weak GPU render 4× the pixels.
     const legacy = this.params?.pixelRatio || 0;
-    const ceiling = this.gpuTier === 'low' ? 1.25 : 2;
+    // A medium GPU at 2x DPR shades four pixels for every CSS pixel. The final
+    // terrain graph can also be executed by the opaque/reflection water passes,
+    // which made a 4K/HiDPI cold frame take minutes and then kept the GPU pinned.
+    // Keep the output native on high-tier devices while applying a hardware
+    // safety ceiling to medium/low devices. This is a runtime render budget; it
+    // does not alter the saved project or any shader/material quality setting.
+    const ceiling = this.gpuTier === 'low' ? 1.25
+      : (this.gpuTier === 'medium' ? 1.5 : 2);
     const base = legacy > 0 ? legacy : Math.min(window.devicePixelRatio, ceiling);
     this._basePixelRatio = Math.min(ceiling, Math.max(0.3, base));
     this._pixelRatioCeiling = ceiling;
@@ -4559,7 +4567,7 @@ export class Engine {
     const target = this.visualPost.opaqueTarget;
     if (!target) {
       this._captureWaterSceneRefraction(sceneSize, null);
-      return false;
+      return null;
     }
     const revision = this._sceneRevisionKey(sceneSize, false);
     const targetChanged = target !== this._sharedOpaqueTarget;
@@ -4571,6 +4579,10 @@ export class Engine {
         for (const [object] of visibility) object.visible = false;
         this.renderer.setRenderTarget(target);
         this.renderer.render(this.scene, this.camera);
+        this._lastSharedOpaqueStats = {
+          triangles: this.renderer.info.render.triangles,
+          drawCalls: this.renderer.info.render.calls,
+        };
       } finally {
         this.renderer.setRenderTarget(previousTarget);
         for (const [object, visible] of visibility) object.visible = visible;
@@ -4585,7 +4597,83 @@ export class Engine {
     this.infiniteCloud?.useSceneDepth?.(depth, this.camera, sceneSize);
     this.planetCloudLayer?.useSceneDepth?.(depth, this.camera, sceneSize);
     this.planetCloudChunks?.useSceneDepth?.(depth, this.camera, sceneSize);
-    return true;
+    return target;
+  }
+
+  /**
+   * Complete a shared-opaque camera frame by drawing only the objects that were
+   * deliberately excluded from the opaque/refraction capture (water, clouds and
+   * editor overlays). The opaque target already contains the exact terrain,
+   * props, sky and depth buffer, so drawing the whole scene again merely repeats
+   * the most expensive shader work. Three.js' normal transparent ordering and
+   * depth tests still apply to this overlay-only render.
+   */
+  _renderSharedOpaqueOverlays(target) {
+    if (!target) return null;
+    const roots = [...new Set(this._sharedOpaqueRoots())]
+      .filter((object) => object?.parent && this._isRenderable(object));
+    const layerState = [];
+    const savedObjects = new Set();
+    const overlayLayer = 31;
+    for (const root of roots) {
+      root.traverse?.((object) => {
+        if (!object?.layers || savedObjects.has(object)) return;
+        savedObjects.add(object);
+        layerState.push([object, object.layers.mask]);
+        object.layers.enable(overlayLayer);
+      });
+    }
+
+    const previousCameraMask = this.camera.layers.mask;
+    const previousTarget = this.renderer.getRenderTarget();
+    const previousAutoClear = this.renderer.autoClear;
+    const previousBackground = this.scene.background;
+    try {
+      this.camera.layers.set(overlayLayer);
+      this.renderer.autoClear = false;
+      // A texture/cubemap background is drawn as geometry even when autoClear is
+      // disabled. It already exists in the opaque target and must not overwrite
+      // that completed color buffer during the overlay pass.
+      this.scene.background = null;
+      this.renderer.setRenderTarget(target);
+      this.renderer.render(this.scene, this.camera);
+    } finally {
+      this.renderer.setRenderTarget(previousTarget);
+      this.renderer.autoClear = previousAutoClear;
+      this.scene.background = previousBackground;
+      this.camera.layers.mask = previousCameraMask;
+      for (const [object, mask] of layerState) object.layers.mask = mask;
+    }
+
+    // The target now contains the completed frame rather than the water-free
+    // capture. Force the next temporal frame to rebuild its refraction source.
+    this._sharedOpaqueRevision = null;
+    this._sharedOpaqueTarget = null;
+    return {
+      triangles: (this._lastSharedOpaqueStats?.triangles || 0)
+        + (this.renderer.info.render.triangles || 0),
+      drawCalls: (this._lastSharedOpaqueStats?.drawCalls || 0)
+        + (this.renderer.info.render.calls || 0),
+    };
+  }
+
+  _renderPreparedCameraScene(target, sharedOpaqueTarget) {
+    if (target && sharedOpaqueTarget) {
+      const stats = this._renderSharedOpaqueOverlays(sharedOpaqueTarget)
+        || this._lastSharedOpaqueStats;
+      this.visualPost.setInputTexture(sharedOpaqueTarget.texture);
+      this._noteMainRender();
+      return { target: sharedOpaqueTarget, ...stats };
+    }
+
+    this.renderer.setRenderTarget(target);
+    this.renderer.render(this.scene, this.camera);
+    this._noteMainRender();
+    return {
+      target,
+      triangles: this.renderer.info.render.triangles,
+      drawCalls: this.renderer.info.render.calls,
+    };
   }
 
   _applyUnderwaterFromSharedTarget(target) {
@@ -5237,6 +5325,25 @@ export class Engine {
       context.assertCurrent();
       if (cloudReady === false) throw new Error('Final cloud material did not become ready');
     }
+
+    // Shader linking is independent from the incremental visible-chunk build.
+    // Submit the exact final set now so KHR_parallel_shader_compile can work
+    // while the following geometry stage yields between chunk batches.
+    const target = this._resolveCameraCompileTarget();
+    const materials = this._finalBootMaterials(
+      context.preparedWaterMaterials,
+      this.visualPost?._plan,
+    );
+    context.compileTarget = target;
+    context.compileMaterials = materials;
+    context.compilePromise = this._compileMaterialVariants(materials, {
+      canvasOnly: true,
+      timeoutMs: 120000,
+      renderTarget: target.renderTarget,
+    });
+    // Cancellation can retire the pipeline during geometry. Keep the submitted
+    // driver job observed until its owning compile stage either awaits or drops it.
+    context.compilePromise.catch(() => {});
     return {
       terrainReady: true,
       waterPrepared: !waterRequired || context.preparedWaterMaterials.length > 0,
@@ -5276,36 +5383,52 @@ export class Engine {
     };
   }
 
-  _finalBootMaterials(extraMaterials = []) {
+  _finalBootMaterials(extraMaterials = [], cameraPlan = this.visualPost?._plan) {
     const materials = new Set();
     this.scene?.traverse?.((object) => {
       const list = Array.isArray(object.material) ? object.material : [object.material];
-      for (const material of list) if (material && object.visible !== false) materials.add(material);
+      for (const material of list) {
+        if (material && this._isRenderable(object)) materials.add(material);
+      }
     });
-    for (const material of [
-      this.visualPost?._lookMaterial,
-      this.visualPost?._cameraMaterial,
-      this.studioCloud?._lowResPass?._composite,
-      this.underwater?._material,
-    ]) if (material) materials.add(material);
+    if (cameraPlan?.lookEnabled && this.visualPost?._lookMaterial) {
+      materials.add(this.visualPost._lookMaterial);
+    }
+    if (cameraPlan?.needsFinalPass && this.visualPost?._cameraMaterial) {
+      materials.add(this.visualPost._cameraMaterial);
+    }
+    for (const layer of [this.studioCloud, this.infiniteCloud, this.planetCloudLayer]) {
+      if (layer?.active && layer?.usesLowRes && layer?._lowResPass?._composite) {
+        materials.add(layer._lowResPass._composite);
+      }
+    }
+    if (this.underwater?.active && this.underwater?._material) {
+      materials.add(this.underwater._material);
+    }
     for (const material of extraMaterials) if (material) materials.add(material);
     return [...materials];
   }
 
   async _compileFinalBootGraph(context) {
     context.assertCurrent();
-    const target = this._resolveCameraCompileTarget();
-    const materials = this._finalBootMaterials(context.preparedWaterMaterials);
-    const result = await this._compileMaterialVariants(materials, {
+    const target = context.compileTarget || this._resolveCameraCompileTarget();
+    const materials = context.compileMaterials || this._finalBootMaterials(
+      context.preparedWaterMaterials,
+      this.visualPost?._plan,
+    );
+    context.progress('Compiling final shaders…', 0, Math.max(1, materials.length));
+    const result = await (context.compilePromise || this._compileMaterialVariants(materials, {
       canvasOnly: true,
-      // One scene submission lets the driver's parallel compiler overlap the
-      // large terrain and water programs. Serial staggering doubled cold boot
-      // on the reference ANGLE driver (38s water + 43s terrain).
-      stagger: false,
+      // The exact visible graph is deliberately small (normally terrain,
+      // water, sky/plinth and the active final post pass). Submit it once so
+      // ANGLE can link the two expensive programs in parallel. Incremental
+      // submission made cold boot nearly twice as long because browser task
+      // delivery was delayed until each preceding driver compile completed.
+      // Hidden mode/effect materials are filtered by _finalBootMaterials(), so
+      // this no longer recreates the old 35-program compiler saturation.
       timeoutMs: 120000,
       renderTarget: target.renderTarget,
-      onProgress: (completed, total) => context.progress('Compiling final shaders…', completed, total),
-    });
+    }));
     context.assertCurrent();
     if (result?.ready !== true) {
       const error = new Error('Final shader graph did not become ready');
@@ -5324,6 +5447,7 @@ export class Engine {
       this._waterWarmFailed = false;
       if (this.water?.material) this.water.visible = true;
     }
+    context.progress('Compiling final shaders…', materials.length, materials.length);
     return {
       compiledMaterials: materials.length,
       shaderCompileMs: (result.syncCompileMs || 0) + (result.asyncWaitMs || 0),
@@ -5336,15 +5460,44 @@ export class Engine {
     this._bootShaderPending = false;
     const firstMs = this._renderInitialStudioFrame({ frozen: true });
     if (firstMs == null) throw new Error('Final frame could not be rendered');
+    const firstWaitStartedAt = performance.now();
     await yieldFrame();
+    const firstWaitMs = performance.now() - firstWaitStartedAt;
     context.assertCurrent();
-    const secondMs = this._renderInitialStudioFrame({ frozen: true });
+    const secondStartedAt = performance.now();
+    // The first render populated the exact scene target at frozen camera/time.
+    // Re-run the final post/presentation chain from that immutable input instead
+    // of executing the terrain, water refraction and reflection graph twice.
+    // Canvas-only configurations have no retained source and safely fall back
+    // to a second exact scene render.
+    const cachedPresentation = this.visualPost?.presentCached?.(this.renderer) === true;
+    const secondMs = cachedPresentation
+      ? performance.now() - secondStartedAt
+      : this._renderInitialStudioFrame({ frozen: true });
     if (secondMs == null) throw new Error('Final frame presentation could not be confirmed');
+    const secondWaitStartedAt = performance.now();
     await yieldFrame();
+    const secondWaitMs = performance.now() - secondWaitStartedAt;
     context.assertCurrent();
     this._bootPresented = true;
     if (this.canvas?.dataset) this.canvas.dataset.firstFrame = 'final';
-    return { firstFrameMs: firstMs, confirmationFrameMs: secondMs };
+    const plan = this.visualPost?.plan;
+    console.info(
+      `[boot] presentation first=${firstMs.toFixed(0)}ms`
+      + ` confirm=${secondMs.toFixed(0)}ms`
+      + ` cached=${cachedPresentation}`
+      + ` raf=${firstWaitMs.toFixed(0)}+${secondWaitMs.toFixed(0)}ms`
+      + (plan
+        ? ` output=${plan.outputWidth}x${plan.outputHeight}`
+          + ` scene=${plan.sceneWidth}x${plan.sceneHeight}`
+        : ''),
+    );
+    return {
+      firstFrameMs: firstMs,
+      confirmationFrameMs: secondMs,
+      cachedPresentation,
+      presentationWaitMs: firstWaitMs + secondWaitMs,
+    };
   }
 
   _completeFinalFrameBoot(result) {
@@ -5374,6 +5527,15 @@ export class Engine {
       `[boot] final frame ready in ${result.duration.toFixed(0)}ms `
       + `(${result.mode}, ${this.rendererConfig?.activeBackend || 'webgl2'})`,
     );
+    const stageDurations = result.manifest?.stageDurations;
+    if (stageDurations) {
+      console.info(
+        '[boot] stages '
+        + Object.entries(stageDurations)
+          .map(([stage, duration]) => `${stage}=${Number(duration).toFixed(0)}ms`)
+          .join(' '),
+      );
+    }
     this._scheduleErosionGPUWarmImport();
   }
 
@@ -9305,11 +9467,14 @@ export class Engine {
     });
     if (cloudResult.changed) this._applyCloudAdaptiveQuality();
 
-    if (this._fps < 42 && this._autoScale > 0.55) {
+    const cadenceLimited = this._continuousRenderInterval(now) > 0;
+    const frameMs = this.profiler?.frame?.avg || 0;
+    const runningSlow = cadenceLimited ? frameMs > 45 : this._fps < 42;
+    if (runningSlow && this._autoScale > 0.55) {
       if (cloudAdaptiveActive && !cloudResult.atScaleFloor) return;
       this._autoScale = Math.max(0.55, this._autoScale - 0.1);
       this._applyPixelRatio();
-    } else if (this._fps > 70 && this._autoScale < 1.0) {
+    } else if (!cadenceLimited && this._fps > 70 && this._autoScale < 1.0) {
       this._autoScale = Math.min(1.0, this._autoScale + 0.05);
       this._applyPixelRatio();
     }
@@ -9320,7 +9485,6 @@ export class Engine {
     // frame CPU time (profiler.frame.avg) rather than the frame COUNT, so the
     // on-demand studio idle (which legitimately stops drawing) never triggers a
     // spurious downgrade. ~45ms ≈ sub-22fps while actually working.
-    const frameMs = this.profiler?.frame?.avg || 0;
     if (this._autoScale <= 0.56 && frameMs > 45
         && (!cloudAdaptiveActive || cloudResult.atScaleFloor)) {
       const lighter = this._lighterPreset(this.perf.preset);
@@ -10416,34 +10580,39 @@ export class Engine {
       const infiniteLowRes = this.worldMode === 'infinite' && !!this.infiniteCloud?.usesLowRes;
       const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
-      this._prepareSharedOpaque(plan, sceneSize);
+      const sharedOpaqueTarget = this._prepareSharedOpaque(plan, sceneSize);
       this._captureWaterPlanarReflection(
         sceneSize,
         this._sceneRevisionKey(sceneSize, true),
       );
+      let rendered;
       if (typeof this.renderer.render === 'function') {
-        this.renderer.setRenderTarget(target);
-        this.renderer.render(this.scene, this.camera);
+        rendered = this._renderPreparedCameraScene(target, sharedOpaqueTarget);
       } else {
         // Lightweight capture harnesses and legacy embedders may only expose
         // the old renderer-compatible underwater facade.
         this.underwater.render(this.renderer, this.scene, this.camera, target);
+        this._noteMainRender();
+        rendered = {
+          target,
+          triangles: this.renderer.info.render.triangles,
+          drawCalls: this.renderer.info.render.calls,
+        };
       }
-      this._noteMainRender();
       const stats = {
-        triangles: this.renderer.info.render.triangles,
-        drawCalls: this.renderer.info.render.calls,
+        triangles: rendered.triangles,
+        drawCalls: rendered.drawCalls,
       };
 
       if (studioLowRes) {
-        this._renderLowResCloudAfterScene(this.studioCloud, target, sceneSize);
+        this._renderLowResCloudAfterScene(this.studioCloud, rendered.target, sceneSize);
       } else if (infiniteLowRes) {
-        this._renderLowResCloudAfterScene(this.infiniteCloud, target, sceneSize);
+        this._renderLowResCloudAfterScene(this.infiniteCloud, rendered.target, sceneSize);
       } else if (planetLowRes) {
-        this._renderLowResCloudAfterScene(this.planetCloudLayer, target, sceneSize);
+        this._renderLowResCloudAfterScene(this.planetCloudLayer, rendered.target, sceneSize);
       }
-      if (this.worldMode !== 'planet') this._applyUnderwaterFromSharedTarget(target);
-      if (target) this.renderer.setRenderTarget(null);
+      if (this.worldMode !== 'planet') this._applyUnderwaterFromSharedTarget(rendered.target);
+      if (rendered.target) this.renderer.setRenderTarget(null);
       this.visualPost.finish(this.renderer);
       return stats;
     });
@@ -10722,7 +10891,11 @@ export class Engine {
     // screen-space pass is not applied in _tickPlanet (renders straight to canvas).
     this._updateUnderwater(dt);
 
-    this.waterSystem?.update(this._fps);
+    // An intentional idle/landing cadence is not a low-FPS failure. Feed the
+    // water safeguard a neutral 60fps while cadence-limited so it cannot remove
+    // a final reflection/effect merely because we deliberately skipped frames.
+    const cadenceInterval = this._continuousRenderInterval(now);
+    this.waterSystem?.update(cadenceInterval > 0 ? Math.max(this._fps, 60) : this._fps);
 
     this.paintMode?.update(dt);
     this.manualTerrain?.update(dt);
@@ -10924,6 +11097,36 @@ export class Engine {
     return { x: v.x * 0.5 + 0.5, y: v.y * 0.5 + 0.5, visible };
   }
 
+  /**
+   * Rendering cadence used only when the user is not interacting. Simulation,
+   * input, streaming and animation time continue to update on every rAF; only
+   * redundant GPU submissions are paced. Spatial quality and shader math stay
+   * unchanged. Landing is intentionally 30fps because its camera motion is
+   * passive and otherwise pins even high-tier GPUs behind the menu.
+   */
+  _continuousRenderInterval(now = performance.now()) {
+    if (this._debug?.forceRender || this.exploreMode !== 'none') return 0;
+    if (now - (this._lastUserActivityAt ?? now) < 900) return 0;
+    if (this._landingShowcase) return 1000 / 30;
+    if (this.gpuTier === 'low') return 1000 / 24;
+    if (this.gpuTier === 'medium') return 1000 / 30;
+    return 0;
+  }
+
+  _renderCadenceDue(now) {
+    const interval = this._continuousRenderInterval(now);
+    return interval <= 0 || now - this._lastRenderAt >= interval - 0.5;
+  }
+
+  _recordRenderedFrame(now) {
+    this._frames++;
+    if (now - this._fpsTime >= 1000) {
+      this._fps = this._frames;
+      this._frames = 0;
+      this._fpsTime = now;
+    }
+  }
+
   _tickStudio(dt, now) {
     // Input always runs (so inertia/look settle even when we skip drawing).
     if (this._debug.freeCamNoClip && this.fpsControls) {
@@ -10935,14 +11138,6 @@ export class Engine {
       this.player.update(dt);
     } else {
       this.controls.update(dt);
-    }
-
-    // FPS accounting runs every tick regardless of whether we draw.
-    this._frames++;
-    if (now - this._fpsTime >= 1000) {
-      this._fps = this._frames;
-      this._frames = 0;
-      this._fpsTime = now;
     }
 
     // ---- on-demand gate: should we actually draw this frame? ----
@@ -10980,9 +11175,11 @@ export class Engine {
     // Heartbeat safety net: redraw at least ~1 Hz so any state change that
     // forgot to invalidate self-heals within a second (cheap insurance).
     const heartbeat = now - this._lastRenderAt > 1000;
-    const shouldRender = !this.perf.onDemandStudio || this._debug.forceRender
+    const renderRequested = !this.perf.onDemandStudio || this._debug.forceRender
       || this._landingShowcase || this.controls.isSettling
       || this._needsRender || moved || animating || minimapDirty || heartbeat;
+    const immediate = this._debug.forceRender || this._needsRender || minimapDirty || heartbeat;
+    const shouldRender = renderRequested && (immediate || this._renderCadenceDue(now));
 
     if (this._bootShaderPending) return;
 
@@ -11042,27 +11239,26 @@ export class Engine {
       this._ensureTerrainHeightTexSafely();
 
       this._maybeWarmUnderwater();
-      this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
+      const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
       this._captureWaterPlanarReflection(
         cameraSceneSize,
         this._sceneRevisionKey(cameraSceneSize, true),
       );
-      this.renderer.setRenderTarget(cameraTarget);
-      this.renderer.render(this.scene, this.camera);
-      this._noteMainRender();
+      const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
       // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
-      this._lastTris = this.renderer.info.render.triangles;
-      this._lastDraws = this.renderer.info.render.calls;
+      this._lastTris = rendered.triangles;
+      this._lastDraws = rendered.drawCalls;
       if (studioLowRes) {
-        this._renderLowResCloudAfterScene(this.studioCloud, cameraTarget, cameraSceneSize);
+        this._renderLowResCloudAfterScene(this.studioCloud, rendered.target, cameraSceneSize);
       }
-      this._applyUnderwaterFromSharedTarget(cameraTarget);
-      if (cameraTarget) this.renderer.setRenderTarget(null);
+      this._applyUnderwaterFromSharedTarget(rendered.target);
+      if (rendered.target) this.renderer.setRenderTarget(null);
       this.visualPost.finish(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
+      this._recordRenderedFrame(now);
 
       // minimap: re-render base only after params settle, marker every frame
       this.profiler.begin('minimap');
@@ -11146,6 +11342,9 @@ export class Engine {
       this.infiniteCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
       this.profiler.end('clouds');
     }
+    if (!this._needsRender && !this._renderCadenceDue(now)) return;
+    this._needsRender = false;
+    this._lastRenderAt = now;
     this._maybeWarmUnderwater();
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
@@ -11153,20 +11352,18 @@ export class Engine {
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
     const infiniteLowRes = !!this.infiniteCloud?.usesLowRes;
-    this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
+    const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
     this._captureWaterPlanarReflection(
       cameraSceneSize,
       this._sceneRevisionKey(cameraSceneSize, true),
     );
-    this.renderer.setRenderTarget(cameraTarget);
-    this.renderer.render(this.scene, this.camera);
-    this._noteMainRender();
-    const triangles = this.renderer.info.render.triangles;
-    const drawCalls = this.renderer.info.render.calls;
+    const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
+    const triangles = rendered.triangles;
+    const drawCalls = rendered.drawCalls;
     if (infiniteLowRes) {
-      this._renderLowResCloudAfterScene(this.infiniteCloud, cameraTarget, cameraSceneSize);
+      this._renderLowResCloudAfterScene(this.infiniteCloud, rendered.target, cameraSceneSize);
     }
-    this._applyUnderwaterFromSharedTarget(cameraTarget);
+    this._applyUnderwaterFromSharedTarget(rendered.target);
     this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
@@ -11175,12 +11372,7 @@ export class Engine {
     if (this.infiniteWorld) this.infiniteWorld.notifyTriangles(triangles);
 
     // HUD updates at ~6 Hz
-    this._frames++;
-    if (now - this._fpsTime >= 1000) {
-      this._fps = this._frames;
-      this._frames = 0;
-      this._fpsTime = now;
-    }
+    this._recordRenderedFrame(now);
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
       if (this.cb.onInfiniteStats) {
@@ -11244,6 +11436,10 @@ export class Engine {
     // steady frame); the planet terrain + water shaders sample it per pixel.
     this._ensurePlanetHeightTex();
 
+    if (!this._needsRender && !this._renderCadenceDue(now)) return;
+    this._needsRender = false;
+    this._lastRenderAt = now;
+
     const cameraPlan = this._prepareCameraPipeline();
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
@@ -11252,31 +11448,24 @@ export class Engine {
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
 
-    this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
+    const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
 
     // planet renders straight to the canvas — no underwater render-target pass
-    this.renderer.setRenderTarget(cameraTarget);
-    this.renderer.render(this.scene, this.camera);
-    this._noteMainRender();
+    const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
     // capture scene tri/draw counts BEFORE the low-res cloud composite (its
     // fullscreen quad would otherwise reset renderer.info to ~2 triangles).
-    const triangles = this.renderer.info.render.triangles;
-    const drawCalls = this.renderer.info.render.calls;
+    const triangles = rendered.triangles;
+    const drawCalls = rendered.drawCalls;
     if (planetLowRes) {
-      this._renderLowResCloudAfterScene(this.planetCloudLayer, cameraTarget, cameraSceneSize);
+      this._renderLowResCloudAfterScene(this.planetCloudLayer, rendered.target, cameraSceneSize);
     }
-    if (cameraTarget) this.renderer.setRenderTarget(null);
+    if (rendered.target) this.renderer.setRenderTarget(null);
     this.visualPost.finish(this.renderer);
     this.profiler.gpu?.frameEnd();
     this.profiler.end('render');
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
 
-    this._frames++;
-    if (now - this._fpsTime >= 1000) {
-      this._fps = this._frames;
-      this._frames = 0;
-      this._fpsTime = now;
-    }
+    this._recordRenderedFrame(now);
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
       if (this.cb.onInfiniteStats) {

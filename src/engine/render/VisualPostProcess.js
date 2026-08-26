@@ -473,6 +473,20 @@ export class VisualPostProcess {
     }
   }
 
+  /**
+   * Present the already completed camera input again without executing the
+   * terrain/water scene a second time. Boot uses this for its confirmation
+   * presentation while animation time and the camera are frozen. The same
+   * final post chain is still executed, so the canvas receives the exact final
+   * image on the following animation frame rather than a preview or shortcut
+   * material.
+   */
+  presentCached(renderer) {
+    if (!this._plan?.usesSceneTarget || !this._sceneRT) return false;
+    this.finish(renderer);
+    return true;
+  }
+
   diagnostics() {
     if (!this._plan) return null;
     return {
