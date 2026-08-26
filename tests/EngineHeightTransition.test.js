@@ -49,6 +49,36 @@ function heightTransitionHarness() {
 }
 
 describe('atomic terrain height transitions', () => {
+  it('coalesces rapid structural Noise Layer edits before GPU submission', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = heightTransitionHarness();
+      const firstProgram = compileTerrainGraph(createNodeTemplateGraph('nodes-dunes')).program;
+      const finalProgram = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;
+      engine._noiseStackCompileTimer = null;
+      engine._noiseStackCompileRequest = null;
+      engine._noiseStackCompileSerial = 0;
+      engine._rebuildStackMaterialsAsync = vi.fn(async (program) => ({
+        swapped: true,
+        sig: program.sig,
+      }));
+
+      const first = engine._scheduleNoiseStackCompile(firstProgram, {}, 200);
+      const final = engine._scheduleNoiseStackCompile(finalProgram, {}, 200);
+
+      await expect(first).resolves.toMatchObject({ stale: true, superseded: true });
+      expect(engine._rebuildStackMaterialsAsync).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(199);
+      expect(engine._rebuildStackMaterialsAsync).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(final).resolves.toMatchObject({ swapped: true, sig: finalProgram.sig });
+      expect(engine._rebuildStackMaterialsAsync).toHaveBeenCalledTimes(1);
+      expect(engine._rebuildStackMaterialsAsync).toHaveBeenCalledWith(finalProgram, {});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('always selects the sampler-limited shader for Manual Terrain projects', () => {
     const engine = heightTransitionHarness();
     engine.projectMode = 'manual';

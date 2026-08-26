@@ -245,6 +245,12 @@ const DEFERRED_TERRAIN_KEYS = new Set(
 const STACK_COMPAT_PARAM_KEYS = new Set([
   'warp', 'ridge', 'persistence', 'lacunarity', 'octaves',
 ]);
+// Structural Noise Layer controls can emit several values during one short
+// gesture. ANGLE cannot cancel a shader once translation has started, so
+// submitting every intermediate graph strands later cloud/editor work behind
+// obsolete programs. Hold only the latest graph for a brief interaction-sized
+// window; uniform-only edits still apply immediately.
+const NOISE_STACK_COMPILE_DEBOUNCE_MS = 650;
 
 export class Engine {
   constructor({
@@ -373,6 +379,9 @@ export class Engine {
     this._underwaterWarmIdentity = null;
     this._underwaterWarmPromise = null;
     this._octToken = 0;
+    this._noiseStackCompileTimer = null;
+    this._noiseStackCompileRequest = null;
+    this._noiseStackCompileSerial = 0;
     this._worldModeToken = 0;
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._mainRenderSerial = 0;  // advances only after a live scene render
@@ -3031,9 +3040,17 @@ export class Engine {
     const needsCompile = next.sig !== this._liveHeightSig
       || liveMaterial?.defines?.OCTAVES !== Math.round(this.params.octaves);
     if (needsCompile) {
-      return this._rebuildStackMaterialsAsync(next, {
-        terrainDirtyOnSwap: true,
-      }).then((result) => {
+      const rebuild = force
+        ? (() => {
+            this._cancelScheduledNoiseStackCompile();
+            return this._rebuildStackMaterialsAsync(next, {
+              terrainDirtyOnSwap: true,
+            });
+          })()
+        : this._scheduleNoiseStackCompile(next, {
+            terrainDirtyOnSwap: true,
+          });
+      return rebuild.then((result) => {
         if (result?.error && this.noiseStack === stack) {
           const rollback = previousLiveStack;
           const rollbackGLSL = generateStackGLSL(rollback);
@@ -3052,6 +3069,7 @@ export class Engine {
       });
     }
 
+    this._cancelScheduledNoiseStackCompile();
     if (this._terrainSourcePendingToken != null) {
       this._octToken++;
       this._terrainSourcePendingToken = null;
@@ -3359,6 +3377,55 @@ export class Engine {
     this._worldCompileGate = null;
     this._compiling = Math.max(0, this._compiling - 1);
     return true;
+  }
+
+  _cancelScheduledNoiseStackCompile() {
+    const request = this._noiseStackCompileRequest;
+    if (this._noiseStackCompileTimer) {
+      clearTimeout(this._noiseStackCompileTimer);
+      this._noiseStackCompileTimer = null;
+    }
+    this._noiseStackCompileRequest = null;
+    if (!request) return false;
+    if (this._terrainSourcePendingToken === request.pendingToken) {
+      this._terrainSourcePendingToken = null;
+    }
+    request.resolve?.({ swapped: false, error: null, stale: true, superseded: true });
+    return true;
+  }
+
+  _scheduleNoiseStackCompile(program, options = {}, delayMs = NOISE_STACK_COMPILE_DEBOUNCE_MS) {
+    this._cancelScheduledNoiseStackCompile();
+
+    // Invalidate a shader job already in flight immediately. Its driver work
+    // may finish, but it can no longer publish an intermediate layer graph.
+    this._octToken++;
+    const pendingToken = `noise-edit-${++this._noiseStackCompileSerial}`;
+    this._terrainSourcePendingToken = pendingToken;
+    this.cb.onCompileProgress?.(null);
+    this.cb.onStatus?.('Preparing latest noise layers…', true);
+
+    return new Promise((resolve) => {
+      const request = { program, options, pendingToken, resolve };
+      this._noiseStackCompileRequest = request;
+      this._noiseStackCompileTimer = setTimeout(async () => {
+        if (this._noiseStackCompileRequest !== request) return;
+        this._noiseStackCompileTimer = null;
+        this._noiseStackCompileRequest = null;
+        if (this._terrainSourcePendingToken === pendingToken) {
+          this._terrainSourcePendingToken = null;
+        }
+        if (this._disposed) {
+          resolve({ swapped: false, error: null, stale: true, aborted: true });
+          return;
+        }
+        try {
+          resolve(await this._rebuildStackMaterialsAsync(program, options));
+        } catch (error) {
+          resolve({ swapped: false, error });
+        }
+      }, Math.max(0, delayMs));
+    });
   }
 
   /**
@@ -4455,10 +4522,10 @@ export class Engine {
     if (!layer.useSceneDepth(sceneDepth, this.camera, sceneSize)) return false;
     layer.renderLowRes(this.renderer, this.camera, sceneSize);
     this.renderer.setRenderTarget(target);
-    // The scene depth is attached to `target`; do not sample that same texture
-    // while writing the composite back into the framebuffer. The march itself
-    // already used depth, and alpha-guided upscaling preserves its silhouette.
-    layer.compositeLowRes(this.renderer, null);
+    // Shared-opaque rendering writes overlays into a distinct final target, so
+    // the source depth remains safe to sample here and the bilateral upscale
+    // keeps cloud silhouettes crisp against terrain.
+    layer.compositeLowRes(this.renderer, sceneDepth);
     return true;
   }
 
@@ -4585,6 +4652,16 @@ export class Engine {
     ].filter(Boolean);
   }
 
+  _sharedOpaqueOverlayRoots() {
+    const lowResCloudMeshes = new Set([
+      this.studioCloud?.usesLowRes ? this.studioCloud.mesh : null,
+      this.infiniteCloud?.usesLowRes ? this.infiniteCloud.mesh : null,
+      this.planetCloudLayer?.usesLowRes ? this.planetCloudLayer.mesh : null,
+    ].filter(Boolean));
+    return this._sharedOpaqueRoots()
+      .filter((root) => !lowResCloudMeshes.has(root));
+  }
+
   _prepareSharedOpaque(plan, sceneSize) {
     const target = this.visualPost.opaqueTarget;
     if (!target) {
@@ -4630,10 +4707,48 @@ export class Engine {
    * the most expensive shader work. Three.js' normal transparent ordering and
    * depth tests still apply to this overlay-only render.
    */
-  _renderSharedOpaqueOverlays(target) {
-    if (!target) return null;
-    const roots = [...new Set(this._sharedOpaqueRoots())]
+  _copySharedOpaqueTarget(sourceTarget, target) {
+    if (!sourceTarget || !target || sourceTarget === target) return false;
+    if (typeof this.renderer.copyTextureToTexture !== 'function') return false;
+    if (!sourceTarget.texture || !target.texture) return false;
+
+    // Three's backend-neutral copy API uses a framebuffer blit for depth
+    // textures and a GPU texture copy for color. Both targets must be fully
+    // initialized before the copy; keeping the renderer on the default target
+    // also prevents its cached framebuffer state from becoming stale.
+    this.renderer.setRenderTarget(null);
+    this.renderer.initRenderTarget?.(sourceTarget);
+    this.renderer.initRenderTarget?.(target);
+    this.renderer.copyTextureToTexture(sourceTarget.texture, target.texture);
+    if (sourceTarget.depthTexture && target.depthTexture) {
+      this.renderer.copyTextureToTexture(sourceTarget.depthTexture, target.depthTexture);
+    }
+    return true;
+  }
+
+  _renderSharedOpaqueOverlays(sourceTarget, target) {
+    // Sampling water/cloud inputs from the framebuffer currently being written
+    // is invalid in WebGL. Never silently fall back to an in-place overlay.
+    if (!sourceTarget || !target || sourceTarget === target) return null;
+    const roots = [...new Set(this._sharedOpaqueOverlayRoots())]
       .filter((object) => object?.parent && this._isRenderable(object));
+    const copied = this._copySharedOpaqueTarget(sourceTarget, target);
+    if (!copied && sourceTarget !== target) {
+      // Compatibility fallback for renderer facades that do not expose the
+      // backend-neutral texture-copy API. It is slower, but remains correct and
+      // still never samples from the framebuffer currently being written.
+      const visibility = [...new Set(this._sharedOpaqueRoots())]
+        .map((object) => [object, object.visible]);
+      const previousTarget = this.renderer.getRenderTarget();
+      try {
+        for (const [object] of visibility) object.visible = false;
+        this.renderer.setRenderTarget(target);
+        this.renderer.render(this.scene, this.camera);
+      } finally {
+        this.renderer.setRenderTarget(previousTarget);
+        for (const [object, visible] of visibility) object.visible = visible;
+      }
+    }
     const layerState = [];
     const savedObjects = new Set();
     const overlayLayer = 31;
@@ -4681,11 +4796,11 @@ export class Engine {
 
   _renderPreparedCameraScene(target, sharedOpaqueTarget) {
     if (target && sharedOpaqueTarget) {
-      const stats = this._renderSharedOpaqueOverlays(sharedOpaqueTarget)
+      const stats = this._renderSharedOpaqueOverlays(sharedOpaqueTarget, target)
         || this._lastSharedOpaqueStats;
-      this.visualPost.setInputTexture(sharedOpaqueTarget.texture);
+      this.visualPost.setInputTexture(target.texture);
       this._noteMainRender();
-      return { target: sharedOpaqueTarget, ...stats };
+      return { target, ...stats };
     }
 
     this.renderer.setRenderTarget(target);
@@ -11784,6 +11899,7 @@ export class Engine {
     this._modeTransitionRequest?.resolveContextRestore?.();
     this._modeTransitionRequest = null;
     this._modeResourceCache?.clear?.();
+    this._cancelScheduledNoiseStackCompile();
     this._clock?.dispose?.();
     if (this._bootResizeTimer) {
       clearTimeout(this._bootResizeTimer);

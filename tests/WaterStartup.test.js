@@ -27,8 +27,8 @@ describe('water startup shaders', () => {
       expect(material.forceSinglePass).toBe(true);
       expect(material.userData.bakedHeightOnly).not.toBe(true);
       expect(material.fragmentShader).toContain('if (uUseWaterTerrainBiomeTex > 0.5)');
-      expect(material.fragmentShader).toContain('return waterBakedHeightAt(xz)');
-      expect(material.fragmentShader).toContain('return heightAt(xz)');
+      expect(material.fragmentShader).toContain('float result = heightAt(xz)');
+      expect(material.fragmentShader).toContain('result = waterBakedHeightAt(xz)');
       expect(material.fragmentShader).toContain('uWaterTerrainHeightTex');
       expect(material.fragmentShader).not.toContain('texture2D(uTerrainHeightTex');
       expect(material.fragmentShader).toContain('float heightAt(vec2 xz)');
@@ -464,7 +464,7 @@ describe('water startup shaders', () => {
     expect(materials).toHaveLength(1);
     expect(materials[0]).not.toBe(legacy);
     expect(materials[0].userData.bakedHeightOnly).not.toBe(true);
-    expect(materials[0].fragmentShader).toContain('return heightAt(xz)');
+    expect(materials[0].fragmentShader).toContain('float result = heightAt(xz)');
     expect(waterSystem.getEffectiveMode()).toBe('realistic');
     waterSystem.dispose();
   });

@@ -38,10 +38,11 @@ float waterTerrainHeightAt(vec2 xz) {
     dependencies: `${NOISE_GLSL}\n${BIOME_GLSL}\n${buildHeightGLSL(stackGLSL.body2d)}`,
     terrainHeightFunction: /* glsl */ `
 float waterTerrainHeightAt(vec2 xz) {
+  float result = heightAt(xz);
   if (uUseWaterTerrainBiomeTex > 0.5) {
-    return waterBakedHeightAt(xz);
+    result = waterBakedHeightAt(xz);
   }
-  return heightAt(xz);
+  return result;
 }
 `,
   };

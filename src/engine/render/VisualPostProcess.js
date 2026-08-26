@@ -390,7 +390,7 @@ export class VisualPostProcess {
         plan.sceneWidth,
         plan.sceneHeight,
         true,
-        requireSceneDepth
+        requireSceneDepth || requireSharedOpaque
       );
     }
     if (requireSharedOpaque) {

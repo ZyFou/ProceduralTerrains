@@ -134,6 +134,7 @@ describe('performance phase 2', () => {
     expect(post.opaqueTarget).not.toBeNull();
     expect(post.opaqueTarget).not.toBe(post.inputTarget);
     expect(post.opaqueTarget.depthTexture).not.toBeNull();
+    expect(post.inputTarget.depthTexture).not.toBeNull();
 
     post.prepare(renderer, {
       params: { visualsPostEnabled: false },
