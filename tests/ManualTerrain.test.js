@@ -167,6 +167,30 @@ describe('Manual Terrain shapes', () => {
     restored.dispose();
   });
 
+  it('recreates the GPU height texture when the lazy manual resolution activates', () => {
+    const uniforms = {
+      uManualHeightTexture: { value: null },
+      uManualOrigin: { value: new THREE.Vector2() },
+      uManualSpan: { value: new THREE.Vector2() },
+    };
+    const field = new ManualTerrainField({
+      uniforms,
+      getBounds: () => ({ origin: { x: -64, z: -64 }, span: { x: 128, z: 128 } }),
+      resolution: 32,
+    });
+    const initialTexture = field.texture;
+
+    field.rebuild([createManualShape('mountain', { x: 0, z: 0 }, { detail: 0 })]);
+
+    expect(field.texture).not.toBe(initialTexture);
+    expect(uniforms.uManualHeightTexture.value).toBe(field.texture);
+    expect(field.texture.image.width).toBe(32);
+    expect(field.texture.image.height).toBe(32);
+    expect(field.texture.image.data).toHaveLength(32 * 32 * 4);
+    expect(field.sampleHeightOffset(0, 0)).toBeGreaterThan(0);
+    field.dispose();
+  });
+
   it('keeps shapes and sculpt strokes anchored when tile bounds expand', () => {
     const uniforms = {
       uManualHeightTexture: { value: null },

@@ -75,10 +75,15 @@ export class ManualSurfacePaintField {
     this.resolution = this.targetResolution;
     this.weightsA = new Uint8Array(this.resolution * this.resolution * 4);
     this.weightsB = new Uint8Array(this.resolution * this.resolution * 4);
-    for (const [texture, data] of [[this.textureA, this.weightsA], [this.textureB, this.weightsB]]) {
-      texture.image.data = data;
-      texture.image.width = this.resolution;
-      texture.image.height = this.resolution;
+    const previousTextureA = this.textureA;
+    const previousTextureB = this.textureB;
+    this.textureA = makeTexture(this.weightsA, this.resolution);
+    this.textureB = makeTexture(this.weightsB, this.resolution);
+    previousTextureA.dispose();
+    previousTextureB.dispose();
+    if (this._boundUniforms) {
+      this._boundUniforms.uManualSurfaceTextureA.value = this.textureA;
+      this._boundUniforms.uManualSurfaceTextureB.value = this.textureB;
     }
     return true;
   }

@@ -63,6 +63,23 @@ function resolutionForTier(gpuTier) {
   return 640;
 }
 
+function makeHeightTexture(data, resolution) {
+  const texture = new THREE.DataTexture(
+    data,
+    resolution,
+    resolution,
+    THREE.RGBAFormat,
+    THREE.HalfFloatType,
+  );
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return texture;
+}
+
 function typedArrayToBase64(array) {
   const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
   let binary = '';
@@ -100,18 +117,7 @@ export class ManualTerrainField {
     this.sculptRevision = 0;
     this._uploadPending = false;
 
-    this.texture = new THREE.DataTexture(
-      this.heightData,
-      this.resolution,
-      this.resolution,
-      THREE.RGBAFormat,
-      THREE.HalfFloatType,
-    );
-    this.texture.colorSpace = THREE.NoColorSpace;
-    this.texture.wrapS = THREE.ClampToEdgeWrapping;
-    this.texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.texture.minFilter = THREE.LinearFilter;
-    this.texture.magFilter = THREE.LinearFilter;
+    this.texture = makeHeightTexture(this.heightData, this.resolution);
     this._syncBounds();
     this._upload();
     this._bindUniforms();
@@ -124,9 +130,10 @@ export class ManualTerrainField {
     this.sculptDelta = new Float32Array(this.resolution * this.resolution);
     this.heightDelta = new Float32Array(this.resolution * this.resolution);
     this.heightData = new Uint16Array(this.resolution * this.resolution * 4);
-    this.texture.image.data = this.heightData;
-    this.texture.image.width = this.resolution;
-    this.texture.image.height = this.resolution;
+    const previousTexture = this.texture;
+    this.texture = makeHeightTexture(this.heightData, this.resolution);
+    previousTexture.dispose();
+    this._bindUniforms();
     this._composeAll();
     return true;
   }

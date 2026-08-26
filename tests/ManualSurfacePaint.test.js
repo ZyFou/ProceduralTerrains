@@ -103,6 +103,30 @@ describe('Manual Terrain surface painting', () => {
     field.dispose();
   });
 
+  it('rebinds fresh GPU textures when the lazy paint resolution activates', () => {
+    const field = new ManualSurfacePaintField({ getBounds: bounds, resolution: 24 });
+    const uniforms = {
+      uManualSurfaceTextureA: { value: null },
+      uManualSurfaceTextureB: { value: null },
+      uManualSurfaceOrigin: { value: new THREE.Vector2() },
+      uManualSurfaceSpan: { value: new THREE.Vector2() },
+    };
+    field.bind(uniforms);
+    const initialTextureA = field.textureA;
+    const initialTextureB = field.textureB;
+
+    field.stamp({ x: 0, z: 0, radius: 20, strength: 1, falloff: 0.7, materialChannel: 0 });
+
+    expect(field.textureA).not.toBe(initialTextureA);
+    expect(field.textureB).not.toBe(initialTextureB);
+    expect(uniforms.uManualSurfaceTextureA.value).toBe(field.textureA);
+    expect(uniforms.uManualSurfaceTextureB.value).toBe(field.textureB);
+    expect(field.textureA.image.width).toBe(24);
+    expect(field.textureA.image.height).toBe(24);
+    expect(field.textureA.image.data).toHaveLength(24 * 24 * 4);
+    field.dispose();
+  });
+
   it('keeps a round texture brush footprint on rectangular multi-tile bounds', () => {
     const field = new ManualSurfacePaintField({
       getBounds: () => ({ origin: { x: -256, z: -128 }, span: { x: 512, z: 256 } }),
