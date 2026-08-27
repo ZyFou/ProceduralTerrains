@@ -97,6 +97,12 @@ uniform vec2 uBakeSpan;
 // world units. uErosionEnabled == 0 makes it a free no-op everywhere.
 uniform sampler2D uErosionOffsetTex;
 uniform float uErosionEnabled;
+// Destruction Lab stores signed crater displacement in R and persistent scorch
+// intensity in G over the bounded Studio assembly.
+uniform sampler2D uDestructionTexture;
+uniform float uDestructionEnabled;
+uniform vec2 uDestructionOrigin;
+uniform vec2 uDestructionSpan;
 
 vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
 // World rect the imported HEIGHT map covers: (originX, originZ, spanX, spanZ).
@@ -710,10 +716,22 @@ float erosionOffsetAt(vec2 xz) {
   return texture2D(uErosionOffsetTex, uv).r;
 }
 
+vec2 destructionUvAt(vec2 xz) {
+  return (xz - uDestructionOrigin) / max(uDestructionSpan, vec2(1.0));
+}
+vec2 destructionSampleAt(vec2 xz) {
+  if (uDestructionEnabled < 0.5) return vec2(0.0);
+  vec2 uv = destructionUvAt(xz);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec2(0.0);
+  return texture2D(uDestructionTexture, uv).rg;
+}
+float destructionOffsetAt(vec2 xz) { return destructionSampleAt(xz).r; }
+float destructionScorchAt(vec2 xz) { return destructionSampleAt(xz).g; }
+
 float heightAtWithClimate(vec2 xz, Climate climate) {
   return shapeHeight(xz, climate) * uPaintBaseMult
     + paintHeightOffsetAt(xz) + manualHeightOffsetAt(xz)
-    + splineHeightOffsetAt(xz) + erosionOffsetAt(xz);
+    + splineHeightOffsetAt(xz) + erosionOffsetAt(xz) + destructionOffsetAt(xz);
 }
 
 float heightAt(vec2 xz) {

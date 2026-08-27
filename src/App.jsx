@@ -55,8 +55,8 @@ import { applyGraphColorPreset, createBlankGraph, setGraphColorEnabled } from '.
 import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
-const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
-const REAL_TERRAIN_PANEL_IDS = ['terrain', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
+const NODE_PANEL_IDS = ['explode', 'planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
+const REAL_TERRAIN_PANEL_IDS = ['terrain', 'explode', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
 // Start loading the drawer chunk with the app so the first tool click does
 // not have to wait for the lazy module before anything can be shown.
@@ -96,6 +96,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
     if (before.manualSurfaceRev !== after.manualSurfaceRev) return 'Painted manual terrain surface or props';
     if (before.paintRev !== after.paintRev) return 'Painted terrain';
     if (before.erosionRev !== after.erosionRev) return 'Updated erosion';
+    if (JSON.stringify(before.destruction) !== JSON.stringify(after.destruction)) return 'Exploded terrain';
     if (before.manualSculptRev !== after.manualSculptRev) return 'Sculpted manual terrain';
     if (JSON.stringify(before.tiles) !== JSON.stringify(after.tiles)
       || before.tileAssemblyShape !== after.tileAssemblyShape
@@ -228,6 +229,12 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
+  const [explodeState, setExplodeState] = useState({
+    enabled: false,
+    settings: { shape: 'bowl', radius: 4.5, strength: 0.72, rim: 0.42, falloff: 0.72, scorch: 0.68, debris: true, sound: true, cameraShake: true },
+    hasDamage: false,
+    revision: 0,
+  });
   const [manualImportDialog, setManualImportDialog] = useState({
     open: false,
     loading: false,
@@ -510,6 +517,10 @@ export default function App() {
           onProjectMode: setProjectMode,
           onGraphState: setGraphState,
           onGraphView: setGraphView,
+          onExplodeState: (next) => {
+            setExplodeState((current) => ({ ...current, ...next }));
+            if (next?.terrainChanged || next?.settingsChanged) scheduleRecordRef.current?.();
+          },
         },
       });
     } catch (err) {
@@ -1973,6 +1984,21 @@ export default function App() {
   const drawerSideAttr = drawerLayout.side ?? 'right';
 
   useEffect(() => {
+    engineRef.current?.setExplodeToolEnabled?.(effectivePanel === 'explode');
+  }, [effectivePanel]);
+
+  const clearExplosions = useCallback(async () => {
+    if (!explodeState.hasDamage) return;
+    const confirmed = await showConfirm({
+      title: 'Clear all explosions?',
+      message: 'This removes every crater and scorch mark. You can restore the previous terrain with Undo.',
+      confirmLabel: 'Clear explosions',
+      danger: true,
+    });
+    if (confirmed) engineRef.current?.clearExplosions?.();
+  }, [explodeState.hasDamage, showConfirm]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(MANUAL_LIBRARY_HEIGHT_KEY, String(Math.round(manualLibraryHeight)));
     } catch { /* The layout still works when storage is unavailable. */ }
@@ -2168,6 +2194,9 @@ export default function App() {
     onCullingEnabled: handleCullingEnabled, onBehindCameraCulling: handleBehindCameraCulling,
     debugFlags, onDebugFlag: handleDebugFlag,
     onResetPanel: handleResetPanel,
+    explodeState,
+    onExplodeSetting: (key, value) => engine().setExplodeSetting(key, value),
+    onClearExplosions: clearExplosions,
     onApplySurfaceTextures: applySurfaceTextures,
     gpu, perf,
     rendererInfo: engineRef.current ? {
@@ -2333,7 +2362,6 @@ export default function App() {
         onClearNotifications={clearNotifications}
         onToggleNotificationLogging={toggleNotificationLogging}
       />
-
       <ManualTerrainImportDialog
         open={manualImportDialog.open}
         loading={manualImportDialog.loading}

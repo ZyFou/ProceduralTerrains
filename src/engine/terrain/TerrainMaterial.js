@@ -41,6 +41,7 @@ const MANUAL_ACTIVE_COMMON_SAMPLERS = new Set([
   'uManualSurfaceTextureB',
   'uManualHeightTexture',
   'uTileOccupancy',
+  'uDestructionTexture',
 ]);
 
 const MANUAL_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
@@ -66,12 +67,21 @@ vec4 paintBiomeAt(vec2 xz) { return vec4(0.0); }
 float splineHeightOffsetAt(vec2 xz) { return 0.0; }
 vec4 splineMaskAt(vec2 xz) { return vec4(0.0); }
 
+vec2 destructionSampleAt(vec2 xz) {
+  if (uDestructionEnabled < 0.5) return vec2(0.0);
+  vec2 uv = (xz - uDestructionOrigin) / max(uDestructionSpan, vec2(1.0));
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec2(0.0);
+  return texture2D(uDestructionTexture, uv).rg;
+}
+float destructionOffsetAt(vec2 xz) { return destructionSampleAt(xz).r; }
+float destructionScorchAt(vec2 xz) { return destructionSampleAt(xz).g; }
+
 float heightAtWithClimate(vec2 xz, Climate climate) {
-  return manualHeightOffsetAt(xz);
+  return manualHeightOffsetAt(xz) + destructionOffsetAt(xz);
 }
 
 float heightAt(vec2 xz) {
-  return manualHeightOffsetAt(xz);
+  return manualHeightOffsetAt(xz) + destructionOffsetAt(xz);
 }
 
 float moistureAt(vec2 xz) {
@@ -815,6 +825,13 @@ ${features.manual ? '' : /* glsl */ `
   td.albedo = applyImportedImageryAlbedo(td.albedo, xz);
 `}
 
+  float destructionScorch = destructionScorchAt(xz);
+  if (destructionScorch > 0.001) {
+    vec3 charColor = vec3(0.055, 0.036, 0.025);
+    td.albedo = mix(td.albedo, charColor, destructionScorch * 0.84);
+    surf.rough = mix(surf.rough, 1.0, destructionScorch * 0.72);
+  }
+
   float concave = clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0);
   float valley = 1.0 - smoothstep(0.0, uHeightScale * 0.55, hC);
   float ao = (1.0 - uAO * (concave * 0.45 + valley * 0.22)) * surf.ao;
@@ -1192,6 +1209,10 @@ export function createTerrainUniforms() {
     // follow it. Disabled by default — a free no-op until an erosion bake runs.
     uErosionOffsetTex:    { value: null },
     uErosionEnabled:      { value: 0.0 },
+    uDestructionTexture:  { value: null },
+    uDestructionEnabled:  { value: 0.0 },
+    uDestructionOrigin:   { value: new THREE.Vector2() },
+    uDestructionSpan:     { value: new THREE.Vector2(1, 1) },
 
     // Noise Stack per-layer continuous params (shared by every height material).
     // Packed each param change by Engine from the live NoiseStack; the GLSL

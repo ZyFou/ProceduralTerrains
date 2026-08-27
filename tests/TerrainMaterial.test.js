@@ -231,9 +231,9 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsBAt(wpos.xz)');
     const fragmentSamplers = [...tile.fragmentShader.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g)];
-    // Four rolling field samplers were added: three Infinite cache levels and
-    // the Studio climate bake.
-    expect(fragmentSamplers).toHaveLength(22);
+    // Rolling caches plus the independent Destruction Lab height/scorch field.
+    expect(fragmentSamplers).toHaveLength(23);
+    expect(tile.fragmentShader).toContain('destructionScorchAt(xz)');
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');
@@ -256,6 +256,7 @@ describe('shared Tile and Infinite terrain program', () => {
       'uManualSurfaceTextureA',
       'uManualSurfaceTextureB',
       'uManualHeightTexture',
+      'uDestructionTexture',
       'uTileOccupancy',
       'uSurfDiffuse',
       'uSurfProps',
@@ -264,6 +265,7 @@ describe('shared Tile and Infinite terrain program', () => {
       'uManualSurfaceTextureA',
       'uManualSurfaceTextureB',
       'uManualHeightTexture',
+      'uDestructionTexture',
       'uTileOccupancy',
     ]);
     expect(fragmentSamplers.length).toBeLessThanOrEqual(16);

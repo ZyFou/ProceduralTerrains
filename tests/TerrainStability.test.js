@@ -215,6 +215,8 @@ describe('terrain state stability', () => {
         serialize: () => null,
       },
       erosionField: { serialize: () => null },
+      destructionField: { serialize: () => ({ version: 1, marker: 'crater-data' }) },
+      explodeSettings: { shape: 'ragged', radius: 7, strength: 1.1 },
       projectHistory: { serializeMetadata: () => null },
       _serializeCreatorTools: () => ({ splines: [], analysis: {} }),
       _syncPlanetStyleToParams: vi.fn(),
@@ -227,6 +229,8 @@ describe('terrain state stability', () => {
     expect(payload.paintState).toEqual({ baseMode: 'flat', layerOpacity: 0.4 });
     expect(payload.timeOfDay).toBe(0.71);
     expect(payload.worldMode).toBe('studio');
+    expect(payload.destruction).toEqual({ version: 1, marker: 'crater-data' });
+    expect(payload.explodeSettings).toMatchObject({ shape: 'ragged', radius: 7, strength: 1.1 });
   });
 
   it('does not publish a terrain variant compiled for a stale height program', async () => {

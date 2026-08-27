@@ -77,6 +77,8 @@ import {
 import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { ErosionField } from './terrain/erosion/ErosionField.js';
+import { DestructionField, destructionResolutionForTier } from './destruction/DestructionField.js';
+import { DEFAULT_EXPLODE_SETTINGS, ExplodeTool, normalizeExplodeSettings } from './destruction/ExplodeTool.js';
 import { EROSION_QUALITY, getErosionPreset } from './terrain/erosion/ErosionPresets.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
@@ -503,6 +505,10 @@ export class Engine {
     // Slice 1 ships the offset pipeline + a no-op identity bake; the simulation
     // arrives in later slices.
     this.erosionField = new ErosionField();
+    this.destructionField = null;
+    this.explodeTool = null;
+    this.explodeSettings = { ...DEFAULT_EXPLODE_SETTINGS };
+    this._explodeBuildingTimer = null;
 
     this._debug = {
       freezeCulling: false,   // stop recomputing chunk visibility (fly out to inspect the frustum)
@@ -560,6 +566,7 @@ export class Engine {
     this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
     this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
+    this.destructionField = new DestructionField({ resolution: destructionResolutionForTier(this.gpuTier) });
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
     this._initTileInteraction();
@@ -969,6 +976,7 @@ export class Engine {
         infinite: false,
       }), this.noiseStack);
       this._minimapSampler.setHeightProgram(this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null);
+      this._minimapSampler.destruction = this.destructionField;
     }
     return this._minimapSampler;
   }
@@ -1000,6 +1008,80 @@ export class Engine {
 
   _sampleSplineHeightOffset(x, z) { return this.splineManager?.getHeightOffset(x, z) ?? 0; }
   _serializeCreatorTools() { return { splines: this.splineManager?.serialize?.() ?? [], analysis: this.terrainAnalysis?.serialize?.() ?? {} }; }
+
+  _explodeHeightAt(x, z) {
+    return this._getCpuHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)
+      + this._samplePaintHeightOffset(x, z)
+      + this._sampleManualHeightOffset(x, z)
+      + this._sampleSplineHeightOffset(x, z);
+  }
+
+  _handleExplodeState(state) {
+    if (state?.terrainChanged) {
+      this.destructionField?.applyTo(this.uniforms, this.worldMode === 'studio');
+      this._markTerrainFieldDirty();
+      this._minimapDirtyAt = performance.now();
+      this.minimap?.requestRedraw?.();
+      this._needsRender = true;
+      if (this._explodeBuildingTimer) clearTimeout(this._explodeBuildingTimer);
+      this._explodeBuildingTimer = setTimeout(() => {
+        this._explodeBuildingTimer = null;
+        if (this.realWorldBuildingsVisible) this._rebuildRealWorldBuildings({ force: true });
+        this._needsRender = true;
+      }, 320);
+    }
+    if (state?.settings) this.explodeSettings = normalizeExplodeSettings(state.settings);
+    this.cb.onExplodeState?.(state);
+  }
+
+  _ensureExplodeTool() {
+    if (this.explodeTool) return this.explodeTool;
+    const bounds = this._creatorBounds();
+    this.destructionField.setRegion(bounds.origin, bounds.span);
+    this.destructionField.applyTo(this.uniforms, true);
+    this.explodeTool = new ExplodeTool({
+      scene: this.scene,
+      camera: this.camera,
+      domElement: this.canvas,
+      field: this.destructionField,
+      getBounds: () => this._creatorBounds(),
+      getHeightAt: (x, z) => this._explodeHeightAt(x, z),
+      getHeightScale: () => this.params.heightScale,
+      gpuTier: this.gpuTier,
+      settings: this.explodeSettings,
+      onChange: (state) => this._handleExplodeState(state),
+    });
+    return this.explodeTool;
+  }
+
+  setExplodeToolEnabled(enabled) {
+    const active = !!enabled && this.worldMode === 'studio';
+    if (active) {
+      this.setExploreMode('none');
+      if (this.paintMode?.state.enabled) this.setPaintMode(false);
+      if (this.splineState?.enabled) this.setSplineEditingEnabled(false);
+      if (this.manualTerrain?.state?.sculpt?.enabled) this.setManualSculptEnabled(false);
+    }
+    this._ensureExplodeTool().setEnabled(active);
+    this._needsRender = true;
+    return active;
+  }
+
+  setExplodeSetting(key, value) {
+    this.explodeSettings = normalizeExplodeSettings({ ...this.explodeSettings, [key]: value });
+    this._ensureExplodeTool().setSettings(this.explodeSettings);
+  }
+
+  clearExplosions() { return this._ensureExplodeTool().clear(); }
+  getExplodeToolState() {
+    return this.explodeTool?.state() ?? {
+      enabled: false,
+      settings: { ...this.explodeSettings },
+      hasDamage: this.destructionField?.hasDamage?.() ?? false,
+      revision: this.destructionField?.revision ?? 0,
+    };
+  }
+  serializeDestruction() { return this.destructionField?.serialize({ jsonSafe: true }) ?? null; }
 
   // ------------------------------------------------------------ parameters
 
@@ -3974,6 +4056,8 @@ export class Engine {
 
     this._applyStudioAssemblyLayout(maxHeight);
     this._syncManualTerrainBounds();
+    const destructionBounds = this._creatorBounds();
+    this.destructionField?.setRegion(destructionBounds.origin, destructionBounds.span);
     this._refreshStudioChunkView();
     this._applyUniforms({ updatePlinth: false });
     this._minimapDirtyAt = performance.now();
@@ -4191,6 +4275,11 @@ export class Engine {
     u.uBoardHalf.value = size / 2;
     u.uChunkSize.value = p.chunkSize;
     this._applyTileUniforms();
+    if (this.destructionField) {
+      const bounds = this._creatorBounds();
+      this.destructionField.setRegion(bounds.origin, bounds.span);
+      this.destructionField.applyTo(u, this.worldMode === 'studio');
+    }
     u.uMoistScale.value = p.moistScale;
     u.uMoistBias.value = p.moistBias;
     u.uBiomeScale.value = p.biomeScale;
@@ -4619,6 +4708,7 @@ export class Engine {
       this.manualTerrain?.field?.revision ?? 0,
       this.manualTerrain?.surfaceField?.revision ?? 0,
       this.splineManager?.baker?.revision ?? 0,
+      this.destructionField?.revision ?? 0,
     ].join(',');
     return [
       this.worldMode,
@@ -7202,6 +7292,7 @@ export class Engine {
       }), this.noiseStack);
       this.cpuHeightSampler.setHeightProgram(this.worldMode === 'studio' && this.generationSource === 'graph' ? this._graphProgram : null);
       this.cpuHeightSampler.erosion = this.erosionField;
+      this.cpuHeightSampler.destruction = this.destructionField;
     }
     return this.cpuHeightSampler;
   }
@@ -8147,6 +8238,7 @@ export class Engine {
     this.worldMode = mode;
     this._cloudAdaptive?.suspend(performance.now(), 6000);
     this.uniforms.uInfiniteMode.value = mode === 'infinite' ? 1.0 : 0.0;
+    this.destructionField?.applyTo(this.uniforms, mode === 'studio');
     const tileDebugView = this.tileDebug?.view ?? 'off';
     this.uniforms.uTileDebugView.value = mode === 'studio'
       ? (tileDebugView === 'noise' ? 1
@@ -10000,6 +10092,9 @@ export class Engine {
     if (paint) data.paint = paint;
     const erosion = this.erosionField?.serialize({ jsonSafe: true });
     if (erosion) data.erosion = erosion;
+    const destruction = this.destructionField?.serialize({ jsonSafe: true });
+    if (destruction) data.destruction = destruction;
+    data.explodeSettings = { ...this.explodeSettings };
     return data;
   }
 
@@ -10091,6 +10186,19 @@ export class Engine {
     this.tiles = this.tileAssemblyShape === 'circle'
       ? this._circleTiles(this.circleRadiusCells)
       : this._sanitizeTiles(json?.tiles);
+    this.explodeTool?.dispose?.();
+    this.explodeTool = null;
+    if (this._explodeBuildingTimer) clearTimeout(this._explodeBuildingTimer);
+    this._explodeBuildingTimer = null;
+    this.explodeSettings = normalizeExplodeSettings(json?.explodeSettings);
+    if (this.destructionField) {
+      const bounds = this._creatorBounds();
+      this.destructionField.setRegion(bounds.origin, bounds.span, { reproject: false });
+      if (json?.destruction) this.destructionField.restore(json.destruction);
+      else this.destructionField.clear();
+      this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+    }
+    this.cb.onExplodeState?.(this.getExplodeToolState());
     this.paintMode?.setEnabled(false);
     // Project documents omit paint data when no stroke exists. Clear the
     // previous project's textures first so an unpainted project cannot inherit
@@ -10218,6 +10326,8 @@ export class Engine {
       paintBaseMode: this.paintMode?.state?.baseMode ?? 'generated',
       paintLayerOpacity: this.paintMode?.state?.layerOpacity ?? 1,
       erosionRev: this.erosionField?.revision ?? 0,
+      destruction: this.serializeDestruction(),
+      explodeSettings: { ...this.explodeSettings },
       tiles: this.tiles.map((t) => ({ ...t })),
       tileAssemblyShape: this.tileAssemblyShape,
       diskRadiusCells: this.circleRadiusCells,
@@ -10411,6 +10521,18 @@ export class Engine {
       this.erosionField.setEnabled(this.params.erosionEnabled === true);
       this.erosionField.applyTo(this.uniforms);
     }
+
+    // Explode tool deformation is an independent authored field. Keeping it in
+    // the normal history snapshot makes every click participate in the editor's
+    // existing Ctrl/Cmd+Z flow instead of creating a second undo system.
+    this.explodeSettings = normalizeExplodeSettings(snap.explodeSettings);
+    this.explodeTool?.setSettings(this.explodeSettings);
+    if (this.destructionField) {
+      if (snap.destruction) this.destructionField.restore(snap.destruction);
+      else this.destructionField.clear();
+      this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+    }
+    this.cb.onExplodeState?.(this.getExplodeToolState());
 
     this._pendingTerrainParams = { ...(snap.pendingTerrainParams || {}) };
     this._pendingNoiseStack = snap.pendingNoiseStack
@@ -11121,11 +11243,13 @@ export class Engine {
 
     this.paintMode?.update(dt);
     this.manualTerrain?.update(dt);
+    if (this.explodeTool?.update(dt)) this._needsRender = true;
     // Coalesce every brush stamp produced during this tick into one texture
     // version bump per changed map. This keeps pointer interpolation from
     // triggering several full DataTexture uploads before a single draw.
     this.paintMode?.flushUploads();
     this.manualTerrain?.flushUploads();
+    this.destructionField?.flushUploads();
     this.propsManager?.tickWind(now * 0.001, this.params);
     this.propsManager?.update({
       mode: this.worldMode,
@@ -11895,6 +12019,12 @@ export class Engine {
   dispose() {
     for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
     this.erosionField?.dispose();
+    this.explodeTool?.dispose?.();
+    this.explodeTool = null;
+    if (this._explodeBuildingTimer) clearTimeout(this._explodeBuildingTimer);
+    this._explodeBuildingTimer = null;
+    this.destructionField?.dispose();
+    this.destructionField = null;
     this._erosionWorker?.terminate();
     this._erosionWorker = null;
     if (this._disposed) return;

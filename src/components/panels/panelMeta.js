@@ -4,6 +4,7 @@ import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 // the startup bundle does not pull every settings panel into the landing page.
 export const PANEL_META = {
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
+  explode: { label: 'Explode', title: 'Explode', desc: 'Click the terrain to create permanent craters.', icon: PANEL_ICONS.explode, modes: ['studio'] },
   noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },
   world: { label: 'World', title: 'World', desc: 'Layout, tiles, chunking and grid.', icon: PANEL_ICONS.world },
   planet: {
@@ -32,7 +33,7 @@ export const PANEL_META = {
 
 // Shared left-toolbar order. Keep this list mode-agnostic: each mode filters
 // its available panels from the same sequence.
-export const PANEL_ORDER = ['terrain', 'noiseLayers', 'water', 'clouds', 'props', 'visuals', 'skybox', 'lighting', 'biomes', 'planet', 'splines', 'world', 'performance', 'debug'];
+export const PANEL_ORDER = ['terrain', 'explode', 'noiseLayers', 'water', 'clouds', 'props', 'visuals', 'skybox', 'lighting', 'biomes', 'planet', 'splines', 'world', 'performance', 'debug'];
 
 export function panelAvailable(id, worldMode) {
   const meta = PANEL_META[id];

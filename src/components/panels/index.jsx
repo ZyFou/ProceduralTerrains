@@ -169,6 +169,42 @@ function TerrainPanel({ ctx }) {
   );
 }
 
+const EXPLODE_SLIDERS = [
+  { key: 'radius', label: 'Radius', min: 0.5, max: 18, step: 0.1, digits: 1, unit: '%', info: 'Blast radius as a percentage of the bounded terrain size.' },
+  { key: 'strength', label: 'Strength', min: 0.1, max: 2, step: 0.01, digits: 2, info: 'Controls crater depth without changing its radius.' },
+  { key: 'rim', label: 'Raised Rim', min: 0, max: 1, step: 0.01, digits: 2, info: 'Pushes displaced terrain upward around the crater edge.' },
+  { key: 'falloff', label: 'Falloff', min: 0.1, max: 1, step: 0.01, digits: 2, info: 'Softens the transition between the blast and untouched terrain.' },
+  { key: 'scorch', label: 'Scorch', min: 0, max: 1, step: 0.01, digits: 2, info: 'Darkens and roughens the terrain around each impact.' },
+];
+
+function ExplodePanel({ ctx }) {
+  const state = ctx.explodeState ?? { settings: {}, hasDamage: false };
+  const settings = state.settings ?? {};
+  return (
+    <SidePanel title="Explode" description="Click directly on the terrain to create an explosion." onClose={ctx.onClose}>
+      <div className="settings-hint">Drag to orbit as usual. A click inside the orange target ring applies permanent terrain deformation.</div>
+      <SelectRow
+        label="Shape"
+        value={settings.shape ?? 'bowl'}
+        options={[
+          { value: 'bowl', label: 'Bowl' },
+          { value: 'punch', label: 'Deep Punch' },
+          { value: 'ragged', label: 'Ragged' },
+        ]}
+        onChange={(value) => ctx.onExplodeSetting?.('shape', value)}
+        info="Changes the crater profile while retaining the same blast radius."
+      />
+      {EXPLODE_SLIDERS.map((def) => (
+        <SliderCtl key={def.key} def={def} value={settings[def.key]} onChange={(value) => ctx.onExplodeSetting?.(def.key, value)} />
+      ))}
+      <ToggleRow label="Debris effect" value={settings.debris !== false} onChange={(value) => ctx.onExplodeSetting?.('debris', value)} />
+      <ToggleRow label="Sound" value={settings.sound !== false} onChange={(value) => ctx.onExplodeSetting?.('sound', value)} />
+      <ToggleRow label="Camera shake" value={settings.cameraShake !== false} onChange={(value) => ctx.onExplodeSetting?.('cameraShake', value)} />
+      <button type="button" className="action-btn danger" disabled={!state.hasDamage} onClick={ctx.onClearExplosions}>Clear all explosions</button>
+    </SidePanel>
+  );
+}
+
 function WorldPanel({ ctx }) {
   return (
     <SidePanel title="World" description="Layout, tiles, chunking and grid." onClose={ctx.onClose}>
@@ -1031,7 +1067,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
-  terrain: TerrainPanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
+  terrain: TerrainPanel, explode: ExplodePanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, visuals: VisualsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,
   splines: ({ ctx }) => <SplinesPanel ctx={ctx} />, history: ({ ctx }) => <HistoryPanel ctx={ctx} />,
