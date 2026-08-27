@@ -1655,6 +1655,7 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .lp-node-color-select { height: 30px; display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--bg-control); }
 .lp-node-color-select i { flex: none; width: 32px; height: 8px; border-radius: 4px; box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
 .lp-node-color-select select { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: 600 10px var(--font); cursor: var(--cursor-pointer); }
+.lp-node-color-select select option { background: var(--bg-panel-soft); color: var(--text-main); }
 
 /* ---- Footer ---- */
 .lp-footer {
