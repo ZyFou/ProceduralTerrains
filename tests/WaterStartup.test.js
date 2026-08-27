@@ -913,6 +913,104 @@ describe('water startup shaders', () => {
     }
   });
 
+  it('renders the realistic material as soon as an async mode switch completes', () => {
+    const params = {
+      octaves: 5,
+      seaLevel: 40,
+      waterEnabled: true,
+      waterMode: 'realistic',
+    };
+    const material = { version: 0 };
+    const engine = {
+      params,
+      worldMode: 'studio',
+      water: null,
+      waterMaterial: null,
+      perf: {},
+      _needsRender: false,
+      compileWaterMaterialsAsync: vi.fn((_materials, onSwap) => {
+        onSwap();
+        return Promise.resolve(true);
+      }),
+    };
+    const waterSystem = Object.create(WaterSystem.prototype);
+    Object.assign(waterSystem, {
+      engine,
+      _disposed: false,
+      _effectiveMode: 'realistic',
+      _usingRealistic: true,
+      _realisticStudio: material,
+      _realisticInfinite: null,
+      _realisticAttached: false,
+      _waterCompileGen: 0,
+      _waterCompilePending: false,
+      _waterCompileRetryTimer: null,
+      _waterCompileRetryCount: 0,
+      _waterCompileFailed: false,
+      _ensureRealisticStudio: vi.fn(),
+      _attachRealisticMaterials: vi.fn(),
+      _applyVisibility: vi.fn(),
+      _applyUniforms: vi.fn(),
+      _applyDebug: vi.fn(),
+      _updateBoundsHelper: vi.fn(),
+      applyPerf: vi.fn(),
+    });
+
+    waterSystem._swapMaterials(params, 'studio');
+
+    expect(waterSystem._attachRealisticMaterials).toHaveBeenCalledTimes(1);
+    expect(engine._needsRender).toBe(true);
+  });
+
+  it('starts the requested water warmup when mode changes while deferred', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      params: {
+        autoUpdate: true,
+        waterEnabled: true,
+        waterMode: 'legacy',
+      },
+      _pendingTerrainParams: {},
+      _waterDeferred: true,
+      _waterWarmPromise: null,
+      cb: {
+        onParams: vi.fn(),
+      },
+      _warmDeferredWater: vi.fn(),
+      _afterParamChange: vi.fn(),
+    });
+
+    engine.setParam('waterMode', 'realistic');
+
+    expect(engine._warmDeferredWater).toHaveBeenCalledTimes(1);
+    expect(engine._afterParamChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts deferred water after an in-flight shader warmup changes mode', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      params: {
+        autoUpdate: true,
+        waterEnabled: true,
+        waterMode: 'legacy',
+      },
+      _pendingTerrainParams: {},
+      _waterDeferred: true,
+      _waterWarmPromise: Promise.resolve(false),
+      _waterWarmRestartPending: false,
+      cb: {
+        onParams: vi.fn(),
+      },
+      _warmDeferredWater: vi.fn(),
+      _afterParamChange: vi.fn(),
+    });
+
+    engine.setParam('waterMode', 'realistic');
+
+    expect(engine._waterWarmRestartPending).toBe(true);
+    expect(engine._warmDeferredWater).not.toHaveBeenCalled();
+  });
+
 
   it('does not let unrelated background compiles block a ready project transition', async () => {
     const engine = Object.create(Engine.prototype);

@@ -2444,8 +2444,15 @@ export class Engine {
       return;
     }
 
-    if (key === 'waterEnabled' && value && this._waterDeferred) {
-      this._warmDeferredWater();
+    const shouldWarmDeferredWater = this._waterDeferred
+      && ((key === 'waterEnabled' && value)
+        || (key === 'waterMode' && value !== 'off'));
+    if (shouldWarmDeferredWater) {
+      // A mode change can land while the startup material is still linking.
+      // Let that exact job finish, then warm the newly requested mode instead
+      // of leaving water deferred until another settings change happens.
+      if (this._waterWarmPromise) this._waterWarmRestartPending = true;
+      else this._warmDeferredWater();
     }
     if (key === 'octaves' && this.worldMode !== 'planet') {
       this._afterParamChange(false, false);

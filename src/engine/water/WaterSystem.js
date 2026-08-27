@@ -557,6 +557,10 @@ export class WaterSystem {
         this._applyDebug(currentParams);
         this._updateBoundsHelper(currentParams);
         this.applyPerf(eng.perf);
+        // Studio renders on demand. The settings change painted the legacy
+        // fallback before this async callback ran, so explicitly request the
+        // first frame that uses the newly attached realistic material.
+        eng._needsRender = true;
       });
       Promise.resolve(compileJob).then((ready) => {
         if (this._disposed || gen !== this._waterCompileGen || ready !== false) return;
