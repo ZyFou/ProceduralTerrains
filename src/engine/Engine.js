@@ -4575,6 +4575,7 @@ export class Engine {
     const previousMip = renderer.getActiveMipmapLevel?.() ?? 0;
     const previousXr = renderer.xr?.enabled;
     let pending = [];
+    const beforePrograms = this._snapshotMaterialPrograms([pass.material], renderer.properties);
     const startedAt = performance.now();
     try {
       if (pass.disableXr && renderer.xr) renderer.xr.enabled = false;
@@ -4592,7 +4593,12 @@ export class Engine {
       if (renderer.xr && previousXr !== undefined) renderer.xr.enabled = previousXr;
     }
     const syncCompileMs = performance.now() - startedAt;
-    const result = await this._waitForMaterialsReady(pending, { timeoutMs });
+    const programsByMaterial = this._captureCompiledPrograms(
+      pending,
+      beforePrograms,
+      renderer.properties,
+    );
+    const result = await this._waitForMaterialsReady(pending, { timeoutMs, programsByMaterial });
     return { ...result, syncCompileMs };
   }
 
@@ -4611,6 +4617,9 @@ export class Engine {
     return {
       ready: results.length === passes.length && results.every((result) => result?.ready === true),
       timedOut: results.some((result) => result?.timedOut === true),
+      failed: results.some((result) => result?.failed === true),
+      code: results.find((result) => result?.code)?.code,
+      failures: results.flatMap((result) => result?.failures || []),
       pendingCount: results.reduce((sum, result) => sum + (result?.pendingCount || 0), 0),
       waitMs: results.reduce((sum, result) => sum + (result?.waitMs || 0), 0),
       syncCompileMs: results.reduce((sum, result) => sum + (result?.syncCompileMs || 0), 0),
@@ -4977,7 +4986,7 @@ export class Engine {
   }
 
   _compileMaterialDescriptor(material) {
-    let role = material?.name || material?.type || 'material';
+    let role = material?.userData?.renderRole || material?.name || material?.type || 'material';
     const requestedWater = this.waterSystem?.getRequestedMaterial?.(this.worldMode);
     if (material === this.terrainMaterial) {
       role = `terrain:${material.userData?.terrainVariant || 'unknown'}`;
@@ -5002,9 +5011,372 @@ export class Engine {
     return {
       role,
       id: material?.id ?? null,
+      materialName: material?.name || '',
+      materialType: material?.type || material?.constructor?.name || 'material',
       vertexChars: material?.vertexShader?.length ?? 0,
       fragmentChars: material?.fragmentShader?.length ?? 0,
     };
+  }
+
+  _materialProgramSet(material, properties = this.renderer?.properties) {
+    const materialProperties = properties?.get?.(material);
+    const programs = new Set();
+    try {
+      if (materialProperties?.programs?.values) {
+        for (const program of materialProperties.programs.values()) {
+          if (program) programs.add(program);
+        }
+      }
+    } catch {
+      // A renderer may be disposing its property map. The current program is
+      // still the best available signal and the lifecycle checks below decide
+      // whether the operation was aborted.
+    }
+    const current = materialProperties?.currentProgram;
+    if (current) programs.add(current);
+    return programs;
+  }
+
+  _snapshotMaterialPrograms(materials, properties = this.renderer?.properties) {
+    const snapshot = new Map();
+    for (const material of new Set(materials || [])) {
+      if (material) snapshot.set(material, this._materialProgramSet(material, properties));
+    }
+    return snapshot;
+  }
+
+  _captureCompiledPrograms(materials, before, properties = this.renderer?.properties) {
+    const captured = new Map();
+    for (const material of new Set(materials || [])) {
+      if (!material) continue;
+      const materialProperties = properties?.get?.(material);
+      const previous = before?.get?.(material) || new Set();
+      const exact = [];
+      for (const program of this._materialProgramSet(material, properties)) {
+        if (!previous.has(program)) exact.push(program);
+      }
+      // On a cache hit there is no new wrapper. currentProgram is the exact
+      // variant selected by this compile submission and must still be checked.
+      const current = materialProperties?.currentProgram;
+      if (current && !exact.includes(current)) exact.push(current);
+      captured.set(material, exact);
+    }
+    return captured;
+  }
+
+  _compiledProgramsForMaterial(material, properties = this.renderer?.properties, exactPrograms = null) {
+    if (exactPrograms?.has?.(material)) {
+      const exact = exactPrograms.get(material) || [];
+      if (exact.length) return exact;
+    }
+    // Some transparent/custom material paths publish currentProgram on a
+    // later poll. An empty immediate capture must not become authoritative.
+    const current = properties?.get?.(material)?.currentProgram;
+    return current ? [current] : [];
+  }
+
+  _shaderSourceHash(material, program) {
+    const source = String(program?.cacheKey
+      || `${material?.vertexShader || ''}\u0000${material?.fragmentShader || ''}`);
+    let hash = 2166136261;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = Math.imul(hash ^ source.charCodeAt(i), 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+
+  _shaderSamplerDeclarations(gl, shader) {
+    if (!this._shaderHandleIsLive(gl, shader)
+        || !gl?.getShaderSource || gl?.isContextLost?.()) return null;
+    try {
+      const source = gl.getShaderSource(shader) || '';
+      let count = 0;
+      const declaration = /\buniform\s+(?:lowp\s+|mediump\s+|highp\s+)?(?:[iu]?sampler\w*)\s+[A-Za-z_]\w*(?:\s*\[\s*(\d+)\s*\])?\s*;/g;
+      for (const match of source.matchAll(declaration)) count += Number(match[1] || 1);
+      return count;
+    } catch {
+      return null;
+    }
+  }
+
+  _shaderHandleIsLive(gl, shader) {
+    if (!shader || gl?.isContextLost?.()) return false;
+    if (!gl?.isShader) return true;
+    try { return gl.isShader(shader) === true; } catch { return false; }
+  }
+
+  _releaseFailedShaderHandles(program, gl) {
+    if (!program || !gl?.deleteShader || gl?.isContextLost?.()) return;
+    if (!this._releasedFailedShaderHandles) this._releasedFailedShaderHandles = new WeakSet();
+    if (this._releasedFailedShaderHandles.has(program)) return;
+    this._releasedFailedShaderHandles.add(program);
+    for (const shader of [program.vertexShader, program.fragmentShader]) {
+      if (!this._shaderHandleIsLive(gl, shader)) continue;
+      try { gl.deleteShader(shader); } catch { /* ignore driver cleanup errors */ }
+    }
+  }
+
+  _activeShaderSamplers(gl, rawProgram) {
+    if (!rawProgram || gl?.isContextLost?.()
+        || !gl?.getProgramParameter || !gl?.getActiveUniform
+        || gl.ACTIVE_UNIFORMS == null) return null;
+    const samplerTypes = new Set([
+      'SAMPLER_2D', 'SAMPLER_CUBE', 'SAMPLER_3D', 'SAMPLER_2D_SHADOW',
+      'SAMPLER_2D_ARRAY', 'SAMPLER_2D_ARRAY_SHADOW', 'SAMPLER_CUBE_SHADOW',
+      'INT_SAMPLER_2D', 'INT_SAMPLER_3D', 'INT_SAMPLER_CUBE', 'INT_SAMPLER_2D_ARRAY',
+      'UNSIGNED_INT_SAMPLER_2D', 'UNSIGNED_INT_SAMPLER_3D',
+      'UNSIGNED_INT_SAMPLER_CUBE', 'UNSIGNED_INT_SAMPLER_2D_ARRAY',
+    ].map((name) => gl[name]).filter((value) => value != null));
+    try {
+      const uniformCount = Number(gl.getProgramParameter(rawProgram, gl.ACTIVE_UNIFORMS)) || 0;
+      const uniforms = [];
+      let count = 0;
+      for (let index = 0; index < uniformCount; index += 1) {
+        if (gl?.isContextLost?.()) return null;
+        const info = gl.getActiveUniform(rawProgram, index);
+        if (!info || !samplerTypes.has(info.type)) continue;
+        const size = Math.max(1, Number(info.size) || 1);
+        count += size;
+        uniforms.push({ name: info.name, size, type: info.type });
+      }
+      return { count, uniforms };
+    } catch {
+      return null;
+    }
+  }
+
+  _shaderFailureDiagnostics(material, program, gl, code, message, cause = null, {
+    linked = null,
+    captureShaderLogs = false,
+  } = {}) {
+    const descriptor = this._compileMaterialDescriptor(material);
+    const rawProgram = program?.program;
+    const diagnostics = program?.diagnostics;
+    const read = (fn, fallback = '') => {
+      if (gl?.isContextLost?.()) return fallback;
+      try { return fn() ?? fallback; } catch { return fallback; }
+    };
+    const programLog = diagnostics
+      ? diagnostics.programLog || ''
+      : (rawProgram && gl?.getProgramInfoLog
+        ? read(() => gl.getProgramInfoLog(rawProgram), '')
+        : '');
+    const vertexLive = this._shaderHandleIsLive(gl, program?.vertexShader);
+    const fragmentLive = this._shaderHandleIsLive(gl, program?.fragmentShader);
+    const vertexLog = diagnostics
+      ? diagnostics.vertexShader?.log || ''
+      : (captureShaderLogs && vertexLive && gl?.getShaderInfoLog
+        ? read(() => gl.getShaderInfoLog(program.vertexShader), '')
+        : '');
+    const fragmentLog = diagnostics
+      ? diagnostics.fragmentShader?.log || ''
+      : (captureShaderLogs && fragmentLive && gl?.getShaderInfoLog
+        ? read(() => gl.getShaderInfoLog(program.fragmentShader), '')
+        : '');
+    const compileStatus = (shader) => (
+      captureShaderLogs && this._shaderHandleIsLive(gl, shader)
+        && gl?.getShaderParameter && gl?.COMPILE_STATUS != null
+        ? read(() => Boolean(gl.getShaderParameter(shader, gl.COMPILE_STATUS)), null)
+        : null
+    );
+    const limit = (name) => (
+      gl?.getParameter && gl?.[name] != null
+        ? read(() => gl.getParameter(gl[name]), null)
+        : null
+    );
+    return {
+      ...descriptor,
+      code,
+      message,
+      programId: program?.id ?? null,
+      sourceHash: this._shaderSourceHash(material, program),
+      linked,
+      runnable: diagnostics?.runnable ?? null,
+      programLog: String(programLog || '').trim(),
+      vertexLog: String(vertexLog || '').trim(),
+      fragmentLog: String(fragmentLog || '').trim(),
+      vertexCompiled: compileStatus(program?.vertexShader),
+      fragmentCompiled: compileStatus(program?.fragmentShader),
+      samplerDeclarations: {
+        vertex: captureShaderLogs
+          ? this._shaderSamplerDeclarations(gl, program?.vertexShader)
+          : null,
+        fragment: captureShaderLogs
+          ? this._shaderSamplerDeclarations(gl, program?.fragmentShader)
+          : null,
+      },
+      samplerLimits: {
+        vertex: limit('MAX_VERTEX_TEXTURE_IMAGE_UNITS'),
+        fragment: limit('MAX_TEXTURE_IMAGE_UNITS'),
+        combined: limit('MAX_COMBINED_TEXTURE_IMAGE_UNITS'),
+      },
+      contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+      cause: cause?.message || null,
+    };
+  }
+
+  /**
+   * Three r185's WebGLProgram.isReady() reports KHR parallel-compile
+   * completion only. It does not check LINK_STATUS and, without the extension,
+   * returns true immediately. This gate performs that missing health check and
+   * executes Three's lazy uniform/attribute reflection before any real draw.
+   */
+  _inspectCompiledProgram(material, program, renderer = this.renderer, gl = renderer?.getContext?.()) {
+    if (!program) return { state: 'pending' };
+    if (this._disposed || renderer !== this.renderer
+        || this._contextLost || gl?.isContextLost?.()) {
+      return {
+        state: 'aborted',
+        contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+      };
+    }
+
+    let complete = false;
+    try {
+      complete = program.isReady?.() === true;
+    } catch (cause) {
+      if (this._disposed || renderer !== this.renderer
+          || this._contextLost || gl?.isContextLost?.()) {
+        return {
+          state: 'aborted',
+          contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+        };
+      }
+      const failure = this._shaderFailureDiagnostics(
+        material,
+        program,
+        gl,
+        'SHADER_COMPLETION_CHECK_FAILED',
+        'Shader completion status could not be read',
+        cause,
+      );
+      return { state: 'failed', failure };
+    }
+    if (!complete) return { state: 'pending' };
+
+    if (!this._shaderProgramHealth) this._shaderProgramHealth = new WeakMap();
+    const cached = this._shaderProgramHealth.get(program);
+    if (cached?.state === 'failed') {
+      return {
+        ...cached,
+        failure: {
+          ...cached.failure,
+          ...this._compileMaterialDescriptor(material),
+        },
+      };
+    }
+    if (cached) return cached;
+
+    const fail = (code, message, cause = null, diagnosticsOptions = {}) => {
+      const failure = this._shaderFailureDiagnostics(
+        material,
+        program,
+        gl,
+        code,
+        message,
+        cause,
+        diagnosticsOptions,
+      );
+      const result = { state: 'failed', failure };
+      this._shaderProgramHealth.set(program, result);
+      console.error(
+        `[shader failure] code=${code} role=${failure.role}`
+        + ` material=${failure.id ?? 'unknown'} program=${failure.programId ?? 'unknown'}`,
+        failure,
+      );
+      return result;
+    };
+
+    const rawProgram = program.program;
+    if (!rawProgram || !gl?.getProgramParameter || gl.LINK_STATUS == null) {
+      return fail('SHADER_PROGRAM_MISSING', 'Compiled shader program is unavailable for link verification');
+    }
+
+    let linked = false;
+    try {
+      linked = gl.getProgramParameter(rawProgram, gl.LINK_STATUS) === true;
+    } catch (cause) {
+      if (this._disposed || renderer !== this.renderer
+          || this._contextLost || gl?.isContextLost?.()) {
+        return {
+          state: 'aborted',
+          contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+        };
+      }
+      return fail('SHADER_LINK_CHECK_FAILED', 'Shader link status could not be read', cause);
+    }
+    if (this._disposed || renderer !== this.renderer
+        || this._contextLost || gl?.isContextLost?.()) {
+      return {
+        state: 'aborted',
+        contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+      };
+    }
+    if (!linked) {
+      const result = fail(
+        'SHADER_LINK_FAILED',
+        'Shader program failed to link',
+        null,
+        { linked: false, captureShaderLogs: true },
+      );
+      this._releaseFailedShaderHandles(program, gl);
+      return result;
+    }
+
+    const activeSamplers = this._activeShaderSamplers(gl, rawProgram);
+    if (this._disposed || renderer !== this.renderer
+        || this._contextLost || gl?.isContextLost?.()) {
+      return {
+        state: 'aborted',
+        contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+      };
+    }
+    try {
+      // onFirstUse() performs Three's own diagnostics and both reflection
+      // passes. Calling both accessors is harmless after the first one and
+      // makes the intent explicit for future Three upgrades.
+      program.getUniforms?.();
+      program.getAttributes?.();
+    } catch (cause) {
+      if (this._disposed || renderer !== this.renderer
+          || this._contextLost || gl?.isContextLost?.()) {
+        return {
+          state: 'aborted',
+          contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+        };
+      }
+      return fail(
+        'SHADER_PROGRAM_PREPARE_FAILED',
+        'Shader linked but its uniforms or attributes could not be prepared',
+        cause,
+        { linked: true },
+      );
+    }
+    if (this._disposed || renderer !== this.renderer
+        || this._contextLost || gl?.isContextLost?.()) {
+      return {
+        state: 'aborted',
+        contextLost: Boolean(this._contextLost || gl?.isContextLost?.()),
+      };
+    }
+    if (program.diagnostics?.runnable === false) {
+      return fail(
+        'SHADER_PROGRAM_PREPARE_FAILED',
+        'Three.js marked the linked shader as non-runnable',
+        null,
+        { linked: true },
+      );
+    }
+
+    const result = {
+      state: 'ready',
+      linked: true,
+      programId: program.id ?? null,
+      sourceHash: this._shaderSourceHash(material, program),
+      activeSamplers,
+    };
+    this._shaderProgramHealth.set(program, result);
+    return result;
   }
 
   async _compileMaterialVariants(mats, {
@@ -5051,18 +5423,23 @@ export class Engine {
       let done = 0;
       const results = [];
       for (const m of list) {
-        results.push(await this._compileMaterialVariants([m], {
+        const result = await this._compileMaterialVariants([m], {
           canvasOnly,
           timeoutMs,
           onProgress: (stepDone) => onProgress?.(done + stepDone, total),
           renderTarget,
-        }));
+        });
+        results.push(result);
         done += passesPerMaterial;
+        if (result?.ready !== true) break;
         await yieldTask();
       }
       return {
         ready: results.every((result) => result.ready),
         timedOut: results.some((result) => result.timedOut),
+        failed: results.some((result) => result.failed),
+        code: results.find((result) => result.code)?.code,
+        failures: results.flatMap((result) => result.failures || []),
         materialCount: list.length,
         pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
         waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
@@ -5077,6 +5454,7 @@ export class Engine {
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
     const previousTarget = renderer.getRenderTarget();
+    const beforePrograms = this._snapshotMaterialPrograms(list, renderer.properties);
     let pending;
     try {
       renderer.setRenderTarget(renderTarget);
@@ -5086,7 +5464,15 @@ export class Engine {
     }
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
-    const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
+    const canvasPrograms = this._captureCompiledPrograms(
+      pending,
+      beforePrograms,
+      renderer.properties,
+    );
+    const canvasResult = await this._waitForMaterialsReady(pending, {
+      ...(waitOpts || {}),
+      programsByMaterial: canvasPrograms,
+    });
     const asyncWaitMs = performance.now() - waitStartedAt;
     if (this._disposed || this.renderer !== renderer || canvasResult?.aborted) {
       return {
@@ -5121,18 +5507,27 @@ export class Engine {
     }
     onProgress?.(list.length, total);
 
-    if (canvasOnly) {
+    if (canvasOnly || canvasResult.ready !== true) {
       return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
     }
 
     this.underwater._ensureTarget(renderer);
     renderer.setRenderTarget(this.underwater._rt);
     const rtCompileStartedAt = performance.now();
+    const beforeRtPrograms = this._snapshotMaterialPrograms(list, renderer.properties);
     const pendingRt = renderer.compile(group, this.camera, this.scene);
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
     renderer.setRenderTarget(null);
     const rtWaitStartedAt = performance.now();
-    const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
+    const rtPrograms = this._captureCompiledPrograms(
+      pendingRt,
+      beforeRtPrograms,
+      renderer.properties,
+    );
+    const rtResult = await this._waitForMaterialsReady(pendingRt, {
+      ...(waitOpts || {}),
+      programsByMaterial: rtPrograms,
+    });
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
     console.info(
       `[shader compile] pass=underwater`
@@ -5147,6 +5542,9 @@ export class Engine {
     return {
       ready: canvasResult.ready && rtResult.ready,
       timedOut: canvasResult.timedOut || rtResult.timedOut,
+      failed: Boolean(canvasResult.failed || rtResult.failed),
+      code: canvasResult.code || rtResult.code,
+      failures: [...(canvasResult.failures || []), ...(rtResult.failures || [])],
       materialCount: list.length,
       pendingCount: canvasResult.pendingCount + rtResult.pendingCount,
       waitMs: canvasResult.waitMs + rtResult.waitMs,
@@ -5171,6 +5569,7 @@ export class Engine {
     group.add(probe);
     const previousTarget = renderer.getRenderTarget();
     const startedAt = performance.now();
+    const beforePrograms = this._snapshotMaterialPrograms([material], renderer.properties);
     let pending;
     try {
       renderer.setRenderTarget(renderTarget);
@@ -5179,7 +5578,12 @@ export class Engine {
       renderer.setRenderTarget(previousTarget);
     }
     const syncCompileMs = performance.now() - startedAt;
-    const result = await this._waitForMaterialsReady(pending, { timeoutMs });
+    const programsByMaterial = this._captureCompiledPrograms(
+      pending,
+      beforePrograms,
+      renderer.properties,
+    );
+    const result = await this._waitForMaterialsReady(pending, { timeoutMs, programsByMaterial });
     return { ...result, syncCompileMs };
   }
   /**
@@ -5187,9 +5591,10 @@ export class Engine {
    * compileAsync throwing when currentProgram is still undefined (common for
    * transparent DoubleSide materials mid-prepare).
    */
-  _waitForMaterialsReady(materials, { timeoutMs = 45000 } = {}) {
+  _waitForMaterialsReady(materials, { timeoutMs = 45000, programsByMaterial = null } = {}) {
     const pending = new Set(materials);
     const readyTimeline = [];
+    const failures = [];
     const renderer = this.renderer;
     if (this._disposed || !renderer) {
       return Promise.resolve({
@@ -5208,9 +5613,11 @@ export class Engine {
         resolve({
           ready: true,
           timedOut: false,
+          failed: false,
           pendingCount: 0,
           waitMs: 0,
           readyTimeline,
+          failures,
         });
         return;
       }
@@ -5230,25 +5637,93 @@ export class Engine {
           return;
         }
 
-        pending.forEach((material) => {
-          const program = props.get(material)?.currentProgram;
-          if (program?.isReady?.()) {
+        let aborted = null;
+        for (const material of [...pending]) {
+          const programs = this._compiledProgramsForMaterial(
+            material,
+            props,
+            programsByMaterial,
+          );
+          if (!programs.length) continue;
+          let materialReady = true;
+          const programHealth = [];
+          for (const program of programs) {
+            const health = this._inspectCompiledProgram(material, program, renderer, gl);
+            if (health.state === 'aborted') {
+              aborted = health;
+              materialReady = false;
+              break;
+            }
+            if (health.state === 'failed') {
+              failures.push({
+                ...health.failure,
+                readyMs: performance.now() - start,
+              });
+              pending.delete(material);
+              materialReady = false;
+              break;
+            }
+            if (health.state !== 'ready') materialReady = false;
+            else programHealth.push(health);
+          }
+          if (aborted) break;
+          if (materialReady) {
             pending.delete(material);
             readyTimeline.push({
               ...this._compileMaterialDescriptor(material),
+              programCount: programs.length,
+              activeSamplers: programHealth.reduce(
+                (max, health) => Math.max(max, health.activeSamplers?.count || 0),
+                0,
+              ),
+              programs: programHealth.map((health) => ({
+                programId: health.programId,
+                sourceHash: health.sourceHash,
+                activeSamplers: health.activeSamplers,
+              })),
               readyMs: performance.now() - start,
             });
           }
-        });
+        }
 
         const waitMs = performance.now() - start;
+        if (aborted) {
+          resolve({
+            ready: false,
+            timedOut: false,
+            failed: false,
+            aborted: true,
+            contextLost: aborted.contextLost || false,
+            pendingCount: pending.size,
+            waitMs,
+            readyTimeline,
+            failures,
+          });
+          return;
+        }
+        if (failures.length) {
+          resolve({
+            ready: false,
+            timedOut: false,
+            failed: true,
+            code: failures[0].code,
+            failureCount: failures.length,
+            failures,
+            pendingCount: pending.size,
+            waitMs,
+            readyTimeline,
+          });
+          return;
+        }
         if (!pending.size) {
           resolve({
             ready: true,
             timedOut: false,
+            failed: false,
             pendingCount: 0,
             waitMs,
             readyTimeline,
+            failures,
           });
           return;
         }
@@ -5257,9 +5732,11 @@ export class Engine {
           resolve({
             ready: false,
             timedOut: true,
+            failed: false,
             pendingCount: pending.size,
             waitMs,
             readyTimeline,
+            failures,
           });
           return;
         }
@@ -5353,6 +5830,7 @@ export class Engine {
 
     const prevTarget = renderTarget ? this.renderer.getRenderTarget() : null;
     const allPending = new Set();
+    const programsByMaterial = new Map();
     for (const { material, source, topology } of variants.values()) {
       if (this._disposed) break;
       const group = new THREE.Group();
@@ -5368,14 +5846,31 @@ export class Engine {
       probe.castShadow = !!source?.castShadow;
       probe.receiveShadow = !!source?.receiveShadow;
       group.add(probe);
+      const beforePrograms = this._snapshotMaterialPrograms(
+        [material],
+        this.renderer.properties,
+      );
       if (renderTarget) this.renderer.setRenderTarget(renderTarget);
       const pending = this.renderer.compile(group, this.camera, this.scene);
       if (renderTarget) this.renderer.setRenderTarget(prevTarget);
       pending.forEach((m) => allPending.add(m));
+      const captured = this._captureCompiledPrograms(
+        pending,
+        beforePrograms,
+        this.renderer.properties,
+      );
+      for (const [compiledMaterial, programs] of captured) {
+        const exact = programsByMaterial.get(compiledMaterial) || [];
+        for (const program of programs) if (!exact.includes(program)) exact.push(program);
+        programsByMaterial.set(compiledMaterial, exact);
+      }
       await yieldTask();
     }
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
-    return this._waitForMaterialsReady(allPending, waitOpts);
+    return this._waitForMaterialsReady(allPending, {
+      ...(waitOpts || {}),
+      programsByMaterial,
+    });
   }
 
   /** True when the object (and its whole parent chain) is visible. */
@@ -5439,6 +5934,14 @@ export class Engine {
       reason,
       ready: result.ready === true,
       timedOut: result.timedOut === true,
+      failed: result.failed === true,
+      code: result.code || null,
+      failures: (result.failures || []).map((failure) => ({
+        code: failure.code,
+        role: failure.role,
+        programId: failure.programId,
+        sourceHash: failure.sourceHash,
+      })),
       materialCount: result.materialCount ?? null,
       syncCompileMs: Number.isFinite(result.syncCompileMs) ? Math.round(result.syncCompileMs * 100) / 100 : null,
       asyncWaitMs: Number.isFinite(result.asyncWaitMs) ? Math.round(result.asyncWaitMs * 100) / 100 : null,
@@ -5752,8 +6255,13 @@ export class Engine {
     }));
     context.assertCurrent();
     if (result?.ready !== true) {
-      const error = new Error('Final shader graph did not become ready');
-      error.code = result?.timedOut ? 'SHADER_TIMEOUT' : 'SHADER_COMPILE_FAILED';
+      const failure = result?.failures?.[0];
+      const error = new Error(failure
+        ? `Final shader could not be prepared (${failure.role})`
+        : 'Final shader graph did not become ready');
+      error.code = result?.code
+        || (result?.timedOut ? 'SHADER_TIMEOUT' : 'SHADER_COMPILE_FAILED');
+      error.shaderFailures = (result?.failures || []).map((entry) => ({ ...entry }));
       throw error;
     }
     if (context.waterRequired) {
@@ -6238,10 +6746,21 @@ export class Engine {
    * this avoids — so the upgrade paths wait patiently here instead.
    */
   async _pollProgramReady(mat, { tries = 1200, intervalMs = 250 } = {}) {
+    const renderer = this.renderer;
+    const gl = renderer?.getContext?.();
     for (let i = 0; i < tries; i++) {
-      if (this._disposed) return false;
-      const prog = this.renderer.properties.get(mat)?.currentProgram;
-      if (prog?.isReady?.()) return true;
+      if (this._disposed || !renderer || this.renderer !== renderer
+          || this._contextLost || gl?.isContextLost?.()) return false;
+      const programs = this._compiledProgramsForMaterial(mat, renderer.properties);
+      if (programs.length) {
+        let allReady = true;
+        for (const program of programs) {
+          const health = this._inspectCompiledProgram(mat, program, renderer, gl);
+          if (health.state === 'failed' || health.state === 'aborted') return false;
+          if (health.state !== 'ready') allReady = false;
+        }
+        if (allReady) return true;
+      }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     return false;

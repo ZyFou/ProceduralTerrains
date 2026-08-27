@@ -472,12 +472,24 @@ describe('water startup shaders', () => {
   it('reports readiness and timeout as distinct outcomes', async () => {
     const engine = Object.create(Engine.prototype);
     const readyMaterial = {};
+    const rawProgram = {};
+    const gl = {
+      LINK_STATUS: 0x8B82,
+      isContextLost: () => false,
+      getProgramParameter: (program, parameter) => program === rawProgram && parameter === 0x8B82,
+    };
     engine.renderer = {
       properties: {
         get: (material) => material === readyMaterial
-          ? { currentProgram: { isReady: () => true } }
+          ? { currentProgram: {
+            program: rawProgram,
+            isReady: () => true,
+            getUniforms: () => ({}),
+            getAttributes: () => ({}),
+          } }
           : {},
       },
+      getContext: () => gl,
     };
 
     await expect(engine._waitForMaterialsReady(new Set([readyMaterial]), { timeoutMs: 10 }))
@@ -494,6 +506,7 @@ describe('water startup shaders', () => {
     const previousTarget = {};
     const sceneTarget = {};
     const material = new THREE.ShaderMaterial();
+    const rawProgram = {};
     let activeTarget = previousTarget;
 
     Object.assign(engine, {
@@ -508,9 +521,19 @@ describe('water startup shaders', () => {
           return new Set([material]);
         }),
         properties: {
-          get: () => ({ currentProgram: { isReady: () => true } }),
+          get: () => ({ currentProgram: {
+            program: rawProgram,
+            isReady: () => true,
+            getUniforms: () => ({}),
+            getAttributes: () => ({}),
+          } }),
         },
-        getContext: () => ({ getExtension: () => null }),
+        getContext: () => ({
+          LINK_STATUS: 0x8B82,
+          isContextLost: () => false,
+          getProgramParameter: (program, parameter) => program === rawProgram && parameter === 0x8B82,
+          getExtension: () => null,
+        }),
       },
     });
 

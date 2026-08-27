@@ -834,6 +834,8 @@ export function createRealisticWaterMaterial(
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
+  mat.userData.renderRole = 'water:studio:realistic';
+  mat.name = mat.userData.renderRole;
   return mat;
 }
 
@@ -855,6 +857,8 @@ export function createInfiniteRealisticWaterMaterial(
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
+  mat.userData.renderRole = 'water:infinite:realistic';
+  mat.name = mat.userData.renderRole;
   mat.uniforms.uWaterFadeStart.value = 2000.0;
   mat.uniforms.uWaterFadeEnd.value = 2500.0;
   return mat;

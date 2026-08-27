@@ -1334,6 +1334,8 @@ export function createTerrainMaterial(
   });
   material.userData.terrainVariant = variant;
   material.userData.heightProgramSig = stackGLSL.sig;
+  material.userData.renderRole = `terrain:${variant}`;
+  material.name = material.userData.renderRole;
   return material;
 }
 
@@ -1345,7 +1347,10 @@ export function createInfiniteTerrainMaterial(
 ) {
   // A distinct material object keeps mode ownership/disposal simple, while the
   // identical source + defines let Three.js reuse Tile's compiled GPU program.
-  return createTerrainMaterial(uniforms, octaves, stackGLSL, options);
+  const material = createTerrainMaterial(uniforms, octaves, stackGLSL, options);
+  material.userData.renderRole = `infinite-terrain:${material.userData.terrainVariant}`;
+  material.name = material.userData.renderRole;
+  return material;
 }
 
 /**
@@ -1366,6 +1371,8 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
   });
   mat.userData.minimalFragment = true;
   mat.userData.heightProgramSig = stackGLSL.sig;
+  mat.userData.renderRole = 'terrain:boot';
+  mat.name = mat.userData.renderRole;
   return mat;
 }
 
@@ -1387,6 +1394,11 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.userData.terrainVariant = variant;
   mat.userData.heightProgramSig = stackGLSL.sig;
+  const terrainRole = mat.userData.renderRole?.startsWith('infinite-terrain:')
+    ? 'infinite-terrain'
+    : 'terrain';
+  mat.userData.renderRole = `${terrainRole}:${variant}`;
+  mat.name = mat.userData.renderRole;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;
   mat.needsUpdate = true;
@@ -1401,5 +1413,10 @@ export function rebuildTerrainPreviewShaderSource(mat, stackGLSL) {
   mat.fragmentShader = buildMinimalFragment(stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL);
   mat.userData.minimalFragment = true;
   mat.userData.heightProgramSig = stackGLSL.sig;
+  const previewRole = mat.userData.renderRole?.startsWith('infinite-terrain:')
+    ? 'infinite-terrain:preview'
+    : 'terrain:preview';
+  mat.userData.renderRole = previewRole;
+  mat.name = previewRole;
   mat.needsUpdate = true;
 }

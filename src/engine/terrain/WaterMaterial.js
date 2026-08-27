@@ -194,6 +194,8 @@ export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEF
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
+  mat.userData.renderRole = 'water:studio:legacy';
+  mat.name = mat.userData.renderRole;
   return mat;
 }
 
@@ -224,5 +226,7 @@ export function createInfiniteWaterMaterial(sharedUniforms, octaves = 7, stackGL
     side: THREE.DoubleSide,
     forceSinglePass: true,
   });
+  mat.userData.renderRole = 'water:infinite:legacy';
+  mat.name = mat.userData.renderRole;
   return mat;
 }

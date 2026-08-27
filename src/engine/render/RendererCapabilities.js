@@ -43,6 +43,16 @@ export function detectRendererCapabilities(renderer = null) {
       supported: typeof performance !== 'undefined' && !!performance.memory,
     },
     gpuTiming: { supported: false },
+    extensions: {
+      parallelShaderCompile: false,
+      timerQuery: false,
+      debugRendererInfo: false,
+    },
+    contextAttributes: null,
+    precision: {
+      fragmentHighp: null,
+    },
+    limits: {},
     detectedRenderer: 'Unavailable',
     detectedGpu: 'GPU info hidden by browser',
     gpuInfoAvailable: false,
@@ -73,17 +83,72 @@ export function detectRendererCapabilities(renderer = null) {
   caps.webgl2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
   caps.detectedRenderer = caps.webgl2 ? 'WebGL 2' : 'WebGL 1';
 
+  const readParameter = (name) => {
+    const token = gl[name];
+    if (token == null || typeof gl.getParameter !== 'function') return null;
+    try {
+      const value = gl.getParameter(token);
+      return ArrayBuffer.isView(value) ? Array.from(value) : value;
+    } catch {
+      return null;
+    }
+  };
+  caps.limits = {
+    maxTextureSize: readParameter('MAX_TEXTURE_SIZE'),
+    maxCubeMapTextureSize: readParameter('MAX_CUBE_MAP_TEXTURE_SIZE'),
+    max3dTextureSize: readParameter('MAX_3D_TEXTURE_SIZE'),
+    maxArrayTextureLayers: readParameter('MAX_ARRAY_TEXTURE_LAYERS'),
+    maxRenderbufferSize: readParameter('MAX_RENDERBUFFER_SIZE'),
+    maxViewportDimensions: readParameter('MAX_VIEWPORT_DIMS'),
+    maxSamples: readParameter('MAX_SAMPLES'),
+    maxVertexTextureUnits: readParameter('MAX_VERTEX_TEXTURE_IMAGE_UNITS'),
+    maxFragmentTextureUnits: readParameter('MAX_TEXTURE_IMAGE_UNITS'),
+    maxCombinedTextureUnits: readParameter('MAX_COMBINED_TEXTURE_IMAGE_UNITS'),
+    maxVertexUniformVectors: readParameter('MAX_VERTEX_UNIFORM_VECTORS'),
+    maxFragmentUniformVectors: readParameter('MAX_FRAGMENT_UNIFORM_VECTORS'),
+    maxVertexUniformComponents: readParameter('MAX_VERTEX_UNIFORM_COMPONENTS'),
+    maxFragmentUniformComponents: readParameter('MAX_FRAGMENT_UNIFORM_COMPONENTS'),
+    maxVaryingVectors: readParameter('MAX_VARYING_VECTORS'),
+    maxVaryingComponents: readParameter('MAX_VARYING_COMPONENTS'),
+    maxDrawBuffers: readParameter('MAX_DRAW_BUFFERS'),
+    maxColorAttachments: readParameter('MAX_COLOR_ATTACHMENTS'),
+  };
+
+  try {
+    caps.contextAttributes = gl.getContextAttributes?.() || null;
+  } catch {
+    caps.contextAttributes = null;
+  }
+
+  try {
+    const highp = gl.getShaderPrecisionFormat?.(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+    caps.precision.fragmentHighp = highp
+      ? { precision: highp.precision, rangeMin: highp.rangeMin, rangeMax: highp.rangeMax }
+      : null;
+  } catch {
+    caps.precision.fragmentHighp = null;
+  }
+
   try {
     const timerExt = caps.webgl2
       ? gl.getExtension('EXT_disjoint_timer_query_webgl2')
       : gl.getExtension('EXT_disjoint_timer_query');
     caps.gpuTiming = { supported: !!timerExt };
+    caps.extensions.timerQuery = !!timerExt;
   } catch {
     caps.gpuTiming = { supported: false };
+    caps.extensions.timerQuery = false;
+  }
+
+  try {
+    caps.extensions.parallelShaderCompile = !!gl.getExtension('KHR_parallel_shader_compile');
+  } catch {
+    caps.extensions.parallelShaderCompile = false;
   }
 
   try {
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    caps.extensions.debugRendererInfo = !!dbg;
     if (dbg) {
       caps.vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || '';
       caps.renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '';

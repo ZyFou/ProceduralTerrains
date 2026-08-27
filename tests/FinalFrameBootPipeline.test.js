@@ -58,6 +58,7 @@ describe('FinalFrameBootPipeline', () => {
   it('keeps failures terminal and reports the failing stage without presenting ready', async () => {
     const onError = vi.fn();
     const onComplete = vi.fn();
+    const present = vi.fn();
     const pipeline = new FinalFrameBootPipeline({
       hooks: {
         compile: async () => {
@@ -65,6 +66,7 @@ describe('FinalFrameBootPipeline', () => {
           error.code = 'SHADER_COMPILE_FAILED';
           throw error;
         },
+        present,
       },
       onError,
       onComplete,
@@ -77,6 +79,7 @@ describe('FinalFrameBootPipeline', () => {
       code: 'SHADER_COMPILE_FAILED',
       retryable: true,
     }));
+    expect(present).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
   });
 

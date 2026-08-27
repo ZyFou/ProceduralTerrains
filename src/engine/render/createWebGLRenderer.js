@@ -5,9 +5,10 @@ import { sanitizeGpuPreference } from './RendererCapabilities.js';
  * Probe whether WebGL is available in this browser / GPU stack.
  */
 export function probeWebGL() {
+  let gl = null;
   try {
     const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
+    gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
     if (!gl) return { ok: false, reason: 'WebGL 2 is required by the terrain renderer.' };
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : '';
@@ -21,6 +22,11 @@ export function probeWebGL() {
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: e?.message || 'WebGL probe failed.' };
+  } finally {
+    // The probe is a separate WebGL context created immediately before the
+    // real renderer. Release it explicitly instead of waiting for GC so
+    // low-memory GPUs do not start the editor with one context already alive.
+    try { gl?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ignore */ }
   }
 }
 
