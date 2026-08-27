@@ -79,6 +79,10 @@ export class ManualSurfacePaintField {
     const previousTextureB = this.textureB;
     this.textureA = makeTexture(this.weightsA, this.resolution);
     this.textureB = makeTexture(this.weightsB, this.resolution);
+    // Replacing a lazily allocated texture must not make its upload version
+    // appear to move backwards before the next batched paint upload.
+    this.textureA.version = previousTextureA.version;
+    this.textureB.version = previousTextureB.version;
     previousTextureA.dispose();
     previousTextureB.dispose();
     if (this._boundUniforms) {
