@@ -19,6 +19,7 @@ import {
   saveToolsRailLayout,
   loadDrawerLayout,
   saveDrawerLayout,
+  SIDE_DRAWER_DESKTOP_WIDTH,
 } from './components/ui/toolsRailLayout.js';
 import { loadUiPrefs, saveUiPrefs } from './components/ui/uiPrefs.js';
 import UiSettingsPanel from './components/ui/UiSettingsPanel.jsx';
@@ -2384,6 +2385,7 @@ export default function App() {
         data-node-palette-side={nodesWorkspaceActive && nodePaletteDock.detached ? nodePaletteDock.side : 'attached'}
         style={{
           '--node-palette-shell-width': `${nodePaletteDock.width || 208}px`,
+          '--side-drawer-width': `${SIDE_DRAWER_DESKTOP_WIDTH}px`,
           '--manual-library-height': `${manualLibraryHeight}px`,
           '--manual-library-bottom-offset': toolsRailAttr === 'bottom' ? '58px' : '0px',
         }}
@@ -2590,6 +2592,8 @@ export default function App() {
                 onStartBlank={handleStartBlankGraph}
                 onApplyTemplate={handleApplyNodeTemplate}
                 inspectorReplaced={!!effectivePanel}
+                replacementInspectorSide={drawerSideAttr}
+                replacementInspectorWidth={SIDE_DRAWER_DESKTOP_WIDTH}
                 onRequestInspector={() => setActivePanel(null)}
                 onPreviewVisibilityChange={setNodesPreviewVisible}
                 toolsRailVisible={showToolPanels}

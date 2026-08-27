@@ -6,7 +6,8 @@ import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  LoaderCircle, Palette, Plus, RotateCcw, Search, Sparkles, Trash2, Ungroup, X,
+  Layers3, LoaderCircle, Mountain, Palette, Plus, RotateCcw, Route, Search,
+  SlidersHorizontal, Sparkles, Trash2, Ungroup, Waves, X,
 } from 'lucide-react';
 import {
   TERRAIN_OUTPUT_ID, addGraphNode, canConnectGraphNodes, connectGraphNodes, createBlankGraph,
@@ -19,7 +20,7 @@ import {
 import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
 import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
 import { NODE_PROJECT_TEMPLATES } from '../../project/NodeProjectTemplates.js';
-import { resolveNearestEdge } from '../ui/toolsRailLayout.js';
+import { resolveNearestEdge, SIDE_DRAWER_DESKTOP_WIDTH } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v2';
 const DEFAULT_LAYOUT = {
@@ -49,6 +50,20 @@ function loadLayout() {
 function saveLayout(layout) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* preferences are best effort */ } }
 function editingTarget(target) { return target?.matches?.('input, textarea, select, [contenteditable="true"]'); }
 const GROUP_TONE_HEX = { slate: '#788392', green: '#58b889', cyan: '#35c8d0', amber: '#d8a34f', violet: '#9b7be8' };
+
+function GraphNodeIcon({ definition, size = 14 }) {
+  const category = definition?.category;
+  const Icon = category === 'Landforms' ? Mountain
+    : category === 'Simulate' ? Waves
+      : category === 'Colorize' ? Palette
+        : category === 'Combine' ? Layers3
+          : category === 'Transform' ? Route
+            : category === 'Adjust' || category === 'Surface' ? SlidersHorizontal
+              : category === 'Output' ? CheckCircle2
+                : category === 'Noise' || category === 'Base' || category === 'Sources' ? Sparkles
+                  : Boxes;
+  return <Icon size={size} strokeWidth={1.75} aria-hidden />;
+}
 
 function graphCompileNodeIds(before, after) {
   if (!before || !after) return (after?.nodes || []).map((node) => node.id);
@@ -116,7 +131,7 @@ function NodePalette({
               </button>
               {!collapsed ? <div className="node-palette-group-body">{items.map((definition) => (
                 <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
-                  <span className={`node-palette-dot tone-${definition.color || 'blue'}`} /><span>{definition.label}</span><Plus size={12} />
+                  <span className={`node-palette-icon tone-${definition.color || 'blue'}`}><GraphNodeIcon definition={definition} size={12} /></span><span>{definition.label}</span><Plus size={12} />
                 </button>
               ))}</div> : null}
             </section>
@@ -132,7 +147,7 @@ function NodePalette({
 function TerrainNode({ data, selected }) {
   const { node, invalid, compiling } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
-  const NodeIcon = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? Palette : Boxes;
+  const outputKind = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? 'Color' : 'Height';
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => {
     const frame = requestAnimationFrame(() => updateNodeInternals(node.id));
@@ -141,16 +156,19 @@ function TerrainNode({ data, selected }) {
   return (
     <div className={`terrain-flow-node tone-${definition.color || 'blue'}${selected ? ' selected' : ''}${invalid ? ' invalid' : ''}${compiling ? ' compiling' : ''}`}>
       <div className="terrain-flow-node__header">
-        <span className="terrain-flow-node__icon"><NodeIcon size={12} aria-hidden /></span>
-        <span className="terrain-flow-node__title">{node.label}</span>
+        <span className="terrain-flow-node__icon"><GraphNodeIcon definition={definition} size={15} /></span>
+        <span className="terrain-flow-node__heading">
+          <span className="terrain-flow-node__eyebrow">{definition.category || 'Node'}</span>
+          <span className="terrain-flow-node__title">{node.label}</span>
+        </span>
         {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={`${node.label} is compiling`} title="Compiling shader"><LoaderCircle size={12} aria-hidden /></span> : null}
-        {definition.permanent ? <span className="terrain-flow-node__output">OUT</span> : null}
+        <span className="terrain-flow-node__kind">{definition.permanent ? 'Output' : outputKind}</span>
       </div>
       <div className="terrain-flow-node__ports">
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
             <div className={`terrain-flow-port input${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 41 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} title={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} />
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} title={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} />
               <span>{port.label}</span>
             </div>
           ))}
@@ -159,7 +177,7 @@ function TerrainNode({ data, selected }) {
           {definition.outputs.map((port, index) => (
             <div className={`terrain-flow-port output${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
               <span>{port.label}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 41 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} title={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} />
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} title={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} />
             </div>
           ))}
         </div>
@@ -189,11 +207,14 @@ function TerrainGroup({ data, selected }) {
         onResizeEnd={(_, size) => data.onResizeEnd(group.id, size)}
       />
       <div className="terrain-flow-group__header">
-        <ChevronDown size={12} className={group.collapsed ? 'collapsed' : ''} aria-hidden />
-        <strong>{group.label}</strong>
-        <span>{group.nodeIds.length} nodes</span>
+        <span className="terrain-flow-group__icon"><Layers3 size={13} aria-hidden /></span>
+        <span className="terrain-flow-group__heading">
+          <strong>{group.label}</strong>
+          <small>{group.nodeIds.length} {group.nodeIds.length === 1 ? 'stage' : 'stages'}</small>
+        </span>
         <button type="button" className="nodrag" onClick={(event) => { event.stopPropagation(); data.onToggle(group.id); }}>
-          {group.collapsed ? 'Expand' : 'Collapse'}
+          <ChevronDown size={13} className={group.collapsed ? 'collapsed' : ''} aria-hidden />
+          <span>{group.collapsed ? 'Expand' : 'Collapse'}</span>
         </button>
       </div>
     </div>
@@ -428,7 +449,10 @@ function NodeInspector({
 export default function NodeWorkspace({
   graph, graphView, graphState, onGraphChange, onGraphViewChange, onStartBlank,
   onApplyTemplate,
-  inspectorReplaced = false, onRequestInspector, preview = null, onPreviewVisibilityChange,
+  inspectorReplaced = false,
+  replacementInspectorSide = 'right',
+  replacementInspectorWidth = SIDE_DRAWER_DESKTOP_WIDTH,
+  onRequestInspector, preview = null, onPreviewVisibilityChange,
   toolsRailVisible = false, toolsRailEdge = 'left', onPaletteDockChange,
 }) {
   const [localGraph, setLocalGraph] = useState(graph);
@@ -460,7 +484,7 @@ export default function NodeWorkspace({
   }, [layout.paletteDetached, layout.paletteSide, layout.paletteWidth, onPaletteDockChange]);
   useEffect(() => {
     if (!instance) return undefined;
-    const frame = requestAnimationFrame(() => instance.fitView({ padding: 0.2, maxZoom: 1, duration: 220 }));
+    const frame = requestAnimationFrame(() => instance.fitView({ padding: 0.2, minZoom: 0.62, maxZoom: 1, duration: 220 }));
     return () => cancelAnimationFrame(frame);
   }, [instance, layout.graphEdge, layout.inspectorSide, layout.paletteDetached, layout.paletteSide]);
 
@@ -646,7 +670,7 @@ export default function NodeWorkspace({
       setSelectedGroups(new Set());
       setSelectedEdges(new Set());
       setNodeMeasurements({});
-      requestAnimationFrame(() => requestAnimationFrame(() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 320 })));
+      requestAnimationFrame(() => requestAnimationFrame(() => instance?.fitView({ padding: 0.18, minZoom: 0.62, maxZoom: 1, duration: 320 })));
     } finally {
       setApplyingTemplateId('');
     }
@@ -791,6 +815,7 @@ export default function NodeWorkspace({
   const toolsBottomOffset = toolsRailVisible && toolsRailEdge === 'bottom' ? 58 : 0;
   const sideOffset = (side) => (layout.paletteDetached && layout.paletteSide === side ? paletteOffset : 0)
     + (!inspectorReplaced && layout.inspectorSide === side ? inspectorOffset : 0)
+    + (inspectorReplaced && replacementInspectorSide === side ? replacementInspectorWidth : 0)
     + toolsSideOffset(side);
   const dockStyle = layout.graphEdge === 'bottom' || layout.graphEdge === 'top'
     ? {
@@ -837,6 +862,11 @@ export default function NodeWorkspace({
         <div className="node-graph-resizer" onPointerDown={beginGraphResize}><GripVertical size={14} /></div>
         <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
           <div className="node-dock-heading"><span className="node-dock-kicker">Nodes</span><strong>{graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise'}</strong></div>
+          <div className={`node-graph-summary${graphState?.valid === false ? ' invalid' : ''}`}>
+            <span className="node-graph-summary__status"><span aria-hidden />{graphState?.valid === false ? 'Needs attention' : 'Live graph'}</span>
+            <span>{flowNodes.filter((node) => node.type === 'terrainNode').length} nodes</span>
+            <span>{flowEdges.length} links</span>
+          </div>
           <div className="node-toolbar-actions">
             {graphMode === 'terrain' && onApplyTemplate ? (
               <label className="node-template-picker" title="Replace the graph with an authored terrain recipe">
@@ -956,7 +986,7 @@ export default function NodeWorkspace({
           }}
           colorMode="dark" proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Lines} gap={24} size={0.7} color="rgba(255, 255, 255, .075)" />
+          <Background variant={BackgroundVariant.Dots} gap={22} size={1.15} color="rgba(160, 178, 198, .17)" />
           <Controls showInteractive={false} position="bottom-right" />
         </ReactFlow>
         </div>

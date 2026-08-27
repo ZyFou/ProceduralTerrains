@@ -10,6 +10,10 @@ export const DEFAULT_TOOLS_RAIL_LAYOUT = { edge: 'left' };
 /** @type {{ side: DrawerSide }} */
 export const DEFAULT_DRAWER_LAYOUT = { side: 'right' };
 
+// Keep desktop workspace geometry in sync with `.side-drawer` in styles.css.
+// Workspace overlays use this value to reserve the visible drawer surface.
+export const SIDE_DRAWER_DESKTOP_WIDTH = 340;
+
 const DESKTOP_MQ = '(hover: hover) and (pointer: fine) and (min-width: 821px)';
 
 export function isToolsRailDesktopLayout() {
