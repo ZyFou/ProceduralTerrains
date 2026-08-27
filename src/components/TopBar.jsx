@@ -12,6 +12,7 @@ import {
   LayoutTemplate,
   Mountain,
   Dices,
+  Orbit,
   Redo2,
   RotateCcw,
   Save,
@@ -48,6 +49,7 @@ export default function TopBar({
   canImportTerrain = false, onImportTerrain,
   manualBaseSource = null, manualWorkspace = 'manual', onManualWorkspace,
   onTogglePreview, onToggleHelp, onResetView,
+  cameraAutoRotate = false, onCameraAutoRotate,
   nodeToolsVisible = true, onToggleNodeTools,
   onOpenPanel, activePanel,
   loading, onOpenSettingsSearch, settingsSearchOpen,
@@ -291,6 +293,16 @@ export default function TopBar({
           <div className={`tb-menu${viewMenuOpen ? ' open' : ''}`} role="menu" aria-label="View">
             <button type="button" role="menuitem" onClick={() => runMenuAction(setViewMenuOpen, onResetView)}>
               <RotateCcw size={14} strokeWidth={1.75} aria-hidden /> Reset camera
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={cameraAutoRotate}
+              className={cameraAutoRotate ? 'active' : ''}
+              title="Slowly rotate the camera around the terrain"
+              onClick={() => runMenuAction(setViewMenuOpen, () => onCameraAutoRotate?.(!cameraAutoRotate))}
+            >
+              <Orbit size={14} strokeWidth={1.75} aria-hidden /> Auto Rotate
             </button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setViewMenuOpen, onTogglePreview)}>
               {previewMode

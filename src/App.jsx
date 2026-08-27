@@ -58,7 +58,10 @@ const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet
 const NODE_PANEL_IDS = ['planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
 const REAL_TERRAIN_PANEL_IDS = ['terrain', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
-const SideDrawer = lazy(() => import('./components/ui/SideDrawer.jsx'));
+// Start loading the drawer chunk with the app so the first tool click does
+// not have to wait for the lazy module before anything can be shown.
+const sideDrawerModule = import('./components/ui/SideDrawer.jsx');
+const SideDrawer = lazy(() => sideDrawerModule);
 const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
 const NodeWorkspace = lazy(loadNodeWorkspace);
 const MANUAL_LIBRARY_HEIGHT_KEY = 'terrain-studio:manual-library-height';
@@ -144,6 +147,7 @@ export default function App() {
   const [gpu, setGpu] = useState('–');
 
   const [camMode, setCamMode] = useState('orbit');
+  const [cameraAutoRotate, setCameraAutoRotate] = useState(false);
   const [helpVisible, setHelpVisible] = useState(false);
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
@@ -962,7 +966,12 @@ export default function App() {
         // visible flash of the default/previous landscape.
         const baseSeed = Number(landingRef.current?.sessionSeed) || ((Math.random() * 0xffffffff) >>> 0);
         const catalog = nextMode === 'nodes' ? NODE_PROJECT_TEMPLATES : nextMode === 'manual' ? [template] : PROJECT_TEMPLATES;
-        const templateOffset = catalog.findIndex((item) => item.id === template.id) + 1;
+        // Keep Blank terrain tied to the random showcase rendered during boot.
+        // Named templates get their own deterministic variation so selecting
+        // them still produces a distinct world.
+        const templateOffset = template.id === 'blank'
+          ? 0
+          : catalog.findIndex((item) => item.id === template.id) + 1;
         const projectSeed = (baseSeed + templateOffset * 0x9e3779b9) >>> 0;
         let templateGraph = null;
         if (nextMode === 'nodes') {
@@ -1199,8 +1208,12 @@ export default function App() {
       }
     }
     const next = exploreMode === mode ? 'none' : mode;
+    if (next === 'plane') setActivePanel(null);
     engine().setExploreMode(next);
   };
+  useEffect(() => {
+    if (exploreMode === 'plane') setActivePanel(null);
+  }, [exploreMode]);
   const handleQualityChange = (key) => { engine().setQuality(key); setQualityPreset(key); };
   const handleTimeOfDay = (value) => { engine().setTimeOfDay(value); setTimeOfDay(value); };
   const handleBehindCameraCulling = (enabled) => { engine().setBehindCameraCulling(enabled); setBehindCameraCulling(enabled); scheduleRecordRef.current?.(); };
@@ -1492,14 +1505,14 @@ export default function App() {
       return;
       }
       const k = String(e.key ?? '').toLowerCase();
-      if (k === 's') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
+      if (k === 's' && exploreMode !== 'plane') engineRef.current?.setSplineEditingEnabled(!splineState.enabled);
       else if (k === 'r' && e.shiftKey && !e.altKey) engineRef.current?.createSpline('river');
       else if (k === 'r' && e.altKey && !e.shiftKey) engineRef.current?.createSpline('road');
       else if (k === 'a') engineRef.current?.setAnalysisSettings({ enabled: !analysisState.enabled });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, splineState.enabled, analysisState.enabled]);
+  }, [undo, redo, splineState.enabled, analysisState.enabled, exploreMode]);
 
   // ---- export: blocking overlay, button disabled via panel busy state ----
   const onExport = (options) => {
@@ -2140,7 +2153,14 @@ export default function App() {
     planetStyleProps,
     onStyleTuning: (key, v) => engine().setPlanetStyleTuning(key, v),
     liveMetrics, camMode,
-    onMode: (mode) => { engine().setCameraMode(mode); setCamMode(mode); },
+    onMode: (mode) => {
+      engine().setCameraMode(mode);
+      setCamMode(mode);
+      if (mode === 'topdown' && cameraAutoRotate) {
+        engine().setAutoRotate(false);
+        setCameraAutoRotate(false);
+      }
+    },
     onFov: (fov) => engine().setFov(fov),
     onFocusCenter: () => engine().focusCenter(),
     boardSize,
@@ -2283,6 +2303,12 @@ export default function App() {
         }}
         onOpenProjects={() => window.dispatchEvent(new Event('terrain-project:home'))}
         onTogglePreview={() => setPreviewMode(!previewMode)}
+        cameraAutoRotate={cameraAutoRotate}
+        onCameraAutoRotate={(enabled) => {
+          const next = enabled && camMode !== 'topdown' && worldMode === 'studio' && exploreMode === 'none';
+          engine().setAutoRotate(next);
+          setCameraAutoRotate(next);
+        }}
         nodeToolsVisible={uiPrefs.nodeToolsVisible !== false}
         onToggleNodeTools={() => {
           const visible = uiPrefs.nodeToolsVisible === false;

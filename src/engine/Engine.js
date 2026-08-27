@@ -2409,10 +2409,10 @@ export class Engine {
     if (this.projectMode === 'procedural' && PRESETS[presetKey]) {
       this.params = applyPreset(this.params, presetKey);
     }
-    // New procedural projects showcase the optimized prop layer immediately.
-    // Loaded projects still keep their serialized propsEnabled value.
+    // New procedural projects start with the terrain itself only. Loaded
+    // projects still keep their serialized propsEnabled value.
     if (this.projectMode === 'procedural') {
-      this.params.propsEnabled = true;
+      this.params.propsEnabled = false;
       this.perf = sanitizePerfSettings({ ...this.perf, propQuality: 1, preset: 'custom' });
       this.qualityPreset = this.perf.preset;
     }
@@ -7022,6 +7022,13 @@ export class Engine {
   focusCenter() { this.controls.focusCenter(); }
   setCameraMode(mode) { this.controls.setMode(mode); }
   setCameraView(view) { this.controls.setView(view); }
+  setAutoRotate(enabled) {
+    this.controls.autoOrbit = !!enabled
+      && this.worldMode === 'studio'
+      && !this._landingShowcase
+      && this.controls.mode !== 'topdown';
+    this._needsRender = true;
+  }
   setFov(fov) {
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
