@@ -51,6 +51,26 @@ describe('DestructionField', () => {
     value.dispose();
   });
 
+  it('finalizes only the new crater contribution and keeps its undo patch valid', () => {
+    const value = field();
+    value.stampCrater({ x: -22, z: 18, radius: 9, depth: 4, rimHeight: 1, seed: 12 });
+    const oldCrater = value.offsetAt(-22, 18);
+    const before = value.stampCrater({
+      x: 11, z: -7, radius: 14, depth: 8, rimHeight: 2, seed: 14,
+      sampleGrid: 3, angularSteps: 96, processingPadding: 4,
+    });
+    const revision = value.revision;
+    expect(value.finalizeCrater(before, { iterations: 2, blend: 0.22 })).toBe(true);
+    expect(value.revision).toBe(revision + 1);
+    expect(value.offsetAt(11, -7)).toBeLessThan(-5);
+    expect(value.offsetAt(-22, 18)).toBeCloseTo(oldCrater, 4);
+
+    value.restorePatch(before);
+    expect(value.offsetAt(11, -7)).toBeCloseTo(0, 4);
+    expect(value.offsetAt(-22, 18)).toBeCloseTo(oldCrater, 4);
+    value.dispose();
+  });
+
   it('round-trips compressed project data and rejects malformed payloads', () => {
     const source = field();
     source.stampCrater({ x: -10, z: 12, radius: 18, depth: 9, rimHeight: 2, seed: 99 });
@@ -74,6 +94,46 @@ describe('DestructionField', () => {
     expect(value.offsetAt(20, 10)).toBeLessThan(before * 0.65);
     expect(value.offsetAt(20, 10)).toBeGreaterThan(before * 1.05);
     expect(value.offsetAt(-70, -70)).toBeCloseTo(0, 4);
+    value.dispose();
+  });
+
+  it('changes field resolution without moving existing explosions', () => {
+    const value = field();
+    value.stampCrater({ x: 14, z: -9, radius: 15, depth: 8, rimHeight: 1.5, seed: 31 });
+    const before = value.offsetAt(14, -9);
+
+    expect(value.setResolution(192)).toBe(true);
+    expect(value.resolution).toBe(192);
+    expect(value.texture.image.width).toBe(192);
+    expect(value.offsetAt(14, -9)).toBeLessThan(before * 0.9);
+    expect(value.offsetAt(14, -9)).toBeGreaterThan(before * 1.1);
+    expect(value.setResolution(192)).toBe(false);
+    value.dispose();
+  });
+
+  it('does not accumulate smoothing when resolution choices are changed repeatedly', () => {
+    const value = field();
+    value.stampCrater({ x: 7, z: -3, radius: 17, depth: 9, rimHeight: 2, seed: 42 });
+    value.setResolution(192);
+    const firstHighResolution = value.delta.slice();
+
+    value.setResolution(96);
+    value.setResolution(128);
+    value.setResolution(192);
+    expect(value.delta).toEqual(firstHighResolution);
+    value.dispose();
+  });
+
+  it('smooths existing explosion edges only when explicitly requested', () => {
+    const value = field();
+    value.stampCrater({ x: 3, z: 5, radius: 18, depth: 10, rimHeight: 3, shape: 'ragged', seed: 17 });
+    const before = value.delta.slice();
+    const revision = value.revision;
+
+    expect(value.smoothEdges()).toBe(true);
+    expect(value.revision).toBe(revision + 1);
+    expect(value.delta).not.toEqual(before);
+    expect(value.offsetAt(3, 5)).toBeLessThan(-7);
     value.dispose();
   });
 });

@@ -194,12 +194,25 @@ function ExplodePanel({ ctx }) {
         onChange={(value) => ctx.onExplodeSetting?.('shape', value)}
         info="Changes the crater profile while retaining the same blast radius."
       />
+      <SelectRow
+        label="Explosion Resolution"
+        value={settings.resolution ?? 'auto'}
+        options={[
+          { value: 'auto', label: 'Auto (GPU)' },
+          { value: '512', label: 'Standard — 512' },
+          { value: '768', label: 'High — 768' },
+          { value: '1024', label: 'Ultra — 1024' },
+        ]}
+        onChange={(value) => ctx.onExplodeSetting?.('resolution', value)}
+        info="Changes the working grid and the quality used to process new explosions. Switching resolutions repeatedly does not accumulate smoothing."
+      />
       {EXPLODE_SLIDERS.map((def) => (
         <SliderCtl key={def.key} def={def} value={settings[def.key]} onChange={(value) => ctx.onExplodeSetting?.(def.key, value)} />
       ))}
       <ToggleRow label="Debris effect" value={settings.debris !== false} onChange={(value) => ctx.onExplodeSetting?.('debris', value)} />
       <ToggleRow label="Sound" value={settings.sound !== false} onChange={(value) => ctx.onExplodeSetting?.('sound', value)} />
       <ToggleRow label="Camera shake" value={settings.cameraShake !== false} onChange={(value) => ctx.onExplodeSetting?.('cameraShake', value)} />
+      <button type="button" className="action-btn" disabled={!state.hasDamage} onClick={ctx.onSmoothExplosionEdges}>Smooth explosion edges</button>
       <button type="button" className="action-btn danger" disabled={!state.hasDamage} onClick={ctx.onClearExplosions}>Clear all explosions</button>
     </SidePanel>
   );

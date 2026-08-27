@@ -231,7 +231,7 @@ export default function App() {
   const [projectMode, setProjectMode] = useState('procedural');
   const [explodeState, setExplodeState] = useState({
     enabled: false,
-    settings: { shape: 'bowl', radius: 4.5, strength: 0.72, rim: 0.42, falloff: 0.72, scorch: 0.68, debris: true, sound: true, cameraShake: true },
+    settings: { shape: 'bowl', resolution: 'auto', radius: 4.5, strength: 0.72, rim: 0.42, falloff: 0.72, scorch: 0.68, debris: true, sound: true, cameraShake: true },
     hasDamage: false,
     revision: 0,
   });
@@ -2196,6 +2196,7 @@ export default function App() {
     onResetPanel: handleResetPanel,
     explodeState,
     onExplodeSetting: (key, value) => engine().setExplodeSetting(key, value),
+    onSmoothExplosionEdges: () => engine().smoothExplosionEdges(),
     onClearExplosions: clearExplosions,
     onApplySurfaceTextures: applySurfaceTextures,
     gpu, perf,

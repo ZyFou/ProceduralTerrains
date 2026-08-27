@@ -78,7 +78,7 @@ import { PlanetStyleManager } from './style/PlanetStyleManager.js';
 import { TerrainHeightSampler } from './terrain/TerrainHeightSampler.js';
 import { ErosionField } from './terrain/erosion/ErosionField.js';
 import { DestructionField, destructionResolutionForTier } from './destruction/DestructionField.js';
-import { DEFAULT_EXPLODE_SETTINGS, ExplodeTool, normalizeExplodeSettings } from './destruction/ExplodeTool.js';
+import { DEFAULT_EXPLODE_SETTINGS, ExplodeTool, normalizeExplodeSettings, resolveExplosionResolution } from './destruction/ExplodeTool.js';
 import { EROSION_QUALITY, getErosionPreset } from './terrain/erosion/ErosionPresets.js';
 import { GpuHeightSampler } from './terrain/GpuHeightSampler.js';
 import { PlayerController } from './player/PlayerController.js';
@@ -1069,10 +1069,20 @@ export class Engine {
 
   setExplodeSetting(key, value) {
     this.explodeSettings = normalizeExplodeSettings({ ...this.explodeSettings, [key]: value });
-    this._ensureExplodeTool().setSettings(this.explodeSettings);
+    const resized = this.destructionField.setResolution(
+      resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
+    );
+    const tool = this._ensureExplodeTool();
+    tool.setSettings(this.explodeSettings);
+    if (resized) {
+      this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+      if (this.destructionField.hasDamage()) this._handleExplodeState({ ...tool.state(), terrainChanged: true });
+      else this._needsRender = true;
+    }
   }
 
   clearExplosions() { return this._ensureExplodeTool().clear(); }
+  smoothExplosionEdges() { return this._ensureExplodeTool().smoothEdges(); }
   getExplodeToolState() {
     return this.explodeTool?.state() ?? {
       enabled: false,
@@ -10192,6 +10202,10 @@ export class Engine {
     this._explodeBuildingTimer = null;
     this.explodeSettings = normalizeExplodeSettings(json?.explodeSettings);
     if (this.destructionField) {
+      this.destructionField.setResolution(
+        resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
+        { reproject: false },
+      );
       const bounds = this._creatorBounds();
       this.destructionField.setRegion(bounds.origin, bounds.span, { reproject: false });
       if (json?.destruction) this.destructionField.restore(json.destruction);
@@ -10526,12 +10540,16 @@ export class Engine {
     // the normal history snapshot makes every click participate in the editor's
     // existing Ctrl/Cmd+Z flow instead of creating a second undo system.
     this.explodeSettings = normalizeExplodeSettings(snap.explodeSettings);
-    this.explodeTool?.setSettings(this.explodeSettings);
     if (this.destructionField) {
+      this.destructionField.setResolution(
+        resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
+        { reproject: false },
+      );
       if (snap.destruction) this.destructionField.restore(snap.destruction);
       else this.destructionField.clear();
       this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
     }
+    this.explodeTool?.setSettings(this.explodeSettings);
     this.cb.onExplodeState?.(this.getExplodeToolState());
 
     this._pendingTerrainParams = { ...(snap.pendingTerrainParams || {}) };

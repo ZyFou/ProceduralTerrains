@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { unzlibSync, zlibSync } from 'fflate';
 
-const MAX_RESOLUTION = 640;
+const MAX_RESOLUTION = 1024;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const smoothstep = (value) => {
   const t = clamp(value, 0, 1);
@@ -35,6 +35,18 @@ function hash01(value) {
   return ((n ^ (n >>> 16)) >>> 0) / 0xffffffff;
 }
 
+function angularNoise(seed, angle, steps) {
+  const count = Math.max(8, Math.round(steps) || 48);
+  const wrapped = ((angle / (Math.PI * 2)) + 1) % 1;
+  const position = wrapped * count;
+  const cell = Math.floor(position);
+  const next = (cell + 1) % count;
+  const t = smoothstep(position - cell);
+  const a = hash01((seed | 0) + cell * 7919);
+  const b = hash01((seed | 0) + next * 7919);
+  return a + (b - a) * t;
+}
+
 function makeTexture(resolution) {
   const data = new Uint16Array(resolution * resolution * 4);
   const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat, THREE.HalfFloatType);
@@ -65,6 +77,7 @@ export class DestructionField {
     this.active = true;
     this.revision = 0;
     this._uploadPending = true;
+    this._resolutionSource = null;
   }
 
   hasDamage() {
@@ -72,6 +85,27 @@ export class DestructionField {
       if (Math.abs(this.delta[i]) > 0.0001 || this.scorch[i] > 0) return true;
     }
     return false;
+  }
+
+  setResolution(resolution, { reproject = true } = {}) {
+    const next = clamp(Math.round(Number(resolution)) || this.resolution, 2, MAX_RESOLUTION);
+    if (next === this.resolution) return false;
+    const hasDamage = this.hasDamage();
+    const previous = reproject && hasDamage
+      ? (this._resolutionSource ?? this.snapshot())
+      : null;
+    if (previous && !this._resolutionSource) this._resolutionSource = previous;
+    if (!reproject || !hasDamage) this._resolutionSource = null;
+    this.texture.dispose();
+    this.resolution = next;
+    this.delta = new Float32Array(next * next);
+    this.scorch = new Uint8Array(next * next);
+    this.texture = makeTexture(next);
+    if (previous) this._reproject(previous);
+    this.enabled = previous ? this.hasDamage() : false;
+    this.revision++;
+    this._uploadPending = true;
+    return true;
   }
 
   setRegion(origin, span, { reproject = true } = {}) {
@@ -83,6 +117,7 @@ export class DestructionField {
       && Math.abs(nextSpan.z - this.span.z) < 1e-6;
     if (same) return false;
 
+    this._resolutionSource = null;
     const previous = reproject && this.hasDamage() ? this.snapshot() : null;
     this.origin = nextOrigin;
     this.span = nextSpan;
@@ -114,40 +149,70 @@ export class DestructionField {
     };
   }
 
-  stampCrater({ x, z, radius, depth, rimHeight, scorch = 0.75, shape = 'bowl', falloff = 0.72, seed = 1 }) {
+  stampCrater({
+    x,
+    z,
+    radius,
+    depth,
+    rimHeight,
+    scorch = 0.75,
+    shape = 'bowl',
+    falloff = 0.72,
+    seed = 1,
+    sampleGrid = 1,
+    angularSteps = 48,
+    processingPadding = 2,
+  }) {
+    this._resolutionSource = null;
     const center = this.worldToPixel(x, z);
     const rx = Math.max(1, radius / this.span.x * (this.resolution - 1));
     const ry = Math.max(1, radius / this.span.z * (this.resolution - 1));
-    const minX = clamp(Math.floor(center.x - rx), 0, this.resolution - 1);
-    const maxX = clamp(Math.ceil(center.x + rx), 0, this.resolution - 1);
-    const minY = clamp(Math.floor(center.y - ry), 0, this.resolution - 1);
-    const maxY = clamp(Math.ceil(center.y + ry), 0, this.resolution - 1);
+    const padding = clamp(Math.round(processingPadding) || 0, 0, 8);
+    const minX = clamp(Math.floor(center.x - rx) - padding, 0, this.resolution - 1);
+    const maxX = clamp(Math.ceil(center.x + rx) + padding, 0, this.resolution - 1);
+    const minY = clamp(Math.floor(center.y - ry) - padding, 0, this.resolution - 1);
+    const maxY = clamp(Math.ceil(center.y + ry) + padding, 0, this.resolution - 1);
     const patch = this.capturePatch(minX, maxX, minY, maxY);
+    const grid = clamp(Math.round(sampleGrid) || 1, 1, 4);
+    const invSamples = 1 / (grid * grid);
+    const softness = clamp(Number(falloff) || 0.72, 0.1, 1);
+    const bowlRadius = shape === 'punch' ? 0.68 : 0.7 + softness * 0.12;
+    const bowlPower = shape === 'punch' ? 0.72 : shape === 'ragged' ? 1.55 : 2;
+    const irregularAmount = shape === 'ragged' ? 0.38 : shape === 'punch' ? 0.08 : 0.18;
+    const edgeWidth = 0.025 + softness * 0.075;
 
     for (let py = minY; py <= maxY; py++) {
       for (let px = minX; px <= maxX; px++) {
-        const nx = (px - center.x) / rx;
-        const ny = (py - center.y) / ry;
-        const distance = Math.hypot(nx, ny);
-        if (distance > 1) continue;
+        let heightContribution = 0;
+        let burnContribution = 0;
+        let contributed = false;
+        for (let sy = 0; sy < grid; sy++) {
+          for (let sx = 0; sx < grid; sx++) {
+            const offsetX = (sx + 0.5) / grid - 0.5;
+            const offsetY = (sy + 0.5) / grid - 0.5;
+            const nx = (px + offsetX - center.x) / rx;
+            const ny = (py + offsetY - center.y) / ry;
+            const distance = Math.hypot(nx, ny);
+            if (distance > 1.25) continue;
+            const angle = Math.atan2(ny, nx);
+            const irregularity = 1 - irregularAmount * 0.5
+              + angularNoise(seed, angle, angularSteps) * irregularAmount;
+            const warped = distance / irregularity;
+            if (warped > 1) continue;
+            const bowlT = 1 - smoothstep(warped / bowlRadius);
+            const bowl = -Math.max(0, depth) * (bowlT ** bowlPower);
+            const rimDistance = (warped - 0.84) / 0.095;
+            const rim = Math.max(0, rimHeight) * Math.exp(-(rimDistance ** 2));
+            const edge = 1 - smoothstep((warped - (1 - edgeWidth)) / edgeWidth);
+            heightContribution += (bowl + rim) * edge;
+            burnContribution += Math.max(0, scorch) * (1 - smoothstep(warped)) * 255;
+            contributed = true;
+          }
+        }
+        if (!contributed) continue;
         const index = py * this.resolution + px;
-        const angle = Math.atan2(ny, nx);
-        const angularCell = Math.floor((angle + Math.PI) * 17.5);
-        const irregularAmount = shape === 'ragged' ? 0.38 : shape === 'punch' ? 0.08 : 0.18;
-        const irregularity = 1 - irregularAmount * 0.5 + hash01((seed | 0) + angularCell * 7919) * irregularAmount;
-        const warped = distance / irregularity;
-        if (warped > 1) continue;
-        const softness = clamp(Number(falloff) || 0.72, 0.1, 1);
-        const bowlRadius = shape === 'punch' ? 0.68 : 0.7 + softness * 0.12;
-        const bowlT = 1 - smoothstep(warped / bowlRadius);
-        const bowlPower = shape === 'punch' ? 0.72 : shape === 'ragged' ? 1.55 : 2;
-        const bowl = -Math.max(0, depth) * (bowlT ** bowlPower);
-        const rimDistance = (warped - 0.84) / 0.095;
-        const rim = Math.max(0, rimHeight) * Math.exp(-(rimDistance ** 2));
-        const edgeWidth = 0.025 + softness * 0.075;
-        const edge = 1 - smoothstep((warped - (1 - edgeWidth)) / edgeWidth);
-        this.delta[index] = clamp(this.delta[index] + (bowl + rim) * edge, -3000, 3000);
-        const burn = Math.max(0, scorch) * (1 - smoothstep(warped)) * 255;
+        this.delta[index] = clamp(this.delta[index] + heightContribution * invSamples, -3000, 3000);
+        const burn = burnContribution * invSamples;
         this.scorch[index] = Math.max(this.scorch[index], Math.round(clamp(burn, 0, 255)));
       }
     }
@@ -156,6 +221,105 @@ export class DestructionField {
     this.revision++;
     this._uploadPending = true;
     return patch;
+  }
+
+  /**
+   * Settle only the contribution added since `patch` was captured. This keeps
+   * repeated explosions cumulative without progressively softening old craters.
+   */
+  finalizeCrater(patch, { iterations = 1, blend = 0.28 } = {}) {
+    if (!patch?.delta || !patch?.scorch || patch.width < 3 || patch.height < 3) return false;
+    const passes = clamp(Math.round(iterations) || 0, 0, 4);
+    const amount = clamp(Number(blend) || 0, 0, 1);
+    if (!passes || !amount) return false;
+    this._resolutionSource = null;
+
+    const size = patch.width * patch.height;
+    let contribution = new Float32Array(size);
+    let burn = new Float32Array(size);
+    for (let row = 0; row < patch.height; row++) {
+      const source = (patch.minY + row) * this.resolution + patch.minX;
+      const target = row * patch.width;
+      for (let column = 0; column < patch.width; column++) {
+        const local = target + column;
+        const global = source + column;
+        contribution[local] = this.delta[global] - patch.delta[local];
+        burn[local] = this.scorch[global] > patch.scorch[local] ? this.scorch[global] : 0;
+      }
+    }
+
+    const blur = (source) => {
+      const output = source.slice();
+      for (let row = 1; row < patch.height - 1; row++) {
+        for (let column = 1; column < patch.width - 1; column++) {
+          const index = row * patch.width + column;
+          const weighted = source[index - patch.width - 1]
+            + source[index - patch.width + 1]
+            + source[index + patch.width - 1]
+            + source[index + patch.width + 1]
+            + 2 * (source[index - patch.width] + source[index - 1]
+              + source[index + 1] + source[index + patch.width])
+            + 4 * source[index];
+          output[index] = source[index] + (weighted / 16 - source[index]) * amount;
+        }
+      }
+      return output;
+    };
+
+    for (let pass = 0; pass < passes; pass++) {
+      contribution = blur(contribution);
+      burn = blur(burn);
+    }
+
+    for (let row = 0; row < patch.height; row++) {
+      const target = (patch.minY + row) * this.resolution + patch.minX;
+      const source = row * patch.width;
+      for (let column = 0; column < patch.width; column++) {
+        const local = source + column;
+        const global = target + column;
+        this.delta[global] = clamp(patch.delta[local] + contribution[local], -3000, 3000);
+        this.scorch[global] = Math.max(patch.scorch[local], Math.round(clamp(burn[local], 0, 255)));
+      }
+    }
+
+    this.enabled = true;
+    this.revision++;
+    this._uploadPending = true;
+    return true;
+  }
+
+  smoothEdges({ iterations = 1, blend = 0.32 } = {}) {
+    if (!this.hasDamage()) return false;
+    let minX = this.resolution;
+    let minY = this.resolution;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < this.resolution; y++) {
+      for (let x = 0; x < this.resolution; x++) {
+        const index = y * this.resolution + x;
+        if (Math.abs(this.delta[index]) <= 0.0001 && this.scorch[index] === 0) continue;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX < minX || maxY < minY) return false;
+    const padding = clamp(Math.round(iterations) + 2, 3, 8);
+    minX = clamp(minX - padding, 0, this.resolution - 1);
+    maxX = clamp(maxX + padding, 0, this.resolution - 1);
+    minY = clamp(minY - padding, 0, this.resolution - 1);
+    maxY = clamp(maxY + padding, 0, this.resolution - 1);
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    return this.finalizeCrater({
+      minX,
+      minY,
+      width,
+      height,
+      delta: new Float32Array(width * height),
+      scorch: new Uint8Array(width * height),
+    }, { iterations, blend });
   }
 
   capturePatch(minX, maxX, minY, maxY) {
@@ -173,6 +337,7 @@ export class DestructionField {
 
   restorePatch(patch) {
     if (!patch?.delta || !patch?.scorch) return false;
+    this._resolutionSource = null;
     for (let row = 0; row < patch.height; row++) {
       const target = (patch.minY + row) * this.resolution + patch.minX;
       const source = row * patch.width;
@@ -192,6 +357,7 @@ export class DestructionField {
     this.enabled = false;
     this.revision++;
     this._uploadPending = true;
+    this._resolutionSource = null;
     return snapshot;
   }
 
@@ -217,6 +383,7 @@ export class DestructionField {
     this.enabled = snapshot.enabled !== false && this.hasDamage();
     this.revision++;
     this._uploadPending = true;
+    this._resolutionSource = null;
     return true;
   }
 
@@ -321,6 +488,7 @@ export class DestructionField {
       this.enabled = source.enabled && this.hasDamage();
       this.revision++;
       this._uploadPending = true;
+      this._resolutionSource = null;
       return true;
     } catch {
       this.delta.fill(0);
@@ -328,6 +496,7 @@ export class DestructionField {
       this.enabled = false;
       this.revision++;
       this._uploadPending = true;
+      this._resolutionSource = null;
       return false;
     }
   }

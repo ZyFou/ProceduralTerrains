@@ -5,6 +5,7 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export const DEFAULT_EXPLODE_SETTINGS = Object.freeze({
   shape: 'bowl',
+  resolution: 'auto',
   radius: 4.5,
   strength: 0.72,
   rim: 0.42,
@@ -16,11 +17,30 @@ export const DEFAULT_EXPLODE_SETTINGS = Object.freeze({
 });
 
 const SHAPES = new Set(['bowl', 'punch', 'ragged']);
+const RESOLUTIONS = new Set(['auto', '512', '768', '1024']);
 const finiteOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+export function resolveExplosionResolution(value, gpuTier = 'high') {
+  const normalized = RESOLUTIONS.has(String(value)) ? String(value) : 'auto';
+  if (normalized !== 'auto') return Number(normalized);
+  if (gpuTier === 'low') return 384;
+  if (gpuTier === 'medium') return 512;
+  return 640;
+}
+
+export function explosionProcessingForResolution(resolution) {
+  const resolved = clamp(Math.round(Number(resolution)) || 512, 384, 1024);
+  if (resolved >= 1024) return { sampleGrid: 4, angularSteps: 128, iterations: 3, blend: 0.18, padding: 5 };
+  if (resolved >= 768) return { sampleGrid: 3, angularSteps: 96, iterations: 2, blend: 0.22, padding: 4 };
+  if (resolved >= 640) return { sampleGrid: 2, angularSteps: 72, iterations: 2, blend: 0.24, padding: 4 };
+  if (resolved >= 512) return { sampleGrid: 2, angularSteps: 64, iterations: 1, blend: 0.28, padding: 3 };
+  return { sampleGrid: 1, angularSteps: 48, iterations: 1, blend: 0.32, padding: 3 };
+}
 
 export function normalizeExplodeSettings(value = {}) {
   return {
     shape: SHAPES.has(value.shape) ? value.shape : DEFAULT_EXPLODE_SETTINGS.shape,
+    resolution: RESOLUTIONS.has(String(value.resolution)) ? String(value.resolution) : DEFAULT_EXPLODE_SETTINGS.resolution,
     radius: clamp(finiteOr(value.radius, DEFAULT_EXPLODE_SETTINGS.radius), 0.5, 18),
     strength: clamp(finiteOr(value.strength, DEFAULT_EXPLODE_SETTINGS.strength), 0.1, 2),
     rim: clamp(finiteOr(value.rim, DEFAULT_EXPLODE_SETTINGS.rim), 0, 1),
@@ -174,7 +194,8 @@ export class ExplodeTool {
   explode(target) {
     if (!this.enabled || !target) return false;
     const metrics = this._metrics();
-    this.field.stampCrater({
+    const processing = explosionProcessingForResolution(this.field.resolution);
+    const patch = this.field.stampCrater({
       x: target.x,
       z: target.z,
       radius: metrics.radius,
@@ -184,7 +205,11 @@ export class ExplodeTool {
       shape: this.settings.shape,
       falloff: this.settings.falloff,
       seed: ((performance.now() * 1000) | 0) ^ this.field.revision,
+      sampleGrid: processing.sampleGrid,
+      angularSteps: processing.angularSteps,
+      processingPadding: processing.padding,
     });
+    this.field.finalizeCrater(patch, processing);
     this._spawnEffect(target, metrics);
     this._playSound();
     if (this.settings.cameraShake && !this._reducedMotion) {
@@ -199,6 +224,12 @@ export class ExplodeTool {
     if (!this.field.hasDamage()) return false;
     this.field.clear();
     this._emit({ terrainChanged: true });
+    return true;
+  }
+
+  smoothEdges() {
+    if (!this.field.smoothEdges()) return false;
+    this._emit({ terrainChanged: true, edgesSmoothed: true });
     return true;
   }
 
