@@ -423,4 +423,35 @@ describe('boot shader compilation', () => {
     material.dispose();
     engine._warmGeo.dispose();
   });
+
+  it('accepts a healthy linked program when parallel shader compilation is unavailable', async () => {
+    const engine = engineHarness();
+    const material = new THREE.ShaderMaterial();
+    const program = programHarness({ linked: true });
+    let target = null;
+    Object.assign(engine, {
+      _warmGeo: new THREE.PlaneGeometry(1, 1),
+      _contextLost: false,
+      renderer: {
+        properties: {
+          get: () => ({ currentProgram: program.wrapper }),
+        },
+        getContext: () => ({
+          ...program.gl,
+          getExtension: vi.fn(() => null),
+        }),
+        getRenderTarget: vi.fn(() => target),
+        setRenderTarget: vi.fn((next) => { target = next; }),
+        compile: vi.fn(() => new Set([material])),
+      },
+    });
+
+    const result = await engine._compileMaterialVariants([material], { canvasOnly: true });
+
+    expect(result).toMatchObject({ ready: true, failed: false, pendingCount: 0 });
+    expect(engine.renderer.compile).toHaveBeenCalledTimes(1);
+    expect(program.gl.getProgramParameter).toHaveBeenCalledWith(program.raw, program.gl.LINK_STATUS);
+    material.dispose();
+    engine._warmGeo.dispose();
+  });
 });

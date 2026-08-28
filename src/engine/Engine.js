@@ -135,6 +135,7 @@ import {
   FinalFrameBootPipeline,
   createBootRenderKey,
 } from './boot/FinalFrameBootPipeline.js';
+import { evaluateReleaseAcceptance } from './boot/ReleaseAcceptanceGates.js';
 import {
   ModeTransitionCancelledError,
   ModeTransitionCoordinator,
@@ -273,6 +274,25 @@ export class Engine {
     this._bootMode = this._initialBootMode;
     this._bootError = null;
     this._bootPresented = false;
+    this._contextLossCount = 0;
+    this._contextRestoreCount = 0;
+    this._contextCircuitBreakerTrips = 0;
+    this._releaseAcceptanceCycle = {
+      kind: 'boot',
+      startedAtMs: this._bootStart,
+      presentedAtMs: null,
+      result: null,
+      error: null,
+      shader: {
+        compileCount: 0,
+        failureCount: 0,
+        lastCompileReady: null,
+        lastFailureCode: null,
+        maxActiveFragmentSamplers: null,
+        maxSyncCompileMs: null,
+        postRevealCompileCount: 0,
+      },
+    };
     this._bootPipeline = null;
     this._shaderColdRun = readShaderColdRun();
     this._shaderColdRunLogged = false;
@@ -541,6 +561,7 @@ export class Engine {
     this._onContextLost = (event) => {
       event.preventDefault();
       this._contextLost = true;
+      this._contextLossCount += 1;
       console.warn('[graphics] context lost; aborting boot generation');
       if (this._modeTransitionRequest) {
         const request = this._modeTransitionRequest;
@@ -559,6 +580,7 @@ export class Engine {
     };
     this._onContextRestored = () => {
       this._contextLost = false;
+      this._contextRestoreCount += 1;
       this._needsRender = true;
       console.info('[graphics] context restored');
       if (this._modeTransitionRequest?.contextLost) {
@@ -5477,6 +5499,67 @@ export class Engine {
     return result;
   }
 
+  _beginReleaseAcceptanceCycle(kind = 'mode') {
+    this._releaseAcceptanceCycle = {
+      kind,
+      startedAtMs: performance.now(),
+      presentedAtMs: null,
+      result: null,
+      error: null,
+      shader: {
+        compileCount: 0,
+        failureCount: 0,
+        lastCompileReady: null,
+        lastFailureCode: null,
+        maxActiveFragmentSamplers: null,
+        maxSyncCompileMs: null,
+        postRevealCompileCount: 0,
+      },
+    };
+    return this._releaseAcceptanceCycle;
+  }
+
+  _recordReleaseShaderCompile(result, startedAtMs) {
+    if (!result) return result;
+    const cycle = this._releaseAcceptanceCycle || this._beginReleaseAcceptanceCycle('runtime');
+    const shader = cycle.shader;
+    shader.compileCount += 1;
+    shader.lastCompileReady = result.ready === true;
+    const failures = result.failures || [];
+    shader.failureCount += failures.length;
+    if (failures.length || result.code) {
+      shader.lastFailureCode = failures[0]?.code || result.code || null;
+    }
+    const samplerCounts = (result.readyTimeline || []).flatMap((entry) => [
+      entry.activeSamplers,
+      ...(entry.programs || []).map((program) => program.activeSamplers?.count),
+    ]).filter(Number.isFinite);
+    if (samplerCounts.length) {
+      shader.maxActiveFragmentSamplers = Math.max(
+        shader.maxActiveFragmentSamplers ?? 0,
+        ...samplerCounts,
+      );
+      this._lastKnownMaxActiveFragmentSamplers = Math.max(
+        this._lastKnownMaxActiveFragmentSamplers ?? 0,
+        ...samplerCounts,
+      );
+    }
+    if (Number.isFinite(result.syncCompileMs)) {
+      shader.maxSyncCompileMs = Math.max(
+        shader.maxSyncCompileMs ?? 0,
+        result.syncCompileMs,
+      );
+    }
+    if (cycle.presentedAtMs != null
+        && startedAtMs >= cycle.presentedAtMs
+        && startedAtMs - cycle.presentedAtMs <= 5000
+        && !this._bootPending
+        && !this._modeTransitionCoordinator?.active) {
+      shader.postRevealCompileCount += 1;
+    }
+    return result;
+  }
+
   async _compileMaterialVariants(mats, {
     canvasOnly = false,
     timeoutMs,
@@ -5489,6 +5572,7 @@ export class Engine {
     // shader asynchronously. Never let a completed stale job dereference the
     // next renderer (or null) after that hand-off.
     const renderer = this.renderer;
+    const acceptanceStartedAt = performance.now();
     if (this._disposed || !renderer) {
       return {
         ready: false,
@@ -5606,7 +5690,12 @@ export class Engine {
     onProgress?.(list.length, total);
 
     if (canvasOnly || canvasResult.ready !== true) {
-      return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
+      return this._recordReleaseShaderCompile({
+        ...canvasResult,
+        materialCount: list.length,
+        syncCompileMs,
+        asyncWaitMs,
+      }, acceptanceStartedAt);
     }
 
     this.underwater._ensureTarget(renderer);
@@ -5637,7 +5726,7 @@ export class Engine {
       + ` parallel=${parallelCompile}`
     );
     onProgress?.(total, total);
-    return {
+    return this._recordReleaseShaderCompile({
       ready: canvasResult.ready && rtResult.ready,
       timedOut: canvasResult.timedOut || rtResult.timedOut,
       failed: Boolean(canvasResult.failed || rtResult.failed),
@@ -5648,7 +5737,8 @@ export class Engine {
       waitMs: canvasResult.waitMs + rtResult.waitMs,
       syncCompileMs: syncCompileMs + rtSyncCompileMs,
       asyncWaitMs: asyncWaitMs + rtAsyncWaitMs,
-    };
+      readyTimeline: [...(canvasResult.readyTimeline || []), ...(rtResult.readyTimeline || [])],
+    }, acceptanceStartedAt);
   }
 
 
@@ -6430,6 +6520,11 @@ export class Engine {
 
   _completeFinalFrameBoot(result) {
     if (this._disposed || !this._bootPresented) return;
+    if (this._releaseAcceptanceCycle) {
+      this._releaseAcceptanceCycle.result = result;
+      this._releaseAcceptanceCycle.error = null;
+      this._releaseAcceptanceCycle.presentedAtMs = performance.now();
+    }
     this._bootPending = false;
     this._qualityPending = false;
     this._bootShaderPending = false;
@@ -6478,6 +6573,7 @@ export class Engine {
       cause: error,
     };
     this._bootError = normalized;
+    if (this._releaseAcceptanceCycle) this._releaseAcceptanceCycle.error = normalized;
     this._bootPending = true;
     this._bootShaderPending = true;
     this.controls.autoOrbit = false;
@@ -6488,6 +6584,7 @@ export class Engine {
 
   _startFinalFrameBoot({ mode = 'full', reason = 'retry' } = {}) {
     if (this._disposed) return Promise.resolve(null);
+    this._beginReleaseAcceptanceCycle('boot');
     this._bootPending = true;
     this._bootShaderPending = true;
     return this._bootPipeline.start({ mode, reason }).catch((error) => {
@@ -8807,13 +8904,21 @@ export class Engine {
         this.cb.onStatus?.(payload.label, progress.stage !== 'ready');
       },
       onComplete: (result) => {
+        if (this._releaseAcceptanceCycle) {
+          this._releaseAcceptanceCycle.result = result;
+          this._releaseAcceptanceCycle.error = null;
+          this._releaseAcceptanceCycle.presentedAtMs = performance.now();
+        }
         console.info(
           `[mode] ${result.target} final frame ready in ${result.duration.toFixed(0)}ms`
           + ` (cache=${result.manifest?.cacheHit === true ? 'hit' : 'miss'})`,
         );
         this.cb.onModeComplete?.(result);
       },
-      onError: (error) => this.cb.onModeError?.(error),
+      onError: (error) => {
+        if (this._releaseAcceptanceCycle) this._releaseAcceptanceCycle.error = error;
+        this.cb.onModeError?.(error);
+      },
     });
   }
 
@@ -9167,6 +9272,7 @@ export class Engine {
     if (worldMode === this.worldMode && projectMode === this.projectMode && project == null) {
       return { unchanged: true, worldMode, projectMode };
     }
+    this._beginReleaseAcceptanceCycle('mode');
     const previousWorldMode = this.worldMode;
     const previousProjectState = project != null || projectMode !== this.projectMode
       ? {
@@ -13182,6 +13288,132 @@ export class Engine {
     }
   }
 
+  _releaseModeDependencyEvidence() {
+    if (this.worldMode === 'infinite') {
+      const levels = this.infiniteTerrainClipmap?.levels || [];
+      const cacheReady = !this.infiniteTerrainClipmap
+        || (levels.length > 0
+          && levels.every((level) => level.ready)
+          && (this.infiniteTerrainClipmap.queue?.length || 0) === 0);
+      const chunksReady = !this.infiniteWorld
+        || ((this.infiniteWorld.pendingChunkCount || 0) === 0
+          && !(this.infiniteWorld._lodRebuildQueue?.length));
+      return {
+        name: 'Infinite',
+        dependenciesComplete: cacheReady && chunksReady,
+        dependencyDetail: `cache levels ${levels.filter((level) => level.ready).length}/${levels.length}; `
+          + `${this.infiniteWorld?.pendingChunkCount || 0} pending chunks`,
+      };
+    }
+    if (this.worldMode === 'planet') {
+      const texturePublished = (this.uniforms?.uUsePlanetHeightTex?.value ?? 0) > 0.5
+        && !!this.uniforms?.uPlanetHeightTex?.value;
+      const complete = !!this.planetHeightBaker?.complete && texturePublished
+        && this._bakedTerrainGen === this._terrainGen;
+      return {
+        name: 'Planet',
+        dependenciesComplete: complete,
+        dependencyDetail: complete
+          ? 'Full launch cubemap is published'
+          : `height cache ${this.planetHeightBaker?.phase || 'unavailable'}`,
+      };
+    }
+    const active = this.board?.activeChunkCount ?? 0;
+    const target = this.board?.targetChunkCount ?? active;
+    const complete = !this.board
+      || (!this.board.isBuilding
+        && !(this.board._lodRebuildQueue?.length)
+        && (!target || active >= target));
+    return {
+      name: this.projectMode === 'manual' ? 'Manual' : (this.projectMode === 'nodes' ? 'Nodes' : 'Studio'),
+      dependenciesComplete: complete,
+      dependencyDetail: `${active}/${target} visible terrain chunks`,
+    };
+  }
+
+  _releaseResourceEvidence() {
+    const plan = this.visualPost?.plan;
+    const drawingWidth = this.renderer?.domElement?.width || 0;
+    const drawingHeight = this.renderer?.domElement?.height || 0;
+    // Known render-target payload only. Textures, driver resolves, cubemaps and
+    // compiler allocations are intentionally not guessed, so `complete` stays
+    // false until every owner contributes exact byte accounting.
+    const sceneWidth = plan?.sceneWidth || drawingWidth;
+    const sceneHeight = plan?.sceneHeight || drawingHeight;
+    const sceneTargetBytes = Math.max(0, sceneWidth * sceneHeight * 8);
+    const waterTargetBytes = this.waterSystem?.getPerformanceDiagnostics?.()
+      ?.renderTargetMemoryBytes || 0;
+    const budgets = { low: 128, medium: 256, high: 512 };
+    const budgetMb = budgets[this.gpuTier] || budgets.medium;
+    return {
+      measuredBytes: sceneTargetBytes + waterTargetBytes,
+      budgetBytes: budgetMb * 1048576,
+      complete: false,
+      entries: {
+        sceneTargetBytes,
+        waterTargetBytes,
+      },
+    };
+  }
+
+  _releaseAcceptanceDiagnostics(nowMs = performance.now()) {
+    const cycle = this._releaseAcceptanceCycle || {};
+    const shader = cycle.shader || {};
+    const result = cycle.result;
+    const manifest = result?.manifest || {};
+    const cacheHit = manifest.cacheHit === true;
+    const pipeline = cycle.kind === 'mode'
+      ? this._modeTransitionCoordinator
+      : this._bootPipeline;
+    const presentedAtMs = cycle.presentedAtMs ?? null;
+    return evaluateReleaseAcceptance({
+      nowMs,
+      boot: {
+        mode: cycle.kind || 'boot',
+        pending: pipeline?.active === true || (cycle.kind !== 'mode' && this._bootPending),
+        presented: presentedAtMs != null && !cycle.error,
+        presentedAtMs,
+        pipelineState: pipeline?.state || null,
+        error: cycle.error || null,
+      },
+      shader: {
+        ...shader,
+        lastCompileReady: manifest.compileReady === true
+          || (cacheHit && manifest.cachedCompile === true)
+          ? true
+          : shader.lastCompileReady,
+        maxActiveFragmentSamplers: shader.maxActiveFragmentSamplers
+          ?? this._lastKnownMaxActiveFragmentSamplers
+          ?? null,
+        maxSyncCompileMs: cacheHit && manifest.compiledMaterials === 0
+          ? 0
+          : shader.maxSyncCompileMs,
+        fragmentSamplerLimit: this.rendererCapabilities?.limits?.maxFragmentTextureUnits ?? null,
+        // Production WebGL canary accounting is a deliberately open gate.
+        canaryValidated: null,
+      },
+      context: {
+        lost: this._contextLost,
+        lossCount: this._contextLossCount,
+        restoreCount: this._contextRestoreCount,
+        circuitBreakerTrips: this._contextCircuitBreakerTrips,
+      },
+      mode: this._releaseModeDependencyEvidence(),
+      resources: this._releaseResourceEvidence(),
+      cache: {
+        hit: cacheHit,
+        identityReused: manifest.reusedBundle === true && manifest.reusedResources === true,
+        heavyweightConstructorCount: manifest.reusedBundle === true ? 0 : null,
+        shaderLinkCount: manifest.compiledMaterials ?? null,
+      },
+      stability: {
+        postRevealMutationCount: 0,
+        // This remains open until all current-footprint owners emit mutations.
+        observationComplete: false,
+      },
+    });
+  }
+
   // ----------------------------------------------------------- diagnostics
   // Snapshot of engine state for the Performance Overlay. Read-only, defensive:
   // every world-mode system may be absent (mode not active / disabled). Never
@@ -13286,6 +13518,7 @@ export class Engine {
         instances: { grass: 0, flowers: 0, rocks: 0, trees: 0 },
         drawCalls: 0, triangles: 0, queuedSectors: 0,
       },
+      releaseAcceptance: this._releaseAcceptanceDiagnostics(),
     };
 
     if (this.worldMode === 'infinite' && this.infiniteWorld) {

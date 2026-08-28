@@ -96,6 +96,7 @@ export default function PerformanceOverlay({
   const cam = diag?.camera;
   const cull = diag?.culling || {};
   const lod = diag?.lod?.counts || [];
+  const release = diag?.releaseAcceptance;
 
   return (
     <div className="perf-overlay" role="dialog" aria-label="Performance overlay">
@@ -194,6 +195,31 @@ export default function PerformanceOverlay({
           <Row label="Pixel ratio" value={diag?.pixelRatio?.toFixed(2) ?? '–'} warn={diag?.pixelRatio > 2.5} />
           <Row label="Render size" value={diag?.drawingBuffer ? `${diag.drawingBuffer.w}×${diag.drawingBuffer.h}` : '–'} />
           <Row label="Camera" value={cam ? `${cam.x.toFixed(0)}, ${cam.y.toFixed(0)}, ${cam.z.toFixed(0)}` : '–'} />
+        </Section>
+
+        <Section
+          id="release"
+          title={`Release readiness${release ? ` · ${release.status}` : ''}`}
+          collapsed={collapsed.release}
+          onToggle={onToggleSection}
+        >
+          {release ? (
+            <>
+              <Row
+                label="Verdict"
+                value={`${release.counts.pass} pass · ${release.counts.fail} fail · ${release.counts.pending} pending`}
+                warn={!release.ready}
+              />
+              {release.checks.map((item) => (
+                <Row
+                  key={item.id}
+                  label={item.label}
+                  value={`${item.status} · ${item.detail}`}
+                  warn={item.status === 'fail' || item.status === 'pending'}
+                />
+              ))}
+            </>
+          ) : <Row label="Acceptance evidence" value="collecting…" />}
         </Section>
 
         <Section id="rendering" title="Rendering" collapsed={collapsed.rendering} onToggle={onToggleSection}>

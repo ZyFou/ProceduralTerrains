@@ -20,6 +20,7 @@ export function buildDiagnosticsObject(snap) {
       mode: snap?.diag?.mode,
       state: snap?.diag?.state,
       qualityPreset: snap?.diag?.qualityPreset,
+      releaseStatus: snap?.diag?.releaseAcceptance?.status,
     },
     renderer: snap?.render,
     rendererBackend: snap?.diag?.renderer,
@@ -43,6 +44,15 @@ export function buildDiagnosticsText(snap) {
   L.push('[Summary]');
   L.push(`  FPS: ${o.summary.fps}   Frame: ${o.summary.frameMs} ms`);
   L.push(`  Mode: ${o.summary.mode}   State: ${o.summary.state}   Quality: ${o.summary.qualityPreset}`);
+  if (o.summary.releaseStatus) {
+    const release = o.scene?.releaseAcceptance;
+    L.push('');
+    L.push('[Release readiness]');
+    L.push(`  Status: ${o.summary.releaseStatus}`);
+    for (const gate of release?.checks || []) {
+      L.push(`  [${gate.status}] ${gate.label}: ${gate.detail}`);
+    }
+  }
   if (o.renderer) {
     L.push('');
     L.push('[Rendering]');
