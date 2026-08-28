@@ -842,9 +842,11 @@ export class Engine {
   }
 
   _releasePaintMode({ preserveState = false } = {}) {
-    if (!this.paintMode) return false;
-    const retained = preserveState ? { ...this.paintMode.state, enabled: false } : null;
-    this.paintMode.dispose();
+    const manager = this.paintMode;
+    const retained = preserveState
+      ? { ...(manager?.state || this.paintState || {}), enabled: false }
+      : null;
+    manager?.dispose?.();
     this.paintMode = null;
     this.paintState = retained
       || { enabled: false, baseMode: 'generated', baseMultiplier: 1, layerOpacity: 1 };
@@ -855,7 +857,7 @@ export class Engine {
     this.uniforms.uPaintBiomeTexture.value = null;
     this.uniforms.uPaintPropsTexture.value = null;
     this.cb.onPaintState?.({ ...this.paintState });
-    return true;
+    return !!manager;
   }
 
   _initManualTerrain() {

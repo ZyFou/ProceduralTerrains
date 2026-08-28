@@ -94,4 +94,34 @@ describe('paint mode lifecycle', () => {
     expect(water.visible).toBe(true);
     expect(paintMode.setEnabled).toHaveBeenCalledWith(true);
   });
+
+  it('restores the generated base when leaving a lazy Manual document', () => {
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      paintMode: null,
+      paintState: {
+        enabled: false,
+        baseMode: 'flat',
+        baseMultiplier: 0,
+        layerOpacity: 1,
+      },
+      uniforms: {
+        uPaintEnabled: { value: 1 },
+        uPaintBaseMult: { value: 0 },
+        uPaintOpacity: { value: 1 },
+        uPaintHeightTexture: { value: {} },
+        uPaintBiomeTexture: { value: {} },
+        uPaintPropsTexture: { value: {} },
+      },
+      cb: { onPaintState: vi.fn() },
+    });
+
+    engine._releasePaintMode();
+
+    expect(engine.paintState.baseMode).toBe('generated');
+    expect(engine.paintState.baseMultiplier).toBe(1);
+    expect(engine.uniforms.uPaintEnabled.value).toBe(0);
+    expect(engine.uniforms.uPaintBaseMult.value).toBe(1);
+    expect(engine.uniforms.uPaintHeightTexture.value).toBeNull();
+  });
 });
