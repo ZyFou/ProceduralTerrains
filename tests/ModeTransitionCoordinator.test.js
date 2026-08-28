@@ -3,6 +3,7 @@ import {
   MODE_TRANSITION_STAGES,
   ModeResourceCache,
   ModeTransitionCoordinator,
+  PreparedModeBundle,
   createModeRenderKey,
 } from '../src/engine/mode/ModeTransitionCoordinator.js';
 
@@ -64,5 +65,39 @@ describe('ModeTransitionCoordinator', () => {
     expect(cache.has('planet')).toBe(true);
     expect(cache.has('studio')).toBe(false);
     expect(disposed).toEqual(['studio']);
+  });
+
+  it('parks, reactivates and disposes a prepared bundle exactly once', () => {
+    const calls = [];
+    const bundle = new PreparedModeBundle({
+      key: 'infinite-key',
+      worldMode: 'infinite',
+      resources: { world: {} },
+      activate: () => calls.push('activate'),
+      park: () => calls.push('park'),
+      dispose: () => calls.push('dispose'),
+    });
+
+    expect(bundle.activate()).toBe(true);
+    expect(bundle.activate()).toBe(false);
+    expect(bundle.park()).toBe(true);
+    expect(bundle.park()).toBe(false);
+    expect(bundle.activate()).toBe(true);
+    expect(bundle.dispose()).toBe(true);
+    expect(bundle.dispose()).toBe(false);
+    expect(calls).toEqual(['activate', 'park', 'activate', 'park', 'dispose']);
+  });
+
+  it('does not double-dispose a bundle stored through cache aliases', () => {
+    const dispose = vi.fn();
+    const bundle = new PreparedModeBundle({
+      key: 'planet-key', worldMode: 'planet', dispose,
+    });
+    const cache = new ModeResourceCache({ maxInactive: 3 });
+    cache.set('planet-a', bundle);
+    cache.set('planet-b', bundle);
+    cache.clear();
+
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 });

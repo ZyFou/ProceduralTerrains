@@ -16,6 +16,7 @@ export class FPSControls {
   constructor(camera, domElement) {
     this.camera = camera;
     this.dom = domElement;
+    this.enabled = true;
 
     this.yaw = 0;          // radians, 0 = looking toward -Z (north)
     this.pitch = 0;        // radians, positive = looking up
@@ -60,6 +61,7 @@ export class FPSControls {
   }
 
   dispose() {
+    this.enabled = false;
     this.dom.removeEventListener('click', this._onClick);
     this.dom.removeEventListener('wheel', this._onWheel);
     document.removeEventListener('mousemove', this._onMouseMove);
@@ -74,6 +76,15 @@ export class FPSControls {
 
   get isLocked() { return this._locked; }
 
+  setEnabled(enabled) {
+    this.enabled = enabled === true;
+    if (this.enabled) return;
+    this._keys.clear();
+    this.touch = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+    this.touchActive = false;
+    if (document.pointerLockElement === this.dom) document.exitPointerLock();
+  }
+
   setTouchInput({ moveX = 0, moveY = 0, lookX = 0, lookY = 0 } = {}) {
     this.touch.moveX = moveX;
     this.touch.moveY = moveY;
@@ -86,6 +97,7 @@ export class FPSControls {
   // ---- event handlers ----
 
   _onClick() {
+    if (!this.enabled) return;
     if (!this._locked) {
       this.dom.requestPointerLock();
     }
@@ -97,13 +109,14 @@ export class FPSControls {
   }
 
   _onMouseMove(e) {
-    if (!this._locked) return;
+    if (!this.enabled || !this._locked) return;
     this.yaw -= e.movementX * this.mouseSensitivity;
     this.pitch -= e.movementY * this.mouseSensitivity;
     this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
   }
 
   _onWheel(e) {
+    if (!this.enabled) return;
     e.preventDefault();
     // logarithmic speed scaling
     const factor = Math.exp(-e.deltaY * 0.0015);
@@ -115,7 +128,7 @@ export class FPSControls {
   }
 
   _onKeyDown(e) {
-    if (!this._locked && !this.allowKeyboardWithoutLock) return;
+    if (!this.enabled || (!this._locked && !this.allowKeyboardWithoutLock)) return;
     this._keys.add(e.code);
   }
 
@@ -135,6 +148,7 @@ export class FPSControls {
   }
 
   update(dt) {
+    if (!this.enabled) return;
     this._applyTouchLook(dt);
 
     if (this.externalMove) {

@@ -39,6 +39,66 @@ export class ModeTransitionCancelledError extends Error {
   }
 }
 
+/**
+ * Owns one fully prepared world-mode graph. The payload deliberately stays
+ * mutable: Three.js resources and controls update internal state while active.
+ * Lifecycle callbacks are idempotent so shared cache aliases cannot dispose a
+ * GPU resource more than once.
+ */
+export class PreparedModeBundle {
+  constructor({
+    key,
+    worldMode,
+    projectMode = null,
+    resources = {},
+    activate,
+    park,
+    dispose,
+    metadata = {},
+  } = {}) {
+    if (!key) throw new Error('PreparedModeBundle requires a render key');
+    if (!worldMode) throw new Error('PreparedModeBundle requires a world mode');
+    this.key = key;
+    this.worldMode = worldMode;
+    this.projectMode = projectMode;
+    this.resources = resources;
+    this.metadata = metadata;
+    this._activate = activate;
+    this._park = park;
+    this._dispose = dispose;
+    this.state = 'prepared';
+    this.disposed = false;
+  }
+
+  get active() { return this.state === 'active' && !this.disposed; }
+
+  activate(context) {
+    if (this.disposed) throw new Error(`Prepared mode bundle ${this.key} is disposed`);
+    if (this.active) return false;
+    this._activate?.(this.resources, context);
+    this.state = 'active';
+    return true;
+  }
+
+  park(context) {
+    if (this.disposed || this.state === 'parked') return false;
+    this._park?.(this.resources, context);
+    this.state = 'parked';
+    return true;
+  }
+
+  dispose() {
+    if (this.disposed) return false;
+    if (this.active) this.park({ reason: 'dispose' });
+    this.disposed = true;
+    this.state = 'disposed';
+    const resources = this.resources;
+    this.resources = null;
+    this._dispose?.(resources);
+    return true;
+  }
+}
+
 function normalizeError(error, stage, runId, target) {
   const source = error instanceof Error ? error : new Error(String(error));
   return {
@@ -250,7 +310,8 @@ export class ModeResourceCache {
     if (!entry) return false;
     this.entries.delete(key);
     if (this.activeKey === key) this.activeKey = null;
-    entry.dispose?.(entry.value);
+    if (entry.dispose) entry.dispose(entry.value);
+    else entry.value?.dispose?.();
     return true;
   }
 
@@ -264,7 +325,13 @@ export class ModeResourceCache {
   }
 
   clear() {
-    for (const entry of this.entries.values()) entry.dispose?.(entry.value);
+    const disposed = new Set();
+    for (const entry of this.entries.values()) {
+      if (disposed.has(entry.value)) continue;
+      disposed.add(entry.value);
+      if (entry.dispose) entry.dispose(entry.value);
+      else entry.value?.dispose?.();
+    }
     this.entries.clear();
     this.activeKey = null;
   }

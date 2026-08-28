@@ -139,6 +139,7 @@ import {
   ModeTransitionCancelledError,
   ModeTransitionCoordinator,
   ModeResourceCache,
+  PreparedModeBundle,
   createModeRenderKey,
 } from './mode/ModeTransitionCoordinator.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
@@ -278,6 +279,8 @@ export class Engine {
     this._modeTransitionCoordinator = null;
     this._modeResourceCache = new ModeResourceCache({ maxInactive: 2 });
     this._modeTransitionContext = null;
+    this._activePreparedModeBundle = null;
+    this._modeDocumentEpoch = 0;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
       migrateWaterParams(migrateTerrainFormationParams(
@@ -418,6 +421,10 @@ export class Engine {
     this.infiniteTerrainClipmap = null;
     this.infiniteCloud = null;
     this.fpsControls = null;
+    this._infiniteMaintenanceCamera = null;
+    this._infiniteMaintenanceGen = -1;
+    this._planetMaintenanceCamera = null;
+    this._planetMaintenanceGen = -1;
 
     // Tile mode: the studio board can grow into a grid of square cells. Each
     // cell is one cellSize (== the single-board size) patch of the SAME
@@ -566,14 +573,11 @@ export class Engine {
     this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
     this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
-    this.destructionField = new DestructionField({ resolution: destructionResolutionForTier(this.gpuTier) });
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
     this._initTileInteraction();
-    this._initPaintMode();
     this._initManualTerrain();
     this._initCreatorTools();
-    this._initProps();
     this._bindMinimapSources();
 
     this.controls.setBoardSize(this.boardSize);
@@ -785,32 +789,8 @@ export class Engine {
     this._sharedOpaqueRevision = null;
     this._sharedOpaqueTarget = null;
 
-    // studio/flat-board volumetric cloud slab (sits above the board; hidden
-    // until enabled). Planet mode has its own spherical PlanetCloudLayer.
-    const initialCloudConfig = resolveCloudQuality({ ...this.params, ...this.perf });
-    this.studioCloud = new CloudSlabLayer(this.scene, {
-      initialConfig: initialCloudConfig,
-      compile: async (mats) => {
-        if (this._disposed) return { ready: false, aborted: true };
-        // The live Studio path normally renders into the visual-post target.
-        // If that target changes while the cloud links, warm the replacement
-        // before allowing CloudSlabLayer to publish/show the candidate.
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const target = this._resolveCameraCompileTarget();
-          const result = await this._compileMaterialVariants(mats, {
-            canvasOnly: true,
-            timeoutMs: 120000,
-            renderTarget: target.renderTarget,
-          });
-          if (result?.ready !== true || this._disposed) return result;
-          const current = this._resolveCameraCompileTarget();
-          if (this._sameCameraCompileTarget(target, current)) return result;
-          await yieldTask();
-        }
-        return { ready: false, aborted: true };
-      },
-      renderer: this.renderer,
-    });
+    // Allocated only when a Studio document actually enables clouds.
+    this.studioCloud = null;
 
     // Procedural sky dome. Persistent + shared by studio (Tile) and infinite
     // world so both modes show the exact same configured sky (driven by the
@@ -847,6 +827,35 @@ export class Engine {
       onToast: (msg) => this.cb.onToast(msg),
     });
     this.paintState = { ...this.paintMode.state };
+    return this.paintMode;
+  }
+
+  _ensurePaintMode() {
+    if (this.paintMode) return this.paintMode;
+    const retained = this.paintState;
+    const manager = this._initPaintMode();
+    if (retained) {
+      manager.setBaseMode(retained.baseMode);
+      manager.setState({ ...retained, enabled: false });
+    }
+    return manager;
+  }
+
+  _releasePaintMode({ preserveState = false } = {}) {
+    if (!this.paintMode) return false;
+    const retained = preserveState ? { ...this.paintMode.state, enabled: false } : null;
+    this.paintMode.dispose();
+    this.paintMode = null;
+    this.paintState = retained
+      || { enabled: false, baseMode: 'generated', baseMultiplier: 1, layerOpacity: 1 };
+    this.uniforms.uPaintEnabled.value = 0;
+    this.uniforms.uPaintBaseMult.value = this.paintState.baseMode === 'flat' ? 0 : 1;
+    this.uniforms.uPaintOpacity.value = this.paintState.layerOpacity ?? 1;
+    this.uniforms.uPaintHeightTexture.value = null;
+    this.uniforms.uPaintBiomeTexture.value = null;
+    this.uniforms.uPaintPropsTexture.value = null;
+    this.cb.onPaintState?.({ ...this.paintState });
+    return true;
   }
 
   _initManualTerrain() {
@@ -858,13 +867,13 @@ export class Engine {
       controls: this.controls,
       getBounds: () => this._creatorBounds(),
       getHeightAt: (x, z) => (
-        this._getCpuHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)
+        this._getCpuHeightSampler().heightAt(x, z) * this._paintBaseMultiplier()
         + this._samplePaintHeightOffset(x, z)
         + this._sampleManualHeightOffset(x, z)
         + this._sampleSplineHeightOffset(x, z)
       ),
       getBaseHeightAt: (x, z) => (
-        this._getCpuHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)
+        this._getCpuHeightSampler().heightAt(x, z) * this._paintBaseMultiplier()
         + this._samplePaintHeightOffset(x, z)
         + this._sampleSplineHeightOffset(x, z)
       ),
@@ -899,10 +908,12 @@ export class Engine {
 
   _bindAuthoringMaskTextures() {
     const uniforms = this.uniforms;
-    if (!uniforms || !this.paintMode?.layers) return;
+    if (!uniforms) return;
     const manual = this.projectMode === 'manual' && this.manualTerrain?.surfaceField;
-    uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
-    uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
+    if (this.paintMode?.layers) {
+      uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
+      uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
+    }
     if (manual) {
       this.manualTerrain.surfaceField.bind(uniforms);
       uniforms.uManualSurfaceMode.value = 1;
@@ -913,9 +924,31 @@ export class Engine {
     }
   }
 
-  _initProps() {
-    this.propsManager = new ProceduralPropsManager(this.scene);
-    this.realWorldBuildingLayer = new RealWorldBuildingLayer(this.scene);
+  _ensurePropsManager() {
+    if (!this.propsManager) this.propsManager = new ProceduralPropsManager(this.scene);
+    return this.propsManager;
+  }
+
+  _releasePropsManager() {
+    if (!this.propsManager) return false;
+    this.propsManager.dispose();
+    this.propsManager = null;
+    return true;
+  }
+
+  _ensureRealWorldBuildingLayer() {
+    if (!this.realWorldBuildingLayer) {
+      this.realWorldBuildingLayer = new RealWorldBuildingLayer(this.scene);
+    }
+    return this.realWorldBuildingLayer;
+  }
+
+  _releaseRealWorldBuildingLayer() {
+    if (!this.realWorldBuildingLayer) return false;
+    this.realWorldBuildingLayer.dispose?.();
+    this.realWorldBuildingLayer = null;
+    this._realWorldBuildingLayoutKey = '';
+    return true;
   }
 
   _creatorBounds() {
@@ -932,19 +965,6 @@ export class Engine {
   }
 
   _initCreatorTools() {
-    const contains = (x, z) => { const { origin, span } = this._creatorBounds(); return x >= origin.x && x <= origin.x + span.x && z >= origin.z && z <= origin.z + span.z; };
-    const picker = new TerrainPicker({ camera: this.camera, domElement: this.canvas, contains,
-      heightAt: (x, z) => (this._getHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)) + this._samplePaintHeightOffset(x, z) + this._sampleManualHeightOffset(x, z) + this._sampleSplineHeightOffset(x, z),
-    });
-    this.splineManager = new SplineManager({ scene: this.scene, camera: this.camera, domElement: this.canvas, controls: this.controls, uniforms: this.uniforms,
-      getBounds: () => this._creatorBounds(), getBaseHeight: (x, z) => this._getHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1), picker, gpuTier: this.gpuTier,
-      onChange: (state) => {
-        this.splineState = state;
-        this._markTerrainFieldDirty();
-        this.cb.onSplineState?.(state);
-      },
-      onStableAction: (label) => { this.projectHistory?.record('splines', label); }, onToast: (message) => this.cb.onToast(message),
-    });
     this.terrainAnalysis = new TerrainAnalysisManager({ uniforms: this.uniforms, getParams: () => this.params, onChange: (state) => { this.analysisState = state; this._needsRender = true; this.cb.onAnalysisState?.(state); } });
     this.analysisState = this.terrainAnalysis.serialize();
     this.projectHistory = new ProjectHistoryManager({
@@ -953,6 +973,37 @@ export class Engine {
       getThumbnail: () => { try { return this.canvas.toDataURL('image/webp', .78); } catch { return null; } },
       onChange: (state) => this.cb.onCreatorHistory?.(state),
     });
+  }
+
+  _ensureSplineManager() {
+    if (this.splineManager) return this.splineManager;
+    const contains = (x, z) => { const { origin, span } = this._creatorBounds(); return x >= origin.x && x <= origin.x + span.x && z >= origin.z && z <= origin.z + span.z; };
+    const picker = new TerrainPicker({ camera: this.camera, domElement: this.canvas, contains,
+      heightAt: (x, z) => (this._getHeightSampler().heightAt(x, z) * this._paintBaseMultiplier()) + this._samplePaintHeightOffset(x, z) + this._sampleManualHeightOffset(x, z) + this._sampleSplineHeightOffset(x, z),
+    });
+    this.splineManager = new SplineManager({ scene: this.scene, camera: this.camera, domElement: this.canvas, controls: this.controls, uniforms: this.uniforms,
+      getBounds: () => this._creatorBounds(), getBaseHeight: (x, z) => this._getHeightSampler().heightAt(x, z) * this._paintBaseMultiplier(), picker, gpuTier: this.gpuTier,
+      onChange: (state) => {
+        this.splineState = state;
+        this._markTerrainFieldDirty();
+        this.cb.onSplineState?.(state);
+      },
+      onStableAction: (label) => { this.projectHistory?.record('splines', label); }, onToast: (message) => this.cb.onToast(message),
+    });
+    return this.splineManager;
+  }
+
+  _releaseSplineManager() {
+    if (!this.splineManager) return false;
+    this.splineManager.dispose();
+    this.splineManager = null;
+    this.splineState = { enabled: false, selectedId: null, creatingType: null, draftPointCount: 0, splines: [] };
+    this.uniforms.uSplineEnabled.value = 0;
+    this.uniforms.uSplineHeightTexture.value = null;
+    this.uniforms.uSplineMaskTexture.value = null;
+    this.uniforms.uSplineAuxTexture.value = null;
+    this.cb.onSplineState?.({ ...this.splineState });
+    return true;
   }
 
   _bindMinimapSources() {
@@ -982,7 +1033,12 @@ export class Engine {
   }
 
   _samplePaintHeightOffset(x, z) {
-    return (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0) * (this.paintMode?.state?.layerOpacity ?? 1);
+    return (this.paintMode?.layers?.sampleHeightOffset(x, z) ?? 0)
+      * (this.paintMode?.state?.layerOpacity ?? this.paintState?.layerOpacity ?? 1);
+  }
+
+  _paintBaseMultiplier() {
+    return this.paintMode?.state?.baseMultiplier ?? this.paintState?.baseMultiplier ?? 1;
   }
 
   _manualBaseSource(document = null) {
@@ -1010,7 +1066,7 @@ export class Engine {
   _serializeCreatorTools() { return { splines: this.splineManager?.serialize?.() ?? [], analysis: this.terrainAnalysis?.serialize?.() ?? {} }; }
 
   _explodeHeightAt(x, z) {
-    return this._getCpuHeightSampler().heightAt(x, z) * (this.paintMode?.state.baseMultiplier ?? 1)
+    return this._getCpuHeightSampler().heightAt(x, z) * this._paintBaseMultiplier()
       + this._samplePaintHeightOffset(x, z)
       + this._sampleManualHeightOffset(x, z)
       + this._sampleSplineHeightOffset(x, z);
@@ -1036,6 +1092,7 @@ export class Engine {
 
   _ensureExplodeTool() {
     if (this.explodeTool) return this.explodeTool;
+    this._ensureDestructionField();
     const bounds = this._creatorBounds();
     this.destructionField.setRegion(bounds.origin, bounds.span);
     this.destructionField.applyTo(this.uniforms, true);
@@ -1069,7 +1126,8 @@ export class Engine {
 
   setExplodeSetting(key, value) {
     this.explodeSettings = normalizeExplodeSettings({ ...this.explodeSettings, [key]: value });
-    const resized = this.destructionField.setResolution(
+    const field = this._ensureDestructionField();
+    const resized = field.setResolution(
       resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
     );
     const tool = this._ensureExplodeTool();
@@ -1092,6 +1150,35 @@ export class Engine {
     };
   }
   serializeDestruction() { return this.destructionField?.serialize({ jsonSafe: true }) ?? null; }
+
+  _ensureDestructionField() {
+    if (this.destructionField) return this.destructionField;
+    this.destructionField = new DestructionField({
+      resolution: resolveExplosionResolution(this.explodeSettings?.resolution, this.gpuTier)
+        || destructionResolutionForTier(this.gpuTier),
+    });
+    const bounds = this._creatorBounds();
+    this.destructionField.setRegion(bounds.origin, bounds.span, { reproject: false });
+    this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+    if (this.cpuHeightSampler) this.cpuHeightSampler.destruction = this.destructionField;
+    if (this._minimapSampler) this._minimapSampler.destruction = this.destructionField;
+    if (this._propCpuSampler) this._propCpuSampler.destruction = this.destructionField;
+    return this.destructionField;
+  }
+
+  _releaseDestructionField() {
+    if (!this.destructionField) return false;
+    this.explodeTool?.dispose?.();
+    this.explodeTool = null;
+    this.destructionField.dispose();
+    this.destructionField = null;
+    if (this.uniforms?.uDestructionEnabled) this.uniforms.uDestructionEnabled.value = 0;
+    if (this.uniforms?.uDestructionTexture) this.uniforms.uDestructionTexture.value = null;
+    if (this.cpuHeightSampler) this.cpuHeightSampler.destruction = null;
+    if (this._minimapSampler) this._minimapSampler.destruction = null;
+    if (this._propCpuSampler) this._propCpuSampler.destruction = null;
+    return true;
+  }
 
   // ------------------------------------------------------------ parameters
 
@@ -1640,7 +1727,7 @@ export class Engine {
     }
     this.realWorldSource = null;
     this.realWorldBuildingsVisible = false;
-    this.realWorldBuildingLayer?.clear();
+    this._releaseRealWorldBuildingLayer();
     this._realWorldBuildingLayoutKey = '';
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
     this.cb.onRealWorldImageryStyle?.(DEFAULT_IMAGERY_STYLE);
@@ -2271,17 +2358,19 @@ export class Engine {
   _rebuildRealWorldBuildings({ force = false } = {}) {
     const entry = this.importedMaps?.height;
     const geo = entry?.geoRef;
-    if (!this.realWorldBuildingLayer || !geo?.buildingCells || !this.realWorldSource) {
+    if (!geo?.buildingCells || !this.realWorldSource) {
       this.realWorldBuildingLayer?.clear();
       this._realWorldBuildingLayoutKey = '';
       return 0;
     }
-    this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible
-      && this.worldMode === 'studio';
     if (!this.realWorldBuildingsVisible) {
+      if (this.realWorldBuildingLayer?.group) this.realWorldBuildingLayer.group.visible = false;
       this._realWorldBuildingLayoutKey = '';
-      return this.realWorldBuildingLayer.count;
+      return this.realWorldBuildingLayer?.count ?? 0;
     }
+    const layer = this._ensureRealWorldBuildingLayer();
+    layer.group.visible = this.realWorldBuildingsVisible
+      && this.worldMode === 'studio';
     const cellSummary = Object.entries(geo.buildingCells)
       .map(([key, patch]) => `${key}:${patch?.buildings?.length ?? 0}`)
       .sort()
@@ -2300,9 +2389,9 @@ export class Engine {
       settings.heightStrength,
       settings.heightOffset,
     ].join('@');
-    if (!force && layoutKey === this._realWorldBuildingLayoutKey) return this.realWorldBuildingLayer.count;
+    if (!force && layoutKey === this._realWorldBuildingLayoutKey) return layer.count;
     this._realWorldBuildingLayoutKey = layoutKey;
-    const count = this.realWorldBuildingLayer.rebuild({
+    const count = layer.rebuild({
       cells: geo.buildingCells,
       bbox0: geo.bbox0,
       zoom: geo.zoom,
@@ -2501,6 +2590,7 @@ export class Engine {
     noiseStackPresetKey = null,
     initialGraph = null,
   } = {}) {
+    this._modeDocumentEpoch = (this._modeDocumentEpoch || 0) + 1;
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
     this.workspacePreset = workspacePreset === 'real-terrain' ? 'real-terrain' : null;
     this._clearPendingTerrainParams();
@@ -2576,12 +2666,12 @@ export class Engine {
     // A new project must not inherit any authoring data from the previous
     // terrain. Clear both the baked masks and their source data, including an
     // unfinished spline draft, before rebuilding the fresh terrain.
-    this.splineManager?.clear();
-    this.splineManager?.setEditingEnabled(false);
-    this.paintMode?.setEnabled(false);
-    this.paintMode?.clear({ silent });
-    this.paintMode?.setBaseMode(this.projectMode === 'manual' ? 'flat' : 'generated');
-    this.paintMode?.setState({ layerOpacity: 1 });
+    this._releasePaintMode();
+    this._releaseSplineManager();
+    if (this.projectMode === 'manual') {
+      this.paintState = { enabled: false, baseMode: 'flat', baseMultiplier: 0, layerOpacity: 1 };
+      this.uniforms.uPaintBaseMult.value = 0;
+    }
     this.setTimeOfDay(DEFAULT_TIME_OF_DAY);
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load({ version: 5, baseSource: 'flat', shapes: [] }, { emit: false });
@@ -2617,6 +2707,8 @@ export class Engine {
     // over the fresh small default board. params already reset erosion* knobs.
     this.erosionField?.clear();
     this.erosionField?.applyTo(this.uniforms);
+    this._releaseDestructionField();
+    this._releasePropsManager();
     // newProject mutates the complete document in one pass instead of routing
     // every preset field through setParam(). Publish that finished snapshot so
     // React panels do not keep rendering the previous project's stack.
@@ -3837,10 +3929,10 @@ export class Engine {
       }
 
       const minimal = this._planetMatMinimal === true;
-      warm = [
-        planet.createPlanetMaterial(this.uniforms, octaves, sg, { minimal }),
-        planet.createPlanetWaterMaterial(this.uniforms, octaves, sg),
-      ];
+      warm = [planet.createPlanetMaterial(this.uniforms, octaves, sg, { minimal })];
+      if (this._planetWaterRequired()) {
+        warm.push(planet.createPlanetWaterMaterial(this.uniforms, octaves, sg));
+      }
 
       const ensureVisibleTargetReady = async () => {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -8292,6 +8384,7 @@ export class Engine {
       this.cb.onToast('Paint Mode is currently available in Studio mode');
       return;
     }
+    if (enabled) this._ensurePaintMode();
     if (enabled && !this.paintMode?.state.enabled) {
       // Never let a pre-stroke progressive bake publish after painting starts.
       // Paint is sampled live while editing; exit starts one fresh atomic bake.
@@ -8309,26 +8402,29 @@ export class Engine {
   }
 
   setPaintSetting(key, value) {
-    this.paintMode?.setState({ [key]: value });
+    this._ensurePaintMode().setState({ [key]: value });
   }
 
   clearPaintLayers() {
     this.projectHistory?.createSnapshot('Before clearing paint', { automatic: true });
-    this.paintMode?.clear();
+    if (this.paintMode) {
+      this.paintMode.clear();
+      this._releasePaintMode({ preserveState: true });
+    }
     this._markTerrainFieldDirty();
   }
 
   // Non-destructive: swap between painting on top of the generated terrain
   // and a flat Empty Terrain base, keeping any existing paint strokes.
   setPaintBaseMode(mode) {
-    this.paintMode?.setBaseMode(mode);
+    this._ensurePaintMode().setBaseMode(mode);
     this._markTerrainFieldDirty();
   }
 
   // Destructive "start fresh": flatten the base AND clear paint layers.
   startEmptyTerrain() {
     this.projectHistory?.createSnapshot('Before empty terrain', { automatic: true });
-    this.paintMode?.startEmpty();
+    this._ensurePaintMode().startEmpty();
     this._markTerrainFieldDirty();
   }
 
@@ -8377,6 +8473,7 @@ export class Engine {
     if (enabled && this.worldMode !== 'studio') { this.cb.onToast('Splines are currently available in Tile mode'); return; }
     if (enabled && this.exploreMode !== 'none') this.setExploreMode('none');
     if (enabled && this.paintMode?.state.enabled) this.setPaintMode(false);
+    if (enabled) this._ensureSplineManager();
     this.splineManager?.setEditingEnabled(enabled);
   }
   createSpline(type) { this.setSplineEditingEnabled(true); this.splineManager?.createSpline(type); }
@@ -8401,6 +8498,261 @@ export class Engine {
   renameSnapshot(id, name) { this.projectHistory?.renameSnapshot(id, name); }
 
   // -------------------------------------------------------------- world mode
+
+  _snapshotModeCamera() {
+    return {
+      position: this.camera.position.clone(),
+      quaternion: this.camera.quaternion.clone(),
+      fov: this.camera.fov,
+      near: this.camera.near,
+      far: this.camera.far,
+    };
+  }
+
+  _restoreModeCamera(snapshot) {
+    if (!snapshot) return;
+    this.camera.position.copy(snapshot.position);
+    this.camera.quaternion.copy(snapshot.quaternion);
+    this.camera.fov = snapshot.fov;
+    this.camera.near = snapshot.near;
+    this.camera.far = snapshot.far;
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+  }
+
+  _setPreparedCloudVisible(layer, visible) {
+    if (!layer) return;
+    if (typeof layer.setInScene === 'function') {
+      layer.setInScene(visible);
+      return;
+    }
+    if (layer.mesh) layer.mesh.visible = visible && layer._enabled !== false;
+    if (layer.group) layer.group.visible = visible && layer._enabled !== false;
+  }
+
+  _capturePreparedModeBundle(renderKey, worldMode = this.worldMode) {
+    const key = typeof renderKey === 'string' ? renderKey : renderKey?.serialized;
+    if (!key) return null;
+    const metadata = { camera: this._snapshotModeCamera() };
+    let resources;
+
+    if (worldMode === 'infinite') {
+      resources = {
+        infiniteWorld: this.infiniteWorld,
+        infiniteTerrainClipmap: this.infiniteTerrainClipmap,
+        infiniteCloud: this.infiniteCloud,
+        infiniteTerrainMat: this._infiniteTerrainMat,
+        infiniteWaterMat: this._infiniteWaterMat,
+        fpsControls: this.fpsControls,
+        fogManager: this.fogManager,
+        keepaliveMaterials: [],
+      };
+    } else if (worldMode === 'planet') {
+      resources = {
+        planetWorld: this.planetWorld,
+        planetWater: this.planetWater,
+        planetWaterMat: this.planetWaterMat,
+        planetControls: this.planetControls,
+        planetCloudChunks: this.planetCloudChunks,
+        planetCloudLayer: this.planetCloudLayer,
+        planetHeightBaker: this.planetHeightBaker,
+        planetMaterial: this.planetMaterial,
+        planetSampler: this.planetSampler,
+        planetPropSampler: this.planetPropSampler,
+        fpsControls: this.fpsControls,
+        bakedTerrainGen: this._bakedTerrainGen,
+        planetBakeRequestedGen: this._planetBakeRequestedGen,
+        heightTexture: this.uniforms.uPlanetHeightTex.value,
+        useHeightTexture: this.uniforms.uUsePlanetHeightTex.value,
+        keepaliveMaterials: [],
+      };
+    } else {
+      resources = {
+        studioCloud: this.studioCloud,
+        keepaliveMaterials: [],
+      };
+    }
+
+    const bundle = new PreparedModeBundle({
+      key,
+      worldMode,
+      projectMode: this.projectMode,
+      resources,
+      metadata,
+      activate: (owned) => {
+        if (worldMode === 'studio') {
+          this.studioCloud = owned.studioCloud;
+          this._enterStudioMode({ deferCompile: true });
+          owned.studioCloud = this.studioCloud;
+        } else if (worldMode === 'infinite') {
+          this._packNoiseUniforms();
+          this._syncCpuHeightProgram();
+          this.uniforms.uPaintEnabled.value = 0;
+          this.uniforms.uManualEnabled.value = 0;
+          this.uniforms.uUseTerrainHeightTex.value = 0;
+          this.uniforms.uFrequency.value = (this.params.noiseScale * 0.1) / this.boardSize;
+          this.infiniteWorld = owned.infiniteWorld;
+          this.infiniteTerrainClipmap = owned.infiniteTerrainClipmap;
+          this.infiniteCloud = owned.infiniteCloud;
+          this._infiniteTerrainMat = owned.infiniteTerrainMat;
+          this._infiniteWaterMat = owned.infiniteWaterMat;
+          this.fpsControls = owned.fpsControls;
+          this.fogManager = owned.fogManager;
+          this.infiniteWorld?.setVisible?.(true);
+          this._setPreparedCloudVisible(this.infiniteCloud, true);
+          this.fpsControls?.setEnabled?.(true);
+          if (this.infiniteTerrainClipmap) {
+            this.uniforms.uUseInfiniteFieldCache.value = 1;
+            this.infiniteTerrainClipmap.levels?.forEach((level, index) => {
+              if (this.uniforms[`uInfiniteFieldTex${index}`]) {
+                this.uniforms[`uInfiniteFieldTex${index}`].value = level.target.texture;
+              }
+            });
+            this.infiniteTerrainClipmap._publishReady?.();
+          }
+          this.waterSystem?.sync?.(this.params, 'infinite');
+          this._applySkyboxSettings();
+          this._applyTimeOfDay();
+          this._applyPixelRatio();
+        } else {
+          this._applyUniforms();
+          this.planetWorld = owned.planetWorld;
+          this.planetWater = owned.planetWater;
+          this.planetWaterMat = owned.planetWaterMat;
+          this.planetControls = owned.planetControls;
+          this.planetCloudChunks = owned.planetCloudChunks;
+          this.planetCloudLayer = owned.planetCloudLayer;
+          this.planetHeightBaker = owned.planetHeightBaker;
+          this.planetMaterial = owned.planetMaterial;
+          this.planetSampler = owned.planetSampler;
+          this.planetPropSampler = owned.planetPropSampler;
+          this.fpsControls = owned.fpsControls;
+          this._bakedTerrainGen = owned.bakedTerrainGen;
+          this._planetBakeRequestedGen = owned.planetBakeRequestedGen;
+          if (this.planetWorld?.group) this.planetWorld.group.visible = true;
+          this._setPreparedCloudVisible(this.planetCloudChunks, true);
+          this._setPreparedCloudVisible(this.planetCloudLayer, true);
+          if (this.planetControls) this.planetControls.enabled = true;
+          this.fpsControls?.setEnabled?.(true);
+          this.uniforms.uPlanetHeightTex.value = owned.heightTexture;
+          this.uniforms.uUsePlanetHeightTex.value = owned.useHeightTexture;
+          this._updatePlanetWater();
+          this.scene.background = new THREE.Color(0x05070d);
+          this._applyPixelRatio();
+        }
+        this._restoreModeCamera(metadata.camera);
+        this._needsRender = true;
+      },
+      park: (owned) => {
+        metadata.camera = this._snapshotModeCamera();
+        if (worldMode === 'studio') {
+          this.board.group.visible = false;
+          if (this.realWorldBuildingLayer) this.realWorldBuildingLayer.group.visible = false;
+          this._setPlinthVisible(false);
+          if (this.water) this.water.visible = false;
+          if (this.controls) this.controls.enabled = false;
+          this._setPreparedCloudVisible(owned.studioCloud, false);
+          if (this.studioCloud === owned.studioCloud) this.studioCloud = null;
+        } else if (worldMode === 'infinite') {
+          owned.infiniteWorld?.setVisible?.(false);
+          this._setPreparedCloudVisible(owned.infiniteCloud, false);
+          owned.fpsControls?.setEnabled?.(false);
+          if (this.infiniteWorld === owned.infiniteWorld) this.infiniteWorld = null;
+          if (this.infiniteTerrainClipmap === owned.infiniteTerrainClipmap) this.infiniteTerrainClipmap = null;
+          if (this.infiniteCloud === owned.infiniteCloud) this.infiniteCloud = null;
+          if (this._infiniteTerrainMat === owned.infiniteTerrainMat) this._infiniteTerrainMat = null;
+          if (this._infiniteWaterMat === owned.infiniteWaterMat) this._infiniteWaterMat = null;
+          if (this.fpsControls === owned.fpsControls) this.fpsControls = null;
+          if (this.fogManager === owned.fogManager) this.fogManager = null;
+          this.uniforms.uUseInfiniteFieldCache.value = 0;
+          this.uniforms.uInfiniteFieldReady.value.set(0, 0, 0);
+        } else {
+          if (owned.planetWorld?.group) owned.planetWorld.group.visible = false;
+          if (owned.planetWater) owned.planetWater.visible = false;
+          this._setPreparedCloudVisible(owned.planetCloudChunks, false);
+          this._setPreparedCloudVisible(owned.planetCloudLayer, false);
+          if (owned.planetControls) owned.planetControls.enabled = false;
+          owned.fpsControls?.setEnabled?.(false);
+          owned.heightTexture = this.uniforms.uPlanetHeightTex.value;
+          owned.useHeightTexture = this.uniforms.uUsePlanetHeightTex.value;
+          if (this.planetWorld === owned.planetWorld) this.planetWorld = null;
+          if (this.planetWater === owned.planetWater) this.planetWater = null;
+          if (this.planetWaterMat === owned.planetWaterMat) this.planetWaterMat = null;
+          if (this.planetControls === owned.planetControls) this.planetControls = null;
+          if (this.planetCloudChunks === owned.planetCloudChunks) this.planetCloudChunks = null;
+          if (this.planetCloudLayer === owned.planetCloudLayer) this.planetCloudLayer = null;
+          if (this.planetHeightBaker === owned.planetHeightBaker) this.planetHeightBaker = null;
+          if (this.planetMaterial === owned.planetMaterial) this.planetMaterial = null;
+          if (this.planetSampler === owned.planetSampler) this.planetSampler = null;
+          if (this.planetPropSampler === owned.planetPropSampler) this.planetPropSampler = null;
+          if (this.fpsControls === owned.fpsControls) this.fpsControls = null;
+          this.uniforms.uPlanetHeightTex.value = null;
+          this.uniforms.uUsePlanetHeightTex.value = 0;
+        }
+      },
+      dispose: (owned) => this._disposePreparedModeResources(worldMode, owned),
+    });
+    bundle.activate({ reason: 'capture-live' });
+    return bundle;
+  }
+
+  _disposePreparedModeResources(worldMode, resources) {
+    if (!resources) return;
+    if (worldMode === 'studio') {
+      resources.studioCloud?.dispose?.();
+    } else if (worldMode === 'infinite') {
+      resources.infiniteCloud?.dispose?.();
+      resources.infiniteTerrainClipmap?.dispose?.();
+      resources.infiniteWorld?.dispose?.();
+      resources.fpsControls?.dispose?.();
+      resources.infiniteTerrainMat?.dispose?.();
+      if (resources.infiniteWaterMat
+          && !this.waterSystem?.ownsMaterial?.(resources.infiniteWaterMat)) {
+        resources.infiniteWaterMat.dispose?.();
+      }
+    } else if (worldMode === 'planet') {
+      resources.planetCloudChunks?.dispose?.();
+      resources.planetCloudLayer?.dispose?.();
+      resources.planetHeightBaker?.dispose?.();
+      resources.planetWorld?.dispose?.();
+      if (resources.planetWater) {
+        this.scene.remove(resources.planetWater);
+        resources.planetWater.geometry?.dispose?.();
+      }
+      resources.planetWaterMat?.dispose?.();
+      resources.planetControls?.dispose?.();
+      resources.fpsControls?.dispose?.();
+      resources.planetMaterial?.dispose?.();
+    }
+    for (const material of resources.keepaliveMaterials || []) material?.dispose?.();
+  }
+
+  _parkActivePreparedModeBundle() {
+    const active = this._activePreparedModeBundle;
+    if (!active || active.disposed) return null;
+    active.park({ reason: 'transition' });
+    this._activePreparedModeBundle = null;
+    return active;
+  }
+
+  _activatePreparedModeBundle(bundle) {
+    if (!bundle || bundle.disposed) return false;
+    this.worldMode = bundle.worldMode;
+    this.projectMode = bundle.projectMode || this.projectMode;
+    this.uniforms.uInfiniteMode.value = bundle.worldMode === 'infinite' ? 1 : 0;
+    this.destructionField?.applyTo(this.uniforms, bundle.worldMode === 'studio');
+    const tileDebugView = this.tileDebug?.view ?? 'off';
+    this.uniforms.uTileDebugView.value = bundle.worldMode === 'studio'
+      ? (tileDebugView === 'noise' ? 1
+        : tileDebugView === 'height' ? 2
+          : tileDebugView === 'biome' ? 3 : 0)
+      : 0;
+    this._underwaterWarmed = false;
+    this._cloudAdaptive?.suspend(performance.now(), 6000);
+    bundle.activate({ reason: 'transition' });
+    this._activePreparedModeBundle = bundle;
+    return true;
+  }
 
   _createModeTransitionCoordinator() {
     this._modeTransitionCoordinator?.dispose?.();
@@ -8454,6 +8806,7 @@ export class Engine {
       },
       worldMode,
       projectMode,
+      documentEpoch: this._modeDocumentEpoch || 0,
       graphSignature: this._activeHeightProgram(worldMode)?.sig || this._stackSig,
       terrainVariant: this._targetTerrainVariant(),
       octaves: Math.round(this.params.octaves),
@@ -8480,20 +8833,23 @@ export class Engine {
   }
 
   _planModeTransition(context) {
+    if (context.input.transitionRequest) context.input.transitionRequest.context = context;
     const requested = context.input.worldMode || context.target || this.worldMode;
     if (!['studio', 'infinite', 'planet'].includes(requested)) {
       throw new Error(`Unsupported world mode: ${requested}`);
     }
-    if (this.projectMode === 'manual' && requested !== 'studio') {
+    context.targetProjectMode = context.input.projectMode || this.projectMode;
+    if (context.targetProjectMode === 'manual' && requested !== 'studio') {
       const error = new Error('Manual Terrain is currently available in Tile mode');
       error.code = 'MANUAL_STUDIO_ONLY';
       throw error;
     }
     context.previousWorldMode = this.worldMode;
+    context.previousProjectMode = this.projectMode;
     context.targetWorldMode = requested;
-    context.targetProjectMode = context.input.projectMode || this.projectMode;
     context.renderKey = this._modeRenderKey(requested, context.targetProjectMode);
-    context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+    context.cacheHit = context.input.project == null
+      && this._modeResourceCache.has(context.renderKey.serialized);
     this._activeModeTransitionContext = context;
     context.progress(context.cacheHit ? 'Reusable mode cache found' : 'Final scene planned', 1, 1);
     return { cacheHit: context.cacheHit, from: this.worldMode, to: requested };
@@ -8506,24 +8862,65 @@ export class Engine {
       context.planetModules = await this._loadPlanetModules();
       context.assertCurrent();
     }
-    context.cachedResources = this._modeResourceCache.get(context.renderKey.serialized)?.resources || null;
-    context.progress(context.cachedResources ? 'Reusing compiled resources' : 'Resources ready', 1, 1);
-    return { reusedResources: Boolean(context.cachedResources) };
+    const cached = context.input.project == null
+      ? this._modeResourceCache.get(context.renderKey.serialized)
+      : null;
+    context.cachedBundle = cached?.bundle || null;
+    context.progress(context.cachedBundle ? 'Reusing prepared world bundle' : 'Resources ready', 1, 1);
+    return { reusedResources: Boolean(context.cachedBundle) };
   }
 
   async _buildModeTransitionGeometry(context) {
     context.progress('Building target geometry behind loader', 0, 1);
-    if (context.input.project) {
-      if (context.targetWorldMode !== 'studio') {
-        const error = new Error('Project transactions must be prepared in Studio mode');
-        error.code = 'PROJECT_TRANSITION_REQUIRES_STUDIO';
-        throw error;
+    if (this.paintMode?.state.enabled) this.setPaintMode(false);
+    if (this.splineState?.enabled) this.setSplineEditingEnabled(false);
+    this.setExploreMode('none');
+    let previousBundle = this._activePreparedModeBundle;
+    if (!previousBundle) {
+      const previousKey = this._modeRenderKey(this.worldMode, this.projectMode);
+      previousBundle = this._capturePreparedModeBundle(previousKey, this.worldMode);
+      this._activePreparedModeBundle = previousBundle;
+    }
+    context.previousBundle = this._parkActivePreparedModeBundle();
+    if (context.previousBundle && context.input.project == null) {
+      const existing = this._modeResourceCache.get(context.previousBundle.key);
+      if (existing?.bundle !== context.previousBundle) {
+        this._modeResourceCache.set(context.previousBundle.key, {
+          worldMode: context.previousBundle.worldMode,
+          bundle: context.previousBundle,
+        }, { dispose: (entry) => entry?.bundle?.dispose?.() });
       }
+    }
+
+    if (context.cachedBundle && context.input.project == null) {
+      context.reusedBundle = this._activatePreparedModeBundle(context.cachedBundle);
+      context.targetBundle = context.cachedBundle;
+      context.assertCurrent();
+      context.progress('Prepared world reactivated', 1, 1);
+      return { geometryReady: true, reusedBundle: true };
+    }
+
+    const installProjectBeforeWorldSwitch = Boolean(
+      context.input.project
+      && this.projectMode === 'manual'
+      && context.targetWorldMode !== 'studio',
+    );
+    if (!installProjectBeforeWorldSwitch && context.targetWorldMode !== this.worldMode) {
+      context.compilePromise = await this._setWorldModeImmediate(context.targetWorldMode, {
+        planetModules: context.planetModules,
+        deferCompile: true,
+      });
+    }
+
+    if (context.input.project) {
       const project = context.input.project;
       if (project.params || project.editorMode || project.generationSource) {
         // loadSeedJSON installs the complete document synchronously and returns
         // the exact material/geometry readiness promise. Keep it for compile.
-        context.projectReady = this.loadSeedJSON(project, { silent: true });
+        context.projectReady = this.loadSeedJSON(project, {
+          silent: true,
+          onRealWorldProgress: context.input.onRealWorldProgress || undefined,
+        });
       } else {
         this.newProject({ ...project, projectMode: context.targetProjectMode, silent: true });
       }
@@ -8533,7 +8930,12 @@ export class Engine {
       }
       this.newProject({ projectMode: context.targetProjectMode, silent: true });
     }
-    if (context.targetWorldMode !== this.worldMode) {
+    if (installProjectBeforeWorldSwitch && context.projectReady) {
+      const prepared = await context.projectReady;
+      if (prepared?.error) throw prepared.error;
+      context.projectReady = Promise.resolve(prepared);
+    }
+    if (installProjectBeforeWorldSwitch && context.targetWorldMode !== this.worldMode) {
       context.compilePromise = await this._setWorldModeImmediate(context.targetWorldMode, {
         planetModules: context.planetModules,
         deferCompile: true,
@@ -8547,8 +8949,13 @@ export class Engine {
         context.targetWorldMode,
         context.targetProjectMode,
       );
-      context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+      context.cacheHit = false;
     }
+    context.targetBundle = this._capturePreparedModeBundle(
+      context.renderKey,
+      context.targetWorldMode,
+    );
+    this._activePreparedModeBundle = context.targetBundle;
     context.assertCurrent();
     context.progress('Visible geometry ready', 1, 1);
     return { geometryReady: true };
@@ -8557,25 +8964,41 @@ export class Engine {
   async _compileModeTransition(context) {
     context.progress('Submitting exact shader set', 0, 1);
     let result;
-    if (context.projectReady) {
-      result = await context.projectReady;
-      if (result?.error) throw result.error;
-    } else if (context.targetWorldMode === 'infinite') {
-      result = await this._warmupInfiniteShaders(Math.round(this.params.octaves), { strict: true });
-    } else if (context.targetWorldMode === 'planet') {
-      const activeCloud = this.planetCloudChunks || this.planetCloudLayer;
-      const cloudWarm = this.params.cloudsEnabled === true ? activeCloud?.warmup?.() : null;
-      result = await this._warmupPlanetShaders(Math.round(this.params.octaves), cloudWarm, { strict: true });
+    if (context.reusedBundle) {
+      result = { ready: true, cached: true, materialCount: 0 };
     } else {
-      result = await this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
-        atomic: true,
-        terrainDirtyOnSwap: true,
-        label: 'Preparing Studio terrain',
-      });
-      if (result?.error) throw result.error;
+      if (context.projectReady) {
+        result = await context.projectReady;
+        if (result?.error) throw result.error;
+      }
+      if (context.targetWorldMode === 'infinite') {
+        result = await this._warmupInfiniteShaders(Math.round(this.params.octaves), { strict: true });
+      } else if (context.targetWorldMode === 'planet') {
+        const activeCloud = this.planetCloudChunks || this.planetCloudLayer;
+        const cloudWarm = this.params.cloudsEnabled === true ? activeCloud?.warmup?.() : null;
+        result = await this._warmupPlanetShaders(Math.round(this.params.octaves), cloudWarm, { strict: true });
+      } else if (!context.projectReady) {
+        result = await this._rebuildStackMaterialsAsync(this._activeHeightProgram(), {
+          atomic: true,
+          terrainDirtyOnSwap: true,
+          label: 'Preparing Studio terrain',
+        });
+        if (result?.error) throw result.error;
+      }
     }
     context.assertCurrent();
     context.keepaliveMaterials = result?.keepaliveMaterials || [];
+    if (context.targetBundle?.resources && context.keepaliveMaterials.length) {
+      const ownedResources = new Set(Object.values(context.targetBundle.resources));
+      context.targetBundle.resources.keepaliveMaterials.push(
+        ...context.keepaliveMaterials.filter((material) => !ownedResources.has(material)),
+      );
+    }
+    if (!context.reusedBundle && context.targetWorldMode === 'infinite') {
+      await this._completeInfiniteLaunchDependencies(context);
+    } else if (!context.reusedBundle && context.targetWorldMode === 'planet') {
+      await this._completePlanetLaunchDependencies(context);
+    }
     context.progress('Final shaders ready', 1, 1);
     // Completion manifests are immutable diagnostics. Never place live Three
     // resources in them: freezing a material would freeze shared uniforms and
@@ -8585,6 +9008,75 @@ export class Engine {
       compiledMaterials: result?.materialCount ?? context.keepaliveMaterials.length,
       cachedCompile: result?.cached === true,
     };
+  }
+
+  async _completeInfiniteLaunchDependencies(context) {
+    context.progress('Preparing launch-area chunks and terrain cache', 0, 1);
+    const maxSteps = 256;
+    for (let step = 0; step < maxSteps; step++) {
+      context.assertCurrent();
+      this.infiniteTerrainClipmap?.update?.(this.camera.position, this._terrainGen);
+      this.infiniteWorld?.update?.(this.camera.position, this.camera);
+      const levels = this.infiniteTerrainClipmap?.levels || [];
+      const cacheReady = !this.infiniteTerrainClipmap
+        || (levels.length > 0
+          && levels.every((level) => level.ready)
+          && (this.infiniteTerrainClipmap.queue?.length || 0) === 0);
+      const chunksReady = !this.infiniteWorld
+        || ((this.infiniteWorld.pendingChunkCount || 0) === 0
+          && !(this.infiniteWorld._lodRebuildQueue?.length));
+      if (cacheReady && chunksReady) {
+        context.progress('Launch-area dependencies ready', 1, 1);
+        return true;
+      }
+      await yieldTask();
+    }
+    const error = new Error('Infinite launch dependencies did not become ready');
+    error.code = 'INFINITE_DEPENDENCIES_INCOMPLETE';
+    throw error;
+  }
+
+  async _completePlanetLaunchDependencies(context) {
+    context.progress('Completing planet height cache', 0, 1);
+    const baker = this.planetHeightBaker;
+    if (!baker) {
+      const error = new Error('Planet height cache is unavailable');
+      error.code = 'PLANET_CACHE_UNAVAILABLE';
+      throw error;
+    }
+    if (this._planetBakeRequestedGen !== this._terrainGen || baker.phase === 'idle') {
+      const started = baker.begin(Math.round(this.params.octaves), this._stackGLSL);
+      if (started === false) {
+        const error = new Error('Planet height cache program is not prepared');
+        error.code = 'PLANET_CACHE_NOT_PREPARED';
+        throw error;
+      }
+      this._planetBakeRequestedGen = this._terrainGen;
+    }
+    let steps = 0;
+    while (!baker.complete && steps < 16) {
+      context.assertCurrent();
+      baker.step();
+      steps += 1;
+      await yieldTask();
+    }
+    if (!baker.complete || !baker.texture) {
+      const error = new Error('Planet height cache did not complete');
+      error.code = 'PLANET_CACHE_INCOMPLETE';
+      throw error;
+    }
+    this.uniforms.uPlanetHeightTex.value = baker.texture;
+    this.uniforms.uUsePlanetHeightTex.value = 1;
+    this._bakedTerrainGen = this._terrainGen;
+    this.planetWorld?.update?.(this.camera.position, this.camera, this._debug);
+    if (context.targetBundle?.resources) {
+      context.targetBundle.resources.heightTexture = baker.texture;
+      context.targetBundle.resources.useHeightTexture = 1;
+      context.targetBundle.resources.bakedTerrainGen = this._bakedTerrainGen;
+      context.targetBundle.resources.planetBakeRequestedGen = this._planetBakeRequestedGen;
+    }
+    context.progress('Planet launch dependencies ready', 1, 1);
+    return true;
   }
 
   _renderFrozenModeFrame() {
@@ -8605,21 +9097,26 @@ export class Engine {
     await yieldFrame();
     context.assertCurrent();
     context.progress('Final frame presented', 2, 2);
+    const documentReplaced = context.input.project != null
+      || context.targetProjectMode !== context.previousProjectMode;
+    if (documentReplaced) {
+      // Old render keys include the prior document epoch and can never be
+      // reused. Release every parked world only after the replacement has
+      // produced its validated frozen frames.
+      this._modeResourceCache.clear();
+      if (context.previousBundle !== context.targetBundle) {
+        context.previousBundle?.dispose?.();
+      }
+    }
     const cacheValue = this._modeResourceCache.get(context.renderKey.serialized) || {
       worldMode: context.targetWorldMode,
       renderKey: context.renderKey,
-      resources: {},
+      bundle: context.targetBundle,
     };
-    cacheValue.resources = {
-      modules: context.planetModules || cacheValue.resources?.modules || null,
-      keepaliveMaterials: context.keepaliveMaterials?.length
-        ? context.keepaliveMaterials
-        : (cacheValue.resources?.keepaliveMaterials || []),
-    };
+    cacheValue.bundle = context.targetBundle || cacheValue.bundle;
+    cacheValue.modules = context.planetModules || cacheValue.modules || null;
     this._modeResourceCache.activate(context.renderKey.serialized, cacheValue, {
-      dispose: (entry) => {
-        for (const material of entry?.resources?.keepaliveMaterials || []) material?.dispose?.();
-      },
+      dispose: (entry) => entry?.bundle?.dispose?.(),
     });
     this._needsRender = false;
     return { presentedFrames: 2 };
@@ -8630,6 +9127,7 @@ export class Engine {
     projectMode = this.projectMode,
     project = null,
     reason = 'user',
+    onRealWorldProgress = null,
   } = {}) {
     if (this._disposed) throw new ModeTransitionCancelledError('Engine is disposed');
     if (worldMode === this.worldMode && projectMode === this.projectMode && project == null) {
@@ -8643,14 +9141,17 @@ export class Engine {
         erosion: this.serializeErosion?.(),
         manualSculpt: this.serializeManualSculpt?.(),
         manualSurface: this.serializeManualSurface?.(),
+        destruction: this.serializeDestruction?.(),
+        explodeSettings: { ...this.explodeSettings },
       }
       : null;
     const request = {
       target: worldMode,
-      input: { worldMode, projectMode, project },
+      input: { worldMode, projectMode, project, onRealWorldProgress },
       reason,
       resizeRevision: 0,
     };
+    request.input.transitionRequest = request;
     this._modeTransitionRequest = request;
     try {
       for (;;) {
@@ -8664,6 +9165,16 @@ export class Engine {
             await request.contextRestorePromise;
             request.contextRestorePromise = null;
             request.reason = 'context-restored';
+            const attempt = request.context;
+            const candidate = attempt?.targetBundle;
+            if (candidate && candidate !== attempt?.previousBundle && !candidate.disposed) {
+              candidate.park({ reason: 'context-restored-retry' });
+              if (!attempt?.reusedBundle) candidate.dispose();
+            }
+            this._activePreparedModeBundle = null;
+            if (attempt?.previousBundle && !attempt.previousBundle.disposed) {
+              this._activatePreparedModeBundle(attempt.previousBundle);
+            }
             continue;
           }
           // Coalesce resize bursts, then rebuild from a fresh render key. The
@@ -8676,16 +9187,44 @@ export class Engine {
           }
           request.resizeRevision = 0;
           request.reason = 'resize';
+          const attempt = request.context;
+          const candidate = attempt?.targetBundle;
+          if (candidate && candidate !== attempt?.previousBundle && !candidate.disposed) {
+            candidate.park({ reason: 'resize-retry' });
+            if (!attempt?.reusedBundle) candidate.dispose();
+          }
+          this._activePreparedModeBundle = null;
+          if (attempt?.previousBundle && !attempt.previousBundle.disposed) {
+            this._activatePreparedModeBundle(attempt.previousBundle);
+          }
         }
       }
     } catch (error) {
       if (error?.code === 'MODE_TRANSITION_CANCELLED') throw error;
+      const attempt = request.context;
+      const candidate = attempt?.targetBundle;
+      const previousBundle = attempt?.previousBundle;
+      if (candidate && candidate !== previousBundle && !candidate.disposed) {
+        candidate.park({ reason: 'failed-transition' });
+        if (!attempt?.reusedBundle) candidate.dispose();
+      }
+      this._activePreparedModeBundle = null;
       if (!this._disposed && previousProjectState) {
         try {
           await this.restoreState(previousProjectState, { rollbackOnError: false });
+          if (previousBundle && !previousBundle.disposed) {
+            this._activatePreparedModeBundle(previousBundle);
+          }
           this._renderFrozenModeFrame();
         } catch (rollbackError) {
           console.error('Project transition rollback failed', rollbackError);
+        }
+      } else if (!this._disposed && previousBundle && !previousBundle.disposed) {
+        try {
+          this._activatePreparedModeBundle(previousBundle);
+          this._renderFrozenModeFrame();
+        } catch (rollbackError) {
+          console.error('Prepared mode rollback failed', rollbackError);
         }
       } else if (!this._disposed && this.worldMode !== previousWorldMode) {
         try {
@@ -8698,6 +9237,7 @@ export class Engine {
       throw error;
     } finally {
       if (this._modeTransitionRequest === request) this._modeTransitionRequest = null;
+      request.context = null;
       if (!this._modeTransitionCoordinator?.active) this._activeModeTransitionContext = null;
     }
   }
@@ -8766,7 +9306,7 @@ export class Engine {
     }
     const activeCache = this._modeResourceCache?.entries?.get(this._modeResourceCache.activeKey)?.value;
     const preservedMaterials = activeCache?.worldMode === prev
-      ? activeCache.resources?.keepaliveMaterials || []
+      ? activeCache.bundle?.resources?.keepaliveMaterials || []
       : [];
     if (prev === 'infinite') this._disposeInfinite({ preserveMaterials: preservedMaterials });
     else if (prev === 'planet') this._disposePlanet();
@@ -9152,15 +9692,8 @@ export class Engine {
     });
     this.planetWorld.setMergeDebug(this._debug.mergeDebug);
 
-    // water shell: a sphere at radius (planetRadius + seaLevel); the shader
-    // discards over land so only basins fill. One mesh, one shared material.
-    this.planetWaterMat = planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL);
-    this.planetWaterMat.uniforms.uWaterAnim.value = p.waterAnim ? 1 : 0;
-    this.planetWater = new THREE.Mesh(new THREE.SphereGeometry(1, 256, 192), this.planetWaterMat);
-    this.planetWater.frustumCulled = false;
-    this.planetWater.renderOrder = 10;
+    this._ensurePlanetWater();
     this._updatePlanetWater();
-    this.scene.add(this.planetWater);
     this._applyWaterPerf();
   }
 
@@ -9571,6 +10104,47 @@ export class Engine {
   /** Sync the current cloud params into whichever cloud layer(s) exist (no
    *  rebuild). Both layers read the same cloud* params; each is only visible in
    *  its own world mode. */
+  _ensureStudioCloud() {
+    if (this.studioCloud || this._disposed) return this.studioCloud;
+    const initialCloudConfig = resolveCloudQuality({ ...this.params, ...this.perf });
+    this.studioCloud = new CloudSlabLayer(this.scene, {
+      initialConfig: initialCloudConfig,
+      compile: async (mats) => {
+        if (this._disposed) return { ready: false, aborted: true };
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const target = this._resolveCameraCompileTarget();
+          const result = await this._compileMaterialVariants(mats, {
+            canvasOnly: true,
+            timeoutMs: 120000,
+            renderTarget: target.renderTarget,
+          });
+          if (result?.ready !== true || this._disposed) return result;
+          const current = this._resolveCameraCompileTarget();
+          if (this._sameCameraCompileTarget(target, current)) return result;
+          await yieldTask();
+        }
+        return { ready: false, aborted: true };
+      },
+      renderer: this.renderer,
+    });
+    if (this._activePreparedModeBundle?.worldMode === 'studio') {
+      this._activePreparedModeBundle.resources.studioCloud = this.studioCloud;
+    }
+    return this.studioCloud;
+  }
+
+  _releaseStudioCloud() {
+    if (!this.studioCloud) return false;
+    const cloud = this.studioCloud;
+    cloud.dispose();
+    this.studioCloud = null;
+    if (this._activePreparedModeBundle?.worldMode === 'studio'
+        && this._activePreparedModeBundle.resources.studioCloud === cloud) {
+      this._activePreparedModeBundle.resources.studioCloud = null;
+    }
+    return true;
+  }
+
   _applyCloudSettings() {
     if (this.worldMode === 'planet') {
       const planet = this._planetModules;
@@ -9627,6 +10201,10 @@ export class Engine {
           viewRadius: this.perf.viewRadius,
         },
       );
+    }
+    if (this.worldMode === 'studio') {
+      if (this.params.cloudsEnabled === true) this._ensureStudioCloud();
+      else this._releaseStudioCloud();
     }
     if (this.studioCloud) {
       // Cover the whole tile assembly (union of cells), not just the origin cell.
@@ -9732,8 +10310,68 @@ export class Engine {
     return this.planetPropSampler;
   }
 
+  _planetWaterRequired() {
+    // Lightweight lifecycle harnesses predate persisted water settings and
+    // intentionally exercise both warmup materials.
+    if (this.params?.waterMode == null) return this.params?.waterEnabled !== false;
+    return resolveEffectiveWaterMode(this.params, 'planet') !== 'off'
+      && this.params.seaLevel > 0.5;
+  }
+
+  _ensurePlanetWater() {
+    if (this.planetWater || !this._planetWaterRequired() || !this._planetModules) {
+      return this.planetWater;
+    }
+    const oct = Math.round(this.params.octaves);
+    this.planetWaterMat = this._planetModules.createPlanetWaterMaterial(
+      this.uniforms,
+      oct,
+      this._stackGLSL,
+    );
+    this.planetWaterMat.uniforms.uWaterAnim.value = this.params.waterAnim ? 1 : 0;
+    this.planetWater = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 256, 192),
+      this.planetWaterMat,
+    );
+    this.planetWater.frustumCulled = false;
+    this.planetWater.renderOrder = 10;
+    this.scene.add(this.planetWater);
+    const owned = this._activePreparedModeBundle?.worldMode === 'planet'
+      ? this._activePreparedModeBundle.resources
+      : null;
+    if (owned) {
+      owned.planetWater = this.planetWater;
+      owned.planetWaterMat = this.planetWaterMat;
+    }
+    return this.planetWater;
+  }
+
+  _releasePlanetWater() {
+    if (!this.planetWater && !this.planetWaterMat) return false;
+    const water = this.planetWater;
+    const material = this.planetWaterMat;
+    if (water) {
+      this.scene.remove(water);
+      water.geometry?.dispose?.();
+    }
+    material?.dispose?.();
+    this.planetWater = null;
+    this.planetWaterMat = null;
+    const owned = this._activePreparedModeBundle?.worldMode === 'planet'
+      ? this._activePreparedModeBundle.resources
+      : null;
+    if (owned?.planetWater === water) owned.planetWater = null;
+    if (owned?.planetWaterMat === material) owned.planetWaterMat = null;
+    return true;
+  }
+
   /** Size + show/hide the water shell from the current radius + sea level. */
   _updatePlanetWater() {
+    if (!this._planetWaterRequired()) {
+      this._releasePlanetWater();
+      return;
+    }
+    if (!this.planetWater && this.worldMode === 'planet') this._ensurePlanetWater();
     if (!this.planetWater) return;
     const seaR = this._planetRadius() + this.params.seaLevel;
     // Circumscribe the analytic sea sphere by only the half-cell diagonal of
@@ -9744,8 +10382,7 @@ export class Engine {
     const halfDiagonal = Math.hypot(halfLon, halfLat);
     const shellRadius = seaR / Math.cos(halfDiagonal) + 0.05;
     this.planetWater.scale.setScalar(shellRadius);
-    this.planetWater.visible = resolveEffectiveWaterMode(this.params, 'planet') !== 'off'
-      && this.params.seaLevel > 0.5;
+    this.planetWater.visible = true;
   }
 
   async _warmupPlanetShaders(oct, cloudWarmPromise = null, { strict = false } = {}) {
@@ -9763,14 +10400,16 @@ export class Engine {
       const planet = await this._loadPlanetModules();
       if (!isCurrent()) return;
       minimal = this._planetMatMinimal === true;
-      warm = [
-        planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL, { minimal }),
-        planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL),
-      ];
+      warm = [planet.createPlanetMaterial(this.uniforms, oct, this._stackGLSL, { minimal })];
+      if (this._planetWaterRequired()) {
+        warm.push(planet.createPlanetWaterMaterial(this.uniforms, oct, this._stackGLSL));
+      }
       warm[0].userData ||= {};
-      warm[1].userData ||= {};
       warm[0].userData.modeCacheRole = 'planet-terrain-program';
-      warm[1].userData.modeCacheRole = 'planet-water-program';
+      if (warm[1]) {
+        warm[1].userData ||= {};
+        warm[1].userData.modeCacheRole = 'planet-water-program';
+      }
       const targetSnapshot = this._resolveCameraCompileTarget();
       const instancedGeometry = this.planetWorld?.batches?.find((batch) => batch?.geometry)?.geometry;
       const terrainCompile = instancedGeometry
@@ -10591,7 +11230,7 @@ export class Engine {
       ...this._pendingTerrainParams,
       noiseStack: projectNoiseStack,
     };
-    const paintOpacity = Number(this.paintMode?.state?.layerOpacity);
+    const paintOpacity = Number(this.paintMode?.state?.layerOpacity ?? this.paintState?.layerOpacity);
     const data = {
       app: 'terrain-studio',
       version: 2,
@@ -10612,7 +11251,9 @@ export class Engine {
         ? Math.max(0, Math.min(1, Number(this.timeOfDay)))
         : DEFAULT_TIME_OF_DAY,
       paintState: {
-        baseMode: this.paintMode?.state?.baseMode === 'flat' ? 'flat' : 'generated',
+        baseMode: (this.paintMode?.state?.baseMode ?? this.paintState?.baseMode) === 'flat'
+          ? 'flat'
+          : 'generated',
         layerOpacity: Number.isFinite(paintOpacity)
           ? Math.max(0, Math.min(1, paintOpacity))
           : 1,
@@ -10647,12 +11288,15 @@ export class Engine {
       this.cb.onToast('Not a valid terrain seed file');
       return Promise.reject(new Error('Invalid terrain seed'));
     }
+    this._modeDocumentEpoch = (this._modeDocumentEpoch || 0) + 1;
     const rollbackState = {
       ...this.serializeState(),
       paint: this.serializePaint(),
       erosion: this.serializeErosion(),
       manualSculpt: this.serializeManualSculpt(),
       manualSurface: this.serializeManualSurface(),
+      destruction: this.serializeDestruction(),
+      explodeSettings: { ...this.explodeSettings },
     };
     // Freeze bake publication while the desired params, authored fields and
     // generated shader source are installed as one transaction.
@@ -10727,43 +11371,60 @@ export class Engine {
     if (this._explodeBuildingTimer) clearTimeout(this._explodeBuildingTimer);
     this._explodeBuildingTimer = null;
     this.explodeSettings = normalizeExplodeSettings(json?.explodeSettings);
-    if (this.destructionField) {
-      this.destructionField.setResolution(
+    if (json?.destruction) {
+      const destructionField = this._ensureDestructionField();
+      destructionField.setResolution(
         resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
         { reproject: false },
       );
       const bounds = this._creatorBounds();
-      this.destructionField.setRegion(bounds.origin, bounds.span, { reproject: false });
-      if (json?.destruction) this.destructionField.restore(json.destruction);
-      else this.destructionField.clear();
-      this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
-    }
+      destructionField.setRegion(bounds.origin, bounds.span, { reproject: false });
+      destructionField.restore(json.destruction);
+      destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+    } else this._releaseDestructionField();
     this.cb.onExplodeState?.(this.getExplodeToolState());
-    this.paintMode?.setEnabled(false);
-    // Project documents omit paint data when no stroke exists. Clear the
-    // previous project's textures first so an unpainted project cannot inherit
-    // height/biome masks from the project that was open before it.
-    this.paintMode?.clear({ silent: true });
+    // Paint and spline fields are document-owned. Drop the prior allocations;
+    // only documents containing authored data (or an explicit flat paint base)
+    // recreate them below.
+    this._releasePaintMode();
+    this._releaseSplineManager();
     const savedPaintBase = json?.paintState?.baseMode === 'flat'
       ? 'flat'
       : 'generated';
-    this.paintMode?.setBaseMode(
-      this.projectMode === 'manual' && manualDocument.baseSource === 'flat' ? 'flat' : savedPaintBase,
-    );
     const savedPaintOpacity = Number(json?.paintState?.layerOpacity);
-    this.paintMode?.setState({
-      layerOpacity: Number.isFinite(savedPaintOpacity)
-        ? Math.max(0, Math.min(1, savedPaintOpacity))
-        : 1,
-    });
-    if (json?.paint) this.paintMode?.load(json.paint);
+    const paintBaseMode = this.projectMode === 'manual' && manualDocument.baseSource === 'flat'
+      ? 'flat'
+      : savedPaintBase;
+    if (json?.paint || (paintBaseMode === 'flat' && this.projectMode !== 'manual')
+        || (Number.isFinite(savedPaintOpacity) && savedPaintOpacity !== 1)) {
+      const paintMode = this._ensurePaintMode();
+      paintMode.setBaseMode(paintBaseMode);
+      paintMode.setState({
+        layerOpacity: Number.isFinite(savedPaintOpacity)
+          ? Math.max(0, Math.min(1, savedPaintOpacity))
+          : 1,
+      });
+      if (json?.paint) paintMode.load(json.paint);
+    } else if (paintBaseMode === 'flat') {
+      this.paintState = {
+        enabled: false,
+        baseMode: 'flat',
+        baseMultiplier: 0,
+        layerOpacity: Number.isFinite(savedPaintOpacity) ? savedPaintOpacity : 1,
+      };
+      this.uniforms.uPaintBaseMult.value = 0;
+      this.uniforms.uPaintOpacity.value = this.paintState.layerOpacity;
+    }
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual' ? manualDocument : null, { emit: false });
     this.manualTerrain?.setEnabled(this.projectMode === 'manual', { silent: true });
     this._bindAuthoringMaskTextures();
     // Install all authored height sources before invalidating and starting the
     // replacement bake; consumers never see a bake from the previous project.
-    this.splineManager?.load(json?.creatorTools?.splines ?? json?.splines ?? []);
+    const savedSplines = json?.creatorTools?.splines ?? json?.splines ?? [];
+    if (Array.isArray(savedSplines) && savedSplines.length) {
+      this._ensureSplineManager().load(savedSplines);
+    }
     this.terrainAnalysis?.load(json?.creatorTools?.analysis);
     if (this.erosionField) {
       if (json?.erosion) this.erosionField.restore(json.erosion);
@@ -10863,8 +11524,8 @@ export class Engine {
       cullingEnabled: this.board?.cullingEnabled !== false,
       behindCameraCulling: this.board?.behindCameraCulling !== false,
       paintRev: this.paintMode?.layers?.revision ?? 0,
-      paintBaseMode: this.paintMode?.state?.baseMode ?? 'generated',
-      paintLayerOpacity: this.paintMode?.state?.layerOpacity ?? 1,
+      paintBaseMode: this.paintMode?.state?.baseMode ?? this.paintState?.baseMode ?? 'generated',
+      paintLayerOpacity: this.paintMode?.state?.layerOpacity ?? this.paintState?.layerOpacity ?? 1,
       erosionRev: this.erosionField?.revision ?? 0,
       destruction: this.serializeDestruction(),
       explodeSettings: { ...this.explodeSettings },
@@ -11025,19 +11686,29 @@ export class Engine {
     // paint layers (board-local height/biome/props overrides). The App injects
     // the heavy blob into snap.paint before calling; a null blob means the
     // restored state had no paint, so wipe the live layers (silent — no toast).
-    if (this.paintMode) {
-      if (snap.paint) this.paintMode.load(snap.paint);
-      else this.paintMode.layers.clear();
-      this.paintMode.setBaseMode(
-        this.projectMode === 'manual' && restoredManualDocument.baseSource === 'flat'
-          ? 'flat'
-          : (snap.paintBaseMode ?? 'generated'),
-      );
-      this.paintMode.setState({
-        layerOpacity: Number.isFinite(Number(snap.paintLayerOpacity))
-          ? Math.max(0, Math.min(1, Number(snap.paintLayerOpacity)))
-          : 1,
-      });
+    this._releasePaintMode();
+    const restoredPaintBase = this.projectMode === 'manual'
+        && restoredManualDocument.baseSource === 'flat'
+      ? 'flat'
+      : (snap.paintBaseMode ?? 'generated');
+    const restoredPaintOpacity = Number.isFinite(Number(snap.paintLayerOpacity))
+      ? Math.max(0, Math.min(1, Number(snap.paintLayerOpacity)))
+      : 1;
+    if (snap.paint || (restoredPaintBase === 'flat' && this.projectMode !== 'manual')
+        || restoredPaintOpacity !== 1) {
+      const paintMode = this._ensurePaintMode();
+      if (snap.paint) paintMode.load(snap.paint);
+      paintMode.setBaseMode(restoredPaintBase);
+      paintMode.setState({ layerOpacity: restoredPaintOpacity });
+    } else if (restoredPaintBase === 'flat') {
+      this.paintState = {
+        enabled: false,
+        baseMode: 'flat',
+        baseMultiplier: 0,
+        layerOpacity: restoredPaintOpacity,
+      };
+      this.uniforms.uPaintBaseMult.value = 0;
+      this.uniforms.uPaintOpacity.value = restoredPaintOpacity;
     }
     this.manualTerrain?.setEnabled(false);
     this.manualTerrain?.load(this.projectMode === 'manual'
@@ -11048,7 +11719,11 @@ export class Engine {
 
     // Creator sources are serialised, not their generated render targets. A
     // restore therefore re-bakes deterministic masks against the restored map.
-    this.splineManager?.load(snap.creatorTools?.splines ?? snap.splines ?? []);
+    this._releaseSplineManager();
+    const restoredSplines = snap.creatorTools?.splines ?? snap.splines ?? [];
+    if (Array.isArray(restoredSplines) && restoredSplines.length) {
+      this._ensureSplineManager().load(restoredSplines);
+    }
     this.terrainAnalysis?.load(snap.creatorTools?.analysis);
 
     // erosion offset field (baked delta + masks). The App injects the heavy
@@ -11066,15 +11741,15 @@ export class Engine {
     // the normal history snapshot makes every click participate in the editor's
     // existing Ctrl/Cmd+Z flow instead of creating a second undo system.
     this.explodeSettings = normalizeExplodeSettings(snap.explodeSettings);
-    if (this.destructionField) {
-      this.destructionField.setResolution(
+    if (snap.destruction) {
+      const destructionField = this._ensureDestructionField();
+      destructionField.setResolution(
         resolveExplosionResolution(this.explodeSettings.resolution, this.gpuTier),
         { reproject: false },
       );
-      if (snap.destruction) this.destructionField.restore(snap.destruction);
-      else this.destructionField.clear();
-      this.destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
-    }
+      destructionField.restore(snap.destruction);
+      destructionField.applyTo(this.uniforms, this.worldMode === 'studio');
+    } else this._releaseDestructionField();
     this.explodeTool?.setSettings(this.explodeSettings);
     this.cb.onExplodeState?.(this.getExplodeToolState());
 
@@ -11794,6 +12469,8 @@ export class Engine {
     this.paintMode?.flushUploads();
     this.manualTerrain?.flushUploads();
     this.destructionField?.flushUploads();
+    if (this.params.propsEnabled === true) this._ensurePropsManager();
+    else this._releasePropsManager();
     this.propsManager?.tickWind(now * 0.001, this.params);
     this.propsManager?.update({
       mode: this.worldMode,
@@ -12210,7 +12887,17 @@ export class Engine {
     if (this.exploreMode !== 'plane' && this.fpsControls) this.fpsControls.update(dt);
     if (this.exploreMode !== 'none' && this.player) this.player.update(dt);
 
-    if (this.infiniteTerrainClipmap) {
+    const cameraState = this._infiniteMaintenanceCamera;
+    const cameraMoved = !cameraState
+      || cameraState.position.distanceToSquared(this.camera.position) > 1e-5
+      || cameraState.quaternion.angleTo(this.camera.quaternion) > 1e-5;
+    const streamingPending = (this.infiniteWorld?.pendingChunkCount || 0) > 0
+      || (this.infiniteWorld?._lodRebuildQueue?.length || 0) > 0
+      || (this.infiniteTerrainClipmap?.queue?.length || 0) > 0;
+    const maintenanceDue = cameraMoved || streamingPending
+      || this._infiniteMaintenanceGen !== this._terrainGen;
+
+    if (maintenanceDue && this.infiniteTerrainClipmap) {
       this.profiler.begin('terrain-field-cache');
       if (this._debug.disableHeightBake) {
         this.uniforms.uUseInfiniteFieldCache.value = 0;
@@ -12222,17 +12909,27 @@ export class Engine {
     }
 
     // Stream chunks around the camera (with culling)
-    if (this.infiniteWorld) {
+    if (maintenanceDue && this.infiniteWorld) {
       this.profiler.begin('chunks');
       this.infiniteWorld.update(this.camera.position, this.camera);
       this.profiler.end('chunks');
     }
-    if (this.infiniteCloud) {
+    if (maintenanceDue) {
+      this._infiniteMaintenanceCamera ||= {
+        position: new THREE.Vector3(),
+        quaternion: new THREE.Quaternion(),
+      };
+      this._infiniteMaintenanceCamera.position.copy(this.camera.position);
+      this._infiniteMaintenanceCamera.quaternion.copy(this.camera.quaternion);
+      this._infiniteMaintenanceGen = this._terrainGen;
+    }
+    const shouldRender = this._needsRender || this._renderCadenceDue(now);
+    if (shouldRender && this.infiniteCloud) {
       this.profiler.begin('clouds');
       this.infiniteCloud.update(dt, this.camera.position, this.uniforms.uSunDir.value);
       this.profiler.end('clouds');
     }
-    if (!this._needsRender && !this._renderCadenceDue(now)) return;
+    if (!shouldRender) return;
     this._needsRender = false;
     this._lastRenderAt = now;
     this._maybeWarmUnderwater();
@@ -12295,12 +12992,30 @@ export class Engine {
       this.planetControls.update(dt);
     }
 
-    if (this.planetWorld) {
+    const cameraState = this._planetMaintenanceCamera;
+    const cameraMoved = !cameraState
+      || cameraState.position.distanceToSquared(this.camera.position) > 1e-5
+      || cameraState.quaternion.angleTo(this.camera.quaternion) > 1e-5;
+    const streamingPending = (this.planetWorld?._lodRebuildQueue?.length || 0) > 0
+      || (this.planetWorld?.pendingChunkCount || 0) > 0;
+    const maintenanceDue = cameraMoved || streamingPending
+      || this._planetMaintenanceGen !== this._terrainGen;
+    if (maintenanceDue && this.planetWorld) {
       this.profiler.begin('chunks');
       this.planetWorld.update(this.camera.position, this.camera, this._debug);
       this.profiler.end('chunks');
     }
-    if (this.planetCloudChunks || this.planetCloudLayer) {
+    if (maintenanceDue) {
+      this._planetMaintenanceCamera ||= {
+        position: new THREE.Vector3(),
+        quaternion: new THREE.Quaternion(),
+      };
+      this._planetMaintenanceCamera.position.copy(this.camera.position);
+      this._planetMaintenanceCamera.quaternion.copy(this.camera.quaternion);
+      this._planetMaintenanceGen = this._terrainGen;
+    }
+    const shouldRender = this._needsRender || this._renderCadenceDue(now);
+    if (shouldRender && (this.planetCloudChunks || this.planetCloudLayer)) {
       this.profiler.begin('clouds');
       if (this.planetCloudChunks) {
         this.planetCloudChunks.update(dt, this.camera.position, this.uniforms.uSunDir.value, this.camera, this.planetWorld, this._debug);
@@ -12324,9 +13039,9 @@ export class Engine {
 
     // refresh the baked height/normal cubemap if the field changed (no-op on a
     // steady frame); the planet terrain + water shaders sample it per pixel.
-    this._ensurePlanetHeightTex();
+    if (maintenanceDue || shouldRender) this._ensurePlanetHeightTex();
 
-    if (!this._needsRender && !this._renderCadenceDue(now)) return;
+    if (!shouldRender) return;
     this._needsRender = false;
     this._lastRenderAt = now;
 
@@ -12580,6 +13295,8 @@ export class Engine {
     this._modeTransitionRequest?.resolveContextRestore?.();
     this._modeTransitionRequest = null;
     this._modeResourceCache?.clear?.();
+    this._activePreparedModeBundle?.dispose?.();
+    this._activePreparedModeBundle = null;
     this._cancelScheduledNoiseStackCompile();
     this._clock?.dispose?.();
     if (this._bootResizeTimer) {

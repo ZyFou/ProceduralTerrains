@@ -665,7 +665,6 @@ export default function App() {
       detail: 'Preparing terrain…',
     }, async (update) => {
       blockingUpdateRef.current = update;
-      const previousWorldMode = worldModeRef.current;
       histSuppressRef.current = true;
       if (histTimerRef.current) {
         clearTimeout(histTimerRef.current);
@@ -679,16 +678,19 @@ export default function App() {
           : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
             ? terrain.worldMode
             : 'studio');
-        if (worldModeRef.current !== targetWorldMode) {
-          await runModeSwitchRef.current(targetWorldMode, { silent: true });
-          blockingUpdateRef.current = update;
-        }
         update({
           detail: terrain.realWorldSource
             ? 'Downloading elevation and imagery…'
             : 'Building terrain…',
         });
-        await engineRef.current?.loadSeedJSON(terrain, {
+        const targetProjectMode = terrain.editorMode === 'nodes'
+          ? 'nodes'
+          : terrain.editorMode === 'manual' ? 'manual' : 'procedural';
+        await engineRef.current?.transitionMode({
+          worldMode: targetWorldMode,
+          projectMode: targetProjectMode,
+          project: terrain,
+          reason: 'project-open',
           onRealWorldProgress: terrain.realWorldSource
             ? (progress) => update({
               progress,
@@ -698,6 +700,7 @@ export default function App() {
             })
             : undefined,
         });
+        setWorldMode(targetWorldMode);
         setRealTerrainMode(terrain.workspacePreset === 'real-terrain');
         const eng = engineRef.current;
         if (eng) {
@@ -742,9 +745,6 @@ export default function App() {
         setCurrentProject(project);
         if (project) showToast(`Opened ${name}`, 'success');
       } catch (error) {
-        if (worldModeRef.current !== previousWorldMode) {
-          await runModeSwitchRef.current(previousWorldMode, { silent: true });
-        }
         showToast(`Could not open ${name}`, 'error');
         throw error;
       } finally {
