@@ -1,3 +1,4 @@
+import React from 'react';
 import { ColorInput } from '../controls.jsx';
 
 // Shared control definitions used across drawer panels (moved out of the old
@@ -170,5 +171,4 @@ export function ColorField({ label, icon, info, value, onChange }) {
     </div>
   );
 }
-import React from 'react';
 

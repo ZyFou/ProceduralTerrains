@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from '../render/RendererReadback.js';
 
 // ============================================================================
 // GPU-backed terrain height sampler for player collision.
@@ -58,22 +59,33 @@ export class GpuHeightSampler {
     this._valid = false;
     this._gen = -1;
     this._batchLocked = false;
+    this._readbackPending = null;
+    this._captureToken = 0;
     this.readbackCount = 0;
     this._cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
     this._cam.up.set(0, 0, -1);
   }
 
   dispose() {
+    this._captureToken++;
     if (this._rt) { this._rt.dispose(); this._rt = null; }
     this._data = null;
     this._valid = false;
   }
 
-  invalidate() { this._valid = false; }
+  invalidate() {
+    this._valid = false;
+    // Let an in-flight GPU transfer finish before reusing its target, but mark
+    // its result stale so it cannot resurrect invalid terrain data.
+    this._captureToken++;
+  }
 
   /** Render/center the tile on (x,z) up-front so a whole batch of samples in
    *  that area hits one cached readback (no mid-loop re-renders). */
-  prime(x, z) { this._ensureTile(x, z); }
+  prime(x, z) {
+    this._ensureTile(x, z);
+    return this._readbackPending || Promise.resolve();
+  }
 
   /** Lock a placement batch to one cached surface tile. Samples outside it use
    *  the analytic fallback rather than recentering and stalling on readPixels. */
@@ -158,8 +170,17 @@ export class GpuHeightSampler {
       && Math.abs(x - this._cx) < half - this.edgeMargin
       && Math.abs(z - this._cz) < half - this.edgeMargin;
     if (fits) return;
+    if (this._readbackPending) {
+      const pendingHalf = this.tileWorld / 2;
+      if (Math.abs(x - this._pendingCx) < pendingHalf - this.edgeMargin
+        && Math.abs(z - this._pendingCz) < pendingHalf - this.edgeMargin
+        && gen === this._pendingGen) return;
+      // One render target cannot safely be overwritten while its asynchronous
+      // readback is pending. CPU sampling remains the exact non-blocking
+      // fallback until the current capture completes.
+      return;
+    }
     this._renderTile(x, z);
-    this._gen = gen;
   }
 
   _sampleFitsTile(x, z) {
@@ -208,8 +229,6 @@ export class GpuHeightSampler {
     r.setRenderTarget(this._rt);
     r.clear();
     r.render(this.scene, cam);
-    r.readRenderTargetPixels(this._rt, 0, 0, N, N, this._data);
-    this.readbackCount++;
     r.setRenderTarget(null);
     this.uniforms.uColorMode.value = 0;
 
@@ -217,8 +236,34 @@ export class GpuHeightSampler {
     this.scene.background = bg;
     for (const o of hidden) o.visible = true;
 
-    this._cx = cx;
-    this._cz = cz;
-    this._valid = true;
+    const generation = this.getGeneration();
+    const token = ++this._captureToken;
+    this._pendingCx = cx;
+    this._pendingCz = cz;
+    this._pendingGen = generation;
+    this._valid = false;
+    const pending = readRenderTargetPixelsAsync(
+      r,
+      this._rt,
+      0,
+      0,
+      N,
+      N,
+      this._data,
+    ).then(() => {
+      if (token !== this._captureToken || generation !== this.getGeneration()) return;
+      this.readbackCount++;
+      this._cx = cx;
+      this._cz = cz;
+      this._gen = generation;
+      this._valid = true;
+    }).catch((error) => {
+      if (token === this._captureToken) {
+        console.warn('GPU height sampler asynchronous readback failed; using CPU heights', error);
+      }
+    }).finally(() => {
+      if (this._readbackPending === pending) this._readbackPending = null;
+    });
+    this._readbackPending = pending;
   }
 }

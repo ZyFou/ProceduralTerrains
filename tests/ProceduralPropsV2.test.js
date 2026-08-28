@@ -303,6 +303,45 @@ describe('optimized prop performance architecture', () => {
     expect(cpu.heightAt).toHaveBeenCalledTimes(2);
   });
 
+  it('uses backend-neutral asynchronous height readback without blocking the first sample', async () => {
+    const pixels = new Uint8Array(4 * 4 * 4);
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] = 127;
+      pixels[i + 1] = 127;
+      pixels[i + 3] = 255;
+    }
+    const renderer = {
+      readRenderTargetPixelsAsync: vi.fn(async () => pixels),
+      getClearColor: vi.fn((color) => color.set(0x000000)),
+      getClearAlpha: vi.fn(() => 1),
+      setClearColor: vi.fn(),
+      setRenderTarget: vi.fn(),
+      clear: vi.fn(),
+      render: vi.fn(),
+    };
+    const cpu = { heightAt: vi.fn(() => 12) };
+    const sampler = new GpuHeightSampler({
+      renderer,
+      scene: new THREE.Scene(),
+      uniforms: { uHeightScale: { value: 100 }, uColorMode: { value: 0 } },
+      cpuSampler: cpu,
+      isTerrainMaterial: () => true,
+      getGeneration: () => 9,
+      getMaxHeight: () => 100,
+      tileSize: 4,
+      tileWorld: 16,
+      edgeMargin: 2,
+    });
+
+    expect(sampler.heightAt(0, 0)).toBe(12);
+    await sampler.prime(0, 0);
+    expect(renderer.readRenderTargetPixelsAsync).toHaveBeenCalledOnce();
+    expect(sampler.readbackCount).toBe(1);
+    expect(sampler.heightAt(0, 0)).toBeGreaterThan(49);
+    expect(sampler.heightAt(0, 0)).toBeLessThan(51);
+    sampler.dispose();
+  });
+
   it('uses radial up and buried roots for Planet placement', () => {
     const manager = new ProceduralPropsManager(new THREE.Scene());
     const desc = getPropType('broadleaf');

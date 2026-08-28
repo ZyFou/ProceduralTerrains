@@ -61,8 +61,8 @@ export function computeWarnings(snap, T = WARN_THRESHOLDS) {
     if (renderer.requestedGpuPreference && renderer.requestedGpuPreference !== 'default') {
       add('info', `${renderer.requestedGpuPreferenceLabel || 'GPU'} preference requested; browser may ignore it`);
     }
-    if (renderer.requestedBackend === 'webgpu' && caps.webgpu && !caps.webgpu.supported) {
-      add('warning', 'WebGPU selected but unavailable, falling back to WebGL');
+    if (renderer.requestedBackend === 'webgpu' && caps.webgpu && !caps.webgpu.selectable) {
+      add('warning', `WebGPU not active: ${caps.webgpu.reason || 'application shader coverage is incomplete'}`);
     } else if (renderer.requestedBackend === 'webgpu' && renderer.activeBackend !== 'webgpu') {
       add('info', 'WebGPU selected, but this build is using WebGL');
     }

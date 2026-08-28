@@ -1,3 +1,8 @@
+import {
+  WEBGPU_RENDERER_STATUS,
+  describeWebGpuApplicationStatus,
+} from './RendererBackendStatus.js';
+
 export const RENDERER_BACKENDS = ['auto', 'webgl', 'webgpu'];
 export const GPU_PREFERENCES = ['default', 'high-performance', 'low-power'];
 
@@ -26,11 +31,18 @@ export function labelGpuPreference(value) {
 }
 
 export function getWebGpuSupport() {
+  const browserSupported = typeof navigator !== 'undefined' && !!navigator.gpu;
+  const applicationReady = WEBGPU_RENDERER_STATUS.applicationReady;
   return {
-    supported: typeof navigator !== 'undefined' && !!navigator.gpu,
-    reason: typeof navigator !== 'undefined' && navigator.gpu
-      ? ''
-      : 'WebGPU unavailable in this browser',
+    // `supported` retains its browser-capability meaning for diagnostics.
+    supported: browserSupported,
+    browserSupported,
+    applicationReady,
+    selectable: browserSupported && applicationReady,
+    phase: WEBGPU_RENDERER_STATUS.phase,
+    reason: !browserSupported
+      ? 'WebGPU unavailable in this browser'
+      : (applicationReady ? '' : describeWebGpuApplicationStatus()),
   };
 }
 

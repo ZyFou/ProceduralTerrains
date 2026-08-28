@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectRendererCapabilities } from '../src/engine/render/RendererCapabilities.js';
+import { detectRendererCapabilities, getWebGpuSupport } from '../src/engine/render/RendererCapabilities.js';
 import { probeWebGL } from '../src/engine/render/createWebGLRenderer.js';
 
 afterEach(() => {
@@ -7,6 +7,16 @@ afterEach(() => {
 });
 
 describe('renderer diagnostics', () => {
+  it('reports WebGPU API availability separately from editor readiness', () => {
+    vi.stubGlobal('navigator', { gpu: {} });
+    expect(getWebGpuSupport()).toMatchObject({
+      supported: true,
+      browserSupported: true,
+      applicationReady: false,
+      selectable: false,
+    });
+  });
+
   it('captures shader-relevant limits without failing on unsupported enums', () => {
     const gl = {
       MAX_TEXTURE_SIZE: 1,

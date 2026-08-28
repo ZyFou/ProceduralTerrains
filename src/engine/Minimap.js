@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const SIZE = 256;
 const SAMPLE_RES = 128;
@@ -46,6 +47,8 @@ export class Minimap {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
     this.camera.up.set(0, 0, -1);
     this._pixels = new Uint8Array(SIZE * SIZE * 4);
+    this._readbackPending = null;
+    this._readbackGeneration = 0;
     this.config = {
       mode: 'color',
       zoom: 1,
@@ -107,6 +110,7 @@ export class Minimap {
 
   requestRedraw() {
     this._dirty = true;
+    this._readbackGeneration++;
   }
 
   _viewState() {
@@ -232,7 +236,15 @@ export class Minimap {
     if (!sampler) return;
 
     if (this.config.mode === 'color') {
-      this._renderSceneColor();
+      if (!this._readbackPending) {
+        const generation = ++this._readbackGeneration;
+        this._readbackPending = this._renderSceneColor(generation)
+          .catch((error) => {
+            console.warn('Minimap asynchronous readback failed', error);
+            this._dirty = true;
+          })
+          .finally(() => { this._readbackPending = null; });
+      }
       this._lastView = this._viewState();
       return;
     }
@@ -264,7 +276,7 @@ export class Minimap {
     this._lastView = this._viewState();
   }
 
-  _renderSceneColor() {
+  async _renderSceneColor(generation = ++this._readbackGeneration) {
     const view = this._viewState();
     this.camera.left = view.centerX - view.halfSpan;
     this.camera.right = view.centerX + view.halfSpan;
@@ -279,8 +291,18 @@ export class Minimap {
     this.renderer.setRenderTarget(this.target);
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
-    this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
     this.renderer.setRenderTarget(prevTarget);
+
+    await readRenderTargetPixelsAsync(
+      this.renderer,
+      this.target,
+      0,
+      0,
+      SIZE,
+      SIZE,
+      this._pixels,
+    );
+    if (generation !== this._readbackGeneration || !this.baseCtx) return;
 
     const img = this.baseCtx.createImageData(SIZE, SIZE);
     for (let y = 0; y < SIZE; y++) {

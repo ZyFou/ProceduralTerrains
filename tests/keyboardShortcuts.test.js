@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   EDITOR_SHORTCUTS,
   isMacPlatform,
@@ -16,6 +17,11 @@ const keyEvent = (key, overrides = {}) => ({
 });
 
 describe('editor keyboard shortcuts', () => {
+  it('keeps ShortcutHint compatible with a classic JSX runtime', () => {
+    const source = readFileSync(new URL('../src/components/ui/ShortcutHint.jsx', import.meta.url), 'utf8');
+    expect(source).toMatch(/import React from ['"]react['"]/);
+  });
+
   it('detects Apple platforms and formats accessible platform labels', () => {
     expect(isMacPlatform('MacIntel')).toBe(true);
     expect(isMacPlatform('Win32')).toBe(false);

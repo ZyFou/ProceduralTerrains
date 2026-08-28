@@ -1,3 +1,4 @@
+import React from 'react';
 import { Command } from 'lucide-react';
 import { getPlatformName, isMacPlatform, shortcutText } from '../../keyboardShortcuts.js';
 

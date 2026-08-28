@@ -676,6 +676,8 @@ export class Engine {
     this.rendererConfig = {
       requestedBackend,
       requestedBackendLabel: labelRendererBackend(requestedBackend),
+      // Applied preference and active backend are deliberately separate. Auto
+      // is an applied preference even though its resolved backend is WebGL2.
       appliedRendererBackend: requestedBackend,
       appliedRendererBackendLabel: labelRendererBackend(requestedBackend),
       activeBackend: 'webgl2',
@@ -688,7 +690,7 @@ export class Engine {
       activeGpuPreferenceLabel: labelGpuPreference(actualOptions.powerPreference || 'default'),
       workerRequested: !!this.perf?.useWorker,
       workerActive: false,
-      webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.supported,
+      webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.selectable,
       webgpuRequestedButNotActive: requestedBackend === 'webgpu',
       reloadRequired: false,
     };

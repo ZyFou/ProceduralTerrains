@@ -172,13 +172,16 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
   const fallbackCaps = useMemo(() => detectRendererCapabilities(), []);
   const caps = rendererInfo?.capabilities || fallbackCaps;
   const webgpuSupported = !!caps.webgpu?.supported;
+  const webgpuSelectable = !!caps.webgpu?.selectable;
   const backendOptions = [
     { value: 'auto', label: 'Auto' },
     { value: 'webgl', label: 'WebGL' },
     {
       value: 'webgpu',
-      label: webgpuSupported ? 'WebGPU' : 'WebGPU unavailable',
-      disabled: !webgpuSupported,
+      label: webgpuSelectable
+        ? 'WebGPU'
+        : (webgpuSupported ? 'WebGPU — TSL migration in progress' : 'WebGPU unavailable'),
+      disabled: !webgpuSelectable,
     },
   ];
   const activeGpuPreference = rendererInfo?.activeGpuPreference || 'default';
@@ -200,7 +203,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           value={perf.rendererBackend}
           options={backendOptions}
           onChange={(v) => onPerfSetting('rendererBackend', v)}
-          info="Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build."
+          info="Auto uses the validated WebGL2 renderer. WebGPU remains locked until every production shader has an exact TSL variant and passes visual parity."
           settingId="performance.rendererBackend"
         />
         <SelectRow
@@ -224,7 +227,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           <CapabilityRow label="GPU Timing" value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
           <CapabilityRow label="Power Preference" value={labelGpuPreference(activeGpuPreference)} />
           <CapabilityRow label="Worker Renderer" value={rendererInfo?.workerActive ? 'Active' : 'Inactive'} />
-          {perf.rendererBackend === 'webgpu' && !webgpuSupported && (
+          {(!webgpuSelectable || perf.rendererBackend === 'webgpu') && caps.webgpu?.reason && (
             <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
           )}
         </div>
