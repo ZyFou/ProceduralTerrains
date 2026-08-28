@@ -195,6 +195,22 @@ describe('shared Tile and Infinite terrain program', () => {
     }
   });
 
+  it('blends Infinite far normals without divergent screen-space derivatives', () => {
+    const uniforms = createTerrainUniforms();
+    const material = createTerrainMaterial(uniforms, 5);
+    materials.push(material);
+    const source = material.fragmentShader;
+
+    const derivative = source.indexOf('vec3 facetedNormal = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)))');
+    const varyingBranch = source.indexOf('if (coarseInfiniteNormal || farNormalMix >= 1.0)');
+    expect(derivative).toBeGreaterThan(-1);
+    expect(varyingBranch).toBeGreaterThan(derivative);
+    expect(source).toContain('smoothstep(');
+    expect(source).toContain('normalFadeCenter - normalFadeHalfWidth');
+    expect(source).toContain('mix(analyticNormal, facetedNormal, farNormalMix)');
+    expect(source).not.toContain('bool farInfiniteNormal');
+  });
+
   it('keeps the circular wall vertex path to one safe height sample', () => {
     const uniforms = createTerrainUniforms();
     const material = createTerrainMaterial(uniforms, 5);

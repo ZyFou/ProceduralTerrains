@@ -728,17 +728,33 @@ ${features.manual ? /* glsl */ `
   } else {
     hC = terrainCachedHeightAt(xz);
     float normalDistance = length(cameraPosition - vWorldPos);
-    bool farInfiniteNormal = uInfiniteMode > 0.5
-      && (vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0));
-    if (farInfiniteNormal) {
+    // Screen-space derivatives are undefined when evaluated only by part of a
+    // fragment quad. The old hard distance branch did exactly that at ~900 m,
+    // drawing a dotted black circle around the camera. Evaluate the faceted
+    // normal before the varying branch, then blend toward it over two chunks.
+    vec3 facetedNormal = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+    if (facetedNormal.y < 0.0) facetedNormal = -facetedNormal;
+    float normalFadeCenter = max(uChunkSize * 7.0, 900.0);
+    float normalFadeHalfWidth = max(uChunkSize, 64.0);
+    float farNormalMix = uInfiniteMode > 0.5
+      ? smoothstep(
+          normalFadeCenter - normalFadeHalfWidth,
+          normalFadeCenter + normalFadeHalfWidth,
+          normalDistance
+        )
+      : 0.0;
+    bool coarseInfiniteNormal = uInfiniteMode > 0.5 && vLod > 1.5;
+    if (coarseInfiniteNormal || farNormalMix >= 1.0) {
       hX = hC;
       hZ = hC;
-      nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
-      if (nGeo.y < 0.0) nGeo = -nGeo;
+      nGeo = facetedNormal;
     } else {
       hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
       hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
-      nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+      vec3 analyticNormal = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+      nGeo = normalize(mix(analyticNormal, facetedNormal, farNormalMix));
+      hX = mix(hX, hC, farNormalMix);
+      hZ = mix(hZ, hC, farNormalMix);
     }
   }
 `}

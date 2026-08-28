@@ -1179,6 +1179,7 @@ export default function App() {
         setHelpVisible(false);
       }
     }).catch((e) => {
+      if (e?.code === 'MODE_TRANSITION_CANCELLED') return null;
       console.error(e);
       if (!silent) showToast('Mode switch failed', 'error');
       if (silent) throw e;

@@ -425,6 +425,8 @@ export class Engine {
     this._infiniteMaintenanceGen = -1;
     this._planetMaintenanceCamera = null;
     this._planetMaintenanceGen = -1;
+    this._planetPrepareEpoch = 0;
+    this._planetHeightPrepareIdentity = null;
 
     // Tile mode: the studio board can grow into a grid of square cells. Each
     // cell is one cellSize (== the single-board size) patch of the SAME
@@ -8344,6 +8346,7 @@ export class Engine {
       this.planetSampler = new planet.PlanetHeightSampler(this.uniforms, () => ({
         octaves: Math.round(this.params.octaves),
       }));
+      this._syncActivePlanetBundleResources({ planetSampler: this.planetSampler });
     }
     return this.planetSampler;
   }
@@ -8532,10 +8535,17 @@ export class Engine {
     if (layer.group) layer.group.visible = visible && layer._enabled !== false;
   }
 
-  _capturePreparedModeBundle(renderKey, worldMode = this.worldMode) {
+  _capturePreparedModeBundle(renderKey, worldMode = this.worldMode, {
+    validated = true,
+    rollbackBundle = null,
+  } = {}) {
     const key = typeof renderKey === 'string' ? renderKey : renderKey?.serialized;
     if (!key) return null;
-    const metadata = { camera: this._snapshotModeCamera() };
+    const metadata = {
+      camera: this._snapshotModeCamera(),
+      validated: validated === true,
+      rollbackBundle,
+    };
     let resources;
 
     if (worldMode === 'infinite') {
@@ -8617,6 +8627,7 @@ export class Engine {
           this._applyTimeOfDay();
           this._applyPixelRatio();
         } else {
+          this._planetPrepareEpoch = (this._planetPrepareEpoch || 0) + 1;
           this._applyUniforms();
           this.planetWorld = owned.planetWorld;
           this.planetWater = owned.planetWater;
@@ -8669,6 +8680,7 @@ export class Engine {
           this.uniforms.uUseInfiniteFieldCache.value = 0;
           this.uniforms.uInfiniteFieldReady.value.set(0, 0, 0);
         } else {
+          this._planetPrepareEpoch = (this._planetPrepareEpoch || 0) + 1;
           if (owned.planetWorld?.group) owned.planetWorld.group.visible = false;
           if (owned.planetWater) owned.planetWater.visible = false;
           this._setPreparedCloudVisible(owned.planetCloudChunks, false);
@@ -8677,6 +8689,8 @@ export class Engine {
           owned.fpsControls?.setEnabled?.(false);
           owned.heightTexture = this.uniforms.uPlanetHeightTex.value;
           owned.useHeightTexture = this.uniforms.uUsePlanetHeightTex.value;
+          owned.bakedTerrainGen = this._bakedTerrainGen;
+          owned.planetBakeRequestedGen = this._planetBakeRequestedGen;
           if (this.planetWorld === owned.planetWorld) this.planetWorld = null;
           if (this.planetWater === owned.planetWater) this.planetWater = null;
           if (this.planetWaterMat === owned.planetWaterMat) this.planetWaterMat = null;
@@ -8696,6 +8710,12 @@ export class Engine {
     });
     bundle.activate({ reason: 'capture-live' });
     return bundle;
+  }
+
+  _syncActivePlanetBundleResources(resources) {
+    const bundle = this._activePreparedModeBundle;
+    if (bundle?.worldMode !== 'planet' || bundle.disposed || !bundle.resources) return;
+    Object.assign(bundle.resources, resources);
   }
 
   _disposePreparedModeResources(worldMode, resources) {
@@ -8884,7 +8904,11 @@ export class Engine {
       this._activePreparedModeBundle = previousBundle;
     }
     context.previousBundle = this._parkActivePreparedModeBundle();
-    if (context.previousBundle && context.input.project == null) {
+    context.rollbackBundle = context.previousBundle?.metadata?.validated === false
+      ? context.previousBundle.metadata.rollbackBundle
+      : context.previousBundle;
+    if (context.previousBundle?.metadata?.validated !== false
+        && context.input.project == null) {
       const existing = this._modeResourceCache.get(context.previousBundle.key);
       if (existing?.bundle !== context.previousBundle) {
         this._modeResourceCache.set(context.previousBundle.key, {
@@ -8956,6 +8980,7 @@ export class Engine {
     context.targetBundle = this._capturePreparedModeBundle(
       context.renderKey,
       context.targetWorldMode,
+      { validated: false, rollbackBundle: context.rollbackBundle },
     );
     this._activePreparedModeBundle = context.targetBundle;
     context.assertCurrent();
@@ -9099,6 +9124,11 @@ export class Engine {
     await yieldFrame();
     context.assertCurrent();
     context.progress('Final frame presented', 2, 2);
+    if (context.targetBundle?.metadata) context.targetBundle.metadata.validated = true;
+    if (context.previousBundle?.metadata?.validated === false
+        && context.previousBundle !== context.targetBundle) {
+      context.previousBundle.dispose();
+    }
     const documentReplaced = context.input.project != null
       || context.targetProjectMode !== context.previousProjectMode;
     if (documentReplaced) {
@@ -9174,8 +9204,13 @@ export class Engine {
               if (!attempt?.reusedBundle) candidate.dispose();
             }
             this._activePreparedModeBundle = null;
-            if (attempt?.previousBundle && !attempt.previousBundle.disposed) {
-              this._activatePreparedModeBundle(attempt.previousBundle);
+            const rollbackBundle = attempt?.rollbackBundle || attempt?.previousBundle;
+            if (attempt?.previousBundle?.metadata?.validated === false
+                && attempt.previousBundle !== candidate) {
+              attempt.previousBundle.dispose();
+            }
+            if (rollbackBundle && !rollbackBundle.disposed) {
+              this._activatePreparedModeBundle(rollbackBundle);
             }
             continue;
           }
@@ -9196,8 +9231,13 @@ export class Engine {
             if (!attempt?.reusedBundle) candidate.dispose();
           }
           this._activePreparedModeBundle = null;
-          if (attempt?.previousBundle && !attempt.previousBundle.disposed) {
-            this._activatePreparedModeBundle(attempt.previousBundle);
+          const rollbackBundle = attempt?.rollbackBundle || attempt?.previousBundle;
+          if (attempt?.previousBundle?.metadata?.validated === false
+              && attempt.previousBundle !== candidate) {
+            attempt.previousBundle.dispose();
+          }
+          if (rollbackBundle && !rollbackBundle.disposed) {
+            this._activatePreparedModeBundle(rollbackBundle);
           }
         }
       }
@@ -9205,12 +9245,19 @@ export class Engine {
       if (error?.code === 'MODE_TRANSITION_CANCELLED') throw error;
       const attempt = request.context;
       const candidate = attempt?.targetBundle;
-      const previousBundle = attempt?.previousBundle;
+      const previousBundle = attempt?.rollbackBundle || attempt?.previousBundle;
+      const interruptedBundle = attempt?.previousBundle?.metadata?.validated === false
+        ? attempt.previousBundle
+        : null;
       if (candidate && candidate !== previousBundle && !candidate.disposed) {
         candidate.park({ reason: 'failed-transition' });
         if (!attempt?.reusedBundle) candidate.dispose();
       }
       this._activePreparedModeBundle = null;
+      if (interruptedBundle && interruptedBundle !== candidate
+          && interruptedBundle !== previousBundle && !interruptedBundle.disposed) {
+        interruptedBundle.dispose();
+      }
       if (!this._disposed && previousProjectState) {
         try {
           await this.restoreState(previousProjectState, { rollbackOnError: false });
@@ -9541,7 +9588,9 @@ export class Engine {
       success = true;
     } catch (error) {
       failure = error;
-      console.warn('Infinite shader warmup failed', error);
+      if (error?.code !== 'MODE_TRANSITION_CANCELLED') {
+        console.warn('Infinite shader warmup failed', error);
+      }
     } finally {
       this._discardHeightCachePreparation(cachePreparation);
       this._worldWarmRetryCount ||= { infinite: 0, planet: 0 };
@@ -9726,6 +9775,16 @@ export class Engine {
     });
     this._bakedTerrainGen = -1;
     this._planetBakeRequestedGen = -1;
+    const prepareIdentity = this._planetHeightPrepareIdentity;
+    if (prepareIdentity?.baker == null
+        && prepareIdentity.epoch === (this._planetPrepareEpoch || 0)) {
+      prepareIdentity.baker = this.planetHeightBaker;
+    }
+    this._syncActivePlanetBundleResources({
+      planetHeightBaker: this.planetHeightBaker,
+      bakedTerrainGen: this._bakedTerrainGen,
+      planetBakeRequestedGen: this._planetBakeRequestedGen,
+    });
     return this.planetHeightBaker;
   }
 
@@ -9813,16 +9872,31 @@ export class Engine {
   }
   _preparePlanetHeightCacheAsync() {
     if (this._disposed || !this.params) return Promise.resolve(false);
-    if (this._planetHeightPreparePromise) return this._planetHeightPreparePromise;
+    const baker = this.planetHeightBaker;
     const program = this._stackGLSL;
     const programSig = program?.heightSig || program?.sig;
     const octaves = Math.round(this.params.octaves);
+    const epoch = this._planetPrepareEpoch || 0;
+    const currentIdentity = this._planetHeightPrepareIdentity;
+    if (this._planetHeightPreparePromise
+        && currentIdentity?.baker === baker
+        && currentIdentity?.programSig === programSig
+        && currentIdentity?.octaves === octaves
+        && currentIdentity?.epoch === epoch) {
+      return this._planetHeightPreparePromise;
+    }
     const job = (async () => {
       let preparation = null;
       try {
         preparation = await this._prepareHeightCacheProgram('planet', octaves, program);
         const currentSig = this._stackGLSL?.heightSig || this._stackGLSL?.sig;
+        // A cold Planet launch legitimately creates its baker inside
+        // _prepareHeightCacheProgram(). Compare against the cache that was
+        // actually prepared, rather than the pre-launch null snapshot.
+        const preparedBaker = preparation?.cache ?? baker;
         if (this._disposed || this.worldMode !== 'planet'
+            || this.planetHeightBaker !== preparedBaker
+            || (this._planetPrepareEpoch || 0) !== epoch
             || currentSig !== programSig
             || Math.round(this.params?.octaves ?? octaves) !== octaves
             || preparation?.result?.ready !== true) {
@@ -9839,9 +9913,16 @@ export class Engine {
     const pending = job.finally(() => {
       if (this._planetHeightPreparePromise === pending) {
         this._planetHeightPreparePromise = null;
+        this._planetHeightPrepareIdentity = null;
       }
     });
     this._planetHeightPreparePromise = pending;
+    this._planetHeightPrepareIdentity = {
+      baker: this.planetHeightBaker ?? baker,
+      programSig,
+      octaves,
+      epoch,
+    };
     return pending;
   }
   _publishHeightCachePreparation(preparation) {
@@ -10025,6 +10106,7 @@ export class Engine {
 
   _enterPlanetMode(planet, { deferCompile = false } = {}) {
     if (!planet) return;
+    this._planetPrepareEpoch = (this._planetPrepareEpoch || 0) + 1;
     const p = this.params;
     // planet is fully procedural — Studio paint layers don't apply
     this.uniforms.uPaintEnabled.value = 0;
@@ -10308,6 +10390,7 @@ export class Engine {
         getWaterLevel: () => this.params.seaLevel,
         getPlanetRadius: () => this.params.planetRadius,
       });
+      this._syncActivePlanetBundleResources({ planetPropSampler: this.planetPropSampler });
     }
     return this.planetPropSampler;
   }
@@ -10449,7 +10532,9 @@ export class Engine {
       success = true;
     } catch (error) {
       failure = error;
-      console.warn('Planet shader warmup failed', error);
+      if (error?.code !== 'MODE_TRANSITION_CANCELLED') {
+        console.warn('Planet shader warmup failed', error);
+      }
     } finally {
       if (!(strict && success)) this._queueWarmMaterials(warm);
       this._worldWarmRetryCount ||= { infinite: 0, planet: 0 };
@@ -10534,6 +10619,7 @@ export class Engine {
 
   /** Dispose the planet-mode systems (does not restore studio). */
   _disposePlanet() {
+    this._planetPrepareEpoch = (this._planetPrepareEpoch || 0) + 1;
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.planetCloudChunks) { this.planetCloudChunks.dispose(); this.planetCloudChunks = null; }
     if (this.planetCloudLayer) { this.planetCloudLayer.dispose(); this.planetCloudLayer = null; }
