@@ -64,7 +64,7 @@ import {
   sanitizePerfSettings, resolveLodSegments, resolveLodDistances,
   hasStoredPerfSettings,
 } from './render/PerformanceSettings.js';
-import { detectGpuTier, presetForTier, saveGpuTier } from './render/GpuTier.js';
+import { detectGpuTierForRenderer, presetForTier, saveGpuTier } from './render/GpuTier.js';
 import {
   buildBoardPlinthGeometry,
   buildCircularPlinthGeometry,
@@ -265,9 +265,13 @@ export class Engine {
     initialParams,
     initialView = 'landing',
     initialBootMode = 'full',
+    rendererBootstrap = null,
+    materialBackend = null,
   }) {
     this._bootStart = performance.now();   // boot timing baseline (see [boot] logs)
     this.canvas = canvas;
+    this._rendererBootstrap = rendererBootstrap;
+    this._materialBackend = materialBackend;
     this.cb = callbacks;
     this._initialView = initialView === 'landing' ? 'landing' : 'editor';
     this._initialBootMode = initialBootMode === 'compatibility' ? 'compatibility' : 'full';
@@ -559,7 +563,7 @@ export class Engine {
 
     this._initRenderer();
     this._onContextLost = (event) => {
-      event.preventDefault();
+      event?.preventDefault?.();
       this._contextLost = true;
       this._contextLossCount += 1;
       console.warn('[graphics] context lost; aborting boot generation');
@@ -596,6 +600,36 @@ export class Engine {
     };
     this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
     this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
+    this._webGpuDeviceLossToken = null;
+    const webGpuDevice = this.renderer?.backend?.isWebGPUBackend
+      ? this.renderer.backend.device
+      : null;
+    if (webGpuDevice?.lost?.then) {
+      const token = { cancelled: false };
+      this._webGpuDeviceLossToken = token;
+      webGpuDevice.lost.then((info) => {
+        if (token.cancelled || this._disposed) return;
+        this._contextLost = true;
+        this._contextLossCount += 1;
+        const reason = info?.message || info?.reason || 'unknown device loss';
+        console.error(`[graphics] WebGPU device lost: ${reason}`);
+        this._modeTransitionCoordinator?.cancel?.();
+        this._bootPipeline?.cancel?.();
+        this._failFinalFrameBoot(
+          new Error(`WebGPU device lost: ${reason}`),
+          'renderer',
+        );
+        this.cb.onModeProgress?.({
+          stage: 'renderer',
+          label: 'WebGPU device lost — reload to recover safely',
+        });
+        this.cb.onStatus('WebGPU device lost — reload to recover safely', false);
+      }).catch((error) => {
+        if (!token.cancelled && !this._disposed) {
+          console.error('[graphics] WebGPU device-loss observer failed', error);
+        }
+      });
+    }
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
@@ -678,22 +712,24 @@ export class Engine {
     const requestedBackend = this.perf?.rendererBackend || 'auto';
     const requestedGpuPreference = this.perf?.gpuPreference || 'default';
     const webgpu = getWebGpuSupport();
-    this.renderer = createRendererForCanvas(this.canvas, {
+    const bootstrap = this._rendererBootstrap;
+    this._rendererBootstrap = null;
+    this.renderer = bootstrap?.renderer || createRendererForCanvas(this.canvas, {
       rendererBackend: requestedBackend,
       gpuPreference: requestedGpuPreference,
     });
     this.renderer.setClearColor(0x0b0e14, 1);
 
-    const gl = this.renderer.getContext();
-    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-    let gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'GPU info hidden by browser';
+    this.rendererCapabilities = detectRendererCapabilities(this.renderer);
+    const activeBackend = bootstrap?.activeBackend
+      || (this.renderer.backend?.isWebGPUBackend ? 'webgpu' : 'webgl2');
+    let gpu = this.rendererCapabilities.detectedGpu || 'GPU info hidden by browser';
     const angle = /ANGLE \([^,]+,\s*(.+?),\s*[^,]*\)\s*$/.exec(gpu);
     if (angle) gpu = angle[1];
     gpu = gpu.replace(/\s*\(0x[0-9A-F]+\)/i, '').replace(/\s*Direct3D.*$/i, '').trim();
+    this.gpuNameFull = gpu;
     if (gpu.length > 42) gpu = gpu.slice(0, 42) + '…';
     this.gpuName = gpu;
-    this.gpuNameFull = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'GPU info hidden by browser';
-    this.rendererCapabilities = detectRendererCapabilities(this.renderer);
     const actualOptions = this.renderer.userData?.terrainRendererOptions || {};
     this.rendererConfig = {
       requestedBackend,
@@ -702,8 +738,8 @@ export class Engine {
       // is an applied preference even though its resolved backend is WebGL2.
       appliedRendererBackend: requestedBackend,
       appliedRendererBackendLabel: labelRendererBackend(requestedBackend),
-      activeBackend: 'webgl2',
-      activeBackendLabel: this.rendererCapabilities.detectedRenderer,
+      activeBackend,
+      activeBackendLabel: activeBackend === 'webgpu' ? 'WebGPU' : this.rendererCapabilities.detectedRenderer,
       requestedGpuPreference,
       requestedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
       appliedGpuPreference: requestedGpuPreference,
@@ -712,8 +748,9 @@ export class Engine {
       activeGpuPreferenceLabel: labelGpuPreference(actualOptions.powerPreference || 'default'),
       workerRequested: !!this.perf?.useWorker,
       workerActive: false,
-      webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.selectable,
-      webgpuRequestedButNotActive: requestedBackend === 'webgpu',
+      webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && activeBackend !== 'webgpu',
+      webgpuRequestedButNotActive: requestedBackend === 'webgpu' && activeBackend !== 'webgpu',
+      backendFallbackReason: bootstrap?.fallbackReason || '',
       reloadRequired: false,
     };
 
@@ -729,7 +766,7 @@ export class Engine {
    * that is surfaced after the boot overlay clears.
    */
   _autoSelectPresetByGpu() {
-    this.gpuTier = detectGpuTier(this.renderer.getContext());
+    this.gpuTier = detectGpuTierForRenderer(this.renderer, this.gpuNameFull);
     saveGpuTier(this.gpuTier);
     if (!this._firstRun) return;
     const preset = presetForTier(this.gpuTier);
@@ -809,9 +846,9 @@ export class Engine {
 
     // camera-underwater post effect (inactive above water — zero cost) +
     // centralized submersion detection / transition (single source of truth).
-    this.underwater = new UnderwaterEffect();
+    this.underwater = new UnderwaterEffect(this._materialBackend);
     this.underwaterController = new UnderwaterController();
-    this.visualPost = new VisualPostProcess();
+    this.visualPost = new VisualPostProcess(this._materialBackend);
     this._sharedOpaqueRevision = null;
     this._sharedOpaqueTarget = null;
 
@@ -822,7 +859,7 @@ export class Engine {
     // world so both modes show the exact same configured sky (driven by the
     // shared timeOfDay + skybox* params). Visibility is toggled per world mode
     // by _applySkyboxSettings(); planet mode hides it (open-space backdrop).
-    this.proceduralSky = new ProceduralSky(this.scene);
+    this.proceduralSky = new ProceduralSky(this.scene, this._materialBackend);
     this.proceduralSky.setVisible(false);
   }
 
@@ -4694,6 +4731,49 @@ export class Engine {
     const previousFace = renderer.getActiveCubeFace?.() ?? 0;
     const previousMip = renderer.getActiveMipmapLevel?.() ?? 0;
     const previousXr = renderer.xr?.enabled;
+    if (renderer.isWebGPURenderer) {
+      const startedAt = performance.now();
+      try {
+        if (pass.disableXr && renderer.xr) renderer.xr.enabled = false;
+        pass.mesh.material = pass.material;
+        pass.camera.updateMatrixWorld?.(true);
+        renderer.setRenderTarget(
+          pass.renderTarget ?? null,
+          pass.activeCubeFace ?? 0,
+          pass.activeMipmapLevel ?? 0,
+        );
+        await renderer.compileAsync(pass.scene, pass.camera, pass.scene);
+        const asyncWaitMs = performance.now() - startedAt;
+        return {
+          ready: true,
+          timedOut: false,
+          failed: false,
+          pendingCount: 0,
+          waitMs: asyncWaitMs,
+          syncCompileMs: 0,
+          asyncWaitMs,
+        };
+      } catch (error) {
+        return {
+          ready: false,
+          timedOut: false,
+          failed: true,
+          code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+          failures: [{
+            ...this._compileMaterialDescriptor(pass.material),
+            code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+            message: error?.message || 'WebGPU pass pipeline compilation failed',
+          }],
+          pendingCount: 0,
+          waitMs: performance.now() - startedAt,
+          syncCompileMs: 0,
+        };
+      } finally {
+        pass.mesh.material = previousMaterial;
+        renderer.setRenderTarget(previousTarget, previousFace, previousMip);
+        if (renderer.xr && previousXr !== undefined) renderer.xr.enabled = previousXr;
+      }
+    }
     let pending = [];
     const beforePrograms = this._snapshotMaterialPrograms([pass.material], renderer.properties);
     const startedAt = performance.now();
@@ -5630,6 +5710,56 @@ export class Engine {
       };
     }
 
+    if (renderer.isWebGPURenderer) {
+      const group = new THREE.Group();
+      for (const material of list) group.add(new THREE.Mesh(this._warmGeo, material));
+      const previousTarget = renderer.getRenderTarget?.() || null;
+      const compileStartedAt = performance.now();
+      try {
+        renderer.setRenderTarget(renderTarget);
+        await renderer.compileAsync(group, this.camera, this.scene);
+        const asyncWaitMs = performance.now() - compileStartedAt;
+        onProgress?.(total, total);
+        return this._recordReleaseShaderCompile({
+          ready: true,
+          timedOut: false,
+          failed: false,
+          failures: [],
+          materialCount: list.length,
+          pendingCount: 0,
+          waitMs: asyncWaitMs,
+          syncCompileMs: 0,
+          asyncWaitMs,
+          readyTimeline: list.map((material) => ({
+            ...this._compileMaterialDescriptor(material),
+            activeSamplers: null,
+            programs: [],
+            readyMs: asyncWaitMs,
+          })),
+        }, acceptanceStartedAt);
+      } catch (error) {
+        const asyncWaitMs = performance.now() - compileStartedAt;
+        return this._recordReleaseShaderCompile({
+          ready: false,
+          timedOut: false,
+          failed: true,
+          code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+          failures: list.map((material) => ({
+            ...this._compileMaterialDescriptor(material),
+            code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+            message: error?.message || 'WebGPU pipeline compilation failed',
+          })),
+          materialCount: list.length,
+          pendingCount: 0,
+          waitMs: asyncWaitMs,
+          syncCompileMs: 0,
+          asyncWaitMs,
+        }, acceptanceStartedAt);
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+      }
+    }
+
     const group = new THREE.Group();
     for (const m of list) group.add(new THREE.Mesh(this._warmGeo, m));
 
@@ -5757,6 +5887,39 @@ export class Engine {
     group.add(probe);
     const previousTarget = renderer.getRenderTarget();
     const startedAt = performance.now();
+    if (renderer.isWebGPURenderer) {
+      try {
+        renderer.setRenderTarget(renderTarget);
+        await renderer.compileAsync(group, this.camera, this.scene);
+        const asyncWaitMs = performance.now() - startedAt;
+        return {
+          ready: true,
+          timedOut: false,
+          failed: false,
+          pendingCount: 0,
+          waitMs: asyncWaitMs,
+          syncCompileMs: 0,
+          asyncWaitMs,
+        };
+      } catch (error) {
+        return {
+          ready: false,
+          timedOut: false,
+          failed: true,
+          code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+          failures: [{
+            ...this._compileMaterialDescriptor(material),
+            code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+            message: error?.message || 'WebGPU instanced pipeline compilation failed',
+          }],
+          pendingCount: 0,
+          waitMs: performance.now() - startedAt,
+          syncCompileMs: 0,
+        };
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+      }
+    }
     const beforePrograms = this._snapshotMaterialPrograms([material], renderer.properties);
     let pending;
     try {
@@ -6017,6 +6180,53 @@ export class Engine {
     }
 
     const prevTarget = renderTarget ? this.renderer.getRenderTarget() : null;
+    if (this.renderer.isWebGPURenderer) {
+      const startedAt = performance.now();
+      try {
+        for (const { material, source, topology } of variants.values()) {
+          if (this._disposed) {
+            return { ready: false, aborted: true, pendingCount: 0, waitMs: 0 };
+          }
+          const group = new THREE.Group();
+          const geometry = source?.geometry ?? this._warmGeo;
+          const probe = topology === 'instanced'
+            ? new THREE.InstancedMesh(geometry, material, 1)
+            : new THREE.Mesh(geometry, material);
+          if (probe.isInstancedMesh) {
+            probe.count = 1;
+            probe.setMatrixAt(0, new THREE.Matrix4());
+          }
+          probe.castShadow = !!source?.castShadow;
+          probe.receiveShadow = !!source?.receiveShadow;
+          group.add(probe);
+          if (renderTarget) this.renderer.setRenderTarget(renderTarget);
+          await this.renderer.compileAsync(group, this.camera, this.scene);
+          await yieldTask();
+        }
+        return {
+          ready: true,
+          timedOut: false,
+          failed: false,
+          pendingCount: 0,
+          waitMs: performance.now() - startedAt,
+        };
+      } catch (error) {
+        return {
+          ready: false,
+          timedOut: false,
+          failed: true,
+          code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+          failures: [{
+            code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+            message: error?.message || 'WebGPU scene pipeline compilation failed',
+          }],
+          pendingCount: 0,
+          waitMs: performance.now() - startedAt,
+        };
+      } finally {
+        if (renderTarget) this.renderer.setRenderTarget(prevTarget);
+      }
+    }
     const allPending = new Set();
     const programsByMaterial = new Map();
     for (const { material, source, topology } of variants.values()) {
@@ -10256,6 +10466,7 @@ export class Engine {
         planetRadius: this._planetRadius(),
         compile: (mats) => this._compileCameraTargetMaterials(mats),
         renderer: this.renderer,
+        materialBackend: this._materialBackend,
       });
     }
     this._applyCloudSettings();
@@ -10318,6 +10529,7 @@ export class Engine {
         return { ready: false, aborted: true };
       },
       renderer: this.renderer,
+      materialBackend: this._materialBackend,
     });
     if (this._activePreparedModeBundle?.worldMode === 'studio') {
       this._activePreparedModeBundle.resources.studioCloud = this.studioCloud;
@@ -10369,6 +10581,7 @@ export class Engine {
           planetRadius: this._planetRadius(),
         compile: (mats) => this._compileCameraTargetMaterials(mats),
           renderer: this.renderer,
+          materialBackend: this._materialBackend,
         });
         this.planetCloudLayer.warmup()
           .catch((e) => console.warn('Cloud shader warmup failed', e));
@@ -11356,7 +11569,7 @@ export class Engine {
    */
   _applySkyboxSettings() {
     if (!this.proceduralSky) {
-      this.proceduralSky = new ProceduralSky(this.scene);
+      this.proceduralSky = new ProceduralSky(this.scene, this._materialBackend);
     }
     this.proceduralSky.applyParams(this.params);
     this.proceduralSky.setVisible(this._skyActive());
@@ -13611,6 +13824,10 @@ export class Engine {
     this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
+    if (this._webGpuDeviceLossToken) {
+      this._webGpuDeviceLossToken.cancelled = true;
+      this._webGpuDeviceLossToken = null;
+    }
     this._bootPipeline?.dispose?.();
     this._bootPipeline = null;
     this._modeTransitionCoordinator?.dispose?.();

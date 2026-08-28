@@ -86,7 +86,7 @@ void main() {
 `;
 
 export class CloudLowResPass {
-  constructor() {
+  constructor(materialBackend = null) {
     this.scale = 0.5;                 // 1.0 = off (caller skips), 0.5 = half, 0.25 = quarter
     this.depthAware = true;
     this.rt = null;
@@ -94,28 +94,31 @@ export class CloudLowResPass {
     this._prevClear = new THREE.Color();
     this._didRender = false;
 
-    this._composite = new THREE.ShaderMaterial({
-      uniforms: {
-        tCloud:          { value: null },
-        tSceneDepth:     { value: null },
-        uLowTexel:       { value: new THREE.Vector2(1, 1) },
-        uDepthSharpness: { value: 1800.0 },
-        uAlphaSharpness: { value: 10.0 },
-        uUseDepth:       { value: 1.0 },
-      },
-      vertexShader: COMPOSITE_VERT,
-      fragmentShader: COMPOSITE_FRAG,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-      // premultiplied "over": dst = src.rgb + dst*(1 - src.a)
-      blending: THREE.CustomBlending,
-      blendEquation: THREE.AddEquation,
-      blendSrc: THREE.OneFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
-      blendSrcAlpha: THREE.OneFactor,
-      blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
-    });
+    const uniforms = {
+      tCloud:          { value: null },
+      tSceneDepth:     { value: null },
+      uLowTexel:       { value: new THREE.Vector2(1, 1) },
+      uDepthSharpness: { value: 1800.0 },
+      uAlphaSharpness: { value: 10.0 },
+      uUseDepth:       { value: 1.0 },
+    };
+    this._composite = materialBackend?.createCloudCompositeMaterial
+      ? materialBackend.createCloudCompositeMaterial(uniforms)
+      : new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: COMPOSITE_VERT,
+        fragmentShader: COMPOSITE_FRAG,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        // premultiplied "over": dst = src.rgb + dst*(1 - src.a)
+        blending: THREE.CustomBlending,
+        blendEquation: THREE.AddEquation,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.OneFactor,
+        blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      });
     this._quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._composite);
     this._quad.frustumCulled = false;
     this._quadScene = new THREE.Scene();

@@ -169,6 +169,7 @@ function CapabilityRow({ label, value, title }) {
 }
 
 function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
+  const [webgpuCanary, setWebgpuCanary] = useState(null);
   const fallbackCaps = useMemo(() => detectRendererCapabilities(), []);
   const caps = rendererInfo?.capabilities || fallbackCaps;
   const webgpuSupported = !!caps.webgpu?.supported;
@@ -189,6 +190,32 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
   const gpuInfo = caps.gpuInfoAvailable
     ? caps.detectedGpu
     : (caps.gpuInfoReason || 'GPU info hidden by browser');
+  const runWebGpuCanary = async () => {
+    setWebgpuCanary({ running: true, ok: false, message: 'Compiling native materials…' });
+    try {
+      const { validateWebGpuProductionMaterials } = await import(
+        '../../engine/render/WebGpuRuntimeValidation.js'
+      );
+      const result = await validateWebGpuProductionMaterials({
+        powerPreference: perf.gpuPreference === 'default'
+          ? 'high-performance'
+          : perf.gpuPreference,
+      });
+      setWebgpuCanary({
+        running: false,
+        ok: result.ok,
+        message: result.ok
+          ? `${result.materials.length} native materials compiled and rendered`
+          : `${result.materials.length} passed — ${result.reason}`,
+      });
+    } catch (error) {
+      setWebgpuCanary({
+        running: false,
+        ok: false,
+        message: error?.message || String(error),
+      });
+    }
+  };
 
   return (
     <ControlSection
@@ -203,7 +230,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           value={perf.rendererBackend}
           options={backendOptions}
           onChange={(v) => onPerfSetting('rendererBackend', v)}
-          info="Auto uses the validated WebGL2 renderer. WebGPU remains locked until every production shader has an exact TSL variant and passes visual parity."
+          info="Auto uses WebGL2 until every visible, authoring and export material has an exact validated TSL variant. It will then prefer native WebGPU automatically."
           settingId="performance.rendererBackend"
         />
         <SelectRow
@@ -230,7 +257,28 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           {(!webgpuSelectable || perf.rendererBackend === 'webgpu') && caps.webgpu?.reason && (
             <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
           )}
+          {webgpuCanary && (
+            <CapabilityRow
+              label="Native Canary"
+              value={webgpuCanary.running
+                ? webgpuCanary.message
+                : `${webgpuCanary.ok ? 'Passed' : 'Failed'} — ${webgpuCanary.message}`}
+            />
+          )}
         </div>
+        {webgpuSupported && !webgpuSelectable && (
+          <div className="gpu-apply-row">
+            <span>Validate the already migrated materials on this GPU</span>
+            <button
+              type="button"
+              className="action-btn gpu-apply-btn"
+              disabled={webgpuCanary?.running}
+              onClick={runWebGpuCanary}
+            >
+              {webgpuCanary?.running ? 'Testing…' : 'Run WebGPU Canary'}
+            </button>
+          </div>
+        )}
         {reloadRequired ? (
           <div className="gpu-apply-row">
             <span>Reload required to apply GPU changes</span>

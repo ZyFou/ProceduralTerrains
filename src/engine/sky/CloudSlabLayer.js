@@ -55,7 +55,7 @@ export class CloudSlabLayer {
     this._adaptiveStepScale = 1;
     this._baseRenderScale = 1;
     this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
-    this._lowResPass = new CloudLowResPass();
+    this._lowResPass = new CloudLowResPass(opts.materialBackend);
     this._enabled = false;
     this._inScene = true;       // gated off while another world mode is active
     this._inRange = true;
@@ -107,7 +107,7 @@ export class CloudSlabLayer {
       this._occupancyPass = new CloudOccupancyPass(
         opts.renderer,
         this.material.uniforms,
-        { size: OCC_SIZE, planet: false },
+        { size: OCC_SIZE, planet: false, materialBackend: opts.materialBackend },
       );
     }
     this._applyOccupancyUniforms();

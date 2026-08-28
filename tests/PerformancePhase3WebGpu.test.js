@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   WEBGPU_RENDERER_STATUS,
+  WEBGPU_PRODUCTION_MATERIALS,
   WEBGPU_SHADER_FAMILIES,
   getMissingWebGpuMaterialFamilies,
+  getMissingWebGpuProductionMaterials,
 } from '../src/engine/render/RendererBackendStatus.js';
 import {
   createTslRenderVariant,
@@ -14,7 +16,10 @@ import {
   imageSsim,
 } from '../src/engine/render/BackendImageParity.js';
 import { getWebGpuSupport } from '../src/engine/render/RendererCapabilities.js';
-import { validateWebGpuRuntime } from '../src/engine/render/WebGpuRuntimeValidation.js';
+import {
+  validateWebGpuProductionMaterials,
+  validateWebGpuRuntime,
+} from '../src/engine/render/WebGpuRuntimeValidation.js';
 
 describe('phase 3 TSL/WebGPU architecture', () => {
   it('builds structurally different exact variants instead of one universal graph', () => {
@@ -70,6 +75,17 @@ describe('phase 3 TSL/WebGPU architecture', () => {
     expect(support.reason).toMatch(/TSL migration in progress/);
     expect(getMissingWebGpuMaterialFamilies(WEBGPU_RENDERER_STATUS))
       .toEqual(WEBGPU_SHADER_FAMILIES);
+    expect(WEBGPU_RENDERER_STATUS.portedProductionMaterials)
+      .toEqual([
+        'sky-procedural',
+        'post-look',
+        'post-camera',
+        'underwater',
+        'cloud-composite',
+        'cloud-occupancy',
+      ]);
+    expect(getMissingWebGpuProductionMaterials(WEBGPU_RENDERER_STATUS))
+      .toEqual(WEBGPU_PRODUCTION_MATERIALS);
     vi.unstubAllGlobals();
   });
 
@@ -79,6 +95,12 @@ describe('phase 3 TSL/WebGPU architecture', () => {
       ok: false,
       backend: null,
       reason: 'WebGPU API unavailable',
+    });
+    await expect(validateWebGpuProductionMaterials()).resolves.toEqual({
+      ok: false,
+      backend: null,
+      reason: 'WebGPU API unavailable',
+      materials: [],
     });
     vi.unstubAllGlobals();
   });
@@ -102,4 +124,3 @@ describe('cross-backend golden metrics', () => {
     expect(result.ssim).toBeLessThan(0.1);
   });
 });
-

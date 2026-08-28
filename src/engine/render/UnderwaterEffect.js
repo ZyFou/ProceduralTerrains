@@ -202,7 +202,7 @@ void main() {
 `;
 
 export class UnderwaterEffect {
-  constructor() {
+  constructor(materialBackend = null) {
     this.enabled = true;       // settings toggle (perf.underwaterEffect)
     this.intensity = 1.0;      // master strength multiplier
     this.visibility = 140;     // underwater view distance, world units
@@ -214,34 +214,37 @@ export class UnderwaterEffect {
     this._rt = null;
     this._quadScene = new THREE.Scene();
     this._quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this._material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX,
-      fragmentShader: FRAGMENT,
-      uniforms: {
-        tDiffuse:       { value: null },
-        tDepth:         { value: null },
-        uStrength:      { value: 0 },
-        uTime:          { value: 0 },
-        uNear:          { value: 0.5 },
-        uFar:           { value: 80000 },
-        uWaterShallow:  { value: new THREE.Vector3(0.1, 0.3, 0.4) },
-        uWaterDeep:     { value: new THREE.Vector3(0.02, 0.08, 0.15) },
-        uSubmergeDepth: { value: 0 },
-        uVisibility:    { value: 140 },
-        uIntensity:     { value: 1 },
-        uDistortion:    { value: 0.5 },
-        uHighMode:      { value: 0 },
-        uCausticStr:    { value: 0.4 },
-        uParticles:     { value: 0 },
-        uLightShafts:   { value: 0 },
-        uSunScreen:     { value: new THREE.Vector2(0.5, 0.8) },
-        uSunVisible:    { value: 0 },
-        uAspect:        { value: 1.7 },
-        uDepthValid:    { value: 1 },
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
+    const uniforms = {
+      tDiffuse:       { value: null },
+      tDepth:         { value: null },
+      uStrength:      { value: 0 },
+      uTime:          { value: 0 },
+      uNear:          { value: 0.5 },
+      uFar:           { value: 80000 },
+      uWaterShallow:  { value: new THREE.Vector3(0.1, 0.3, 0.4) },
+      uWaterDeep:     { value: new THREE.Vector3(0.02, 0.08, 0.15) },
+      uSubmergeDepth: { value: 0 },
+      uVisibility:    { value: 140 },
+      uIntensity:     { value: 1 },
+      uDistortion:    { value: 0.5 },
+      uHighMode:      { value: 0 },
+      uCausticStr:    { value: 0.4 },
+      uParticles:     { value: 0 },
+      uLightShafts:   { value: 0 },
+      uSunScreen:     { value: new THREE.Vector2(0.5, 0.8) },
+      uSunVisible:    { value: 0 },
+      uAspect:        { value: 1.7 },
+      uDepthValid:    { value: 1 },
+    };
+    this._material = materialBackend?.createUnderwaterMaterial
+      ? materialBackend.createUnderwaterMaterial(uniforms)
+      : new THREE.ShaderMaterial({
+        vertexShader: VERTEX,
+        fragmentShader: FRAGMENT,
+        uniforms,
+        depthTest: false,
+        depthWrite: false,
+      });
     // fullscreen triangle (avoids a diagonal seam, 1 less vertex than a quad)
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([

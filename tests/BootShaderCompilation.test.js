@@ -71,6 +71,69 @@ function attachProgram(engine, material, programState, programs = [programState.
 }
 
 describe('boot shader compilation', () => {
+  it('compiles exact render passes through the native WebGPU async pipeline', async () => {
+    const engine = engineHarness();
+    const material = { id: 101, type: 'NodeMaterial', userData: { renderRole: 'post:look' } };
+    const originalMaterial = { id: 100 };
+    const mesh = { material: originalMaterial };
+    const camera = { updateMatrixWorld: vi.fn() };
+    const previousTarget = { id: 'previous' };
+    const compileAsync = vi.fn(async () => {});
+    const setRenderTarget = vi.fn();
+    engine.renderer = {
+      isWebGPURenderer: true,
+      backend: { isWebGPUBackend: true },
+      compileAsync,
+      getRenderTarget: vi.fn(() => previousTarget),
+      getActiveCubeFace: vi.fn(() => 0),
+      getActiveMipmapLevel: vi.fn(() => 0),
+      setRenderTarget,
+      xr: { enabled: true },
+    };
+
+    const result = await engine._compileExactPass({
+      scene: { id: 'pass-scene' },
+      camera,
+      mesh,
+      material,
+      renderTarget: { id: 'target' },
+      disableXr: true,
+    });
+
+    expect(result).toMatchObject({ ready: true, failed: false, pendingCount: 0 });
+    expect(compileAsync).toHaveBeenCalledOnce();
+    expect(mesh.material).toBe(originalMaterial);
+    expect(setRenderTarget).toHaveBeenLastCalledWith(previousTarget, 0, 0);
+    expect(engine.renderer.xr.enabled).toBe(true);
+  });
+
+  it('reports WebGPU pass pipeline rejection without touching WebGL internals', async () => {
+    const engine = engineHarness();
+    const material = { id: 102, type: 'NodeMaterial', userData: { renderRole: 'post:camera' } };
+    const mesh = { material: null };
+    engine.renderer = {
+      isWebGPURenderer: true,
+      backend: { isWebGPUBackend: true },
+      compileAsync: vi.fn(async () => { throw new Error('pipeline rejected'); }),
+      getRenderTarget: vi.fn(() => null),
+      setRenderTarget: vi.fn(),
+    };
+
+    const result = await engine._compileExactPass({
+      scene: {},
+      camera: { updateMatrixWorld: vi.fn() },
+      mesh,
+      material,
+    });
+
+    expect(result).toMatchObject({
+      ready: false,
+      failed: true,
+      code: 'WEBGPU_PIPELINE_COMPILE_FAILED',
+    });
+    expect(result.failures[0].message).toBe('pipeline rejected');
+  });
+
   it('forces a distinct shader source key only when a cold-run token is active', () => {
     const engine = engineHarness();
     const material = { defines: { EXISTING_DEFINE: 1 }, needsUpdate: false };

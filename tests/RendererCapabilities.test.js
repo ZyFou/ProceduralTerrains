@@ -56,6 +56,48 @@ describe('renderer diagnostics', () => {
     });
   });
 
+  it('reports native WebGPU adapter limits without treating its canvas context as WebGL', () => {
+    const renderer = {
+      isWebGPURenderer: true,
+      userData: { terrainRendererOptions: { antialias: false, alpha: false } },
+      backend: {
+        isWebGPUBackend: true,
+        adapter: {
+          info: { vendor: 'Test Vendor', description: 'Test WebGPU Adapter' },
+          features: new Set(['timestamp-query']),
+        },
+        device: {
+          limits: {
+            maxTextureDimension2D: 16384,
+            maxTextureDimension3D: 2048,
+            maxTextureArrayLayers: 256,
+            maxSampledTexturesPerShaderStage: 16,
+            maxBindGroups: 4,
+            maxBindingsPerBindGroup: 1000,
+            maxUniformBuffersPerShaderStage: 12,
+            maxColorAttachments: 8,
+          },
+        },
+      },
+    };
+
+    const capabilities = detectRendererCapabilities(renderer);
+
+    expect(capabilities).toMatchObject({
+      webgl: false,
+      webgl2: false,
+      detectedRenderer: 'WebGPU',
+      detectedGpu: 'Test WebGPU Adapter',
+      gpuTiming: { supported: true },
+      limits: {
+        maxTextureSize: 16384,
+        maxFragmentTextureUnits: 16,
+        maxBindGroups: 4,
+      },
+    });
+    expect(capabilities.webgpu.nativeActive).toBe(true);
+  });
+
   it('releases the temporary WebGL probe context before creating the renderer', () => {
     const loseContext = vi.fn();
     const gl = {

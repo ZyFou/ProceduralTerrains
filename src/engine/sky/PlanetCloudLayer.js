@@ -57,7 +57,7 @@ export class PlanetCloudLayer {
     this._adaptiveStepScale = 1;
     this._baseRenderScale = 1;
     this._lowRes = false;       // half/quarter-res cloud render + bilateral upscale
-    this._lowResPass = new CloudLowResPass();
+    this._lowResPass = new CloudLowResPass(opts.materialBackend);
     this._enabled = false;
     this._inRange = true;
     this._maxDistance = Infinity;
@@ -92,7 +92,7 @@ export class PlanetCloudLayer {
       this._occupancyPass = new CloudOccupancyPass(
         opts.renderer,
         this.material.uniforms,
-        { size: OCC_SIZE, planet: true },
+        { size: OCC_SIZE, planet: true, materialBackend: opts.materialBackend },
       );
     }
     this._applyOccupancyUniforms();

@@ -262,7 +262,7 @@ function fullscreenGeometry() {
 }
 
 export class VisualPostProcess {
-  constructor() {
+  constructor(materialBackend = null) {
     this._sceneRT = null;
     this._lookRT = null;
     this._plan = null;
@@ -272,50 +272,58 @@ export class VisualPostProcess {
 
     this._quadScene = new THREE.Scene();
     this._quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this._lookMaterial = new THREE.ShaderMaterial({
-      vertexShader: VERTEX,
-      fragmentShader: LOOK_FRAGMENT,
-      uniforms: {
-        tDiffuse: { value: null },
-        uTexel: { value: new THREE.Vector2(1, 1) },
-        uExposure: { value: 1 },
-        uContrast: { value: 1 },
-        uSaturation: { value: 1 },
-        uVignette: { value: 0 },
-        uBloomStrength: { value: 0 },
-        uBloomThreshold: { value: 0.75 },
-        uSunRaysStrength: { value: 0 },
-        uSunScreen: { value: new THREE.Vector2(0.5, 0.8) },
-        uSunVisible: { value: 0 },
-        uSunRaysColor: { value: new THREE.Color(1.0, 0.92, 0.72) },
-        uTime: { value: 0 },
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
-    this._cameraMaterial = new THREE.ShaderMaterial({
-      vertexShader: VERTEX,
-      fragmentShader: CAMERA_FRAGMENT,
-      uniforms: {
-        tDiffuse: { value: null },
-        uSourceSize: { value: new THREE.Vector2(1, 1) },
-        uOutputSize: { value: new THREE.Vector2(1, 1) },
-        uReconstructionMode: { value: 0 },
-        uDithering: { value: 0 },
-        uDitherStrength: { value: 0.65 },
-        uDitherLevels: { value: 8 },
-        uDitherScale: { value: 2 },
-        uCrt: { value: 0 },
-        uCrtStrength: { value: 0.5 },
-        uCrtLensBend: { value: 0.35 },
-        uCrtLineWidth: { value: 2 },
-        uChromatic: { value: 0 },
-        uChromaticStrength: { value: 1.5 },
-        uTime: { value: 0 },
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
+    const lookUniforms = {
+      tDiffuse: { value: null },
+      uTexel: { value: new THREE.Vector2(1, 1) },
+      uExposure: { value: 1 },
+      uContrast: { value: 1 },
+      uSaturation: { value: 1 },
+      uVignette: { value: 0 },
+      uBloomStrength: { value: 0 },
+      uBloomThreshold: { value: 0.75 },
+      uSunRaysStrength: { value: 0 },
+      uSunScreen: { value: new THREE.Vector2(0.5, 0.8) },
+      uSunVisible: { value: 0 },
+      uSunRaysColor: { value: new THREE.Color(1.0, 0.92, 0.72) },
+      uTime: { value: 0 },
+    };
+    const cameraUniforms = {
+      tDiffuse: { value: null },
+      uSourceSize: { value: new THREE.Vector2(1, 1) },
+      uOutputSize: { value: new THREE.Vector2(1, 1) },
+      uReconstructionMode: { value: 0 },
+      uDithering: { value: 0 },
+      uDitherStrength: { value: 0.65 },
+      uDitherLevels: { value: 8 },
+      uDitherScale: { value: 2 },
+      uCrt: { value: 0 },
+      uCrtStrength: { value: 0.5 },
+      uCrtLensBend: { value: 0.35 },
+      uCrtLineWidth: { value: 2 },
+      uChromatic: { value: 0 },
+      uChromaticStrength: { value: 1.5 },
+      uTime: { value: 0 },
+    };
+    if (materialBackend?.createVisualPostMaterials) {
+      const created = materialBackend.createVisualPostMaterials(lookUniforms, cameraUniforms);
+      this._lookMaterial = created.lookMaterial;
+      this._cameraMaterial = created.cameraMaterial;
+    } else {
+      this._lookMaterial = new THREE.ShaderMaterial({
+        vertexShader: VERTEX,
+        fragmentShader: LOOK_FRAGMENT,
+        uniforms: lookUniforms,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this._cameraMaterial = new THREE.ShaderMaterial({
+        vertexShader: VERTEX,
+        fragmentShader: CAMERA_FRAGMENT,
+        uniforms: cameraUniforms,
+        depthTest: false,
+        depthWrite: false,
+      });
+    }
     this._quad = new THREE.Mesh(fullscreenGeometry(), this._lookMaterial);
     this._quad.frustumCulled = false;
     this._quadScene.add(this._quad);

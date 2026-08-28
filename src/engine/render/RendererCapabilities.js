@@ -73,6 +73,63 @@ export function detectRendererCapabilities(renderer = null) {
     renderer: '',
   };
 
+  if (renderer?.isWebGPURenderer && renderer.backend?.isWebGPUBackend) {
+    const backend = renderer.backend;
+    const adapter = backend.adapter || null;
+    const device = backend.device || null;
+    const limits = device?.limits || adapter?.limits || {};
+    const info = adapter?.info || {};
+    const detectedGpu = info.description || info.device || info.architecture
+      || info.vendor || 'WebGPU adapter';
+    caps.webgpu = {
+      ...caps.webgpu,
+      supported: true,
+      browserSupported: true,
+      nativeActive: true,
+    };
+    caps.detectedRenderer = 'WebGPU';
+    caps.detectedGpu = detectedGpu;
+    caps.gpuInfoAvailable = detectedGpu !== 'WebGPU adapter';
+    caps.gpuInfoReason = caps.gpuInfoAvailable ? '' : 'Browser hid WebGPU adapter details';
+    caps.vendor = info.vendor || '';
+    caps.renderer = detectedGpu;
+    caps.contextAttributes = renderer.userData?.terrainRendererOptions || {
+      antialias: false,
+      alpha: false,
+    };
+    caps.gpuTiming = {
+      supported: adapter?.features?.has?.('timestamp-query') === true
+        || device?.features?.has?.('timestamp-query') === true,
+    };
+    caps.extensions.timerQuery = caps.gpuTiming.supported;
+    caps.limits = {
+      maxTextureSize: limits.maxTextureDimension2D ?? null,
+      maxCubeMapTextureSize: limits.maxTextureDimension2D ?? null,
+      max3dTextureSize: limits.maxTextureDimension3D ?? null,
+      maxArrayTextureLayers: limits.maxTextureArrayLayers ?? null,
+      maxRenderbufferSize: limits.maxTextureDimension2D ?? null,
+      maxViewportDimensions: limits.maxTextureDimension2D != null
+        ? [limits.maxTextureDimension2D, limits.maxTextureDimension2D]
+        : null,
+      maxSamples: null,
+      maxVertexTextureUnits: limits.maxSampledTexturesPerShaderStage ?? null,
+      maxFragmentTextureUnits: limits.maxSampledTexturesPerShaderStage ?? null,
+      maxCombinedTextureUnits: limits.maxSampledTexturesPerShaderStage ?? null,
+      maxVertexUniformVectors: null,
+      maxFragmentUniformVectors: null,
+      maxVertexUniformComponents: null,
+      maxFragmentUniformComponents: null,
+      maxVaryingVectors: null,
+      maxVaryingComponents: limits.maxInterStageShaderVariables ?? null,
+      maxDrawBuffers: limits.maxColorAttachments ?? null,
+      maxColorAttachments: limits.maxColorAttachments ?? null,
+      maxBindGroups: limits.maxBindGroups ?? null,
+      maxBindingsPerBindGroup: limits.maxBindingsPerBindGroup ?? null,
+      maxUniformBuffersPerShaderStage: limits.maxUniformBuffersPerShaderStage ?? null,
+    };
+    return caps;
+  }
+
   let gl = null;
   let ownsContext = false;
   try {

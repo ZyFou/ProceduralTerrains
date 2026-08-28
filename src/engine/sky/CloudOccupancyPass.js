@@ -105,7 +105,7 @@ void main() {
  * DataTexture upload and no GPU readback on the animation path.
  */
 export class CloudOccupancyPass {
-  constructor(renderer, uniforms, { size = 64, planet = false } = {}) {
+  constructor(renderer, uniforms, { size = 64, planet = false, materialBackend = null } = {}) {
     this.renderer = renderer;
     this.size = size;
     this.scene = new THREE.Scene();
@@ -123,25 +123,33 @@ export class CloudOccupancyPass {
       target.texture.name = `CloudOccupancyGPU${planet ? 'Planet' : 'Studio'}${index}`;
       return target;
     });
-    this.generateMaterial = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader: VERTEX,
-      fragmentShader: buildOccupancyFragment(planet),
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.NoBlending,
-    });
-    this.dilateMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        tInput: { value: null },
-        uTexel: { value: new THREE.Vector2(1 / size, 1 / size) },
-      },
-      vertexShader: VERTEX,
-      fragmentShader: DILATE_FRAGMENT,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.NoBlending,
-    });
+    this._nativeMaterials = materialBackend?.createCloudOccupancyMaterials
+      ? materialBackend.createCloudOccupancyMaterials(uniforms, { planet })
+      : null;
+    this.generateMaterial = this._nativeMaterials?.generateMaterial
+      || new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: VERTEX,
+        fragmentShader: buildOccupancyFragment(planet),
+        depthTest: false,
+        depthWrite: false,
+        blending: THREE.NoBlending,
+      });
+    this.dilateMaterial = this._nativeMaterials?.dilateMaterial
+      || new THREE.ShaderMaterial({
+        uniforms: {
+          tInput: { value: null },
+          uTexel: { value: new THREE.Vector2(1 / size, 1 / size) },
+        },
+        vertexShader: VERTEX,
+        fragmentShader: DILATE_FRAGMENT,
+        depthTest: false,
+        depthWrite: false,
+        blending: THREE.NoBlending,
+      });
+    if (this._nativeMaterials) {
+      this.dilateMaterial.uniforms.uTexel.value.setScalar(1 / size);
+    }
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.generateMaterial);
     this.mesh.frustumCulled = false;
     this.scene.add(this.mesh);
@@ -150,7 +158,8 @@ export class CloudOccupancyPass {
   get texture() { return this.targets[0].texture; }
 
   setUniforms(uniforms) {
-    this.generateMaterial.uniforms = uniforms;
+    if (this._nativeMaterials?.setUniforms) this._nativeMaterials.setUniforms(uniforms);
+    else this.generateMaterial.uniforms = uniforms;
   }
 
   render() {

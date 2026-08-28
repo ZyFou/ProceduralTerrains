@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { sanitizeGpuPreference } from './RendererCapabilities.js';
+import { WEBGPU_RENDERER_STATUS } from './RendererBackendStatus.js';
 
 /**
  * Probe whether WebGL is available in this browser / GPU stack.
@@ -89,6 +90,92 @@ export function createRendererForCanvas(canvas, settings = {}) {
   throw lastError || new Error(
     'Could not create a WebGL context. Try closing other 3D tabs, reloading the page, or enabling hardware acceleration.',
   );
+}
+
+function normalizedBackend(value) {
+  return value === 'webgpu' || value === 'webgl' ? value : 'auto';
+}
+
+/**
+ * Create and initialize the selected renderer before Engine constructs any GPU
+ * resources. WebGPU initialization is asynchronous; failures fall back on a
+ * fresh WebGL2 renderer bound to the same canvas before the scene exists.
+ */
+export async function createRendererForCanvasAsync(canvas, settings = {}, {
+  webgpuStatus = WEBGPU_RENDERER_STATUS,
+  loadWebGpuModule = () => import('three/webgpu'),
+  createWebGlRenderer = createRendererForCanvas,
+} = {}) {
+  const requestedBackend = normalizedBackend(settings.rendererBackend);
+  const webgpuRequested = requestedBackend === 'webgpu'
+    || (requestedBackend === 'auto' && webgpuStatus.applicationReady === true);
+
+  if (!webgpuRequested) {
+    return {
+      renderer: createWebGlRenderer(canvas, settings),
+      requestedBackend,
+      activeBackend: 'webgl2',
+      fallbackReason: '',
+    };
+  }
+
+  if (typeof navigator === 'undefined' || !navigator.gpu) {
+    return {
+      renderer: createWebGlRenderer(canvas, settings),
+      requestedBackend,
+      activeBackend: 'webgl2',
+      fallbackReason: 'WebGPU API unavailable',
+    };
+  }
+
+  if (webgpuStatus.applicationReady !== true) {
+    return {
+      renderer: createWebGlRenderer(canvas, settings),
+      requestedBackend,
+      activeBackend: 'webgl2',
+      fallbackReason: 'Production WebGPU material parity is incomplete',
+    };
+  }
+
+  let renderer = null;
+  try {
+    const webgpu = await loadWebGpuModule();
+    const gpuPreference = sanitizeGpuPreference(settings.gpuPreference);
+    const rendererOptions = {
+      canvas,
+      antialias: false,
+      alpha: false,
+      forceWebGL: false,
+      ...(gpuPreference === 'default' ? {} : { powerPreference: gpuPreference }),
+    };
+    renderer = new webgpu.WebGPURenderer(rendererOptions);
+    await renderer.init();
+    if (!renderer.backend?.isWebGPUBackend) {
+      throw new Error('Three.js selected its WebGL2 fallback backend');
+    }
+    renderer.userData = {
+      ...(renderer.userData || {}),
+      terrainRendererOptions: {
+        antialias: false,
+        alpha: false,
+        powerPreference: gpuPreference,
+      },
+    };
+    return {
+      renderer,
+      requestedBackend,
+      activeBackend: 'webgpu',
+      fallbackReason: '',
+    };
+  } catch (error) {
+    try { renderer?.dispose?.(); } catch { /* best-effort failed backend cleanup */ }
+    return {
+      renderer: createWebGlRenderer(canvas, settings),
+      requestedBackend,
+      activeBackend: 'webgl2',
+      fallbackReason: error?.message || 'WebGPU initialization failed',
+    };
+  }
 }
 
 export function loseRendererContext(renderer) {

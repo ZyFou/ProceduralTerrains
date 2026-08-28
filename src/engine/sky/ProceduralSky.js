@@ -48,7 +48,7 @@ export class ProceduralSky {
   /**
    * @param {THREE.Scene} scene
    */
-  constructor(scene) {
+  constructor(scene, materialBackend = null) {
     this.scene = scene;
 
     // Sky uniforms (independent from terrain — set by TimeOfDay)
@@ -56,14 +56,20 @@ export class ProceduralSky {
 
     // Large inverted sphere
     const geometry = new THREE.IcosahedronGeometry(40000, 4);
-    this.material = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,
-      vertexShader: SKY_VERTEX,
-      fragmentShader: SKY_FRAGMENT,
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest: true,
-    });
+    if (materialBackend?.createProceduralSkyMaterial) {
+      const created = materialBackend.createProceduralSkyMaterial(this.uniforms);
+      this.material = created.material;
+      this.uniforms = created.uniforms;
+    } else {
+      this.material = new THREE.ShaderMaterial({
+        uniforms: this.uniforms,
+        vertexShader: SKY_VERTEX,
+        fragmentShader: SKY_FRAGMENT,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: true,
+      });
+    }
 
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.renderOrder = -1000;

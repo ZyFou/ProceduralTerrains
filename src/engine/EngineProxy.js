@@ -12,8 +12,28 @@ class EngineProxyHost {
   }
 
   async init() {
-    const { Engine } = await import('./Engine.js');
-    this._engine = new Engine(this._options);
+    const [{ Engine }, { loadPerfSettings }, { createRendererForCanvasAsync }] = await Promise.all([
+      import('./Engine.js'),
+      import('./render/PerformanceSettings.js'),
+      import('./render/createWebGLRenderer.js'),
+    ]);
+    const perf = loadPerfSettings();
+    const rendererBootstrap = await createRendererForCanvasAsync(this._options.canvas, {
+      rendererBackend: perf.rendererBackend,
+      gpuPreference: perf.gpuPreference,
+    });
+    let materialBackend = null;
+    if (rendererBootstrap.activeBackend === 'webgpu') {
+      const { createWebGpuMaterialBackend } = await import(
+        './render/webgpu/WebGpuMaterialBackend.js'
+      );
+      materialBackend = createWebGpuMaterialBackend();
+    }
+    this._engine = new Engine({
+      ...this._options,
+      rendererBootstrap,
+      materialBackend,
+    });
     if (this._engine.rendererConfig) {
       this._engine.rendererConfig = {
         ...this._engine.rendererConfig,

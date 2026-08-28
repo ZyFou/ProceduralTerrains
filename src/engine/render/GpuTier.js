@@ -54,7 +54,7 @@ export function readRendererString(gl) {
  */
 export function detectGpuTier(gl) {
   if (!gl) return 'medium';
-  const r = readRendererString(gl).toLowerCase();
+  const r = readRendererString(gl);
 
   // Capability tiebreakers: tiny texture limits / no high-precision floats in
   // the fragment shader are a strong "weak GPU" signal regardless of name.
@@ -66,10 +66,29 @@ export function detectGpuTier(gl) {
     highpOk = !!fmt && fmt.precision > 0;
   } catch { /* ignore */ }
 
-  if (r && LOW_HINTS.some((h) => r.includes(h))) return 'low';
+  if (r && LOW_HINTS.some((h) => r.toLowerCase().includes(h))) return 'low';
   if (!highpOk || maxTex < 8192) return 'low';
+  return detectGpuTierFromName(r);
+}
+
+/**
+ * Classify a renderer name exposed by WebGPU adapter info or diagnostics.
+ * Capability checks remain in detectGpuTier() for WebGL; WebGPU limits differ
+ * enough that the conservative name-only fallback is safer.
+ */
+export function detectGpuTierFromName(rendererName = '') {
+  const r = String(rendererName || '').toLowerCase();
+  if (r && LOW_HINTS.some((h) => r.includes(h))) return 'low';
   if (r && HIGH_HINTS.some((h) => r.includes(h))) return 'high';
   return 'medium';
+}
+
+/** Select the correct tier probe without treating a GPUCanvasContext as WebGL. */
+export function detectGpuTierForRenderer(renderer, detectedGpu = '') {
+  if (renderer?.isWebGPURenderer && renderer.backend?.isWebGPUBackend) {
+    return detectGpuTierFromName(detectedGpu);
+  }
+  return detectGpuTier(renderer?.getContext?.());
 }
 
 /** Map a detected GPU tier to a starting performance preset key. */
