@@ -11,6 +11,41 @@ function transitionContext() {
 }
 
 describe('mode launch readiness', () => {
+  it('does not start a competing octave compile while entering Planet mode', () => {
+    class PlanetOrbitControls {
+      constructor() { this.update = vi.fn(); }
+    }
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      params: { octaves: 6, cloudsEnabled: false },
+      uniforms: {
+        uPaintEnabled: { value: 1 },
+        uManualEnabled: { value: 1 },
+        uUseTerrainHeightTex: { value: 1 },
+      },
+      board: { group: { visible: true } },
+      water: { visible: true },
+      controls: { enabled: true },
+      scene: {},
+      camera: {},
+      canvas: {},
+      cb: { onFirstInteract: vi.fn(), onStatus: vi.fn() },
+      _planetPrepareEpoch: 0,
+      _compiling: true,
+      _setPlinthVisible: vi.fn(),
+      _applyUniforms: vi.fn(),
+      _buildPlanetWorld: vi.fn(),
+      _applyCloudSettings: vi.fn(),
+      _applyPlanetCamera: vi.fn(),
+      _applyPixelRatio: vi.fn(),
+    });
+
+    engine._enterPlanetMode({ PlanetOrbitControls }, { deferCompile: true });
+
+    expect(engine._applyUniforms).toHaveBeenCalledWith({ compileOctaves: false });
+    expect(engine._buildPlanetWorld).toHaveBeenCalledOnce();
+  });
+
   it('never promotes an interrupted target bundle into the mode LRU', async () => {
     const engine = Object.create(Engine.prototype);
     const stableInfinite = { metadata: { validated: true } };
@@ -74,6 +109,7 @@ describe('mode launch readiness', () => {
     engine._planetPrepareEpoch = 2;
     engine.planetHeightBaker = bakerB;
     const second = engine._preparePlanetHeightCacheAsync();
+    await Promise.resolve();
 
     expect(engine._prepareHeightCacheProgram).toHaveBeenCalledTimes(2);
     pending[0]({ cache: bakerA, handle: {}, result: { ready: true } });
@@ -106,6 +142,98 @@ describe('mode launch readiness', () => {
 
     await expect(engine._preparePlanetHeightCacheAsync()).resolves.toBe(true);
     expect(engine._publishHeightCachePreparation).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses a cold Planet preparation while its baker identity is being installed', async () => {
+    const coldBaker = {};
+    let finishPreparation;
+    const preparation = new Promise((resolve) => { finishPreparation = resolve; });
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _disposed: false,
+      worldMode: 'planet',
+      params: { octaves: 6 },
+      _stackGLSL: { sig: 'planet-cold-race' },
+      planetHeightBaker: null,
+      _planetPrepareEpoch: 1,
+      _planetHeightPreparePromise: null,
+      _planetHeightPrepareIdentity: null,
+      _prepareHeightCacheProgram: vi.fn(() => preparation),
+      _publishHeightCachePreparation: vi.fn(() => true),
+      _discardHeightCachePreparation: vi.fn(),
+    });
+
+    const first = engine._preparePlanetHeightCacheAsync();
+    engine.planetHeightBaker = coldBaker;
+    const second = engine._preparePlanetHeightCacheAsync();
+    await Promise.resolve();
+
+    expect(engine._prepareHeightCacheProgram).toHaveBeenCalledTimes(1);
+    finishPreparation({ cache: coldBaker, handle: {}, result: { ready: true } });
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(true);
+    expect(engine._publishHeightCachePreparation).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes the in-flight Planet preparation before shader compilation can re-enter', async () => {
+    const coldBaker = {};
+    let nestedPreparation = null;
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _disposed: false,
+      worldMode: 'planet',
+      params: { octaves: 6 },
+      _stackGLSL: { sig: 'planet-reentrant-compile' },
+      planetHeightBaker: null,
+      _planetPrepareEpoch: 1,
+      _planetHeightPreparePromise: null,
+      _planetHeightPrepareIdentity: null,
+      _prepareHeightCacheProgram: vi.fn(function prepare() {
+        this.planetHeightBaker = coldBaker;
+        nestedPreparation = this._preparePlanetHeightCacheAsync();
+        return Promise.resolve({
+          cache: coldBaker,
+          handle: {},
+          result: { ready: true },
+        });
+      }),
+      _publishHeightCachePreparation: vi.fn(() => true),
+      _discardHeightCachePreparation: vi.fn(),
+    });
+
+    const first = engine._preparePlanetHeightCacheAsync();
+    await expect(first).resolves.toBe(true);
+    await expect(nestedPreparation).resolves.toBe(true);
+
+    expect(engine._prepareHeightCacheProgram).toHaveBeenCalledTimes(1);
+    expect(engine._publishHeightCachePreparation).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a cold Planet height baker before a prepare identity exists', async () => {
+    class PlanetHeightBaker {
+      constructor(options) { this.options = options; }
+    }
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, {
+      _disposed: false,
+      renderer: {},
+      uniforms: {},
+      _planetModules: { PlanetHeightBaker },
+      _planetHeightPrepareIdentity: null,
+      _planetPrepareEpoch: 0,
+      planetHeightBaker: null,
+      _syncActivePlanetBundleResources: vi.fn(),
+    });
+
+    const baker = await engine._ensurePlanetHeightBaker();
+
+    expect(baker).toBeInstanceOf(PlanetHeightBaker);
+    expect(baker.options.requirePrepared).toBe(true);
+    expect(engine._syncActivePlanetBundleResources).toHaveBeenCalledWith({
+      planetHeightBaker: baker,
+      bakedTerrainGen: -1,
+      planetBakeRequestedGen: -1,
+    });
   });
 
   it('finishes every Infinite clipmap level and visible chunk before returning', async () => {

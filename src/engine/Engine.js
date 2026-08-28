@@ -4426,7 +4426,7 @@ export class Engine {
     return true;
   }
 
-  _applyUniforms({ updatePlinth = true } = {}) {
+  _applyUniforms({ updatePlinth = true, compileOctaves = true } = {}) {
     this._needsRender = true;
     const p = this.params;
     const u = this.uniforms;
@@ -4521,7 +4521,7 @@ export class Engine {
     const activeTerrainMaterial = this.worldMode === 'planet'
       ? this.planetWorld?.materials?.[0]
       : (this.worldMode === 'infinite' ? this._infiniteTerrainMat : this.terrainMaterial);
-    if (activeTerrainMaterial?.defines?.OCTAVES !== oct) {
+    if (compileOctaves && activeTerrainMaterial?.defines?.OCTAVES !== oct) {
       this._setOctavesAsync(oct);
     }
 
@@ -10100,7 +10100,8 @@ export class Engine {
     this._bakedTerrainGen = -1;
     this._planetBakeRequestedGen = -1;
     const prepareIdentity = this._planetHeightPrepareIdentity;
-    if (prepareIdentity?.baker == null
+    if (prepareIdentity != null
+        && prepareIdentity.baker == null
         && prepareIdentity.epoch === (this._planetPrepareEpoch || 0)) {
       prepareIdentity.baker = this.planetHeightBaker;
     }
@@ -10203,13 +10204,16 @@ export class Engine {
     const epoch = this._planetPrepareEpoch || 0;
     const currentIdentity = this._planetHeightPrepareIdentity;
     if (this._planetHeightPreparePromise
-        && currentIdentity?.baker === baker
         && currentIdentity?.programSig === programSig
         && currentIdentity?.octaves === octaves
         && currentIdentity?.epoch === epoch) {
       return this._planetHeightPreparePromise;
     }
-    const job = (async () => {
+    // Publish the in-flight identity before starting renderer compilation.
+    // WebGL shader compilation can synchronously re-enter the render loop;
+    // without this microtask boundary that re-entry starts a second Planet
+    // preparation and invalidates the first baker handle's serial.
+    const job = Promise.resolve().then(async () => {
       let preparation = null;
       try {
         preparation = await this._prepareHeightCacheProgram('planet', octaves, program);
@@ -10233,7 +10237,7 @@ export class Engine {
       } finally {
         this._discardHeightCachePreparation(preparation);
       }
-    })();
+    });
     const pending = job.finally(() => {
       if (this._planetHeightPreparePromise === pending) {
         this._planetHeightPreparePromise = null;
@@ -10448,7 +10452,12 @@ export class Engine {
     this.controls.enabled = false;
 
     // refresh shared uniforms (radius, frequency, sun, fog-off for planet)
-    this._applyUniforms();
+    // The target world below is built with the requested octave define and
+    // the strict mode warmup compiles it. Do not launch the normal live-octave
+    // rebuild against a parked/stale PlanetWorld during this handoff: that
+    // second job would supersede the height-cache program being prepared by
+    // _warmupPlanetShaders().
+    this._applyUniforms({ compileOctaves: false });
 
     // Planet always builds the FULL chunk materials and holds the mode-switch
     // overlay until they are compiled (user preference: never show the planet
@@ -10846,7 +10855,12 @@ export class Engine {
       ]);
       if (!isCurrent()) throw new ModeTransitionCancelledError();
       if (terrainResult?.ready !== true || waterResult?.ready !== true || !cacheReady) {
-        throw new Error('Planet shader compilation did not complete');
+        throw new Error(
+          'Planet shader compilation did not complete'
+          + ` (terrain=${terrainResult?.ready === true}`
+          + `, water=${waterResult?.ready === true}`
+          + `, heightCache=${cacheReady === true})`,
+        );
       }
       const currentTarget = this._resolveCameraCompileTarget();
       if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) {
