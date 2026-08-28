@@ -98,7 +98,7 @@ export async function validateWebGpuProductionMaterials({
   const validated = [];
   try {
     const [THREE, backendModule, skyModule, postModule, underwaterModule, lowResModule,
-      occupancyModule, cloudModule] = await Promise.all([
+      occupancyModule, cloudModule, terrainModule] = await Promise.all([
       import('three/webgpu'),
       import('./webgpu/WebGpuMaterialBackend.js'),
       import('../sky/proceduralSkyGLSL.js'),
@@ -107,6 +107,7 @@ export async function validateWebGpuProductionMaterials({
       import('../sky/CloudLowResPass.js'),
       import('../sky/CloudOccupancyPass.js'),
       import('../sky/CloudSlabShader.js'),
+      import('../terrain/TerrainMaterial.js'),
     ]);
     const ownedCanvas = canvas || document.createElement('canvas');
     ownedCanvas.width = 4;
@@ -128,6 +129,10 @@ export async function validateWebGpuProductionMaterials({
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
     camera.position.z = 2;
     geometry = new THREE.PlaneGeometry(2, 2);
+    const vertexCount = geometry.getAttribute('position').count;
+    geometry.setAttribute('aSkirt', new THREE.Float32BufferAttribute(vertexCount, 1));
+    geometry.setAttribute('aLod', new THREE.Float32BufferAttribute(vertexCount, 1));
+    geometry.setAttribute('aWall', new THREE.Float32BufferAttribute(vertexCount, 1));
     const mesh = new THREE.Mesh(geometry);
     mesh.frustumCulled = false;
     scene.add(mesh);
@@ -154,6 +159,18 @@ export async function validateWebGpuProductionMaterials({
       planet: false,
       materialBackend: backend,
     });
+    const manualEmpty = terrainModule.createTerrainMaterial(
+      terrainModule.createTerrainUniforms(),
+      1,
+      undefined,
+      { variant: 'manual-empty', materialBackend: backend },
+    );
+    const manualSurface = terrainModule.createTerrainMaterial(
+      terrainModule.createTerrainUniforms(),
+      1,
+      undefined,
+      { variant: 'manual', materialBackend: backend },
+    );
     disposables.push(
       sky.material,
       post,
@@ -161,6 +178,8 @@ export async function validateWebGpuProductionMaterials({
       lowRes,
       occupancy,
       cloudSource,
+      manualEmpty,
+      manualSurface,
     );
 
     const candidates = [
@@ -180,6 +199,15 @@ export async function validateWebGpuProductionMaterials({
       renderer.render(scene, camera);
       validated.push(name);
     }
+    for (const material of [manualEmpty, manualSurface]) {
+      for (const node of Object.values(material.uniforms || {})) {
+        if (node?.isTextureNode) node.value = sourceTexture;
+      }
+      mesh.material = material;
+      await renderer.compileAsync(scene, camera);
+      renderer.render(scene, camera);
+    }
+    validated.push('terrain-manual');
     renderer.setRenderTarget(null);
 
     occupancy.mesh.material = occupancy.generateMaterial;

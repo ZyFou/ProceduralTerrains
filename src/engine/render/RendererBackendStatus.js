@@ -52,6 +52,7 @@ const PORTED_PRODUCTION_MATERIALS = Object.freeze([
   'underwater',
   'cloud-composite',
   'cloud-occupancy',
+  'terrain-manual',
 ]);
 
 const VALIDATED_PRODUCTION_MATERIALS = Object.freeze([]);

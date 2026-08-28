@@ -374,3 +374,26 @@ Those responses are not renderer failures. Browser-extension messages such as `R
 - `tests/ResourceLifetime.test.js`
 
 After each material family, run targeted tests first, then the full suite and production build. Perform a real browser screenshot/console inspection after every meaningful visual change.
+
+## Mac continuation log — 2026-08-28
+
+Hardware baseline: Apple M4 Pro, normal hardware-accelerated Chromium session.
+
+- Restored the locked Three.js `0.185.1` dependency on the Mac. The transferred
+  `node_modules` directory contained `0.160.1`, which did not expose
+  `three/webgpu` or `three/tsl`.
+- Fixed two native cloud-occupancy canary issues: the fullscreen pass now uses
+  a projection camera that WebGPU can update for its clip-space convention, and
+  the single-channel render target lets Three infer the backend-specific R8
+  format instead of passing WebGL's `R8` spelling to WebGPU.
+- Native canary result after those fixes: 6/6 existing production materials
+  compiled, rendered, and produced a non-empty readback.
+- Added specialized Manual terrain TSL graphs for `manual-empty` and painted
+  `manual` variants. The runtime terrain factory returns these NodeMaterials
+  when the native material backend is active and retains the shared mutable
+  uniform contract.
+- Native canary result with both Manual variants: passed, 7/22 production
+  materials reported as ported. `terrain-manual` remains unvalidated.
+- Remaining Manual parity work before validation: atlas diffuse/normal/rough/AO
+  sampling, full detail and caustic layers, tile occupancy/wall edge cases,
+  analysis/debug outputs, and WebGL2/WebGPU golden-image comparison.

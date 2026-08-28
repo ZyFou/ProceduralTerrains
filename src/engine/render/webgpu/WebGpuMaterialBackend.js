@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn,
+  attribute,
   atan,
   cameraPosition,
   cameraProjectionMatrix,
@@ -16,6 +17,7 @@ import {
   max,
   min,
   mix,
+  modelWorldMatrix,
   mod,
   normalize,
   positionGeometry,
@@ -30,10 +32,62 @@ import {
   texture,
   uniform,
   uv,
+  varying,
   vec2,
   vec3,
   vec4,
 } from 'three/tsl';
+
+const MANUAL_TERRAIN_TEXTURE_UNIFORMS = new Set([
+  'uManualHeightTexture',
+  'uManualSurfaceTextureA',
+  'uManualSurfaceTextureB',
+  'uDestructionTexture',
+]);
+
+const MANUAL_TERRAIN_NODE_UNIFORMS = Object.freeze([
+  'uManualEnabled', 'uManualOrigin', 'uManualSpan',
+  'uManualHeightTexture', 'uManualSurfaceMode', 'uManualSurfaceOrigin',
+  'uManualSurfaceSpan', 'uManualSurfaceTextureA', 'uManualSurfaceTextureB',
+  'uDestructionEnabled', 'uDestructionOrigin', 'uDestructionSpan',
+  'uDestructionTexture', 'uHeightScale', 'uSeaLevel', 'uEps',
+  'uSkirtDepth', 'uPlinthBaseY', 'uWallThickness', 'uBoardHalf',
+  'uUseTiles', 'uTileShape', 'uInfiniteMode', 'uNormalStrength', 'uAO',
+  'uGrid', 'uLodDebug', 'uColorMode', 'uFogColor', 'uFogDensity',
+  'uPlinthColor', 'uSunDir', 'uPaletteSaturation', 'uPaletteContrast',
+  'uPaletteTint', 'uTerrainSunCol', 'uTerrainSunIntensity',
+  'uTerrainSkyAmb', 'uTerrainBounce', 'uColSand', 'uColDryGrass',
+  'uColGrass', 'uColForest', 'uColSwamp', 'uColRedRock', 'uColRedRock2',
+  'uColRock', 'uColRockHi', 'uColSnow', 'uSnowLine',
+]);
+
+let manualTerrainFallbackTexture = null;
+
+function getManualTerrainFallbackTexture() {
+  if (!manualTerrainFallbackTexture) {
+    manualTerrainFallbackTexture = new THREE.DataTexture(
+      new Uint8Array([0, 0, 0, 0]),
+      1,
+      1,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    manualTerrainFallbackTexture.needsUpdate = true;
+    manualTerrainFallbackTexture.name = 'WebGPUManualTerrainFallback';
+  }
+  return manualTerrainFallbackTexture;
+}
+
+function promoteManualTerrainUniforms(legacyUniforms) {
+  for (const name of MANUAL_TERRAIN_NODE_UNIFORMS) {
+    const entry = legacyUniforms?.[name];
+    if (!entry || entry.isNode) continue;
+    legacyUniforms[name] = MANUAL_TERRAIN_TEXTURE_UNIFORMS.has(name)
+      ? texture(entry.value || getManualTerrainFallbackTexture())
+      : uniform(entry.value);
+  }
+  return legacyUniforms;
+}
 
 function promoteLegacyUniforms(legacyUniforms) {
   const nodes = {};
@@ -654,6 +708,254 @@ function createCloudOccupancyMaterials(legacyUniforms, { planet = false } = {}) 
   };
 }
 
+function boundedTextureSample(textureNode, point, origin, span) {
+  const sampleUv = point.sub(origin).div(max(span, vec2(1)));
+  const inside = step(0, sampleUv.x).mul(step(sampleUv.x, 1))
+    .mul(step(0, sampleUv.y)).mul(step(sampleUv.y, 1));
+  return textureNode.sample(clamp(sampleUv, vec2(0), vec2(1))).mul(inside);
+}
+
+function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}) {
+  const uniforms = promoteManualTerrainUniforms(legacyUniforms);
+  const {
+    uManualEnabled,
+    uManualOrigin,
+    uManualSpan,
+    uManualHeightTexture,
+    uManualSurfaceMode,
+    uManualSurfaceOrigin,
+    uManualSurfaceSpan,
+    uManualSurfaceTextureA,
+    uManualSurfaceTextureB,
+    uDestructionEnabled,
+    uDestructionOrigin,
+    uDestructionSpan,
+    uDestructionTexture,
+    uHeightScale,
+    uSeaLevel,
+    uEps,
+    uSkirtDepth,
+    uPlinthBaseY,
+    uWallThickness,
+    uBoardHalf,
+    uUseTiles,
+    uTileShape,
+    uInfiniteMode,
+    uNormalStrength,
+    uAO,
+    uGrid,
+    uLodDebug,
+    uColorMode,
+    uFogColor,
+    uFogDensity,
+    uPlinthColor,
+    uSunDir,
+    uPaletteSaturation,
+    uPaletteContrast,
+    uPaletteTint,
+    uTerrainSunCol,
+    uTerrainSunIntensity,
+    uTerrainSkyAmb,
+    uTerrainBounce,
+    uColSand,
+    uColDryGrass,
+    uColGrass,
+    uColForest,
+    uColSwamp,
+    uColRedRock,
+    uColRedRock2,
+    uColRock,
+    uColRockHi,
+    uColSnow,
+    uSnowLine,
+  } = uniforms;
+
+  const manualSample = (point) => boundedTextureSample(
+    uManualHeightTexture,
+    point,
+    uManualOrigin,
+    uManualSpan,
+  ).r.mul(step(0.5, uManualEnabled));
+  const destructionSample = (point) => boundedTextureSample(
+    uDestructionTexture,
+    point,
+    uDestructionOrigin,
+    uDestructionSpan,
+  ).rg.mul(step(0.5, uDestructionEnabled));
+  const heightAt = (point) => manualSample(point).add(destructionSample(point).r);
+
+  const vWorldPosition = varying(vec3());
+  const vWall = varying(float());
+  const vSkirt = varying(float());
+  const vLod = varying(float());
+
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.name = `terrain:${variant}:webgpu`;
+  material.userData.renderRole = `terrain:${variant}`;
+  material.userData.terrainVariant = variant;
+  material.side = THREE.DoubleSide;
+  material.toneMapped = false;
+  material.uniforms = uniforms;
+
+  material.vertexNode = Fn(() => {
+    const worldPosition = modelWorldMatrix.mul(vec4(positionGeometry, 1)).toVar();
+    const height = heightAt(worldPosition.xz);
+    const aSkirt = attribute('aSkirt', 'float');
+    const aWall = attribute('aWall', 'float');
+    const outer = step(uBoardHalf.sub(1), worldPosition.x.abs())
+      .add(step(uBoardHalf.sub(1), worldPosition.z.abs()));
+    const squareWall = aSkirt.mul(step(0.5, outer))
+      .mul(float(1).sub(step(0.5, uUseTiles)));
+    const radialWall = aSkirt.mul(step(0.5, aWall))
+      .mul(step(0.5, uUseTiles)).mul(step(0.5, uTileShape));
+    const wall = max(squareWall, radialWall)
+      .mul(float(1).sub(step(0.5, uInfiniteMode)));
+    const skirt = aSkirt.mul(float(1).sub(wall));
+
+    const outDirection = vec2(sign(worldPosition.x), sign(worldPosition.z))
+      .mul(vec2(
+        step(uBoardHalf.sub(1), worldPosition.x.abs()),
+        step(uBoardHalf.sub(1), worldPosition.z.abs()),
+      ));
+    worldPosition.x.addAssign(outDirection.x.mul(wall).mul(uWallThickness));
+    worldPosition.z.addAssign(outDirection.y.mul(wall).mul(uWallThickness));
+    worldPosition.y.assign(mix(
+      height.sub(skirt.mul(uSkirtDepth)),
+      uPlinthBaseY,
+      wall,
+    ));
+
+    vWorldPosition.assign(worldPosition.xyz);
+    vWall.assign(wall);
+    vSkirt.assign(max(skirt, wall));
+    vLod.assign(attribute('aLod', 'float'));
+    return cameraProjectionMatrix.mul(cameraViewMatrix).mul(worldPosition);
+  })();
+
+  const buildFragmentNode = (surfaceEnabled) => Fn(() => {
+    const point = vWorldPosition.xz;
+    const eps = max(uEps, 0.001);
+    const height = heightAt(point);
+    const heightX = heightAt(point.add(vec2(eps, 0)));
+    const heightZ = heightAt(point.add(vec2(0, eps)));
+    const geometricNormal = normalize(vec3(
+      heightX.sub(height).div(eps).negate(),
+      1,
+      heightZ.sub(height).div(eps).negate(),
+    ));
+    const normal = normalize(vec3(
+      geometricNormal.x.mul(uNormalStrength),
+      1,
+      geometricNormal.z.mul(uNormalStrength),
+    ));
+    const slope = float(1).sub(geometricNormal.y);
+    const height01 = clamp(height.div(max(uHeightScale, 0.001)), 0, 1);
+    const relativeHeight = vWorldPosition.y.sub(uSeaLevel);
+
+    let albedo = mix(uColGrass, uColDryGrass, smoothstep(0.18, 0.45, height01));
+    albedo = mix(albedo, uColRock, smoothstep(0.4, 0.75, height01));
+    albedo = mix(albedo, uColRock, clamp(slope.mul(1.8), 0, 1).mul(0.6));
+    albedo = mix(albedo, uColRockHi, smoothstep(0.6, 0.85, height01)
+      .mul(float(1).sub(slope)));
+    albedo = mix(albedo, uColSnow, smoothstep(
+      uSnowLine.sub(0.08),
+      uSnowLine.add(0.06),
+      height01.sub(slope.mul(0.25)),
+    ));
+    albedo = mix(uColSand, albedo, smoothstep(0, 6, relativeHeight));
+
+    if (surfaceEnabled) {
+      const weightsA = boundedTextureSample(
+        uManualSurfaceTextureA,
+        point,
+        uManualSurfaceOrigin,
+        uManualSurfaceSpan,
+      ).mul(step(0.5, uManualSurfaceMode));
+      const weightsB = boundedTextureSample(
+        uManualSurfaceTextureB,
+        point,
+        uManualSurfaceOrigin,
+        uManualSurfaceSpan,
+      ).mul(step(0.5, uManualSurfaceMode));
+      const coverage = clamp(
+        weightsA.x.add(weightsA.y).add(weightsA.z).add(weightsA.w)
+          .add(weightsB.x).add(weightsB.y).add(weightsB.z),
+        0,
+        1,
+      );
+      const painted = uColGrass.mul(weightsA.x)
+        .add(uColRock.mul(weightsA.y))
+        .add(uColSand.mul(weightsA.z))
+        .add(uColSnow.mul(weightsA.w))
+        .add(uColSwamp.mul(weightsB.x))
+        .add(uColRedRock.mul(weightsB.y))
+        .add(uColRedRock2.mul(weightsB.z))
+        .div(max(coverage, 0.0001));
+      albedo = mix(albedo, painted, coverage);
+    }
+
+    const scorch = destructionSample(point).g;
+    albedo = mix(albedo, vec3(0.055, 0.036, 0.025), scorch.mul(0.84));
+    const luminance = dot(albedo, vec3(0.299, 0.587, 0.114));
+    albedo = max(
+      mix(vec3(luminance), albedo, uPaletteSaturation)
+        .sub(0.5).mul(uPaletteContrast).add(0.5),
+      vec3(0),
+    ).mul(uPaletteTint);
+
+    const concavity = clamp(
+      heightX.add(heightZ).mul(0.5).sub(height).div(eps.mul(0.9)),
+      0,
+      1,
+    );
+    const valley = float(1).sub(smoothstep(0, uHeightScale.mul(0.55), height));
+    const ao = float(1).sub(uAO.mul(concavity.mul(0.45).add(valley.mul(0.22))));
+    const diffuse = max(dot(normal, uSunDir), 0);
+    const sun = uTerrainSunCol.mul(uTerrainSunIntensity).mul(diffuse);
+    const sky = uTerrainSkyAmb.mul(0.5).mul(normal.y.mul(0.5).add(0.5));
+    const bounce = uTerrainBounce.mul(0.25).mul(float(1).sub(normal.y.mul(0.5)));
+    let color = albedo.mul(sun.add(sky).add(bounce)).mul(ao);
+
+    const gridCell = fract(point.div(max(uBoardHalf.div(8), 1)).add(0.5)).sub(0.5).abs();
+    const gridLine = smoothstep(0.47, 0.5, max(gridCell.x, gridCell.y));
+    color = mix(color, vec3(0.45, 0.8, 0.95), gridLine.mul(uGrid).mul(0.08));
+    const lodTint = select(
+      vLod.lessThan(0.5), vec3(0.9, 0.28, 0.3),
+      select(vLod.lessThan(1.5), vec3(0.96, 0.65, 0.14),
+        select(vLod.lessThan(2.5), vec3(0.96, 0.85, 0.04), vec3(0.23, 0.51, 0.96))),
+    );
+    color = mix(color, lodTint, step(0.5, uLodDebug).mul(0.55));
+
+    const distance = length(cameraPosition.sub(vWorldPosition));
+    const fog = float(1).sub(exp(uFogDensity.mul(uFogDensity)
+      .mul(distance).mul(distance).negate()));
+    color = mix(color, uFogColor, clamp(fog, 0, 1));
+
+    const packedHigh = floor(height01.mul(255)).div(255);
+    const packedLow = fract(height01.mul(255));
+    const packed = select(
+      uColorMode.greaterThan(1.5),
+      vec3(packedHigh, packedLow, 0),
+      vec3(height01),
+    );
+    color = select(uColorMode.greaterThan(0.5), packed, color);
+    color = select(vWall.greaterThan(0.02), mix(uPlinthColor, uFogColor, clamp(fog, 0, 1)), color);
+    return vec4(pow(max(color, vec3(0)), vec3(1 / 2.2)), 1);
+  })();
+
+  const applyVariant = (nextVariant) => {
+    const normalized = nextVariant === 'manual-empty' ? 'manual-empty' : 'manual';
+    material.fragmentNode = buildFragmentNode(normalized === 'manual');
+    material.userData.terrainVariant = normalized;
+    material.userData.renderRole = `terrain:${normalized}`;
+    material.name = `terrain:${normalized}:webgpu`;
+    material.needsUpdate = true;
+  };
+  material.userData.rebuildTerrainVariant = applyVariant;
+  applyVariant(variant);
+  return { material, uniforms };
+}
+
 function createProceduralSkyMaterial(legacyUniforms) {
   const uniforms = promoteLegacyUniforms(legacyUniforms);
   const {
@@ -763,5 +1065,6 @@ export function createWebGpuMaterialBackend() {
     createUnderwaterMaterial,
     createCloudCompositeMaterial,
     createCloudOccupancyMaterials,
+    createManualTerrainMaterial,
   });
 }

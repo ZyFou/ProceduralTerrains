@@ -5,6 +5,11 @@ import { UnderwaterEffect } from '../src/engine/render/UnderwaterEffect.js';
 import { CloudLowResPass } from '../src/engine/sky/CloudLowResPass.js';
 import { CloudOccupancyPass } from '../src/engine/sky/CloudOccupancyPass.js';
 import { createCloudSlabMaterial } from '../src/engine/sky/CloudSlabShader.js';
+import {
+  createTerrainMaterial,
+  createTerrainUniforms,
+  rebuildTerrainShaderSource,
+} from '../src/engine/terrain/TerrainMaterial.js';
 
 describe('WebGPU material backend', () => {
   it('creates a native node sky while preserving the legacy uniform update contract', () => {
@@ -92,5 +97,36 @@ describe('WebGPU material backend', () => {
     pass.dispose();
     source.dispose();
     replacement.dispose();
+  });
+
+  it('creates specialized native Manual terrain variants through the runtime factory', () => {
+    const backend = createWebGpuMaterialBackend();
+    const emptyUniforms = createTerrainUniforms();
+    const empty = createTerrainMaterial(emptyUniforms, 1, undefined, {
+      variant: 'manual-empty',
+      materialBackend: backend,
+    });
+    const painted = createTerrainMaterial(createTerrainUniforms(), 1, undefined, {
+      variant: 'manual',
+      materialBackend: backend,
+    });
+
+    expect(empty.isNodeMaterial).toBe(true);
+    expect(empty.vertexNode?.isNode).toBe(true);
+    expect(empty.fragmentNode?.isNode).toBe(true);
+    expect(empty.userData.renderRole).toBe('terrain:manual-empty');
+    expect(painted.userData.renderRole).toBe('terrain:manual');
+    expect(empty.uniforms.uManualHeightTexture.isTextureNode).toBe(true);
+    expect(emptyUniforms.uSeaLevel.isNode).toBe(true);
+    emptyUniforms.uSeaLevel.value = 18;
+    expect(empty.uniforms.uSeaLevel.value).toBe(18);
+
+    rebuildTerrainShaderSource(empty, { sig: 'manual-test' }, { variant: 'manual' });
+    expect(empty.userData.terrainVariant).toBe('manual');
+    expect(empty.userData.heightProgramSig).toBe('manual-test');
+    expect(empty.isShaderMaterial).not.toBe(true);
+
+    empty.dispose();
+    painted.dispose();
   });
 });

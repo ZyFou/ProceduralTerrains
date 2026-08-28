@@ -1364,6 +1364,18 @@ export function createTerrainMaterial(
   options = {},
 ) {
   const variant = resolveTerrainVariant(options.variant).name;
+  if (resolveTerrainVariant(variant).manual
+      && options.materialBackend?.createManualTerrainMaterial) {
+    const created = options.materialBackend.createManualTerrainMaterial(uniforms, { variant });
+    const material = created?.material || created;
+    material.defines ||= {};
+    material.defines.OCTAVES = octaves;
+    material.userData.terrainVariant = variant;
+    material.userData.heightProgramSig = stackGLSL.sig;
+    material.userData.renderRole = `terrain:${variant}`;
+    material.name = `terrain:${variant}:webgpu`;
+    return material;
+  }
   const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);
@@ -1429,6 +1441,12 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 // served from three's cache.
 export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   const variant = resolveTerrainVariant(options.variant).name;
+  if (mat?.isNodeMaterial && mat.userData?.rebuildTerrainVariant) {
+    mat.userData.rebuildTerrainVariant(variant);
+    mat.userData.minimalFragment = false;
+    mat.userData.heightProgramSig = stackGLSL.sig;
+    return;
+  }
   const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);

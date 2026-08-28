@@ -798,7 +798,7 @@ export class Engine {
       this.uniforms,
       oct,
       this._stackGLSL,
-      { variant: this._targetTerrainVariant() },
+      { variant: this._targetTerrainVariant(), materialBackend: this._materialBackend },
     );
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
@@ -3770,7 +3770,10 @@ export class Engine {
     try {
       warm = [nodePreviewMaterial
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
-        : createTerrainMaterial(this.uniforms, oct, sg, { variant: terrainVariant })];
+        : createTerrainMaterial(this.uniforms, oct, sg, {
+          variant: terrainVariant,
+          materialBackend: this._materialBackend,
+        })];
       const waterActive = this.params.waterEnabled !== false;
       if ((heightSourceChanged || octavesChanged) && waterActive) {
         if (this.worldMode === 'infinite') {
@@ -6504,7 +6507,7 @@ export class Engine {
         this.uniforms,
         Math.round(this.params.octaves),
         program,
-        { variant: 'base' },
+        { variant: 'base', materialBackend: this._materialBackend },
       );
       const previous = this.terrainMaterial;
       this.terrainMaterial = replacement;
@@ -7188,7 +7191,10 @@ export class Engine {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
       const heightProgram = this._activeHeightProgram('studio');
-      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, { variant });
+      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, {
+        variant,
+        materialBackend: this._materialBackend,
+      });
       const targetSnapshot = this._resolveCameraCompileTarget();
       const workId = `terrain-${variant}`;
       this._bgWorkStart(workId, variant === 'base'
@@ -11222,7 +11228,7 @@ export class Engine {
       this.uniforms,
       oct,
       program,
-      { variant },
+      { variant, materialBackend: this._materialBackend },
     );
     this._terrainVariantCompiling = true;
     this._bgWorkStart('terrain-variant', `Preparing ${variant} terrain shader…`);

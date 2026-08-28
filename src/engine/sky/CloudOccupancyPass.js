@@ -109,12 +109,15 @@ export class CloudOccupancyPass {
     this.renderer = renderer;
     this.size = size;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.Camera();
+    // The common WebGPU renderer updates a camera's projection when it switches
+    // from WebGL to WebGPU clip-space conventions. A bare Camera has no
+    // updateProjectionMatrix(), so use an explicit fullscreen orthographic
+    // projection even though the vertex shader already writes clip positions.
+    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.targets = [0, 1].map((index) => {
       const target = new THREE.WebGLRenderTarget(size, size, {
         type: THREE.UnsignedByteType,
         format: THREE.RedFormat,
-        internalFormat: 'R8',
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
         depthBuffer: false,

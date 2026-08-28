@@ -83,6 +83,7 @@ describe('phase 3 TSL/WebGPU architecture', () => {
         'underwater',
         'cloud-composite',
         'cloud-occupancy',
+        'terrain-manual',
       ]);
     expect(getMissingWebGpuProductionMaterials(WEBGPU_RENDERER_STATUS))
       .toEqual(WEBGPU_PRODUCTION_MATERIALS);
