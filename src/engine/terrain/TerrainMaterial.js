@@ -49,6 +49,21 @@ const MANUAL_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
   (line, name) => (MANUAL_ACTIVE_COMMON_SAMPLERS.has(name) ? line : ''),
 );
 
+// Generated-base Manual terrain is a Tile-only shader, but it still needs the
+// source project's paint/import/spline fields alongside Manual sculpt/surface
+// fields. Remove only sampler declarations that this terrain program never
+// reads. Together with the live-height specialization below, this keeps the
+// complete hybrid fragment interface at the portable WebGL2 limit of 16.
+const HYBRID_UNUSED_COMMON_SAMPLERS = new Set([
+  'uPaintPropsTexture',
+  'uSplineAuxTexture',
+]);
+
+const HYBRID_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
+  /^uniform sampler2D ([A-Za-z0-9_]+);.*$/gm,
+  (line, name) => (HYBRID_UNUSED_COMMON_SAMPLERS.has(name) ? '' : line),
+);
+
 const MANUAL_HEIGHT_GLSL = /* glsl */ `
 ${MANUAL_SURFACE_WEIGHTS_GLSL}
 
@@ -121,7 +136,11 @@ const buildVertex = (heightGLSL, variant = 'full') => {
   const manual = features.manual;
   const preview = variant === 'preview';
   return /* glsl */ `
-${manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
+${manual
+    ? MANUAL_COMMON_UNIFORMS_GLSL
+    : features.tileOnly
+      ? HYBRID_COMMON_UNIFORMS_GLSL
+      : COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
@@ -409,12 +428,16 @@ const buildFragment = (
   return /* glsl */ `
 precision highp float;
 
-${features.manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
+${features.manual
+    ? MANUAL_COMMON_UNIFORMS_GLSL
+    : features.tileOnly
+      ? HYBRID_COMMON_UNIFORMS_GLSL
+      : COMMON_UNIFORMS_GLSL}
 ${features.manual ? '' : IMPORTED_IMAGERY_ALBEDO_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
-${features.manual ? '' : TERRAIN_HEIGHT_TEX_GLSL}
+${features.manual || features.tileOnly ? '' : TERRAIN_HEIGHT_TEX_GLSL}
 ${features.manual
     ? MANUAL_TERRAIN_CACHE_GLSL
     : features.tileOnly
@@ -676,6 +699,14 @@ ${features.manual ? '' : /* glsl */ `
   float hC, hX, hZ;
   vec3 nGeo;
 ${features.manual ? /* glsl */ `
+  hC = terrainCachedHeightAt(xz);
+  hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
+  hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
+  nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+` : features.tileOnly ? /* glsl */ `
+  // Hybrid Manual terrain is Tile-only and the Engine's correctness baseline
+  // keeps Tile consumers on the live generation. Compiling the dormant Studio
+  // cache branch would reserve a seventeenth active fragment sampler.
   hC = terrainCachedHeightAt(xz);
   hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
   hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
