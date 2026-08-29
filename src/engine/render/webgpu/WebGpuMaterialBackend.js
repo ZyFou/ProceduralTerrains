@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn,
+  acos,
   attribute,
   atan,
   cameraPosition,
@@ -13,6 +14,7 @@ import {
   float,
   floor,
   fract,
+  fwidth,
   length,
   max,
   min,
@@ -52,13 +54,17 @@ const MANUAL_TERRAIN_NODE_UNIFORMS = Object.freeze([
   'uDestructionEnabled', 'uDestructionOrigin', 'uDestructionSpan',
   'uDestructionTexture', 'uHeightScale', 'uSeaLevel', 'uEps',
   'uSkirtDepth', 'uPlinthBaseY', 'uWallThickness', 'uBoardHalf',
-  'uUseTiles', 'uTileShape', 'uInfiniteMode', 'uNormalStrength', 'uAO',
-  'uGrid', 'uLodDebug', 'uColorMode', 'uFogColor', 'uFogDensity',
+  'uChunkSize', 'uUseTiles', 'uTileShape', 'uInfiniteMode', 'uNormalStrength', 'uAO',
+  'uGrid', 'uLodDebug', 'uMergeDebug', 'uColorMode', 'uTileDebugView',
+  'uTerrainDetailDebug', 'uFogColor', 'uFogDensity',
   'uPlinthColor', 'uSunDir', 'uPaletteSaturation', 'uPaletteContrast',
   'uPaletteTint', 'uTerrainSunCol', 'uTerrainSunIntensity',
   'uTerrainSkyAmb', 'uTerrainBounce', 'uColSand', 'uColDryGrass',
   'uColGrass', 'uColForest', 'uColSwamp', 'uColRedRock', 'uColRedRock2',
   'uColRock', 'uColRockHi', 'uColSnow', 'uSnowLine',
+  'uAnalysisEnabled', 'uAnalysisMode', 'uAnalysisOpacity', 'uAnalysisMin',
+  'uAnalysisMax', 'uAnalysisThresholdA', 'uAnalysisThresholdB',
+  'uAnalysisContourSpacing', 'uAnalysisContourStrength',
 ]);
 
 let manualTerrainFallbackTexture = null;
@@ -738,6 +744,7 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uPlinthBaseY,
     uWallThickness,
     uBoardHalf,
+    uChunkSize,
     uUseTiles,
     uTileShape,
     uInfiniteMode,
@@ -745,7 +752,10 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uAO,
     uGrid,
     uLodDebug,
+    uMergeDebug,
     uColorMode,
+    uTileDebugView,
+    uTerrainDetailDebug,
     uFogColor,
     uFogDensity,
     uPlinthColor,
@@ -768,6 +778,15 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uColRockHi,
     uColSnow,
     uSnowLine,
+    uAnalysisEnabled,
+    uAnalysisMode,
+    uAnalysisOpacity,
+    uAnalysisMin,
+    uAnalysisMax,
+    uAnalysisThresholdA,
+    uAnalysisThresholdB,
+    uAnalysisContourSpacing,
+    uAnalysisContourStrength,
   } = uniforms;
 
   const manualSample = (point) => boundedTextureSample(
@@ -793,6 +812,7 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
   material.name = `terrain:${variant}:webgpu`;
   material.userData.renderRole = `terrain:${variant}`;
   material.userData.terrainVariant = variant;
+  material.userData.preservesLinearDataOutputs = true;
   material.side = THREE.DoubleSide;
   material.toneMapped = false;
   material.uniforms = uniforms;
@@ -916,31 +936,136 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     const bounce = uTerrainBounce.mul(0.25).mul(float(1).sub(normal.y.mul(0.5)));
     let color = albedo.mul(sun.add(sky).add(bounce)).mul(ao);
 
-    const gridCell = fract(point.div(max(uBoardHalf.div(8), 1)).add(0.5)).sub(0.5).abs();
-    const gridLine = smoothstep(0.47, 0.5, max(gridCell.x, gridCell.y));
-    color = mix(color, vec3(0.45, 0.8, 0.95), gridLine.mul(uGrid).mul(0.08));
+    const rangeT = clamp(
+      height.sub(uAnalysisMin).div(max(uAnalysisMax.sub(uAnalysisMin), 0.001)),
+      0,
+      1,
+    );
+    const heightAnalysis = mix(vec3(0.05, 0.17, 0.42), vec3(0.92, 0.72, 0.24), rangeT);
+    const contour = float(1).sub(smoothstep(
+      0,
+      0.055,
+      fract(height.div(max(uAnalysisContourSpacing, 1))).sub(0.5).abs(),
+    )).mul(uAnalysisContourStrength);
+    const contouredHeight = mix(heightAnalysis, vec3(0.04), contour);
+    const slopeDegrees = acos(clamp(geometricNormal.y, -1, 1)).mul(57.2958);
+    const safeThresholdA = max(uAnalysisThresholdA, 1);
+    const safeThresholdSpan = max(uAnalysisThresholdB.sub(uAnalysisThresholdA), 1);
+    const gentleSlope = mix(
+      vec3(0.07, 0.35, 0.16),
+      vec3(0.75, 0.78, 0.16),
+      clamp(slopeDegrees.div(safeThresholdA), 0, 1),
+    );
+    const steepSlope = mix(
+      vec3(0.92, 0.58, 0.10),
+      vec3(0.70, 0.08, 0.08),
+      clamp(slopeDegrees.sub(uAnalysisThresholdA).div(safeThresholdSpan), 0, 1),
+    );
+    const slopeAnalysis = select(slopeDegrees.lessThan(uAnalysisThresholdA), gentleSlope, steepSlope);
+    const normalAnalysis = geometricNormal.mul(0.5).add(0.5);
+    const curvature = clamp(
+      heightX.add(heightZ).mul(0.5).sub(height).div(max(eps.mul(4), 0.001)),
+      -0.5,
+      0.5,
+    );
+    const curvatureAnalysis = select(
+      curvature.greaterThan(0),
+      mix(vec3(0.35), vec3(0.95, 0.65, 0.18), curvature.mul(2)),
+      mix(vec3(0.35), vec3(0.12, 0.45, 0.95), curvature.negate().mul(2)),
+    );
+    const waterDepth = max(uSeaLevel.sub(height), 0);
+    const depthAnalysis = mix(
+      vec3(0.08, 0.35, 0.55),
+      vec3(0.01, 0.02, 0.18),
+      clamp(waterDepth.div(max(uAnalysisMax, 1)), 0, 1),
+    );
+    const analysis = select(
+      uAnalysisMode.lessThan(1.5),
+      contouredHeight,
+      select(
+        uAnalysisMode.lessThan(2.5),
+        slopeAnalysis,
+        select(
+          uAnalysisMode.lessThan(3.5),
+          normalAnalysis,
+          select(uAnalysisMode.lessThan(4.5), curvatureAnalysis, depthAnalysis),
+        ),
+      ),
+    );
+    color = mix(
+      color,
+      analysis,
+      step(0.5, uAnalysisEnabled).mul(uAnalysisOpacity),
+    );
+
+    const gridWidth = fwidth(point).add(0.00001);
+    const gridPoint = fract(point.div(max(uChunkSize, 1)).sub(0.5))
+      .sub(0.5).abs().mul(max(uChunkSize, 1)).div(gridWidth);
+    const gridLine = float(1).sub(min(min(gridPoint.x, gridPoint.y), 1));
+    const gridFade = smoothstep(
+      420,
+      60,
+      length(cameraPosition.sub(vWorldPosition)).div(8),
+    );
+    color = mix(
+      color,
+      vec3(0.45, 0.8, 0.95),
+      gridLine.mul(uGrid).mul(0.22).mul(gridFade.mul(0.65).add(0.35)),
+    );
     const lodTint = select(
       vLod.lessThan(0.5), vec3(0.9, 0.28, 0.3),
       select(vLod.lessThan(1.5), vec3(0.96, 0.65, 0.14),
         select(vLod.lessThan(2.5), vec3(0.96, 0.85, 0.04), vec3(0.23, 0.51, 0.96))),
     );
     color = mix(color, lodTint, step(0.5, uLodDebug).mul(0.55));
+    const mergeTint = select(
+      vLod.lessThan(5), vec3(0.18, 0.95, 0.45),
+      select(vLod.lessThan(6), vec3(0.95, 0.95, 0.15),
+        select(vLod.lessThan(7), vec3(0.98, 0.55, 0.10), vec3(0.95, 0.20, 0.95))),
+    );
+    color = mix(
+      color,
+      mergeTint,
+      step(0.5, uMergeDebug).mul(step(3.5, vLod)).mul(0.55),
+    );
 
     const distance = length(cameraPosition.sub(vWorldPosition));
     const fog = float(1).sub(exp(uFogDensity.mul(uFogDensity)
       .mul(distance).mul(distance).negate()));
     color = mix(color, uFogColor, clamp(fog, 0, 1));
 
-    const packedHigh = floor(height01.mul(255)).div(255);
-    const packedLow = fract(height01.mul(255));
+    const outputHeight = select(uColorMode.greaterThan(2.5), vWorldPosition.y, height);
+    const outputHeight01 = clamp(outputHeight.div(max(uHeightScale, 0.001)), 0, 1);
+    const packedHigh = floor(outputHeight01.mul(255)).div(255);
+    const packedLow = fract(outputHeight01.mul(255));
     const packed = select(
       uColorMode.greaterThan(1.5),
       vec3(packedHigh, packedLow, 0),
-      vec3(height01),
+      vec3(outputHeight01),
     );
-    color = select(uColorMode.greaterThan(0.5), packed, color);
-    color = select(vWall.greaterThan(0.02), mix(uPlinthColor, uFogColor, clamp(fog, 0, 1)), color);
-    return vec4(pow(max(color, vec3(0)), vec3(1 / 2.2)), 1);
+    const tileDebug = select(
+      uTileDebugView.lessThan(2.5),
+      vec3(height01),
+      albedo,
+    );
+    let output = pow(max(color, vec3(0)), vec3(1 / 2.2));
+    // Full terrain writes wall and data-output modes in linear/output space;
+    // applying display gamma to packed height bytes corrupts collision and
+    // prop-placement readbacks.
+    output = select(
+      vWall.greaterThan(0.02),
+      mix(uPlinthColor, uFogColor, clamp(fog, 0, 1)),
+      output,
+    );
+    output = select(uColorMode.greaterThan(0.5), packed, output);
+    output = select(uTileDebugView.greaterThan(0.5), tileDebug, output);
+    const detailDebug = select(
+      uTerrainDetailDebug.lessThan(1.5),
+      vec3(clamp(slope.mul(2.4), 0, 1)),
+      normal.mul(0.5).add(0.5),
+    );
+    output = select(uTerrainDetailDebug.greaterThan(0.5), detailDebug, output);
+    return vec4(output, 1);
   })();
 
   const applyVariant = (nextVariant) => {

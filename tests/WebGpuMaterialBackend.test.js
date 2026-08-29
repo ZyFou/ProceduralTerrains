@@ -117,6 +117,9 @@ describe('WebGPU material backend', () => {
     expect(empty.userData.renderRole).toBe('terrain:manual-empty');
     expect(painted.userData.renderRole).toBe('terrain:manual');
     expect(empty.uniforms.uManualHeightTexture.isTextureNode).toBe(true);
+    expect(empty.uniforms.uAnalysisEnabled.isNode).toBe(true);
+    expect(empty.uniforms.uChunkSize.isNode).toBe(true);
+    expect(empty.userData.preservesLinearDataOutputs).toBe(true);
     expect(emptyUniforms.uSeaLevel.isNode).toBe(true);
     emptyUniforms.uSeaLevel.value = 18;
     expect(empty.uniforms.uSeaLevel.value).toBe(18);

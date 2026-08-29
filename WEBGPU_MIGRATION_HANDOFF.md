@@ -394,6 +394,15 @@ Hardware baseline: Apple M4 Pro, normal hardware-accelerated Chromium session.
   uniform contract.
 - Native canary result with both Manual variants: passed, 7/22 production
   materials reported as ported. `terrain-manual` remains unvalidated.
+- Hardened the Manual NodeMaterial data and inspection paths. Heightmap,
+  collision and prop-placement outputs now bypass display gamma (including
+  mode 3's visible-LOD height), and the native graph includes height, slope,
+  normal, curvature and water-depth analysis views plus chunk-grid, LOD and
+  merge-debug overlays.
+- The native production canary now renders a real XZ Manual terrain plane with
+  a constant 64/255 height texture and rejects gamma-corrupted or channel-skewed
+  readback. Result on the M4 Pro: passed, 7 native materials compiled/rendered,
+  linear Manual height byte = 64, with no new console warning/error.
 - Remaining Manual parity work before validation: atlas diffuse/normal/rough/AO
   sampling, full detail and caustic layers, tile occupancy/wall edge cases,
-  analysis/debug outputs, and WebGL2/WebGPU golden-image comparison.
+  biome/detail-specific debug outputs, and WebGL2/WebGPU golden-image comparison.

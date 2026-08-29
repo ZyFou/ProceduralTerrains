@@ -93,7 +93,9 @@ export async function validateWebGpuProductionMaterials({
   let renderer = null;
   let target = null;
   let geometry = null;
+  let manualGeometry = null;
   let sourceTexture = null;
+  let manualHeightTexture = null;
   const disposables = [];
   const validated = [];
   try {
@@ -133,6 +135,21 @@ export async function validateWebGpuProductionMaterials({
     geometry.setAttribute('aSkirt', new THREE.Float32BufferAttribute(vertexCount, 1));
     geometry.setAttribute('aLod', new THREE.Float32BufferAttribute(vertexCount, 1));
     geometry.setAttribute('aWall', new THREE.Float32BufferAttribute(vertexCount, 1));
+    manualGeometry = new THREE.PlaneGeometry(2, 2);
+    manualGeometry.rotateX(-Math.PI / 2);
+    const manualVertexCount = manualGeometry.getAttribute('position').count;
+    manualGeometry.setAttribute(
+      'aSkirt',
+      new THREE.Float32BufferAttribute(manualVertexCount, 1),
+    );
+    manualGeometry.setAttribute(
+      'aLod',
+      new THREE.Float32BufferAttribute(manualVertexCount, 1),
+    );
+    manualGeometry.setAttribute(
+      'aWall',
+      new THREE.Float32BufferAttribute(manualVertexCount, 1),
+    );
     const mesh = new THREE.Mesh(geometry);
     mesh.frustumCulled = false;
     scene.add(mesh);
@@ -148,6 +165,17 @@ export async function validateWebGpuProductionMaterials({
       THREE.UnsignedByteType,
     );
     sourceTexture.needsUpdate = true;
+    manualHeightTexture = new THREE.DataTexture(
+      new Uint8Array([
+        64, 0, 0, 255, 64, 0, 0, 255,
+        64, 0, 0, 255, 64, 0, 0, 255,
+      ]),
+      2,
+      2,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    manualHeightTexture.needsUpdate = true;
 
     const sky = backend.createProceduralSkyMaterial(skyModule.createProceduralSkyUniforms());
     const post = new postModule.VisualPostProcess(backend);
@@ -199,15 +227,60 @@ export async function validateWebGpuProductionMaterials({
       renderer.render(scene, camera);
       validated.push(name);
     }
+    mesh.geometry = manualGeometry;
+    camera.position.set(0, 2, 0);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
     for (const material of [manualEmpty, manualSurface]) {
       for (const node of Object.values(material.uniforms || {})) {
         if (node?.isTextureNode) node.value = sourceTexture;
       }
+      material.uniforms.uManualHeightTexture.value = manualHeightTexture;
+      material.uniforms.uManualEnabled.value = 1;
+      material.uniforms.uManualOrigin.value.set(-1, -1);
+      material.uniforms.uManualSpan.value.set(2, 2);
+      material.uniforms.uHeightScale.value = 1;
       mesh.material = material;
       await renderer.compileAsync(scene, camera);
       renderer.render(scene, camera);
     }
+    // Data-output modes feed collision, prop placement and heightmap export.
+    // They must remain linear; display gamma would turn a 64 byte into ~136.
+    manualEmpty.uniforms.uColorMode.value = 1;
+    mesh.material = manualEmpty;
+    renderer.render(scene, camera);
+    const manualPixels = await readRenderTargetPixelsAsync(renderer, target, 0, 0, 4, 4);
+    let manualHeightByte = 0;
+    let manualCoveredPixels = 0;
+    let manualChannelSkew = false;
+    for (let index = 0; index < manualPixels.length; index += 4) {
+      const red = manualPixels[index];
+      const green = manualPixels[index + 1];
+      const blue = manualPixels[index + 2];
+      if (Math.max(red, green, blue) === 0) continue;
+      manualCoveredPixels++;
+      manualHeightByte = Math.max(manualHeightByte, red);
+      if (Math.abs(green - red) > 2 || Math.abs(blue - red) > 2) {
+        manualChannelSkew = true;
+      }
+    }
+    if (manualCoveredPixels === 0 || manualHeightByte < 56 || manualHeightByte > 72) {
+      throw new Error(
+        `Manual terrain linear height output was ${manualHeightByte}`
+        + ` across ${manualCoveredPixels} covered pixels; expected approximately 64`,
+      );
+    }
+    if (manualChannelSkew) {
+      throw new Error('Manual terrain grayscale height output was channel-skewed');
+    }
+    manualEmpty.uniforms.uColorMode.value = 0;
     validated.push('terrain-manual');
+    mesh.geometry = geometry;
+    camera.position.set(0, 0, 2);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
     renderer.setRenderTarget(null);
 
     occupancy.mesh.material = occupancy.generateMaterial;
@@ -231,6 +304,7 @@ export async function validateWebGpuProductionMaterials({
       reason: '',
       materials: validated,
       pixels: pixels.length,
+      checks: { manualHeightByte, manualCoveredPixels },
     };
   } catch (error) {
     return {
@@ -245,7 +319,9 @@ export async function validateWebGpuProductionMaterials({
       try { disposable?.dispose?.(); } catch { /* ignore */ }
     }
     try { sourceTexture?.dispose?.(); } catch { /* ignore */ }
+    try { manualHeightTexture?.dispose?.(); } catch { /* ignore */ }
     try { target?.dispose?.(); } catch { /* ignore */ }
+    try { manualGeometry?.dispose?.(); } catch { /* ignore */ }
     try { geometry?.dispose?.(); } catch { /* ignore */ }
     try { renderer?.dispose?.(); } catch { /* ignore */ }
   }
