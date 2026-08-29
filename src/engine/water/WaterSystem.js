@@ -370,6 +370,7 @@ export class WaterSystem {
       octaves,
       stackGLSL,
       infinite: false,
+      materialBackend: this.engine._materialBackend,
     });
   }
 
@@ -697,6 +698,7 @@ export class WaterSystem {
       octaves,
       stackGLSL: eng._stackGLSL,
       infinite: false,
+      materialBackend: eng._materialBackend,
     });
   }
 

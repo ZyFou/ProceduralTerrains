@@ -8,9 +8,10 @@ function readyStatus(applicationReady) {
 }
 
 describe('renderer backend bootstrap', () => {
-  it('keeps Auto on WebGL2 until the complete production material set is validated', async () => {
+  it('keeps Auto on stable WebGL while production parity is still in progress', async () => {
     vi.stubGlobal('navigator', { gpu: {} });
     const webgl = {};
+    const loadWebGpuModule = vi.fn();
     const createWebGlRenderer = vi.fn(() => webgl);
 
     await expect(createRendererForCanvasAsync({}, {
@@ -18,6 +19,7 @@ describe('renderer backend bootstrap', () => {
       gpuPreference: 'default',
     }, {
       webgpuStatus: readyStatus(false),
+      loadWebGpuModule,
       createWebGlRenderer,
     })).resolves.toEqual({
       renderer: webgl,
@@ -25,6 +27,7 @@ describe('renderer backend bootstrap', () => {
       activeBackend: 'webgl2',
       fallbackReason: '',
     });
+    expect(loadWebGpuModule).not.toHaveBeenCalled();
     expect(createWebGlRenderer).toHaveBeenCalledOnce();
   });
 
@@ -36,7 +39,7 @@ describe('renderer backend bootstrap', () => {
     const createWebGlRenderer = vi.fn();
 
     const result = await createRendererForCanvasAsync({ id: 'canvas' }, {
-      rendererBackend: 'auto',
+      rendererBackend: 'webgpu',
       gpuPreference: 'high-performance',
     }, {
       webgpuStatus: readyStatus(true),
@@ -46,7 +49,7 @@ describe('renderer backend bootstrap', () => {
 
     expect(result).toMatchObject({
       renderer: instance,
-      requestedBackend: 'auto',
+      requestedBackend: 'webgpu',
       activeBackend: 'webgpu',
       fallbackReason: '',
     });
@@ -69,7 +72,7 @@ describe('renderer backend bootstrap', () => {
     const WebGPURenderer = vi.fn(() => instance);
 
     await createRendererForCanvasAsync({}, {
-      rendererBackend: 'auto',
+      rendererBackend: 'webgpu',
       gpuPreference: 'default',
     }, {
       webgpuStatus: readyStatus(true),

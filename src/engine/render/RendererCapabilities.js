@@ -38,7 +38,9 @@ export function getWebGpuSupport() {
     supported: browserSupported,
     browserSupported,
     applicationReady,
-    selectable: browserSupported && applicationReady,
+    // WebGPU remains marked as migration-in-progress until full parity, but it
+    // is user-selectable for native testing as soon as the browser exposes it.
+    selectable: browserSupported,
     phase: WEBGPU_RENDERER_STATUS.phase,
     reason: !browserSupported
       ? 'WebGPU unavailable in this browser'

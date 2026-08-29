@@ -162,7 +162,7 @@ class PerformanceProfiler {
     const info = renderer.info;
     const r = info.render;
     const m = info.memory;
-    this.render.calls = r.calls;
+    this.render.calls = Number.isFinite(r.drawCalls) ? r.drawCalls : r.calls;
     this.render.triangles = r.triangles;
     this.render.points = r.points;
     this.render.lines = r.lines;

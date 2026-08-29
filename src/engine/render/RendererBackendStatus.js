@@ -53,6 +53,7 @@ const PORTED_PRODUCTION_MATERIALS = Object.freeze([
   'cloud-composite',
   'cloud-occupancy',
   'terrain-manual',
+  'water-studio-legacy',
 ]);
 
 const VALIDATED_PRODUCTION_MATERIALS = Object.freeze([]);

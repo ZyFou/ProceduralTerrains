@@ -86,6 +86,44 @@ describe('camera pipeline reuse', () => {
     expect(engine._sharedOpaqueTarget).toBeNull();
   });
 
+  it('keeps WebGPU-style renderer counters scoped to the current scene pass', () => {
+    const engine = Object.create(Engine.prototype);
+    const info = {
+      render: { triangles: 900, calls: 90, drawCalls: 60 },
+      reset: vi.fn(() => {
+        info.render.triangles = 0;
+        info.render.drawCalls = 0;
+      }),
+    };
+    const renderer = {
+      info,
+      setRenderTarget: vi.fn(),
+      render: vi.fn(() => {
+        info.render.triangles += 120;
+        info.render.calls += 1;
+        info.render.drawCalls += 6;
+      }),
+    };
+    Object.assign(engine, {
+      renderer,
+      scene: {},
+      camera: {},
+      visualPost: { setInputTexture: vi.fn() },
+      _mainRenderSerial: 0,
+    });
+
+    expect(engine._renderPreparedCameraScene(null, null)).toMatchObject({
+      triangles: 120,
+      drawCalls: 6,
+    });
+    expect(engine._renderPreparedCameraScene(null, null)).toMatchObject({
+      triangles: 120,
+      drawCalls: 6,
+    });
+    expect(info.reset).toHaveBeenCalledTimes(2);
+    expect(info.render.calls).toBe(92);
+  });
+
   it('composites low-resolution clouds with source depth into a distinct final target', () => {
     const engine = Object.create(Engine.prototype);
     const sourceDepth = {};

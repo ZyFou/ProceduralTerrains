@@ -415,6 +415,19 @@ export class Engine {
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._mainRenderSerial = 0;  // advances only after a live scene render
     this._warmGeo = new THREE.PlaneGeometry(1, 1);
+    const warmVertexCount = this._warmGeo.getAttribute('position').count;
+    this._warmGeo.setAttribute(
+      'aSkirt',
+      new THREE.Float32BufferAttribute(warmVertexCount, 1),
+    );
+    this._warmGeo.setAttribute(
+      'aLod',
+      new THREE.Float32BufferAttribute(warmVertexCount, 1),
+    );
+    this._warmGeo.setAttribute(
+      'aWall',
+      new THREE.Float32BufferAttribute(warmVertexCount, 1),
+    );
     this._erosionGPUModule = null;
     this._erosionGPUImportPromise = null;
     this._erosionGPUUnavailable = false;
@@ -798,12 +811,21 @@ export class Engine {
       this.uniforms,
       oct,
       this._stackGLSL,
-      { variant: this._targetTerrainVariant(), materialBackend: this._materialBackend },
+      {
+        variant: this._targetTerrainVariant(),
+        materialBackend: this._materialBackend,
+        nativeLegacyStudio: true,
+      },
     );
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
-    this.waterMaterial = createWaterMaterial(this.uniforms, oct, this._stackGLSL);
+    this.waterMaterial = createWaterMaterial(
+      this.uniforms,
+      oct,
+      this._stackGLSL,
+      { materialBackend: this._materialBackend },
+    );
     this.water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.waterMaterial);
     this.water.geometry.rotateX(-Math.PI / 2);
     this.water.renderOrder = 10;
@@ -2609,7 +2631,16 @@ export class Engine {
       else this._warmDeferredWater();
     }
     if (key === 'octaves' && this.worldMode !== 'planet') {
-      this._afterParamChange(false, false);
+      const liveTerrain = this.worldMode === 'infinite'
+        ? this._infiniteTerrainMat
+        : this.terrainMaterial;
+      // WebGL marks the field dirty after its asynchronously compiled material
+      // is swapped. Native WebGPU changes the uniform immediately, so publish
+      // the new generation here for minimap, props and readback consumers.
+      this._afterParamChange(
+        false,
+        liveTerrain?.userData?.webGpuLegacyDynamicOctaves === true,
+      );
       return;
     }
     this._afterParamChange(REBUILD_KEYS.has(key), TERRAIN_FIELD_KEYS.has(key));
@@ -3773,6 +3804,7 @@ export class Engine {
         : createTerrainMaterial(this.uniforms, oct, sg, {
           variant: terrainVariant,
           materialBackend: this._materialBackend,
+          nativeLegacyStudio: modeAtStart === 'studio',
         })];
       const waterActive = this.params.waterEnabled !== false;
       if ((heightSourceChanged || octavesChanged) && waterActive) {
@@ -3784,7 +3816,9 @@ export class Engine {
         } else {
           warm.push(
             this.waterSystem?.createStudioStackWarmMaterial?.(sg, oct)
-            ?? createWaterMaterial(this.uniforms, oct, sg),
+            ?? createWaterMaterial(this.uniforms, oct, sg, {
+              materialBackend: this._materialBackend,
+            }),
           );
         }
       }
@@ -3899,8 +3933,28 @@ export class Engine {
           if (mat.defines.OCTAVES !== oct) mat.defines.OCTAVES = oct;
         }
         if (modeAtStart === 'studio') {
-          if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
-          else rebuildTerrainShaderSource(this.terrainMaterial, sg, { variant: terrainVariant });
+          const warmTerrain = warm[0];
+          const liveTerrain = this.terrainMaterial;
+          const bothNodeMaterials = Boolean(liveTerrain?.isNodeMaterial)
+            && Boolean(warmTerrain?.isNodeMaterial);
+          const terrainTopologyChanged = !nodePreviewMaterial && warmTerrain && (
+            Boolean(liveTerrain?.isNodeMaterial) !== Boolean(warmTerrain.isNodeMaterial)
+            || (bothNodeMaterials
+              && Boolean(liveTerrain.userData?.exactLegacyHeight)
+                !== Boolean(warmTerrain.userData?.exactLegacyHeight))
+            || (bothNodeMaterials
+              && warmTerrain.userData?.exactLegacyHeight === true
+              && liveTerrain.userData?.webGpuLegacyOctaves
+                !== warmTerrain.userData?.webGpuLegacyOctaves)
+          );
+          if (terrainTopologyChanged) {
+            this._replaceStudioTerrainMaterial(warmTerrain);
+            warm[0] = null;
+          } else if (nodePreviewMaterial) {
+            rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
+          } else {
+            rebuildTerrainShaderSource(this.terrainMaterial, sg, { variant: terrainVariant });
+          }
           if (heightSourceChanged
               && this.waterMaterial
               && !this.waterSystem?.ownsMaterial?.(this.waterMaterial)) {
@@ -3945,7 +3999,7 @@ export class Engine {
       if (this._terrainSourcePendingToken === token) {
         this._terrainSourcePendingToken = null;
       }
-      this._queueWarmMaterials(warm);
+      this._queueWarmMaterials(warm.filter(Boolean));
       this._discardHeightCachePreparation(cachePreparation);
       if (atomic) {
         const released = this._releaseTerrainAtomicCompile(token);
@@ -4442,6 +4496,7 @@ export class Engine {
     u.uSeaLevel.value = p.seaLevel;
     u.uTerrainFormationSeaLevel.value = p.terrainFormationSeaLevel;
     u.uAmplitude.value = p.noiseStrength;
+    if (u.uOctaves) u.uOctaves.value = Math.round(p.octaves);
     u.uTerrainSmoothing.value = p.terrainSmoothing ?? 0;
     u.uPersistence.value = p.persistence;
     u.uLacunarity.value = p.lacunarity;
@@ -4514,15 +4569,21 @@ export class Engine {
       u.uFogDensity.value = this.worldMode === 'planet' ? 0.0 : p.fogDensity * 0.0001;
     }
 
-    // Octave count is a compile-time constant (keeps loop bounds static for
-    // the D3D11 shader compiler) — changing it requires new programs, which
-    // are compiled in the background and swapped in when ready.
+    // WebGL keeps this as a compile-time constant for D3D11 compatibility and
+    // swaps a background-compiled program. Native WebGPU uses a bounded WGSL
+    // loop driven by uOctaves, so the same pipeline stays live while editing.
     const oct = Math.round(p.octaves);
     const activeTerrainMaterial = this.worldMode === 'planet'
       ? this.planetWorld?.materials?.[0]
       : (this.worldMode === 'infinite' ? this._infiniteTerrainMat : this.terrainMaterial);
     if (compileOctaves && activeTerrainMaterial?.defines?.OCTAVES !== oct) {
-      this._setOctavesAsync(oct);
+      if (activeTerrainMaterial?.userData?.webGpuLegacyDynamicOctaves === true) {
+        // The native WebGPU terrain owns a fixed maximum-octave graph and masks
+        // inactive layers with uOctaves, so this define is metadata only.
+        activeTerrainMaterial.defines.OCTAVES = oct;
+      } else {
+        this._setOctavesAsync(oct);
+      }
     }
 
     this.terrainMaterial.wireframe = p.wireframe;
@@ -4597,6 +4658,14 @@ export class Engine {
         .map((v) => (v ? 1.0 : 0.0));
     }
     u.uSurfTile.value = atlas.tile.slice();
+    const surfaceMaterials = [
+      this.terrainMaterial,
+      this._infiniteTerrainMat,
+      ...(this.planetWorld?.materials ?? []),
+    ];
+    for (const material of new Set(surfaceMaterials)) {
+      material?.userData?.refreshSurfaceTextures?.();
+    }
     this._surfaceAtlas = atlas;
     this._needsRender = true;
     return true;
@@ -4981,6 +5050,22 @@ export class Engine {
       .filter((root) => !lowResCloudMeshes.has(root));
   }
 
+  _resetRendererPassStats() {
+    // WebGLRenderer resets renderer.info for each render() call, whereas the
+    // common WebGPU renderer resets it only from its animation-loop boundary.
+    // Engine also renders from async boot/transition jobs, so relying on either
+    // implicit policy makes WebGPU's HUD counters accumulate indefinitely.
+    this.renderer?.info?.reset?.();
+  }
+
+  _rendererDrawCalls() {
+    const render = this.renderer?.info?.render;
+    // Three's common/WebGPU Info uses `calls` for cumulative renderer.render()
+    // submissions and `drawCalls` for actual frame-local draw commands. The
+    // WebGL renderer exposes only the historical `calls` draw-command field.
+    return Number.isFinite(render?.drawCalls) ? render.drawCalls : (render?.calls || 0);
+  }
+
   _prepareSharedOpaque(plan, sceneSize) {
     const target = this.visualPost.opaqueTarget;
     if (!target) {
@@ -4996,10 +5081,11 @@ export class Engine {
       try {
         for (const [object] of visibility) object.visible = false;
         this.renderer.setRenderTarget(target);
+        this._resetRendererPassStats();
         this.renderer.render(this.scene, this.camera);
         this._lastSharedOpaqueStats = {
           triangles: this.renderer.info.render.triangles,
-          drawCalls: this.renderer.info.render.calls,
+          drawCalls: this._rendererDrawCalls(),
         };
       } finally {
         this.renderer.setRenderTarget(previousTarget);
@@ -5062,6 +5148,7 @@ export class Engine {
       try {
         for (const [object] of visibility) object.visible = false;
         this.renderer.setRenderTarget(target);
+        this._resetRendererPassStats();
         this.renderer.render(this.scene, this.camera);
       } finally {
         this.renderer.setRenderTarget(previousTarget);
@@ -5092,6 +5179,7 @@ export class Engine {
       // that completed color buffer during the overlay pass.
       this.scene.background = null;
       this.renderer.setRenderTarget(target);
+      this._resetRendererPassStats();
       this.renderer.render(this.scene, this.camera);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
@@ -5109,7 +5197,7 @@ export class Engine {
       triangles: (this._lastSharedOpaqueStats?.triangles || 0)
         + (this.renderer.info.render.triangles || 0),
       drawCalls: (this._lastSharedOpaqueStats?.drawCalls || 0)
-        + (this.renderer.info.render.calls || 0),
+        + this._rendererDrawCalls(),
     };
   }
 
@@ -5123,12 +5211,13 @@ export class Engine {
     }
 
     this.renderer.setRenderTarget(target);
+    this._resetRendererPassStats();
     this.renderer.render(this.scene, this.camera);
     this._noteMainRender();
     return {
       target,
       triangles: this.renderer.info.render.triangles,
-      drawCalls: this.renderer.info.render.calls,
+      drawCalls: this._rendererDrawCalls(),
     };
   }
 
@@ -6484,6 +6573,22 @@ export class Engine {
     };
   }
 
+  _replaceStudioTerrainMaterial(replacement, { deferPrevious = true } = {}) {
+    if (!replacement || replacement === this.terrainMaterial) return null;
+    const previous = this.terrainMaterial;
+    this.terrainMaterial = replacement;
+    if (this.board) {
+      this.board.material = replacement;
+      for (const chunk of this.board.chunks) chunk.mesh.material = replacement;
+    }
+    if (this.diskWall) this.diskWall.material = replacement;
+    if (previous) {
+      if (deferPrevious) this._queueWarmMaterials([previous]);
+      else previous.dispose?.();
+    }
+    return previous;
+  }
+
   async _applyCompatibilityBootProfile(context) {
     if (context.mode !== 'compatibility') return;
     context.assertCurrent();
@@ -6507,16 +6612,13 @@ export class Engine {
         this.uniforms,
         Math.round(this.params.octaves),
         program,
-        { variant: 'base', materialBackend: this._materialBackend },
+        {
+          variant: 'base',
+          materialBackend: this._materialBackend,
+          nativeLegacyStudio: true,
+        },
       );
-      const previous = this.terrainMaterial;
-      this.terrainMaterial = replacement;
-      if (this.board) {
-        this.board.material = replacement;
-        for (const chunk of this.board.chunks) chunk.mesh.material = replacement;
-      }
-      if (this.diskWall) this.diskWall.material = replacement;
-      previous?.dispose?.();
+      this._replaceStudioTerrainMaterial(replacement, { deferPrevious: false });
     }
   }
 
@@ -7194,6 +7296,7 @@ export class Engine {
       const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, {
         variant,
         materialBackend: this._materialBackend,
+        nativeLegacyStudio: true,
       });
       const targetSnapshot = this._resolveCameraCompileTarget();
       const workId = `terrain-${variant}`;
@@ -11242,8 +11345,13 @@ export class Engine {
       this.uniforms,
       oct,
       program,
-      { variant, materialBackend: this._materialBackend },
+      {
+        variant,
+        materialBackend: this._materialBackend,
+        nativeLegacyStudio: mode === 'studio',
+      },
     );
+    let warmAdopted = false;
     this._terrainVariantCompiling = true;
     this._bgWorkStart('terrain-variant', `Preparing ${variant} terrain shader…`);
     try {
@@ -11290,7 +11398,24 @@ export class Engine {
         ? this._infiniteTerrainMat
         : this.terrainMaterial;
       if (!target || target.userData?.minimalFragment) return false;
-      rebuildTerrainShaderSource(target, program, { variant });
+      const bothNodeMaterials = Boolean(target.isNodeMaterial)
+        && Boolean(warm.isNodeMaterial);
+      const terrainTopologyChanged = mode === 'studio' && (
+        Boolean(target.isNodeMaterial) !== Boolean(warm.isNodeMaterial)
+        || (bothNodeMaterials
+          && Boolean(target.userData?.exactLegacyHeight)
+            !== Boolean(warm.userData?.exactLegacyHeight))
+        || (bothNodeMaterials
+          && warm.userData?.exactLegacyHeight === true
+          && target.userData?.webGpuLegacyOctaves
+            !== warm.userData?.webGpuLegacyOctaves)
+      );
+      if (terrainTopologyChanged) {
+        this._replaceStudioTerrainMaterial(warm);
+        warmAdopted = true;
+      } else {
+        rebuildTerrainShaderSource(target, program, { variant });
+      }
       this._needsRender = true;
       this._terrainVariantRetryCount = 0;
       this._terrainVariantFailed = false;
@@ -11303,7 +11428,7 @@ export class Engine {
     } finally {
       this._terrainVariantCompiling = false;
       this._bgWorkEnd('terrain-variant');
-      this._queueWarmMaterials([warm]);
+      if (!warmAdopted) this._queueWarmMaterials([warm]);
     }
   }
 
@@ -12583,12 +12708,13 @@ export class Engine {
       } else {
         // Lightweight capture harnesses and legacy embedders may only expose
         // the old renderer-compatible underwater facade.
+        this._resetRendererPassStats();
         this.underwater.render(this.renderer, this.scene, this.camera, target);
         this._noteMainRender();
         rendered = {
           target,
           triangles: this.renderer.info.render.triangles,
-          drawCalls: this.renderer.info.render.calls,
+          drawCalls: this._rendererDrawCalls(),
         };
       }
       const stats = {
@@ -13241,9 +13367,9 @@ export class Engine {
         this._sceneRevisionKey(cameraSceneSize, true),
       );
       const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
-      // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
-      // renderer.info auto-resets each render(), so the fullscreen composite quad
-      // would otherwise overwrite the stats with its own ~2 triangles (HUD → 0).
+      // Capture the scene's tri/draw counts before the low-res cloud composite.
+      // _renderPreparedCameraScene explicitly scopes renderer.info to this pass,
+      // keeping WebGL and WebGPU counters identical and frame-local.
       this._lastTris = rendered.triangles;
       this._lastDraws = rendered.drawCalls;
       if (studioLowRes) {

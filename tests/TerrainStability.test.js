@@ -53,6 +53,23 @@ function createParamEngine() {
 }
 
 describe('terrain state stability', () => {
+  it('publishes native WebGPU octave edits without waiting for a shader rebuild', () => {
+    const engine = createParamEngine();
+    engine.worldMode = 'studio';
+    engine.params.octaves = 7;
+    engine.terrainMaterial = {
+      userData: { webGpuLegacyDynamicOctaves: true },
+    };
+
+    engine.setParam('octaves', 5);
+
+    expect(engine.params.octaves).toBe(5);
+    expect(engine._terrainGen).toBe(8);
+    expect(engine._bakedStudioGen).toBe(-1);
+    expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
+    expect(engine.minimap.requestRedraw).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the published terrain bake when sea level or water styling changes', () => {
     const engine = createParamEngine();
 

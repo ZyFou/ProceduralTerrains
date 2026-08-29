@@ -8,6 +8,7 @@ import { InfiniteTerrainClipmap } from '../src/engine/terrain/InfiniteTerrainCli
 import { TerrainHeightBaker } from '../src/engine/terrain/TerrainHeightBaker.js';
 import { CloudOccupancyPass } from '../src/engine/sky/CloudOccupancyPass.js';
 import { createCloudSlabMaterial } from '../src/engine/sky/CloudSlabShader.js';
+import { PerformanceProfiler } from '../src/engine/perf/PerformanceProfiler.js';
 
 function renderTargetRenderer() {
   let target = null;
@@ -36,6 +37,21 @@ function renderTargetRenderer() {
 }
 
 describe('performance phase 3', () => {
+  it('reads frame-local WebGPU draw calls instead of cumulative render submissions', () => {
+    const profiler = new PerformanceProfiler();
+    profiler.setActive(true);
+    profiler.captureRenderer({
+      info: {
+        render: { calls: 4200, drawCalls: 33, triangles: 42000, points: 0, lines: 0 },
+        memory: { geometries: 12, textures: 8 },
+        programs: [],
+      },
+    });
+
+    expect(profiler.render.calls).toBe(33);
+    expect(profiler.render.triangles).toBe(42000);
+  });
+
   it('refreshes one Infinite field-cache level per frame and shares readiness', () => {
     const renderer = renderTargetRenderer();
     const uniforms = createTerrainUniforms();

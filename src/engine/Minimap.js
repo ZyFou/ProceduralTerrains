@@ -228,27 +228,7 @@ export class Minimap {
     }
   }
 
-  renderBase() {
-    if (!this._dirty || !this.baseCtx) return;
-    this._dirty = false;
-
-    const sampler = this.sources.sampler;
-    if (!sampler) return;
-
-    if (this.config.mode === 'color') {
-      if (!this._readbackPending) {
-        const generation = ++this._readbackGeneration;
-        this._readbackPending = this._renderSceneColor(generation)
-          .catch((error) => {
-            console.warn('Minimap asynchronous readback failed', error);
-            this._dirty = true;
-          })
-          .finally(() => { this._readbackPending = null; });
-      }
-      this._lastView = this._viewState();
-      return;
-    }
-
+  _renderSampledBase() {
     const img = this.baseCtx.createImageData(SIZE, SIZE);
     const cell = SIZE / SAMPLE_RES;
     for (let sy = 0; sy < SAMPLE_RES; sy++) {
@@ -274,6 +254,34 @@ export class Minimap {
     this.baseCtx.putImageData(img, 0, 0);
     this._baseImage = img;
     this._lastView = this._viewState();
+  }
+
+  renderBase() {
+    if (!this._dirty || !this.baseCtx) return;
+    this._dirty = false;
+
+    const sampler = this.sources.sampler;
+    if (!sampler) return;
+
+    // Rendering the full editor scene for the colour minimap asks WebGPU's
+    // NodeBuilder to compile every visible legacy ShaderMaterial a second time.
+    // The sampler produces the same terrain/biome/water representation as the
+    // diagnostic modes without an extra scene pass or GPU readback.
+    if (this.config.mode === 'color' && !this.renderer?.backend?.isWebGPUBackend) {
+      if (!this._readbackPending) {
+        const generation = ++this._readbackGeneration;
+        this._readbackPending = this._renderSceneColor(generation)
+          .catch((error) => {
+            console.warn('Minimap asynchronous readback failed', error);
+            this._dirty = true;
+          })
+          .finally(() => { this._readbackPending = null; });
+      }
+      this._lastView = this._viewState();
+      return;
+    }
+
+    this._renderSampledBase();
   }
 
   async _renderSceneColor(generation = ++this._readbackGeneration) {

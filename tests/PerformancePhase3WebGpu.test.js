@@ -71,7 +71,7 @@ describe('phase 3 TSL/WebGPU architecture', () => {
     expect(support.browserSupported).toBe(true);
     expect(support.supported).toBe(true);
     expect(support.applicationReady).toBe(false);
-    expect(support.selectable).toBe(false);
+    expect(support.selectable).toBe(true);
     expect(support.reason).toMatch(/TSL migration in progress/);
     expect(getMissingWebGpuMaterialFamilies(WEBGPU_RENDERER_STATUS))
       .toEqual(WEBGPU_SHADER_FAMILIES);
@@ -84,6 +84,7 @@ describe('phase 3 TSL/WebGPU architecture', () => {
         'cloud-composite',
         'cloud-occupancy',
         'terrain-manual',
+        'water-studio-legacy',
       ]);
     expect(getMissingWebGpuProductionMaterials(WEBGPU_RENDERER_STATUS))
       .toEqual(WEBGPU_PRODUCTION_MATERIALS);

@@ -10,6 +10,7 @@ import {
   createTerrainUniforms,
   rebuildTerrainShaderSource,
 } from '../src/engine/terrain/TerrainMaterial.js';
+import { createWaterMaterial } from '../src/engine/terrain/WaterMaterial.js';
 
 describe('WebGPU material backend', () => {
   it('creates a native node sky while preserving the legacy uniform update contract', () => {
@@ -56,6 +57,7 @@ describe('WebGPU material backend', () => {
     expect(created.lookMaterial.isNodeMaterial).toBe(true);
     expect(created.cameraMaterial.isNodeMaterial).toBe(true);
     expect(created.lookMaterial.uniforms.tDiffuse.isTextureNode).toBe(true);
+    expect(created.lookMaterial.uniforms.tDiffuse.value?.isTexture).toBe(true);
     expect(created.cameraMaterial.uniforms.uReconstructionMode.isNode).toBe(true);
     created.lookMaterial.dispose();
     created.cameraMaterial.dispose();
@@ -120,6 +122,9 @@ describe('WebGPU material backend', () => {
     expect(empty.uniforms.uAnalysisEnabled.isNode).toBe(true);
     expect(empty.uniforms.uChunkSize.isNode).toBe(true);
     expect(empty.userData.preservesLinearDataOutputs).toBe(true);
+    expect(painted.uniforms.uSurfDiffuse.isTextureNode).toBe(true);
+    expect(painted.uniforms.uSurfProps.isTextureNode).toBe(true);
+    expect(painted.uniforms.uSurfTile.node.isArrayBufferNode).toBe(true);
     expect(emptyUniforms.uSeaLevel.isNode).toBe(true);
     emptyUniforms.uSeaLevel.value = 18;
     expect(empty.uniforms.uSeaLevel.value).toBe(18);
@@ -129,7 +134,65 @@ describe('WebGPU material backend', () => {
     expect(empty.userData.heightProgramSig).toBe('manual-test');
     expect(empty.isShaderMaterial).not.toBe(true);
 
+    const nextTiles = new Array(13).fill(7);
+    painted.uniforms.uSurfTile.value = nextTiles;
+    expect(painted.uniforms.uSurfTile.node.array).toBe(nextTiles);
+    const surfaceFragment = painted.fragmentNode;
+    painted.userData.refreshSurfaceTextures();
+    expect(painted.fragmentNode).not.toBe(surfaceFragment);
+    expect(painted.userData.terrainVariant).toBe('manual');
+
     empty.dispose();
     painted.dispose();
+  });
+
+  it('creates native default Classic Studio terrain without a ShaderMaterial fallback', () => {
+    const backend = createWebGpuMaterialBackend();
+    const shared = createTerrainUniforms();
+    shared.uLayerStrength.value[0] = 0.75;
+    const terrain = createTerrainMaterial(shared, 5, undefined, {
+      variant: 'detail',
+      materialBackend: backend,
+      nativeLegacyStudio: true,
+    });
+
+    expect(terrain.isNodeMaterial).toBe(true);
+    expect(terrain.isShaderMaterial).not.toBe(true);
+    expect(terrain.vertexNode?.isNode).toBe(true);
+    expect(terrain.fragmentNode?.isNode).toBe(true);
+    expect(terrain.userData.renderRole).toBe('terrain:detail');
+    expect(terrain.userData.exactLegacyHeight).toBe(true);
+    expect(terrain.userData.webGpuLegacyOctaves).toBe(9);
+    expect(terrain.userData.webGpuLegacyDynamicOctaves).toBe(true);
+    expect(terrain.uniforms.uLayerStrength.node.isArrayBufferNode).toBe(true);
+    expect(terrain.uniforms.uLayerStrength.node.array[0]).toBe(0.75);
+    shared.uOctaves.value = 3;
+    expect(terrain.uniforms.uOctaves.value).toBe(3);
+
+    terrain.uniforms.uPaintHeightTexture.value = null;
+    expect(terrain.uniforms.uPaintHeightTexture.value?.isTexture).toBe(true);
+
+    terrain.dispose();
+  });
+
+  it('creates native Studio legacy water and keeps shared uniforms live', () => {
+    const backend = createWebGpuMaterialBackend();
+    const shared = createTerrainUniforms();
+    const water = createWaterMaterial(shared, 1, undefined, {
+      materialBackend: backend,
+    });
+
+    expect(water.isNodeMaterial).toBe(true);
+    expect(water.vertexNode?.isNode).toBe(true);
+    expect(water.fragmentNode?.isNode).toBe(true);
+    expect(water.userData.renderRole).toBe('water:studio:legacy');
+    expect(water.uniforms.uManualHeightTexture.isTextureNode).toBe(true);
+    expect(water.uniforms.uWaterTerrainHeightTex.isTextureNode).toBe(true);
+
+    shared.uSeaLevel.value = 31;
+    expect(water.uniforms.uSeaLevel.value).toBe(31);
+    water.uniforms.uFoamWidth.value = 5;
+    expect(water.uniforms.uFoamWidth.value).toBe(5);
+    water.dispose();
   });
 });

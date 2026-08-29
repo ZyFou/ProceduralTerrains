@@ -107,8 +107,9 @@ export async function createRendererForCanvasAsync(canvas, settings = {}, {
   createWebGlRenderer = createRendererForCanvas,
 } = {}) {
   const requestedBackend = normalizedBackend(settings.rendererBackend);
-  const webgpuRequested = requestedBackend === 'webgpu'
-    || (requestedBackend === 'auto' && webgpuStatus.applicationReady === true);
+  // WebGPU remains an explicit experimental opt-in until production material
+  // parity is complete. Auto intentionally follows the stable WebGL2 path.
+  const webgpuRequested = requestedBackend === 'webgpu';
 
   if (!webgpuRequested) {
     return {
@@ -125,15 +126,6 @@ export async function createRendererForCanvasAsync(canvas, settings = {}, {
       requestedBackend,
       activeBackend: 'webgl2',
       fallbackReason: 'WebGPU API unavailable',
-    };
-  }
-
-  if (webgpuStatus.applicationReady !== true) {
-    return {
-      renderer: createWebGlRenderer(canvas, settings),
-      requestedBackend,
-      activeBackend: 'webgl2',
-      fallbackReason: 'Production WebGPU material parity is incomplete',
     };
   }
 

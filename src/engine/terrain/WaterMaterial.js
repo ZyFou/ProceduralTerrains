@@ -175,7 +175,12 @@ function waterQualityUniforms() {
   };
 }
 
-export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEFAULT_STACK_GLSL) {
+export function createWaterMaterial(
+  sharedUniforms,
+  octaves = 7,
+  stackGLSL = DEFAULT_STACK_GLSL,
+  { materialBackend = null } = {},
+) {
   const uniforms = {
     ...sharedUniforms,                 // share uniform OBJECTS with terrain
     ...waterQualityUniforms(),
@@ -183,6 +188,9 @@ export function createWaterMaterial(sharedUniforms, octaves = 7, stackGLSL = DEF
     uWaterFadeStart: { value: 99999.0 },  // studio mode: no fade
     uWaterFadeEnd:   { value: 100000.0 },
   };
+  if (materialBackend?.createLegacyStudioWaterMaterial) {
+    return materialBackend.createLegacyStudioWaterMaterial(uniforms);
+  }
   const mat = new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },

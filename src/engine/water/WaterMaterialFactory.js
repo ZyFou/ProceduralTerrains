@@ -21,6 +21,7 @@ export function createWaterMaterialForMode({
   stackGLSL,
   infinite = false,
   planet = false,
+  materialBackend = null,
 }) {
   if (planet) {
     return createPlanetWaterMaterial(sharedUniforms, octaves, stackGLSL);
@@ -42,7 +43,7 @@ export function createWaterMaterialForMode({
   }
   return infinite
     ? createInfiniteWaterMaterial(sharedUniforms, octaves, stackGLSL)
-    : createWaterMaterial(sharedUniforms, octaves, stackGLSL);
+    : createWaterMaterial(sharedUniforms, octaves, stackGLSL, { materialBackend });
 }
 
 export function applyWaterMaterialSettings(mat, params, mode, debugView = 'off') {

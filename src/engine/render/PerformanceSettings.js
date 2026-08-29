@@ -28,6 +28,7 @@ export const BASE_LOD_DISTANCES = [4, 8, 14];       // thresholds × chunkSize
 export const MAX_SAFE_TRIANGLES = 6_000_000;
 
 const STORAGE_KEY = 'terrain-studio-perf-v1';
+const RENDERER_BACKEND_DEFAULT_VERSION = 3;
 
 export const PERF_LIMITS = {
   renderScale:           { min: 0.4,     max: 2.0 },
@@ -164,7 +165,8 @@ export function createPerfSettings(presetKey = 'high') {
   const { label, ...values } = PERF_PRESETS[presetKey] || PERF_PRESETS.high;
   return sanitizePerfSettings({
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
-    rendererBackend: 'auto',
+    rendererBackend: 'webgl',
+    rendererBackendDefaultVersion: RENDERER_BACKEND_DEFAULT_VERSION,
     gpuPreference: 'default',
     useWorker: false,
     autoPerf: true,
@@ -364,6 +366,13 @@ export function loadPerfSettings() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      // WebGPU was briefly promoted before production material parity was
+      // ready. Move every setting written by that rollout back to the stable
+      // WebGL renderer once. Explicit choices made after v3 remain untouched.
+      if ((parsed.rendererBackendDefaultVersion ?? 1) < RENDERER_BACKEND_DEFAULT_VERSION) {
+        parsed.rendererBackend = 'webgl';
+        parsed.rendererBackendDefaultVersion = RENDERER_BACKEND_DEFAULT_VERSION;
+      }
       const base = createPerfSettings(parsed.preset === 'custom' ? 'high' : parsed.preset);
       return sanitizePerfSettings({ ...base, ...parsed });
     }

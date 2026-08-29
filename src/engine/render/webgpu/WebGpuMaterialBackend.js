@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn,
+  Loop,
+  abs,
   acos,
   attribute,
   atan,
@@ -15,6 +17,7 @@ import {
   floor,
   fract,
   fwidth,
+  int,
   length,
   max,
   min,
@@ -33,6 +36,7 @@ import {
   step,
   texture,
   uniform,
+  uniformArray,
   uv,
   varying,
   vec2,
@@ -45,16 +49,54 @@ const MANUAL_TERRAIN_TEXTURE_UNIFORMS = new Set([
   'uManualSurfaceTextureA',
   'uManualSurfaceTextureB',
   'uDestructionTexture',
+  'uTileOccupancy',
+  'uSurfDiffuse',
+  'uSurfProps',
+  'uPaintHeightTexture',
+  'uSplineHeightTexture',
+  'uErosionOffsetTex',
+]);
+
+const LEGACY_WATER_TEXTURE_UNIFORMS = new Set([
+  'uManualHeightTexture',
+  'uDestructionTexture',
+  'uWaterTerrainHeightTex',
+  'uTileOccupancy',
+]);
+
+const LEGACY_WATER_NODE_UNIFORMS = Object.freeze([
+  'uManualEnabled', 'uManualOrigin', 'uManualSpan', 'uManualHeightTexture',
+  'uDestructionEnabled', 'uDestructionOrigin', 'uDestructionSpan',
+  'uDestructionTexture', 'uWaterTerrainHeightTex', 'uUseWaterTerrainBiomeTex',
+  'uBakeOrigin', 'uBakeSpan', 'uHeightScale', 'uSeaLevel',
+  'uTileOccupancy', 'uTileGridOrigin', 'uTileGridDim', 'uTileCellSize',
+  'uUseTiles', 'uTileShape', 'uTileDiskRadius',
+  'uWaterAnim', 'uWaterFadeStart', 'uWaterFadeEnd', 'uWaterQuality',
+  'uWaterDetail', 'uWaterReflection', 'uWaveComplexity', 'uFoamWidth',
+  'uVisualFoamBreakup', 'uVisualShallowWaterSoftness',
+  'uColShallow', 'uColDeep', 'uColFoam', 'uPaletteSaturation',
+  'uPaletteTint', 'uSunDir', 'uTerrainSunCol', 'uTerrainSunIntensity',
+  'uTerrainSkyAmb', 'uFogColor', 'uFogDensity', 'uTime',
 ]);
 
 const MANUAL_TERRAIN_NODE_UNIFORMS = Object.freeze([
+  'uSeedOffset', 'uFrequency', 'uAmplitude', 'uOctaves', 'uStackNormalize',
+  'uStackOutMin', 'uStackOutMax', 'uTerrainSmoothing', 'uPersistence',
+  'uLacunarity', 'uRidge', 'uWarp', 'uFalloff', 'uEdgeFalloffMode',
+  'uMoistScale', 'uMoistBias', 'uBiomeScale', 'uTempBias',
+  'uTerrainFormationSeaLevel', 'uPaintBaseMult', 'uPaintEnabled',
+  'uPaintOpacity', 'uPaintBoardSize', 'uPaintHeightTexture',
+  'uSplineEnabled', 'uSplineOrigin', 'uSplineSpan', 'uSplineHeightTexture',
+  'uErosionEnabled', 'uErosionOffsetTex', 'uBakeOrigin', 'uBakeSpan',
   'uManualEnabled', 'uManualOrigin', 'uManualSpan',
   'uManualHeightTexture', 'uManualSurfaceMode', 'uManualSurfaceOrigin',
   'uManualSurfaceSpan', 'uManualSurfaceTextureA', 'uManualSurfaceTextureB',
   'uDestructionEnabled', 'uDestructionOrigin', 'uDestructionSpan',
   'uDestructionTexture', 'uHeightScale', 'uSeaLevel', 'uEps',
   'uSkirtDepth', 'uPlinthBaseY', 'uWallThickness', 'uBoardHalf',
-  'uChunkSize', 'uUseTiles', 'uTileShape', 'uInfiniteMode', 'uNormalStrength', 'uAO',
+  'uChunkSize', 'uTileOccupancy', 'uTileGridOrigin', 'uTileGridDim',
+  'uTileCellSize', 'uUseTiles', 'uTileShape', 'uTileDiskRadius',
+  'uInfiniteMode', 'uNormalStrength', 'uAO',
   'uGrid', 'uLodDebug', 'uMergeDebug', 'uColorMode', 'uTileDebugView',
   'uTerrainDetailDebug', 'uFogColor', 'uFogDensity',
   'uPlinthColor', 'uSunDir', 'uPaletteSaturation', 'uPaletteContrast',
@@ -65,6 +107,10 @@ const MANUAL_TERRAIN_NODE_UNIFORMS = Object.freeze([
   'uAnalysisEnabled', 'uAnalysisMode', 'uAnalysisOpacity', 'uAnalysisMin',
   'uAnalysisMax', 'uAnalysisThresholdA', 'uAnalysisThresholdB',
   'uAnalysisContourSpacing', 'uAnalysisContourStrength',
+  'uSurfDiffuse', 'uSurfProps', 'uSurfMode', 'uSurfAmount',
+  'uSurfPaletteInfluence', 'uSurfScale', 'uSurfBreakup', 'uSurfBlend',
+  'uSurfNormalAmt', 'uSurfRoughAmt', 'uSurfAOAmt', 'uSurfTriplanar',
+  'uSurfNear', 'uSurfFar',
 ]);
 
 let manualTerrainFallbackTexture = null;
@@ -84,15 +130,95 @@ function getManualTerrainFallbackTexture() {
   return manualTerrainFallbackTexture;
 }
 
+function promoteUniformEntry(entry, textureUniform = false) {
+  if (entry?.isNode) return entry;
+  if (entry?.node?.isNode) return entry.node;
+  let current = entry?.value;
+  const node = textureUniform
+    ? texture(current || getManualTerrainFallbackTexture())
+    : uniform(current);
+  if (entry && typeof entry === 'object') {
+    Object.defineProperty(entry, 'value', {
+      configurable: true,
+      enumerable: true,
+      get: () => current,
+      set: (next) => {
+        current = next;
+        node.value = textureUniform
+          ? (next || getManualTerrainFallbackTexture())
+          : next;
+      },
+    });
+    Object.defineProperty(entry, 'node', {
+      configurable: true,
+      enumerable: false,
+      value: node,
+    });
+  }
+  return node;
+}
+
+function promoteLegacyWaterUniforms(legacyUniforms) {
+  const nodes = {};
+  for (const name of LEGACY_WATER_NODE_UNIFORMS) {
+    nodes[name] = promoteUniformEntry(
+      legacyUniforms?.[name],
+      LEGACY_WATER_TEXTURE_UNIFORMS.has(name),
+    );
+  }
+  return nodes;
+}
+
 function promoteManualTerrainUniforms(legacyUniforms) {
   for (const name of MANUAL_TERRAIN_NODE_UNIFORMS) {
     const entry = legacyUniforms?.[name];
     if (!entry || entry.isNode) continue;
-    legacyUniforms[name] = MANUAL_TERRAIN_TEXTURE_UNIFORMS.has(name)
-      ? texture(entry.value || getManualTerrainFallbackTexture())
-      : uniform(entry.value);
+    if (MANUAL_TERRAIN_TEXTURE_UNIFORMS.has(name)) {
+      let current = entry.value || getManualTerrainFallbackTexture();
+      const node = texture(current);
+      // Project loading legitimately clears optional texture uniforms. TSL's
+      // TextureNode cannot hold null, so retain a transparent 1x1 resource
+      // while the feature's enable/mode uniform keeps the sample a no-op.
+      Object.defineProperty(node, 'value', {
+        configurable: true,
+        enumerable: true,
+        get: () => current,
+        set: (next) => {
+          current = next || getManualTerrainFallbackTexture();
+        },
+      });
+      legacyUniforms[name] = node;
+    } else {
+      legacyUniforms[name] = uniform(entry.value);
+    }
   }
   return legacyUniforms;
+}
+
+function bridgeManualTerrainArrayUniform(legacyUniforms, name, length, fallback) {
+  const entry = legacyUniforms?.[name];
+  if (!entry) return uniformArray(new Array(length).fill(fallback), 'float');
+  if (entry.node?.isArrayBufferNode) return entry.node;
+
+  let current = Array.isArray(entry.value)
+    ? entry.value
+    : new Array(length).fill(fallback);
+  const node = uniformArray(current, 'float');
+  Object.defineProperty(entry, 'value', {
+    configurable: true,
+    enumerable: true,
+    get: () => current,
+    set: (next) => {
+      current = Array.isArray(next) ? next : new Array(length).fill(fallback);
+      node.array = current;
+    },
+  });
+  Object.defineProperty(entry, 'node', {
+    configurable: true,
+    enumerable: false,
+    value: node,
+  });
+  return node;
 }
 
 function promoteLegacyUniforms(legacyUniforms) {
@@ -108,7 +234,7 @@ function promotePostUniforms(legacyUniforms) {
   const textureUniforms = new Set(['tDiffuse', 'tDepth', 'tCloud', 'tSceneDepth', 'tInput']);
   for (const [name, entry] of Object.entries(legacyUniforms || {})) {
     nodes[name] = textureUniforms.has(name)
-      ? texture(entry?.value ?? null)
+      ? texture(entry?.value || getManualTerrainFallbackTexture())
       : uniform(entry?.value);
   }
   return nodes;
@@ -714,6 +840,301 @@ function createCloudOccupancyMaterials(legacyUniforms, { planet = false } = {}) 
   };
 }
 
+function legacySmoothstep(edge0, edge1, value) {
+  const t = clamp(value.sub(edge0).div(float(edge1).sub(edge0)), 0, 1);
+  return t.mul(t).mul(float(3).sub(t.mul(2)));
+}
+
+function legacyHash12(point) {
+  const p3 = fract(vec3(point.x, point.y, point.x).mul(0.1031)).toVar();
+  p3.addAssign(dot(p3, p3.yzx.add(33.33)));
+  return fract(p3.x.add(p3.y).mul(p3.z));
+}
+
+function legacyValueNoise(point) {
+  const cell = floor(point);
+  const local = fract(point);
+  const fade = local.mul(local).mul(local)
+    .mul(local.mul(local.mul(6).sub(15)).add(10));
+  const a = legacyHash12(cell);
+  const b = legacyHash12(cell.add(vec2(1, 0)));
+  const c = legacyHash12(cell.add(vec2(0, 1)));
+  const d = legacyHash12(cell.add(vec2(1, 1)));
+  return mix(mix(a, b, fade.x), mix(c, d, fade.x), fade.y);
+}
+
+function legacyRotate(point) {
+  return vec2(
+    point.x.mul(0.8).add(point.y.mul(0.6)),
+    point.x.mul(-0.6).add(point.y.mul(0.8)),
+  );
+}
+
+function createLegacyFbm(octaves, uPersistence, uLacunarity, uOctaves = null) {
+  return (input) => {
+    const point = vec2(input).toVar();
+    const amplitude = float(0.5).toVar();
+    const sum = float(0).toVar();
+    const normalization = float(0).toVar();
+    const count = uOctaves
+      ? int(clamp(uOctaves, 1, octaves))
+      : int(octaves);
+    Loop(count, () => {
+      sum.addAssign(legacyValueNoise(point).mul(amplitude));
+      normalization.addAssign(amplitude);
+      amplitude.mulAssign(uPersistence);
+      point.assign(legacyRotate(point).mul(uLacunarity));
+    });
+    return sum.div(max(normalization, 0.0001));
+  };
+}
+
+function legacyFbm3(input) {
+  let point = input;
+  let value = legacyValueNoise(point).mul(0.55);
+  point = legacyRotate(point).mul(2.13);
+  value = value.add(legacyValueNoise(point).mul(0.3));
+  point = legacyRotate(point).mul(2.13);
+  return value.add(legacyValueNoise(point).mul(0.15));
+}
+
+function createLegacyRidgedFbm(octaves, uPersistence, uLacunarity, uOctaves = null) {
+  return (input) => {
+    const point = vec2(input).toVar();
+    const amplitude = float(0.5).toVar();
+    const sum = float(0).toVar();
+    const normalization = float(0).toVar();
+    const carry = float(1).toVar();
+    const count = uOctaves
+      ? int(clamp(uOctaves, 1, octaves))
+      : int(octaves);
+    Loop(count, () => {
+      const ridge = float(1).sub(abs(legacyValueNoise(point).mul(2).sub(1))).pow(2);
+      sum.addAssign(amplitude.mul(ridge).mul(carry));
+      carry.assign(clamp(ridge.mul(1.4), 0, 1));
+      normalization.addAssign(amplitude);
+      amplitude.mulAssign(uPersistence);
+      point.assign(legacyRotate(point).mul(uLacunarity));
+    });
+    return sum.div(max(normalization, 0.0001));
+  };
+}
+
+function createLegacyGeneratedHeight(
+  uniforms,
+  octaves,
+  tileOccupancyAtCell,
+  legacyLayerStrength,
+) {
+  const {
+    uSeedOffset,
+    uFrequency,
+    uAmplitude,
+    uOctaves,
+    uStackNormalize,
+    uStackOutMin,
+    uStackOutMax,
+    uTerrainSmoothing,
+    uPersistence,
+    uLacunarity,
+    uRidge,
+    uWarp,
+    uFalloff,
+    uEdgeFalloffMode,
+    uMoistScale,
+    uMoistBias,
+    uBiomeScale,
+    uTempBias,
+    uTerrainFormationSeaLevel,
+    uHeightScale,
+    uBoardHalf,
+    uTileGridOrigin,
+    uTileCellSize,
+    uUseTiles,
+    uTileShape,
+    uTileDiskRadius,
+    uInfiniteMode,
+  } = uniforms;
+  const fbm = createLegacyFbm(octaves, uPersistence, uLacunarity, uOctaves);
+  const fbm4 = createLegacyFbm(4, uPersistence, uLacunarity);
+  const ridgedFbm = createLegacyRidgedFbm(
+    octaves,
+    uPersistence,
+    uLacunarity,
+    uOctaves,
+  );
+
+  const tileFalloff = (point) => {
+    const cellSize = max(uTileCellSize, 1);
+    const relative = point.sub(uTileGridOrigin).div(cellSize);
+    const cell = floor(relative);
+    const local = fract(relative).mul(2).sub(1);
+    const band = max(uFalloff, 0.0001);
+    const xPositive = mix(
+      legacySmoothstep(0, band, float(1).sub(local.x)),
+      1,
+      tileOccupancyAtCell(cell.add(vec2(1, 0))),
+    );
+    const xNegative = mix(
+      legacySmoothstep(0, band, float(1).add(local.x)),
+      1,
+      tileOccupancyAtCell(cell.add(vec2(-1, 0))),
+    );
+    const zPositive = mix(
+      legacySmoothstep(0, band, float(1).sub(local.y)),
+      1,
+      tileOccupancyAtCell(cell.add(vec2(0, 1))),
+    );
+    const zNegative = mix(
+      legacySmoothstep(0, band, float(1).add(local.y)),
+      1,
+      tileOccupancyAtCell(cell.add(vec2(0, -1))),
+    );
+    return xPositive.mul(xNegative).mul(zPositive).mul(zNegative);
+  };
+  const assemblyFalloff = (point) => {
+    const square = tileFalloff(point);
+    const band = max(uFalloff.mul(max(uTileCellSize, 1)), 0.0001);
+    const circleT = clamp(uTileDiskRadius.sub(length(point)).div(band), 0, 1);
+    const circle = legacySmoothstep(0, 1, circleT);
+    return mix(square, circle, step(0.5, uTileShape));
+  };
+
+  return (point) => {
+    const p = point.mul(uFrequency).add(uSeedOffset);
+    const biomePoint = p.mul(uBiomeScale);
+    const continentalness = legacyFbm3(
+      biomePoint.mul(0.085).add(vec2(211.3, 57.9)),
+    );
+    const temperature = clamp(
+      legacyFbm3(biomePoint.mul(0.15).add(vec2(71.7, 313.1)))
+        .mul(1.5).sub(0.25).add(uTempBias),
+      0,
+      1,
+    );
+    const moisture = clamp(
+      legacyFbm3(biomePoint.mul(uMoistScale).mul(0.13).add(vec2(91.7, 53.9)))
+        .mul(1.5).sub(0.25).add(uMoistBias),
+      0,
+      1,
+    );
+    const erosion = legacyFbm3(
+      biomePoint.mul(0.19).add(vec2(157.1, 423.7)),
+    );
+    const region = legacyFbm3(p.mul(0.7).add(vec2(631.4, 199.2)));
+    const jitter = region.sub(0.5).mul(0.16);
+    const hot = legacySmoothstep(0.52, 0.74, temperature.add(jitter));
+    const dry = legacySmoothstep(0.55, 0.3, moisture.sub(jitter));
+    const wet = legacySmoothstep(0.55, 0.78, moisture.add(jitter));
+    const lowContinental = legacySmoothstep(0.55, 0.32, continentalness);
+    const eroded = legacySmoothstep(0.4, 0.7, erosion.add(jitter.mul(0.5)));
+    const desert = hot.mul(dry).mul(float(1).sub(eroded.mul(0.55)));
+    const canyon = dry.mul(eroded)
+      .mul(legacySmoothstep(0.3, 0.55, continentalness));
+    const wetland = wet.mul(lowContinental).mul(float(1).sub(hot.mul(0.4)));
+    const mountainsBiome = legacySmoothstep(0.38, 0.62, continentalness)
+      .mul(float(1).sub(eroded.mul(0.7)));
+
+    const warp = vec2(
+      fbm4(p.add(vec2(13.7, 41.3))),
+      fbm4(p.add(vec2(87.2, 9.1))),
+    );
+    const q = p.add(warp.sub(0.5).mul(uWarp)
+      .mul(float(1).sub(canyon.mul(0.5))));
+    const base = fbm(q);
+    const baseAmplitude = float(0.3)
+      .mul(float(1).sub(desert.mul(0.45)))
+      .mul(float(1).sub(wetland.mul(0.75)));
+    let height = base.mul(baseAmplitude).add(0.06);
+    const dune = float(1).sub(abs(legacyValueNoise(vec2(
+      q.x.mul(2.2).add(q.y.mul(0.4)),
+      q.y.mul(0.8),
+    ).add(vec2(311.7, 89.1))).mul(2).sub(1)));
+    height = height.add(dune.mul(dune).mul(0.05).mul(desert));
+    const ridge = ridgedFbm(q.mul(1.7).add(vec2(31.4, 27.2)));
+    const smoothAmount = clamp(uTerrainSmoothing, 0, 1);
+    const ridgeShape = mix(
+      pow(ridge, 1.35),
+      pow(ridge, 0.62).mul(0.58),
+      smoothAmount,
+    );
+    const chain = legacySmoothstep(
+      0.34,
+      0.66,
+      fbm4(q.mul(0.35).add(vec2(5.1, 17.7))),
+    );
+    const mountains = chain
+      .mul(mix(0.35, 1, mountainsBiome))
+      .mul(float(1).sub(desert.mul(0.85)))
+      .mul(float(1).sub(wetland));
+    height = height.add(ridgeShape.mul(mountains).mul(uRidge)
+      .mul(mix(1.15, 0.82, smoothAmount)));
+    const sea01 = uTerrainFormationSeaLevel.div(max(uHeightScale, 1));
+    height = mix(height, sea01.add(0.012).add(base.mul(0.03)), wetland.mul(0.85));
+    const terraceSteps = float(14);
+    const terraceValue = floor(height.mul(terraceSteps))
+      .add(legacySmoothstep(0.2, 0.8, fract(height.mul(terraceSteps))))
+      .div(terraceSteps);
+    height = mix(height, terraceValue, canyon.mul(0.75));
+
+    const height01 = clamp(height.div(1.35), 0, 1);
+    const peak = max(height01.sub(0.42), 0);
+    const compressed = float(0.42).add(peak.div(
+      float(1).add(smoothAmount.mul(3.2).mul(peak).div(0.58)),
+    )).mul(1.35);
+    height = mix(
+      height,
+      compressed,
+      legacySmoothstep(0.42, 0.72, height01).mul(smoothAmount),
+    );
+    // The default generated stack is one `replace` legacy layer, followed by
+    // the stack-wide amplitude multiplier. Keep this ordering identical to
+    // stackHeight2D() so smoothing and mountain-edge additions see world data
+    // at the same stage as the GLSL implementation.
+    height = height.mul(legacyLayerStrength).mul(uAmplitude);
+
+    const squareEdge = mix(
+      max(point.x.abs(), point.y.abs()).div(max(uBoardHalf, 1)),
+      length(point.div(max(uBoardHalf, 1))).mul(0.7071),
+      0.5,
+    );
+    const squareT = clamp(
+      float(1).sub(squareEdge).div(max(uFalloff, 0.0001)),
+      0,
+      1,
+    );
+    const squareRim = legacySmoothstep(0, 1, squareT);
+    const studioRim = mix(squareRim, assemblyFalloff(point), step(0.5, uUseTiles));
+    const rim = mix(studioRim, 1, step(0.5, uInfiniteMode));
+    const falloffEnabled = step(0.0001, uFalloff);
+    const attenuated = height.mul(mix(1, rim, falloffEnabled));
+    const edgePoint = p.add(vec2(173.7, 419.2));
+    const edgeMountains = pow(ridgedFbm(edgePoint.mul(2.35)), 1.25);
+    const edgeBreakup = legacyValueNoise(edgePoint.mul(5.1).add(vec2(61.4, 27.8)));
+    const mountainEdge = height.add(
+      edgeMountains.mul(0.55).add(edgeBreakup.mul(0.12))
+        .mul(float(1).sub(rim)).mul(uAmplitude).mul(clamp(uFalloff, 0, 1)),
+    );
+    height = mix(attenuated, mountainEdge, step(0.5, uEdgeFalloffMode));
+    const stackSoftClamp = (value) => select(
+      value.lessThanEqual(0),
+      0,
+      select(
+        value.lessThanEqual(1),
+        value,
+        min(1.35, float(1).add(float(0.35).mul(
+          float(1).sub(exp(value.sub(1).div(0.35).negate())),
+        ))),
+      ),
+    );
+    const normalized = stackSoftClamp(
+      height.sub(uStackOutMin).div(max(uStackOutMax.sub(uStackOutMin), 0.0001)),
+    );
+    height = mix(clamp(height, 0, 1.35), normalized, step(0.5, uStackNormalize));
+    return height.mul(uHeightScale);
+  };
+}
+
 function boundedTextureSample(textureNode, point, origin, span) {
   const sampleUv = point.sub(origin).div(max(span, vec2(1)));
   const inside = step(0, sampleUv.x).mul(step(sampleUv.x, 1))
@@ -721,9 +1142,43 @@ function boundedTextureSample(textureNode, point, origin, span) {
   return textureNode.sample(clamp(sampleUv, vec2(0), vec2(1))).mul(inside);
 }
 
-function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}) {
+function createManualTerrainMaterial(
+  legacyUniforms,
+  { variant = 'manual', legacyGenerated = false, octaves = 7 } = {},
+) {
+  const surfaceTiles = bridgeManualTerrainArrayUniform(
+    legacyUniforms,
+    'uSurfTile',
+    13,
+    12,
+  );
+  const surfaceRolesReady = bridgeManualTerrainArrayUniform(
+    legacyUniforms,
+    'uSurfRolePresent',
+    13,
+    0,
+  );
+  const layerStrengths = bridgeManualTerrainArrayUniform(
+    legacyUniforms,
+    'uLayerStrength',
+    12,
+    0,
+  );
   const uniforms = promoteManualTerrainUniforms(legacyUniforms);
   const {
+    uPaintBaseMult,
+    uPaintEnabled,
+    uPaintOpacity,
+    uPaintBoardSize,
+    uPaintHeightTexture,
+    uSplineEnabled,
+    uSplineOrigin,
+    uSplineSpan,
+    uSplineHeightTexture,
+    uErosionEnabled,
+    uErosionOffsetTex,
+    uBakeOrigin,
+    uBakeSpan,
     uManualEnabled,
     uManualOrigin,
     uManualSpan,
@@ -745,8 +1200,13 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uWallThickness,
     uBoardHalf,
     uChunkSize,
+    uTileOccupancy,
+    uTileGridOrigin,
+    uTileGridDim,
+    uTileCellSize,
     uUseTiles,
     uTileShape,
+    uTileDiskRadius,
     uInfiniteMode,
     uNormalStrength,
     uAO,
@@ -787,6 +1247,19 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uAnalysisThresholdB,
     uAnalysisContourSpacing,
     uAnalysisContourStrength,
+    uSurfDiffuse,
+    uSurfProps,
+    uSurfMode,
+    uSurfAmount,
+    uSurfPaletteInfluence,
+    uSurfScale,
+    uSurfBreakup,
+    uSurfNormalAmt,
+    uSurfRoughAmt,
+    uSurfAOAmt,
+    uSurfTriplanar,
+    uSurfNear,
+    uSurfFar,
   } = uniforms;
 
   const manualSample = (point) => boundedTextureSample(
@@ -801,12 +1274,165 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     uDestructionOrigin,
     uDestructionSpan,
   ).rg.mul(step(0.5, uDestructionEnabled));
-  const heightAt = (point) => manualSample(point).add(destructionSample(point).r);
+  const tileOccupancyAtCell = (cell) => {
+    const inside = step(0, cell.x).mul(step(0, cell.y))
+      .mul(step(cell.x, uTileGridDim.x.sub(0.5)))
+      .mul(step(cell.y, uTileGridDim.y.sub(0.5)));
+    const sampleUv = cell.add(0.5).div(max(uTileGridDim, vec2(1)));
+    return step(0.5, uTileOccupancy.sample(sampleUv).r).mul(inside);
+  };
+  const tileWallAt = (point) => {
+    const cellSize = max(uTileCellSize, 1);
+    const relative = point.sub(uTileGridOrigin).div(cellSize);
+    const edgeEpsilon = float(2).div(cellSize);
+    const floorX = floor(relative.x);
+    const floorZ = floor(relative.y);
+    const nearestX = floor(relative.x.add(0.5));
+    const onXBoundary = step(abs(relative.x.sub(nearestX)), edgeEpsilon);
+    const occupiedLeft = tileOccupancyAtCell(vec2(nearestX.sub(1), floorZ));
+    const occupiedRight = tileOccupancyAtCell(vec2(nearestX, floorZ));
+    const wallX = onXBoundary.mul(abs(occupiedLeft.sub(occupiedRight)));
+    const nearestZ = floor(relative.y.add(0.5));
+    const onZBoundary = step(abs(relative.y.sub(nearestZ)), edgeEpsilon);
+    const occupiedDown = tileOccupancyAtCell(vec2(floorX, nearestZ.sub(1)));
+    const occupiedUp = tileOccupancyAtCell(vec2(floorX, nearestZ));
+    const wallZ = onZBoundary.mul(abs(occupiedDown.sub(occupiedUp)));
+    return vec3(
+      wallX.add(wallZ),
+      occupiedLeft.sub(occupiedRight).mul(wallX),
+      occupiedDown.sub(occupiedUp).mul(wallZ),
+    );
+  };
+  const tileOccupiedAt = (point) => {
+    const relative = point.sub(uTileGridOrigin).div(max(uTileCellSize, 1));
+    let occupied = tileOccupancyAtCell(floor(relative));
+    const disk = step(length(point), uTileDiskRadius);
+    occupied = occupied.mul(mix(1, disk, step(0.5, uTileShape)));
+    return mix(1, occupied, step(0.5, uUseTiles));
+  };
+  const generatedHeightAt = legacyGenerated
+    ? createLegacyGeneratedHeight(
+      uniforms,
+      Math.max(1, Math.round(octaves)),
+      tileOccupancyAtCell,
+      layerStrengths.element(0),
+    )
+    : () => float(0);
+  const paintSample = legacyGenerated ? (point) => {
+    const sampleUv = point.div(max(uPaintBoardSize, 1)).add(0.5);
+    const inside = step(0, sampleUv.x).mul(step(sampleUv.x, 1))
+      .mul(step(0, sampleUv.y)).mul(step(sampleUv.y, 1));
+    return uPaintHeightTexture.sample(clamp(sampleUv, vec2(0), vec2(1))).r
+      .mul(inside).mul(uPaintOpacity).mul(step(0.5, uPaintEnabled));
+  } : () => float(0);
+  const splineSample = legacyGenerated ? (point) => boundedTextureSample(
+    uSplineHeightTexture,
+    point,
+    uSplineOrigin,
+    uSplineSpan,
+  ).r.mul(step(0.5, uSplineEnabled)) : () => float(0);
+  const erosionSample = legacyGenerated ? (point) => boundedTextureSample(
+    uErosionOffsetTex,
+    point,
+    uBakeOrigin,
+    uBakeSpan,
+  ).r.mul(step(0.5, uErosionEnabled)) : () => float(0);
+  const heightAt = (point) => generatedHeightAt(point).mul(uPaintBaseMult)
+    .add(paintSample(point))
+    .add(manualSample(point))
+    .add(splineSample(point))
+    .add(erosionSample(point))
+    .add(destructionSample(point).r);
+
+  const surfaceArrayValue = (arrayNode, role) => {
+    let value = arrayNode.element(12);
+    for (let index = 11; index >= 0; index -= 1) {
+      value = select(role.lessThan(index + 0.5), arrayNode.element(index), value);
+    }
+    return value;
+  };
+  const surfacePalette = (role) => select(
+    role.lessThan(1.5), uColSand,
+    select(
+      role.lessThan(4.5), uColGrass,
+      select(
+        role.lessThan(7.5), uColSwamp,
+        select(
+          role.lessThan(8.5), uColRedRock,
+          select(
+            role.lessThan(9.5), uColRedRock2,
+            select(role.lessThan(11.5), uColRock, uColSnow),
+          ),
+        ),
+      ),
+    ),
+  );
+  const randomizedSurfaceUv = (input, role, salt) => {
+    const cell = floor(input);
+    const local = fract(input);
+    const key = cell.add(vec2(
+      role.mul(19.17).add(salt),
+      role.mul(5.83).sub(salt),
+    ));
+    const breakup = clamp(uSurfBreakup, 0, 1);
+    const scale = mix(
+      1,
+      mix(0.72, 1.36, hash21(key.add(vec2(29.1, 11.7)))),
+      breakup,
+    );
+    const offset = vec2(
+      hash21(key.add(vec2(73.4, 2.6))),
+      hash21(key.add(vec2(9.4, 91.2))),
+    ).sub(0.5).mul(breakup);
+    return cell.add(local.sub(0.5).mul(scale).add(0.5).add(offset));
+  };
+  const surfaceAtlasUv = (input, role) => vec2(
+    fract(input.x),
+    role.mul(4).add(0.006).add(fract(input.y).mul(0.988)).div(52),
+  );
+  const sampleSurfaceRole = (role, worldPosition, triBlend, geometricNormal) => {
+    const tile = surfaceArrayValue(surfaceTiles, role);
+    const inverseTile = max(uSurfScale, 0.01).div(max(tile, 0.01));
+    const uvX = randomizedSurfaceUv(worldPosition.zy.mul(inverseTile), role, 1);
+    const uvY = randomizedSurfaceUv(worldPosition.xz.mul(inverseTile), role, 2);
+    const uvZ = randomizedSurfaceUv(worldPosition.xy.mul(inverseTile), role, 3);
+    const diffuseX = uSurfDiffuse.sample(surfaceAtlasUv(uvX, role)).rgb;
+    const diffuseY = uSurfDiffuse.sample(surfaceAtlasUv(uvY, role)).rgb;
+    const diffuseZ = uSurfDiffuse.sample(surfaceAtlasUv(uvZ, role)).rgb;
+    const propsX = uSurfProps.sample(surfaceAtlasUv(uvX, role));
+    const propsY = uSurfProps.sample(surfaceAtlasUv(uvY, role));
+    const propsZ = uSurfProps.sample(surfaceAtlasUv(uvZ, role));
+    let albedo = diffuseX.mul(triBlend.x)
+      .add(diffuseY.mul(triBlend.y))
+      .add(diffuseZ.mul(triBlend.z));
+    const normalXy = propsX.rg.mul(2).sub(1);
+    const normalYy = propsY.rg.mul(2).sub(1);
+    const normalZy = propsZ.rg.mul(2).sub(1);
+    const normalX = normalize(geometricNormal.add(vec3(0, normalXy.y.negate(), normalXy.x)));
+    const normalY = normalize(geometricNormal.add(vec3(normalYy.x, 0, normalYy.y.negate())));
+    const normalZ = normalize(geometricNormal.add(vec3(normalZy.x, normalZy.y.negate(), 0)));
+    const sampledNormal = normalize(
+      normalX.mul(triBlend.x).add(normalY.mul(triBlend.y)).add(normalZ.mul(triBlend.z)),
+    );
+    const roughness = propsX.b.mul(triBlend.x)
+      .add(propsY.b.mul(triBlend.y)).add(propsZ.b.mul(triBlend.z));
+    const ao = propsX.a.mul(triBlend.x)
+      .add(propsY.a.mul(triBlend.y)).add(propsZ.a.mul(triBlend.z));
+    const ready = step(0.5, surfaceArrayValue(surfaceRolesReady, role));
+    const tintAmount = clamp(uSurfPaletteInfluence, 0, 1).mul(ready);
+    const luminance = dot(albedo, vec3(0.299, 0.587, 0.114));
+    const tinted = max(surfacePalette(role).mul(mix(0.48, 1.55, luminance)), vec3(0));
+    albedo = mix(albedo, tinted, tintAmount);
+    return { albedo, normal: sampledNormal, roughness, ao };
+  };
 
   const vWorldPosition = varying(vec3());
   const vWall = varying(float());
   const vSkirt = varying(float());
   const vLod = varying(float());
+  const vWallMesh = varying(float());
+  const vTerrainHeight = varying(float());
+  const vTerrainNormal = varying(vec3());
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.name = `terrain:${variant}:webgpu`;
@@ -817,28 +1443,51 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
   material.toneMapped = false;
   material.uniforms = uniforms;
 
-  material.vertexNode = Fn(() => {
+  const buildVertexNode = () => Fn(() => {
     const worldPosition = modelWorldMatrix.mul(vec4(positionGeometry, 1)).toVar();
     const height = heightAt(worldPosition.xz);
+    if (legacyGenerated) {
+      // The generated WebGPU path evaluates height in the vertex stage. Derive
+      // its normal from the same continuous field here so it is interpolated
+      // across the mesh instead of exposing one flat normal per triangle.
+      const normalEps = max(uEps, 0.001);
+      const heightX = heightAt(worldPosition.xz.add(vec2(normalEps, 0)));
+      const heightZ = heightAt(worldPosition.xz.add(vec2(0, normalEps)));
+      vTerrainNormal.assign(normalize(vec3(
+        heightX.sub(height).div(normalEps).negate(),
+        1,
+        heightZ.sub(height).div(normalEps).negate(),
+      )));
+    } else {
+      vTerrainNormal.assign(vec3(0, 1, 0));
+    }
     const aSkirt = attribute('aSkirt', 'float');
     const aWall = attribute('aWall', 'float');
     const outer = step(uBoardHalf.sub(1), worldPosition.x.abs())
       .add(step(uBoardHalf.sub(1), worldPosition.z.abs()));
-    const squareWall = aSkirt.mul(step(0.5, outer))
-      .mul(float(1).sub(step(0.5, uUseTiles)));
+    const finite = float(1).sub(step(0.5, uInfiniteMode));
+    const tiled = step(0.5, uUseTiles);
+    const circular = step(0.5, uTileShape);
+    const singleWall = aSkirt.mul(step(0.5, outer))
+      .mul(float(1).sub(tiled)).mul(finite);
+    const tileWall = tileWallAt(worldPosition.xz);
+    const tileOuter = step(0.5, tileWall.x);
+    const squareWall = aSkirt.mul(tileOuter).mul(tiled)
+      .mul(float(1).sub(circular)).mul(finite);
     const radialWall = aSkirt.mul(step(0.5, aWall))
-      .mul(step(0.5, uUseTiles)).mul(step(0.5, uTileShape));
-    const wall = max(squareWall, radialWall)
-      .mul(float(1).sub(step(0.5, uInfiniteMode)));
+      .mul(tiled).mul(circular).mul(finite);
+    const wall = max(max(singleWall, squareWall), radialWall);
     const skirt = aSkirt.mul(float(1).sub(wall));
 
-    const outDirection = vec2(sign(worldPosition.x), sign(worldPosition.z))
+    const singleOutDirection = vec2(sign(worldPosition.x), sign(worldPosition.z))
       .mul(vec2(
         step(uBoardHalf.sub(1), worldPosition.x.abs()),
         step(uBoardHalf.sub(1), worldPosition.z.abs()),
       ));
-    worldPosition.x.addAssign(outDirection.x.mul(wall).mul(uWallThickness));
-    worldPosition.z.addAssign(outDirection.y.mul(wall).mul(uWallThickness));
+    const outDirection = singleOutDirection.mul(singleWall)
+      .add(tileWall.yz.mul(squareWall));
+    worldPosition.x.addAssign(outDirection.x.mul(uWallThickness));
+    worldPosition.z.addAssign(outDirection.y.mul(uWallThickness));
     worldPosition.y.assign(mix(
       height.sub(skirt.mul(uSkirtDepth)),
       uPlinthBaseY,
@@ -849,21 +1498,34 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     vWall.assign(wall);
     vSkirt.assign(max(skirt, wall));
     vLod.assign(attribute('aLod', 'float'));
+    vWallMesh.assign(aWall);
+    vTerrainHeight.assign(height);
     return cameraProjectionMatrix.mul(cameraViewMatrix).mul(worldPosition);
   })();
+  material.vertexNode = buildVertexNode();
 
   const buildFragmentNode = (surfaceEnabled) => Fn(() => {
     const point = vWorldPosition.xz;
+    uInfiniteMode.lessThan(0.5)
+      .and(uTileShape.greaterThan(0.5))
+      .and(vWallMesh.lessThan(0.5))
+      .and(tileOccupiedAt(point).lessThan(0.5))
+      .discard();
     const eps = max(uEps, 0.001);
-    const height = heightAt(point);
-    const heightX = heightAt(point.add(vec2(eps, 0)));
-    const heightZ = heightAt(point.add(vec2(0, eps)));
-    const geometricNormal = normalize(vec3(
-      heightX.sub(height).div(eps).negate(),
-      1,
-      heightZ.sub(height).div(eps).negate(),
-    ));
-    const normal = normalize(vec3(
+    const height = legacyGenerated ? vTerrainHeight : heightAt(point);
+    const heightX = legacyGenerated ? height : heightAt(point.add(vec2(eps, 0)));
+    const heightZ = legacyGenerated ? height : heightAt(point.add(vec2(0, eps)));
+    let geometricNormal;
+    if (legacyGenerated) {
+      geometricNormal = normalize(vTerrainNormal);
+    } else {
+      geometricNormal = normalize(vec3(
+        heightX.sub(height).div(eps).negate(),
+        1,
+        heightZ.sub(height).div(eps).negate(),
+      ));
+    }
+    let normal = normalize(vec3(
       geometricNormal.x.mul(uNormalStrength),
       1,
       geometricNormal.z.mul(uNormalStrength),
@@ -883,6 +1545,11 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
       height01.sub(slope.mul(0.25)),
     ));
     albedo = mix(uColSand, albedo, smoothstep(0, 6, relativeHeight));
+
+    let surfaceAo = float(1);
+    let surfaceRoughness = float(0.8);
+    let surfaceAmount = float(0);
+    let manualSurfaceDebug = vec3(0);
 
     if (surfaceEnabled) {
       const weightsA = boundedTextureSample(
@@ -912,6 +1579,78 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
         .add(uColRedRock2.mul(weightsB.z))
         .div(max(coverage, 0.0001));
       albedo = mix(albedo, painted, coverage);
+
+      const weightedRoles = [
+        [3, weightsA.x],
+        [10, weightsA.y],
+        [0, weightsA.z],
+        [12, weightsA.w],
+        [6, weightsB.x],
+        [8, weightsB.y],
+        [9, weightsB.z],
+      ];
+      let bestRole = float(0);
+      let secondRole = float(0);
+      let bestWeight = float(0);
+      let secondWeight = float(0);
+      for (const [roleIndex, weight] of weightedRoles) {
+        const becomesBest = weight.greaterThan(bestWeight);
+        const becomesSecond = weight.greaterThan(secondWeight);
+        secondRole = select(
+          becomesBest,
+          bestRole,
+          select(becomesSecond, float(roleIndex), secondRole),
+        );
+        secondWeight = select(
+          becomesBest,
+          bestWeight,
+          select(becomesSecond, weight, secondWeight),
+        );
+        bestRole = select(becomesBest, float(roleIndex), bestRole);
+        bestWeight = select(becomesBest, weight, bestWeight);
+      }
+
+      const triRaw = pow(abs(geometricNormal), vec3(4));
+      const triNormalized = triRaw.div(max(triRaw.x.add(triRaw.y).add(triRaw.z), 0.0001));
+      const triBlend = select(uSurfTriplanar.greaterThan(0.5), triNormalized, vec3(0, 1, 0));
+      const bestSurface = sampleSurfaceRole(bestRole, vWorldPosition, triBlend, geometricNormal);
+      const secondSurface = sampleSurfaceRole(
+        secondRole,
+        vWorldPosition,
+        triBlend,
+        geometricNormal,
+      );
+      const secondMix = clamp(
+        secondWeight.div(max(bestWeight.add(secondWeight), 0.0001)),
+        0,
+        0.85,
+      );
+      const texturedAlbedo = mix(bestSurface.albedo, secondSurface.albedo, secondMix);
+      const texturedNormal = normalize(mix(bestSurface.normal, secondSurface.normal, secondMix));
+      const texturedRoughness = mix(
+        bestSurface.roughness,
+        secondSurface.roughness,
+        secondMix,
+      );
+      const texturedAo = mix(bestSurface.ao, secondSurface.ao, secondMix);
+      const surfaceDistance = length(cameraPosition.sub(vWorldPosition));
+      const fade = float(1).sub(smoothstep(uSurfNear, uSurfFar, surfaceDistance));
+      const manualAmount = fade.mul(coverage);
+      const generatedAmount = uSurfMode.mul(uSurfAmount).mul(fade).mul(coverage);
+      surfaceAmount = mix(generatedAmount, manualAmount, step(0.5, uManualSurfaceMode))
+        .mul(step(0.0001, bestWeight));
+      manualSurfaceDebug = vec3(weightsA.x, coverage, surfaceAmount);
+      albedo = mix(albedo, texturedAlbedo, surfaceAmount);
+      const boostedNormal = normalize(
+        geometricNormal.add(texturedNormal.sub(geometricNormal).mul(uSurfNormalAmt)),
+      );
+      normal = normalize(mix(normal, boostedNormal, clamp(surfaceAmount, 0, 1)));
+      surfaceRoughness = mix(
+        0.8,
+        texturedRoughness,
+        clamp(surfaceAmount.mul(uSurfRoughAmt), 0, 1),
+      );
+      surfaceAo = mix(1, texturedAo, clamp(surfaceAmount.mul(uSurfAOAmt), 0, 1));
     }
 
     const scorch = destructionSample(point).g;
@@ -929,12 +1668,22 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
       1,
     );
     const valley = float(1).sub(smoothstep(0, uHeightScale.mul(0.55), height));
-    const ao = float(1).sub(uAO.mul(concavity.mul(0.45).add(valley.mul(0.22))));
+    const ao = float(1).sub(uAO.mul(concavity.mul(0.45).add(valley.mul(0.22))))
+      .mul(surfaceAo);
     const diffuse = max(dot(normal, uSunDir), 0);
     const sun = uTerrainSunCol.mul(uTerrainSunIntensity).mul(diffuse);
     const sky = uTerrainSkyAmb.mul(0.5).mul(normal.y.mul(0.5).add(0.5));
     const bounce = uTerrainBounce.mul(0.25).mul(float(1).sub(normal.y.mul(0.5)));
     let color = albedo.mul(sun.add(sky).add(bounce)).mul(ao);
+    const viewDirection = normalize(cameraPosition.sub(vWorldPosition));
+    const halfDirection = normalize(uSunDir.add(viewDirection));
+    const specularPower = mix(96, 8, clamp(surfaceRoughness, 0.04, 1));
+    const specular = pow(max(dot(normal, halfDirection), 0), specularPower)
+      .mul(float(1).sub(clamp(surfaceRoughness, 0, 1)))
+      .mul(surfaceAmount)
+      .mul(0.15)
+      .mul(max(uSunDir.y, 0));
+    color = color.add(uTerrainSunCol.mul(uTerrainSunIntensity).mul(specular));
 
     const rangeT = clamp(
       height.sub(uAnalysisMin).div(max(uAnalysisMax.sub(uAnalysisMin), 0.001)),
@@ -1062,23 +1811,221 @@ function createManualTerrainMaterial(legacyUniforms, { variant = 'manual' } = {}
     const detailDebug = select(
       uTerrainDetailDebug.lessThan(1.5),
       vec3(clamp(slope.mul(2.4), 0, 1)),
-      normal.mul(0.5).add(0.5),
+      select(
+        uTerrainDetailDebug.lessThan(7.5),
+        normal.mul(0.5).add(0.5),
+        manualSurfaceDebug,
+      ),
     );
     output = select(uTerrainDetailDebug.greaterThan(0.5), detailDebug, output);
     return vec4(output, 1);
   })();
 
   const applyVariant = (nextVariant) => {
-    const normalized = nextVariant === 'manual-empty' ? 'manual-empty' : 'manual';
-    material.fragmentNode = buildFragmentNode(normalized === 'manual');
+    const normalized = legacyGenerated
+      ? (['base', 'detail', 'surface', 'full', 'hybrid-surface', 'hybrid'].includes(nextVariant)
+        ? nextVariant : 'full')
+      : (nextVariant === 'manual-empty' ? 'manual-empty' : 'manual');
+    const surfaceEnabled = legacyGenerated
+      ? ['surface', 'full', 'hybrid-surface', 'hybrid'].includes(normalized)
+      : normalized === 'manual';
+    material.fragmentNode = buildFragmentNode(surfaceEnabled);
     material.userData.terrainVariant = normalized;
     material.userData.renderRole = `terrain:${normalized}`;
     material.name = `terrain:${normalized}:webgpu`;
     material.needsUpdate = true;
   };
   material.userData.rebuildTerrainVariant = applyVariant;
+  material.userData.exactLegacyHeight = legacyGenerated;
+  material.userData.webGpuLegacyOctaves = legacyGenerated
+    ? Math.max(1, Math.round(octaves))
+    : null;
+  material.userData.refreshSurfaceTextures = () => {
+    material.vertexNode = buildVertexNode();
+    applyVariant(material.userData.terrainVariant);
+  };
   applyVariant(variant);
   return { material, uniforms };
+}
+
+function createLegacyStudioWaterMaterial(legacyUniforms) {
+  const uniforms = promoteLegacyWaterUniforms(legacyUniforms);
+  const {
+    uManualEnabled,
+    uManualOrigin,
+    uManualSpan,
+    uManualHeightTexture,
+    uDestructionEnabled,
+    uDestructionOrigin,
+    uDestructionSpan,
+    uDestructionTexture,
+    uWaterTerrainHeightTex,
+    uUseWaterTerrainBiomeTex,
+    uBakeOrigin,
+    uBakeSpan,
+    uHeightScale,
+    uSeaLevel,
+    uTileOccupancy,
+    uTileGridOrigin,
+    uTileGridDim,
+    uTileCellSize,
+    uUseTiles,
+    uTileShape,
+    uTileDiskRadius,
+    uWaterAnim,
+    uWaterFadeStart,
+    uWaterFadeEnd,
+    uWaterQuality,
+    uWaterDetail,
+    uWaterReflection,
+    uWaveComplexity,
+    uFoamWidth,
+    uVisualFoamBreakup,
+    uVisualShallowWaterSoftness,
+    uColShallow,
+    uColDeep,
+    uColFoam,
+    uPaletteSaturation,
+    uPaletteTint,
+    uSunDir,
+    uTerrainSunCol,
+    uTerrainSunIntensity,
+    uTerrainSkyAmb,
+    uFogColor,
+    uFogDensity,
+    uTime,
+  } = uniforms;
+
+  const manualHeightAt = (point) => boundedTextureSample(
+    uManualHeightTexture,
+    point,
+    uManualOrigin,
+    uManualSpan,
+  ).r.add(boundedTextureSample(
+    uDestructionTexture,
+    point,
+    uDestructionOrigin,
+    uDestructionSpan,
+  ).r.mul(step(0.5, uDestructionEnabled)));
+  const bakedHeightAt = (point) => boundedTextureSample(
+    uWaterTerrainHeightTex,
+    point,
+    uBakeOrigin,
+    uBakeSpan,
+  ).a.mul(uHeightScale);
+  const terrainHeightAt = (point) => mix(
+    bakedHeightAt(point).mul(step(0.5, uUseWaterTerrainBiomeTex)),
+    manualHeightAt(point),
+    step(0.5, uManualEnabled),
+  );
+  const tileOccupancyAtCell = (cell) => {
+    const inside = step(0, cell.x).mul(step(0, cell.y))
+      .mul(step(cell.x, uTileGridDim.x.sub(0.5)))
+      .mul(step(cell.y, uTileGridDim.y.sub(0.5)));
+    const sampleUv = cell.add(0.5).div(max(uTileGridDim, vec2(1)));
+    return step(0.5, uTileOccupancy.sample(sampleUv).r).mul(inside);
+  };
+  const tileOccupiedAt = (point) => {
+    const relative = point.sub(uTileGridOrigin).div(max(uTileCellSize, 1));
+    let occupied = tileOccupancyAtCell(floor(relative));
+    const disk = step(length(point), uTileDiskRadius);
+    occupied = occupied.mul(mix(1, disk, step(0.5, uTileShape)));
+    return mix(1, occupied, step(0.5, uUseTiles));
+  };
+
+  const vWorldPosition = varying(vec3());
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.name = 'water:studio:legacy:webgpu';
+  material.userData.renderRole = 'water:studio:legacy';
+  material.transparent = true;
+  material.depthTest = true;
+  material.depthWrite = false;
+  material.side = THREE.DoubleSide;
+  material.forceSinglePass = true;
+  material.toneMapped = false;
+  material.uniforms = uniforms;
+  material.vertexNode = Fn(() => {
+    const worldPosition = modelWorldMatrix.mul(vec4(positionGeometry, 1));
+    vWorldPosition.assign(worldPosition.xyz);
+    return cameraProjectionMatrix.mul(cameraViewMatrix).mul(worldPosition);
+  })();
+  material.fragmentNode = Fn(() => {
+    const point = vWorldPosition.xz;
+    tileOccupiedAt(point).lessThan(0.5).discard();
+    const depth = uSeaLevel.sub(terrainHeightAt(point));
+    depth.lessThanEqual(0.02).discard();
+
+    const animationTime = uTime.mul(uWaterAnim);
+    const largeWave = sin(point.x.mul(0.055).add(animationTime.mul(0.6)))
+      .add(cos(point.y.mul(0.047).sub(animationTime.mul(0.45))));
+    const detailWave = sin(point.x.add(point.y).mul(0.14)
+      .sub(animationTime.mul(0.8))).mul(uWaterDetail).mul(step(0.5, uWaterQuality));
+    const waveStrength = uWaveComplexity.mul(0.16);
+    const normal = normalize(vec3(
+      cos(point.x.mul(0.055).add(animationTime.mul(0.6)))
+        .add(cos(point.x.add(point.y).mul(0.14).sub(animationTime.mul(0.8)))
+          .mul(uWaterDetail).mul(step(0.5, uWaterQuality))).mul(waveStrength).negate(),
+      1,
+      sin(point.y.mul(0.047).sub(animationTime.mul(0.45)))
+        .add(cos(point.x.add(point.y).mul(0.14).sub(animationTime.mul(0.8)))
+          .mul(uWaterDetail).mul(step(0.5, uWaterQuality))).mul(waveStrength),
+    ));
+    const shoreSoftness = clamp(uVisualShallowWaterSoftness, 0, 1);
+    const depthGrade = clamp(depth.div(mix(55, 74, shoreSoftness)), 0, 1);
+    let color = mix(uColShallow, uColDeep, depthGrade);
+    color = mix(vec3(luma(color)), color, uPaletteSaturation).mul(uPaletteTint);
+
+    const diffuse = max(dot(normal, normalize(uSunDir)), 0);
+    const viewDirection = normalize(cameraPosition.sub(vWorldPosition));
+    const halfVector = normalize(normalize(uSunDir).add(viewDirection));
+    const specular = pow(max(dot(normal, halfVector), 0), 90)
+      .mul(uWaterReflection).mul(0.55);
+    const lighting = vec3(0.55).add(uTerrainSkyAmb.mul(0.35))
+      .add(uTerrainSunCol.mul(diffuse).mul(uTerrainSunIntensity).mul(0.65));
+    color = color.mul(lighting)
+      .add(uTerrainSunCol.mul(specular).mul(uTerrainSunIntensity));
+
+    const fresnel = pow(float(1).sub(max(dot(viewDirection, vec3(0, 1, 0)), 0)), 3);
+    color = color.add(uFogColor.mul(fresnel).mul(uWaterReflection).mul(0.18));
+    const foamNoise = largeWave.mul(0.5).add(0.5);
+    const foamDistance = max(uFoamWidth, 0.5);
+    const foam = float(1).sub(smoothstep(
+      min(0.6, foamDistance.mul(0.5)),
+      foamDistance.add(shoreSoftness.mul(1.8)),
+      depth.add(foamNoise.mul(mix(0.8, 3.2, uVisualFoamBreakup))),
+    ));
+    color = mix(color, uColFoam.mul(lighting), foam.mul(0.75));
+
+    const cameraDistance = length(cameraPosition.xz.sub(point));
+    const edgeFade = float(1).sub(smoothstep(
+      uWaterFadeStart,
+      uWaterFadeEnd,
+      cameraDistance,
+    ));
+    const alpha = clamp(float(0.5).add(depthGrade.mul(0.42))
+      .add(fresnel.mul(0.15)).add(foam.mul(0.3)), 0, 0.94).mul(edgeFade);
+    alpha.lessThan(0.01).discard();
+
+    const distance3d = length(cameraPosition.sub(vWorldPosition));
+    const fog = float(1).sub(exp(
+      uFogDensity.mul(uFogDensity).mul(distance3d).mul(distance3d).negate(),
+    ));
+    color = mix(color, uFogColor, clamp(fog, 0, 1));
+    return vec4(pow(max(color, vec3(0)), vec3(1 / 2.2)), alpha);
+  })();
+  return material;
+}
+
+function createLegacyStudioTerrainMaterial(legacyUniforms, options = {}) {
+  const created = createManualTerrainMaterial(legacyUniforms, {
+    ...options,
+    // Keep one fixed WebGPU pipeline. uOctaves masks this maximum graph at
+    // runtime, avoiding a large shader rebuild on every octave slider change.
+    octaves: 9,
+    legacyGenerated: true,
+  });
+  created.material.userData.webGpuLegacyDynamicOctaves = true;
+  return created;
 }
 
 function createProceduralSkyMaterial(legacyUniforms) {
@@ -1191,5 +2138,7 @@ export function createWebGpuMaterialBackend() {
     createCloudCompositeMaterial,
     createCloudOccupancyMaterials,
     createManualTerrainMaterial,
+    createLegacyStudioTerrainMaterial,
+    createLegacyStudioWaterMaterial,
   });
 }

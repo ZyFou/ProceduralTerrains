@@ -406,3 +406,128 @@ Hardware baseline: Apple M4 Pro, normal hardware-accelerated Chromium session.
 - Remaining Manual parity work before validation: atlas diffuse/normal/rough/AO
   sampling, full detail and caustic layers, tile occupancy/wall edge cases,
   biome/detail-specific debug outputs, and WebGL2/WebGPU golden-image comparison.
+
+## Mac continuation log — 2026-08-29
+
+- Ported the painted Manual surface atlas to the native TSL graph. Manual A/B
+  weights retain the WebGL role mapping and select the two strongest roles.
+  Each selected role samples atlas diffuse plus packed normal/roughness/AO;
+  the packed properties share triplanar samples to avoid a second property
+  sampling pass. Distance fade, palette influence, stochastic breakup,
+  triplanar/planar selection, normal relief, AO and roughness response are live
+  uniforms.
+- Added a mutable-array bridge for `uSurfTile` and `uSurfRolePresent`. Existing
+  engine code can continue replacing `.value` arrays while native WebGPU reads
+  padded uniform buffers.
+- Found and fixed a WebGPU-only dynamic-resource issue during semantic canary
+  validation. Three identifies TSL texture uniforms by texture UUID when it
+  builds the graph, so installing an atlas after the fallback texture had been
+  compiled retained the old binding. Native Manual materials now expose a
+  narrow resource refresh hook; `_installSurfaceAtlas()` invokes it after
+  swapping atlas textures and rebuilds the vertex/fragment nodes without
+  changing the public uniform API.
+- Ported Manual multi-tile visibility and wall classification: occupancy texture
+  sampling, empty-neighbour outer walls, interior-seam preservation, circular
+  disk clipping, radial-wall exemption and finite/single-board behavior.
+- Strengthened `validateWebGpuProductionMaterials()` beyond compilation. It now
+  verifies: linear Manual height byte near 64; unskewed grayscale channels;
+  controlled Manual grass-mask coverage/amount; green-dominant atlas role
+  lookup after a post-compile texture replacement; and a zero-color readback
+  when the circular tile occupancy mask is empty.
+- Native result on Apple M4 Pro: passed, 7 native materials compiled/rendered,
+  all semantic Manual checks passed, and browser console contained no WebGPU
+  warning/error.
+- Validation after this lot: 69 test files / 580 tests passed; production build
+  passed. The existing Vite chunk-size warnings are unchanged.
+- `terrain-manual` remains ported but deliberately not promoted to validated.
+  Remaining visual parity work is the full close-range detail/normal layer,
+  underwater caustics, the remaining biome/detail debug views, and a controlled
+  WebGL2/WebGPU golden-image comparison. After that, begin the exact Studio
+  procedural height/noise-stack port; do not use the approximate demo height in
+  `SharedTerrainNodes.js` as production parity.
+- At the user's explicit request, WebGPU is now selectable during the migration
+  and is the default renderer preference. `Auto` also prefers native WebGPU.
+  Existing persisted settings that still contain the old implicit `auto`
+  default migrate once to explicit `webgpu`; an explicit WebGL choice is never
+  overwritten. Native renderer initialization failure still falls back
+  atomically to a fresh WebGL2 renderer. The parity registry remains closed and
+  the Performance panel continues to display the 7/22 migration warning.
+- Browser smoke test after enabling the default: the Manual project reached
+  `Ready`, Performance showed WebGPU selected and active, and the post-process
+  null-sampler startup error was fixed with a valid fallback texture. Expected
+  `ShaderMaterial is not compatible` diagnostics remain for production passes
+  that have not yet been ported; these are migration work, not a reason to mark
+  the registry validated.
+- Fixed the WebGPU minimap failure reported from `MinimapOverlay`. Color mode no
+  longer renders the complete Three.js scene into a secondary target under
+  WebGPU; it uses the existing terrain/biome/water sampler, just like the other
+  minimap modes. This removes the redundant scene pass/readback and prevents
+  the minimap from submitting every remaining GLSL `ShaderMaterial` to
+  NodeBuilder. Browser verification: opening the Manual project still exposes
+  its known hybrid-terrain migration diagnostics, but opening the minimap adds
+  zero new warning/error entries.
+- Ported Studio Legacy water to a native TSL `MeshBasicNodeMaterial`. The graph
+  keeps the mutable shared-uniform contract and covers Manual/baked terrain
+  depth, tile and circular occupancy, waves, shallow/deep tint, sun/specular,
+  foam, fog, distance fade and alpha. It is created through the normal water
+  factory only when the WebGPU material backend is active; WebGL2 and the
+  unported realistic/infinite/planet water paths are unchanged. The production
+  canary now compiles/renders `water-studio-legacy`, and the parity registry is
+  8/22 ported.
+- Deliberately rejected an approximate procedural-height TSL prototype after a
+  browser visual comparison. `terrain-studio` and hybrid generated-base terrain
+  remain unported until the exact noise-stack/codegen semantics are available;
+  do not promote them based only on successful compilation.
+- Validation after the minimap/water slice: 70 test files / 583 tests passed;
+  production build passed with only the unchanged Vite chunk-size warnings.
+- Began the exact Studio Classic terrain port. The default single-legacy-layer
+  stack now has a native TSL height graph covering the historical climate,
+  biome weights, domain warp, FBM/ridged FBM, dunes, mountain chains, wetlands,
+  canyon terraces, smoothing, stack normalization, tile/disk falloff, edge
+  mountains, paint/spline/manual/erosion/destruction offsets and the live layer
+  strength. It is intentionally specialized to Studio `base`, `detail`,
+  `hybrid-surface` and `hybrid` variants with the default structural stack;
+  custom stacks and the procedural surface/full variants still use their
+  existing path until their exact graphs are ported. `terrain-studio` therefore
+  remains outside the ported registry.
+- Added safe material-topology swaps for edits that cross between this native
+  Classic graph and an unported GLSL/custom-stack graph, including octave-count
+  changes. Optional TSL texture uniforms now retain a transparent fallback when
+  project loading clears them, preventing a `TextureNode` null-resource error.
+- Native browser verification on the M4 Pro: cold boot and opening the saved
+  Procedural Blank terrain both rendered with the WebGPU adapter, with zero
+  warning/error entries and no `ShaderMaterial is not compatible` diagnostic.
+  Observed final-frame times were 511 ms cold and 332 ms for the project mode
+  transition on the test viewport. Final validation: 70 test files / 584 tests
+  passed, and the production build passed with only the existing chunk-size
+  warnings.
+- Fixed WebGPU draw-call telemetry that appeared to leak upward forever. Three's
+  common WebGPU `Info` object uses cumulative `render.calls` for render-pass
+  submissions and frame-local `render.drawCalls` for actual draw commands,
+  whereas WebGL exposes draw commands through `render.calls`. Engine pass stats
+  and `PerformanceProfiler` now select the backend-correct field and explicitly
+  reset pass-local counters. Browser reproduction changed from 2440→2824 over
+  five seconds to a stable 33 draw calls across ten samples; triangles remained
+  stable and the console had no warning/error, confirming this was telemetry
+  accumulation rather than duplicated scene objects. Final validation after
+  this fix: 70 test files / 586 tests passed and the production build passed.
+- Fixed the Classic Studio quality/interaction regression exposed by the first
+  native terrain rollout. Generated terrain no longer lights each triangle with
+  a flat screen-space derivative normal: the vertex stage derives a continuous
+  finite-difference normal from the exact height field and interpolates it,
+  removing the low-poly faceting without increasing the geometry budget.
+  Classic WebGPU FBM/ridged FBM now use bounded WGSL loops driven by a live
+  `uOctaves` uniform, so octave edits reuse the existing pipeline instead of
+  rebuilding the large terrain shader. Browser stress tests applied 28 rapid
+  octave edits and 29 noise-scale edits at roughly 11 ms per update with zero
+  shader compile/error logs; the reference view remained responsive at its
+  existing triangle budget.
+- Production rollout decision: WebGPU is no longer the default. Real-project
+  visual validation still showed major material, lighting, texture and water
+  parity gaps despite the isolated native terrain fixes. New settings and
+  `Auto` now use WebGL2; settings written by the short-lived WebGPU-default
+  rollout migrate once back to WebGL2. WebGPU remains an explicit experimental
+  option only. Browser verification restored the complete saved-project look
+  with `full, webgl2`, a 154 ms final frame, and no console error. Do not make
+  WebGPU the default again without golden-image parity on representative saved
+  projects, interactive latency checks, and all production material roles.

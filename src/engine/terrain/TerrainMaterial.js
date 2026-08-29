@@ -1097,6 +1097,7 @@ export function createTerrainUniforms() {
     uSeaLevel:       { value: 42 },
     uTerrainFormationSeaLevel: { value: 42 },
     uAmplitude:      { value: 1.0 },
+    uOctaves:        { value: 7.0 },
     uStackNormalize: { value: 0.0 },
     uStackOutMin:    { value: 0.0 },
     uStackOutMax:    { value: 1.35 },
@@ -1364,6 +1365,27 @@ export function createTerrainMaterial(
   options = {},
 ) {
   const variant = resolveTerrainVariant(options.variant).name;
+  const nativeLegacyVariant = variant === 'base'
+    || variant === 'detail'
+    || variant === 'hybrid-surface'
+    || variant === 'hybrid';
+  if (options.nativeLegacyStudio === true
+      && nativeLegacyVariant
+      && stackGLSL.sig === DEFAULT_STACK_GLSL.sig
+      && options.materialBackend?.createLegacyStudioTerrainMaterial) {
+    const created = options.materialBackend.createLegacyStudioTerrainMaterial(
+      uniforms,
+      { variant, octaves },
+    );
+    const material = created?.material || created;
+    material.defines ||= {};
+    material.defines.OCTAVES = octaves;
+    material.userData.terrainVariant = variant;
+    material.userData.heightProgramSig = stackGLSL.sig;
+    material.userData.renderRole = `terrain:${variant}`;
+    material.name = `terrain:${variant}:webgpu`;
+    return material;
+  }
   if (resolveTerrainVariant(variant).manual
       && options.materialBackend?.createManualTerrainMaterial) {
     const created = options.materialBackend.createManualTerrainMaterial(uniforms, { variant });
@@ -1406,7 +1428,10 @@ export function createInfiniteTerrainMaterial(
 ) {
   // A distinct material object keeps mode ownership/disposal simple, while the
   // identical source + defines let Three.js reuse Tile's compiled GPU program.
-  const material = createTerrainMaterial(uniforms, octaves, stackGLSL, options);
+  const material = createTerrainMaterial(uniforms, octaves, stackGLSL, {
+    ...options,
+    nativeLegacyStudio: false,
+  });
   material.userData.renderRole = `infinite-terrain:${material.userData.terrainVariant}`;
   material.name = material.userData.renderRole;
   return material;

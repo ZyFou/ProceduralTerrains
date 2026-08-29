@@ -230,7 +230,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           value={perf.rendererBackend}
           options={backendOptions}
           onChange={(v) => onPerfSetting('rendererBackend', v)}
-          info="Auto uses WebGL2 until every visible, authoring and export material has an exact validated TSL variant. It will then prefer native WebGPU automatically."
+          info="WebGL is the stable default. WebGPU remains an experimental opt-in while material and visual parity are incomplete; initialization failures still fall back atomically to WebGL2."
           settingId="performance.rendererBackend"
         />
         <SelectRow
@@ -266,7 +266,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
             />
           )}
         </div>
-        {webgpuSupported && !webgpuSelectable && (
+        {webgpuSupported && (
           <div className="gpu-apply-row">
             <span>Validate the already migrated materials on this GPU</span>
             <button

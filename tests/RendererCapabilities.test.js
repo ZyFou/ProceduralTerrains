@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectRendererCapabilities, getWebGpuSupport } from '../src/engine/render/RendererCapabilities.js';
 import { probeWebGL } from '../src/engine/render/createWebGLRenderer.js';
+import { createPerfSettings, loadPerfSettings } from '../src/engine/render/PerformanceSettings.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -13,7 +14,22 @@ describe('renderer diagnostics', () => {
       supported: true,
       browserSupported: true,
       applicationReady: false,
-      selectable: false,
+      selectable: true,
+    });
+  });
+
+  it('defaults new settings and migration-era saved choices to WebGL', () => {
+    expect(createPerfSettings().rendererBackend).toBe('webgl');
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify({
+        preset: 'high',
+        rendererBackend: 'webgpu',
+        rendererBackendDefaultVersion: 2,
+      })),
+    });
+    expect(loadPerfSettings()).toMatchObject({
+      rendererBackend: 'webgl',
+      rendererBackendDefaultVersion: 3,
     });
   });
 
