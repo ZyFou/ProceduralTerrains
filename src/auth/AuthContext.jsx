@@ -27,6 +27,16 @@ export function AuthProvider({ children }) {
     return () => controller.abort();
   }, [refresh]);
 
+  useEffect(() => {
+    const onBackendChanged = () => {
+      setUser(null);
+      setStatus('loading');
+      refresh();
+    };
+    window.addEventListener('terrain-backend:changed', onBackendChanged);
+    return () => window.removeEventListener('terrain-backend:changed', onBackendChanged);
+  }, [refresh]);
+
   const login = useCallback(async (credentials) => {
     const result = await authApi.login(credentials);
     setUser(result.user);

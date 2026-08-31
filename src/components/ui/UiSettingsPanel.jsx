@@ -1,3 +1,4 @@
+import React, { useEffect, useState } from 'react';
 import { Settings, X } from 'lucide-react';
 
 const MODE_DISPLAY_OPTIONS = [
@@ -9,7 +10,13 @@ const MODE_DISPLAY_OPTIONS = [
 /**
  * UI appearance settings — opened from Edit → Settings.
  */
-export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
+export default function UiSettingsPanel({ open, prefs, onChange, onClose, desktopBackend = null, onBackendChange }) {
+  const [remoteUrlDraft, setRemoteUrlDraft] = useState(desktopBackend?.remoteUrl ?? '');
+
+  useEffect(() => {
+    setRemoteUrlDraft(desktopBackend?.remoteUrl ?? '');
+  }, [desktopBackend?.remoteUrl]);
+
   if (!open) return null;
 
   const set = (patch) => onChange({ ...prefs, ...patch });
@@ -73,10 +80,45 @@ export default function UiSettingsPanel({ open, prefs, onChange, onClose }) {
               />
             </label>
           </section>
+
+          {desktopBackend && (
+            <section className="ui-settings-section">
+              <h3 className="ui-settings-section-title">Backend</h3>
+              <div className="ui-settings-choice-group" role="radiogroup" aria-label="Backend profile">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={desktopBackend.profile === 'remote'}
+                  className={`ui-settings-choice${desktopBackend.profile === 'remote' ? ' active' : ''}`}
+                  onClick={() => onBackendChange?.({ ...desktopBackend, profile: 'remote', remoteUrl: remoteUrlDraft })}
+                >
+                  Remote backend
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={desktopBackend.profile === 'local'}
+                  className={`ui-settings-choice${desktopBackend.profile === 'local' ? ' active' : ''}`}
+                  onClick={() => onBackendChange?.({ ...desktopBackend, profile: 'local', remoteUrl: remoteUrlDraft })}
+                >
+                  Local backend · localhost:6062
+                </button>
+              </div>
+              <label className="ui-settings-row ui-settings-url-row">
+                <span className="ui-settings-row-label">Remote API URL</span>
+                <input
+                  type="url"
+                  value={remoteUrlDraft}
+                  placeholder="https://api.example.com/api/v1"
+                  onChange={(event) => setRemoteUrlDraft(event.target.value)}
+                  onBlur={() => onBackendChange?.({ ...desktopBackend, remoteUrl: remoteUrlDraft })}
+                />
+              </label>
+            </section>
+          )}
         </div>
       </div>
     </div>
   );
 }
-import React from 'react';
 

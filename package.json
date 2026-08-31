@@ -1,10 +1,17 @@
 {
   "name": "terrain-studio",
+  "productName": "Procedural Terrains",
+  "description": "GPU-driven procedural terrain authoring studio.",
+  "author": "ZyFou",
+  "main": "electron/main.cjs",
   "private": true,
   "version": "1.7.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop:dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:6061 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:6061 electron .\"",
+    "desktop:package": "node tools/verify-desktop-release.cjs && npm run build && electron-forge package --platform=win32 --arch=x64",
+    "desktop:icon": "node tools/create-electron-icon.cjs",
     "dev:api": "npm --prefix api run dev",
     "build": "vite build",
     "preview": "vite preview",
@@ -12,6 +19,9 @@
     "test:watch": "vitest",
     "test:api": "npm --prefix api test",
     "migrate:api": "npm --prefix api run migrate"
+  },
+  "config": {
+    "forge": "./forge.config.cjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",
@@ -25,8 +35,14 @@
     "three": "0.185.1"
   },
   "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.0.0",
+    "png-to-ico": "^3.0.2",
     "vite": "^5.4.11",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "wait-on": "^9.1.0"
   }
 }

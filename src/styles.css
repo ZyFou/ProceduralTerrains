@@ -455,6 +455,15 @@ body {
   color: var(--accent);
 }
 .tb-menu button.active svg { color: var(--accent); }
+.tb-document-state {
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-document-state.dirty { color: var(--accent); }
 .ui-settings-heading {
   display: flex;
   align-items: flex-start;
@@ -5477,6 +5486,26 @@ input[type="color"].palette-color-input {
   height: 16px;
   accent-color: var(--accent);
   cursor: var(--cursor-pointer);
+}
+.ui-settings-url-row {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
+}
+.ui-settings-url-row input[type="url"] {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--text-main);
+  background: var(--bg-control);
+  font: inherit;
+  font-size: 11px;
+}
+.ui-settings-url-row input[type="url"]:focus {
+  outline: none;
+  border-color: var(--border-active);
 }
 .ui-settings-choice-group {
   display: flex;

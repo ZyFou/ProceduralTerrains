@@ -30,6 +30,7 @@ function choice(name, fallback, values) {
 
 const environment = process.env.NODE_ENV ?? 'development';
 const developmentPrivacySecret = 'three-terrain-development-privacy-secret';
+const desktopOrigin = 'procedural-terrain://app';
 
 export const config = Object.freeze({
   environment,
@@ -38,7 +39,9 @@ export const config = Object.freeze({
   logLevel: process.env.LOG_LEVEL ?? 'info',
   trustProxy: boolean('TRUST_PROXY', environment === 'production'),
   bodyLimit: integer('API_BODY_LIMIT_BYTES', 1_048_576),
-  frontendOrigins: list('FRONTEND_ORIGINS', ['http://localhost:6061']),
+  // The packaged Electron renderer is a trusted first-party client. Keep this
+  // explicit rather than allowing arbitrary custom schemes.
+  frontendOrigins: [...new Set([...list('FRONTEND_ORIGINS', ['http://localhost:6061']), desktopOrigin])],
   databaseUrl: process.env.DATABASE_URL || null,
   database: Object.freeze({
     host: process.env.DB_HOST ?? '127.0.0.1',

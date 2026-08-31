@@ -124,6 +124,7 @@ import {
 import { profiler } from './perf/PerformanceProfiler.js';
 import { GPUProfiler } from './perf/GPUProfiler.js';
 import { APP_VERSION } from '../constants/app.js';
+import { saveBlob } from '../platform/DesktopBridge.js';
 import { TerrainPicker } from './terrain/TerrainPicker.js';
 import { SplineManager } from '../creator/splines/SplineManager.js';
 import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManager.js';
@@ -10118,7 +10119,7 @@ export class Engine {
   saveSeed() {
     const data = this.createProjectPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    this._download(URL.createObjectURL(blob), `terrain-seed-${data.params.seed}.json`);
+    this._download(blob, `terrain-seed-${data.params.seed}.json`);
     this.cb.onToast('Seed saved as JSON');
   }
 
@@ -10764,7 +10765,7 @@ export class Engine {
     if (!names.length) { this.cb.onToast('No water masks exported'); return; }
     const { zipSync } = await import('fflate');
     const zipped = zipSync(files);
-    this._download(URL.createObjectURL(new Blob([zipped])), `water_masks-${this.params.seed}.zip`);
+    await this._download(new Blob([zipped], { type: 'application/zip' }), `water_masks-${this.params.seed}.zip`);
     this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
   }
 
@@ -10880,10 +10881,7 @@ export class Engine {
         [`${scene.value}.png`]: pngBytes,
         [`${scene.value}.json`]: reportBytes,
       });
-      this._download(
-        URL.createObjectURL(new Blob([archive], { type: 'application/zip' })),
-        `water-baseline-${scene.value}.zip`,
-      );
+      await this._download(new Blob([archive], { type: 'application/zip' }), `water-baseline-${scene.value}.zip`);
       this.cb.onToast(`Water baseline captured: ${scene.label}`);
       return report;
     } finally {
@@ -10907,12 +10905,8 @@ export class Engine {
 
   // --------------------------------------------------------------- exports
 
-  _download(url, filename) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  async _download(blob, filename) {
+    return saveBlob(blob, filename);
   }
 
   _captureOverlayRoots() {
@@ -10991,7 +10985,7 @@ export class Engine {
     this._renderCameraCapture();
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
-      this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
+      this._download(blob, `terrain-${this.params.seed}.png`);
       this.cb.onToast('Screenshot exported');
     });
   }
@@ -11043,7 +11037,7 @@ export class Engine {
     ctx.putImageData(img, 0, 0);
     canvas.toBlob((blob) => {
       if (!blob) return this.cb.onToast('Export failed');
-      this._download(URL.createObjectURL(blob), `heightmap-${this.params.seed}.png`);
+      this._download(blob, `heightmap-${this.params.seed}.png`);
       this.cb.onToast('Heightmap exported');
     });
   }

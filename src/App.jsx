@@ -48,6 +48,26 @@ import {
   normalizeProject,
   projectStore,
 } from './project/ProjectStore.js';
+import {
+  createEditableProjectDocument,
+  readEditableProjectDocument,
+  suggestedProjectFilename,
+} from './project/ProjectDocument.js';
+import {
+  isDesktopApp,
+  getDesktopBackendSettings,
+  listRecentDesktopDocuments,
+  onDesktopCloseRequested,
+  onDesktopDocumentOpen,
+  openDesktopDocument,
+  openRecentDesktopDocument,
+  resolveDesktopClose,
+  saveBlob,
+  saveDesktopDocument,
+  setDesktopBackendSettings,
+  takeStartupDesktopDocument,
+} from './platform/DesktopBridge.js';
+import { setApiBackend } from './auth/authApi.js';
 import { getProjectTemplate, PROJECT_TEMPLATES } from './project/ProjectTemplates.js';
 import {
   NODE_PROJECT_TEMPLATES, createNodeTemplateGraph, getNodeProjectTemplate,
@@ -131,7 +151,7 @@ export default function App() {
 
   const loading = useLoading();
   const landing = useLanding();
-  const { showPopup, showConfirm } = usePopup();
+  const { showPopup, showConfirm, showChoice } = usePopup();
   const landingRef = useRef(landing);
   landingRef.current = landing;
   const loadingRef = useRef(loading);
@@ -228,6 +248,12 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [webglError, setWebglError] = useState(null);
   const [activeProject, setActiveProject] = useState(null);
+  const [desktopDocument, setDesktopDocument] = useState({ path: null, dirty: false });
+  const desktopDocumentRef = useRef(desktopDocument);
+  desktopDocumentRef.current = desktopDocument;
+  const [recentDesktopDocuments, setRecentDesktopDocuments] = useState([]);
+  const defaultRemoteApiUrl = String(import.meta.env.VITE_DISTANT_URL ?? import.meta.env.VITE_API_URL ?? '').trim();
+  const [desktopBackend, setDesktopBackend] = useState({ profile: 'remote', remoteUrl: defaultRemoteApiUrl });
   const [projectName, setProjectName] = useState('Untitled terrain');
   const [projectMode, setProjectMode] = useState('procedural');
   const [explodeState, setExplodeState] = useState({
@@ -602,7 +628,54 @@ export default function App() {
     const nextName = String(value ?? '').slice(0, 120);
     projectNameRef.current = nextName;
     setProjectName(nextName);
+    if (isDesktopApp()) setDesktopDocument((current) => ({ ...current, dirty: true }));
   }, []);
+
+  const refreshDesktopRecents = useCallback(async () => {
+    if (!isDesktopApp()) return [];
+    try {
+      const entries = await listRecentDesktopDocuments();
+      setRecentDesktopDocuments(entries);
+      return entries;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const saveCurrentDesktopDocument = useCallback(async ({ forceSaveAs = false } = {}) => {
+    const eng = engineRef.current;
+    if (!eng) return null;
+    const current = activeProjectRef.current;
+    const name = String(projectNameRef.current ?? current?.metadata?.name ?? 'Untitled terrain').trim() || 'Untitled terrain';
+    const project = normalizeProject({
+      id: current?.id,
+      metadata: { ...current?.metadata, name },
+      terrain: eng.createProjectPayload(),
+      exportHistory: current?.exportHistory ?? [],
+    });
+    const projectDocument = createEditableProjectDocument(project);
+    try {
+      const result = await saveDesktopDocument({
+        path: desktopDocumentRef.current.path,
+        forceSaveAs,
+        suggestedName: suggestedProjectFilename(name),
+        content: JSON.stringify(projectDocument, null, 2),
+      });
+      if (!result || result.canceled) return null;
+      const saved = await projectStore.save(project);
+      setCurrentProject(saved);
+      setDesktopDocument({ path: result.path, dirty: false });
+      window.document.title = `${saved.metadata.name} — Procedural Terrains`;
+      await refreshDesktopRecents();
+      showToast(`Saved ${saved.metadata.name}`, 'success');
+      return saved;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save the project file.';
+      showToast(message, 'error');
+      showPopup(message, { type: 'error', title: 'Save failed' });
+      return null;
+    }
+  }, [refreshDesktopRecents, setCurrentProject, showPopup, showToast]);
 
   const saveCurrentProject = useCallback(async (metadata = null, { captureFresh = true } = {}) => {
     const eng = engineRef.current;
@@ -888,6 +961,104 @@ export default function App() {
     reader.readAsText(file);
   }, [loadProjectJSON]);
 
+  const loadDesktopProjectDocument = useCallback(async (payload) => {
+    if (!payload || payload.canceled) return false;
+    if (payload.error) {
+      showToast(payload.error, 'error');
+      return false;
+    }
+    try {
+      const project = readEditableProjectDocument(payload.document, { legacy: !!payload.legacy });
+      await loadProjectJSON(project);
+      setDesktopDocument({ path: payload.legacy ? null : payload.path, dirty: false });
+      window.document.title = `${project.metadata.name} — Procedural Terrains`;
+      if (!payload.legacy) await refreshDesktopRecents();
+      else showToast('Legacy JSON project imported. Save it as .ptrterrain to create a desktop document.', 'info');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not open the project document.', 'error');
+      return false;
+    }
+  }, [loadProjectJSON, refreshDesktopRecents, showToast]);
+
+  const openDesktopProjectDocument = useCallback(async () => {
+    const result = await openDesktopDocument();
+    return loadDesktopProjectDocument(result);
+  }, [loadDesktopProjectDocument]);
+
+  const openRecentDesktopProjectDocument = useCallback(async (documentPath) => {
+    try {
+      return await loadDesktopProjectDocument(await openRecentDesktopDocument(documentPath));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'The recent project could not be opened.', 'error');
+      await refreshDesktopRecents();
+      return false;
+    }
+  }, [loadDesktopProjectDocument, refreshDesktopRecents, showToast]);
+
+  useEffect(() => {
+    if (!isDesktopApp()) return undefined;
+    let mounted = true;
+    getDesktopBackendSettings().then((stored) => {
+      if (!mounted) return;
+      const next = stored || { profile: 'remote', remoteUrl: defaultRemoteApiUrl };
+      // Also persist the initial value so Electron's API relay has a target
+      // before Cloud clients make their first request.
+      const configured = stored ? Promise.resolve(stored) : setDesktopBackendSettings(next);
+      configured.then((backend) => {
+        if (!mounted || !backend) return;
+        setDesktopBackend(backend);
+        setApiBackend(backend);
+      }).catch(() => {});
+    }).catch(() => {});
+    refreshDesktopRecents();
+    const stopOpen = onDesktopDocumentOpen((payload) => { loadDesktopProjectDocument(payload); });
+    takeStartupDesktopDocument().then((payload) => {
+      if (payload) loadDesktopProjectDocument(payload);
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+      stopOpen();
+    };
+  }, [defaultRemoteApiUrl, loadDesktopProjectDocument, refreshDesktopRecents]);
+
+  const handleDesktopBackend = useCallback(async (next) => {
+    try {
+      const saved = await setDesktopBackendSettings(next);
+      if (!saved) return;
+      setDesktopBackend(saved);
+      setApiBackend(saved);
+      showToast(`Using ${saved.profile === 'local' ? 'the local' : 'the remote'} backend`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not update the backend settings.', 'error');
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (!isDesktopApp()) return undefined;
+    return onDesktopCloseRequested(async () => {
+      if (!desktopDocumentRef.current.dirty) {
+        resolveDesktopClose('discard');
+        return;
+      }
+      const choice = await showChoice({
+        title: 'Unsaved changes',
+        message: 'Save changes to this terrain before closing?',
+        cancelLabel: 'Cancel',
+        actions: [
+          { value: 'discard', label: 'Don’t save', danger: true },
+          { value: 'save', label: 'Save' },
+        ],
+      });
+      if (choice === 'save') {
+        const saved = await saveCurrentDesktopDocument();
+        resolveDesktopClose(saved ? 'discard' : 'cancel');
+      } else {
+        resolveDesktopClose(choice === 'discard' ? 'discard' : 'cancel');
+      }
+    });
+  }, [saveCurrentDesktopDocument, showChoice]);
+
   const hasFileDrag = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
   const onFileDragEnter = useCallback((e) => {
@@ -919,7 +1090,7 @@ export default function App() {
     if (file) loadProjectFile(file);
   }, [loadProjectFile]);
 
-  const downloadCurrentProject = useCallback(() => {
+  const downloadCurrentProject = useCallback(async () => {
     const eng = engineRef.current;
     if (!eng) return;
     const current = activeProjectRef.current;
@@ -930,17 +1101,11 @@ export default function App() {
       terrain: eng.createProjectPayload(),
       exportHistory: current?.exportHistory ?? [],
     });
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'terrain';
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${slug}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast(`Downloaded ${name}`, 'success');
+    const desktop = isDesktopApp();
+    const payload = desktop ? createEditableProjectDocument(project) : project;
+    const filename = desktop ? suggestedProjectFilename(name) : `${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'terrain'}.json`;
+    const result = await saveBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), filename);
+    if (!result?.canceled) showToast(`Downloaded ${name}`, 'success');
   }, [showToast]);
 
   const createProjectFromTemplate = useCallback(async (templateId = 'blank', {
@@ -1005,6 +1170,7 @@ export default function App() {
         // A new terrain is a new document. Do not let saveCurrentProject reuse
         // the id of whichever project was previously open.
         setCurrentProject(null);
+        if (isDesktopApp()) setDesktopDocument({ path: null, dirty: true });
         // One engine transaction now owns project construction, exact shader
         // compilation and the two frozen presentation frames. This replaces
         // the old visible `newProject()` followed by a second rebuild.
@@ -1345,6 +1511,7 @@ export default function App() {
   const scheduleRecord = useCallback(() => {
     if (histSuppressRef.current) return;
     if (!bootedRef.current || landingRef.current?.visible) return;
+    if (isDesktopApp()) setDesktopDocument((current) => ({ ...current, dirty: true }));
     if (histTimerRef.current) clearTimeout(histTimerRef.current);
     histTimerRef.current = setTimeout(() => {
       histTimerRef.current = null;
@@ -2316,9 +2483,15 @@ export default function App() {
         previewMode={previewMode}
         onNew={() => createProjectFromTemplate('blank', { editorMode: realTerrainMode ? 'real' : projectMode })}
         onRandomize={() => engine().randomizeSeed()}
-        onSave={() => saveCurrentProject()}
+        onSave={() => (isDesktopApp() ? saveCurrentDesktopDocument() : saveCurrentProject())}
+        onSaveAs={isDesktopApp() ? () => saveCurrentDesktopDocument({ forceSaveAs: true }) : undefined}
         onDownload={downloadCurrentProject}
         onLoadJSON={loadProjectJSON}
+        onOpenDocument={isDesktopApp() ? openDesktopProjectDocument : undefined}
+        recentDocuments={recentDesktopDocuments}
+        onOpenRecentDocument={openRecentDesktopProjectDocument}
+        documentPath={desktopDocument.path}
+        documentDirty={desktopDocument.dirty}
         canOpenInManual={worldMode === 'studio' && !realTerrainMode && ['procedural', 'nodes'].includes(projectMode)}
         onOpenInManual={openInManualTerrain}
         canImportTerrain={worldMode === 'studio' && !realTerrainMode && projectMode === 'manual'}
@@ -2648,6 +2821,8 @@ export default function App() {
           open={uiSettingsOpen}
           prefs={uiPrefs}
           onChange={handleUiPrefs}
+          desktopBackend={isDesktopApp() ? desktopBackend : null}
+          onBackendChange={handleDesktopBackend}
           onClose={() => setUiSettingsOpen(false)}
         />
       )}
