@@ -105,7 +105,7 @@ NODE_ENV=production
 API_HOST=127.0.0.1
 API_PORT=6062
 # Keep the packaged desktop origin alongside the web application origin.
-FRONTEND_ORIGINS=https://example.com,procedural-terrain://app
+FRONTEND_ORIGINS=https://procedural-terrains.com,procedural-terrain://app
 COOKIE_SECURE=true
 COOKIE_SAME_SITE=lax
 TRUST_PROXY=true

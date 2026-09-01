@@ -14,6 +14,9 @@ export default defineConfig({
     port: 6061,
     strictPort: false,  // allow port shifting if 6061 is in use
     host: true,         // listen on all interfaces -> reachable on the network
+    cors: {
+      origin: ['https://procedural-terrains.com'],
+    },
     // Keep browser requests same-origin during local development. The auth
     // client uses /api/v1 in production too, so this also exercises the same
     // deployment shape locally instead of relying on a second CORS path.
@@ -25,6 +28,9 @@ export default defineConfig({
     },
   },
   preview: {
+    cors: {
+      origin: ['https://procedural-terrains.com'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:6062',
