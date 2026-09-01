@@ -166,7 +166,11 @@ export function createPerfSettings(presetKey = 'high') {
     preset: PERF_PRESETS[presetKey] ? presetKey : 'high',
     rendererBackend: 'auto',
     gpuPreference: 'default',
-    useWorker: false,
+    // OffscreenCanvas is the primary renderer wherever it is supported. The
+    // explicit bit distinguishes a user opt-out from settings saved by older
+    // releases where `false` was merely the default.
+    useWorker: true,
+    workerPreferenceExplicit: false,
     autoPerf: true,
     resolutionDenoiseMode: 'clean',
     underwaterEffect: true,
@@ -258,6 +262,7 @@ export function sanitizePerfSettings(settings) {
   s.rendererBackend = sanitizeRendererBackend(s.rendererBackend);
   s.gpuPreference = sanitizeGpuPreference(s.gpuPreference);
   s.useWorker = !!s.useWorker;
+  s.workerPreferenceExplicit = !!s.workerPreferenceExplicit;
 
   s.renderScale = clamp(+s.renderScale || 1, PERF_LIMITS.renderScale);
   s.resolutionScale = clamp(+s.resolutionScale || 1, PERF_LIMITS.resolutionScale);
@@ -365,7 +370,12 @@ export function loadPerfSettings() {
     if (raw) {
       const parsed = JSON.parse(raw);
       const base = createPerfSettings(parsed.preset === 'custom' ? 'high' : parsed.preset);
-      return sanitizePerfSettings({ ...base, ...parsed });
+      const migrated = { ...parsed };
+      if (parsed.workerPreferenceExplicit !== true) {
+        migrated.useWorker = true;
+        migrated.workerPreferenceExplicit = false;
+      }
+      return sanitizePerfSettings({ ...base, ...migrated });
     }
   } catch { /* corrupted or unavailable storage — fall through to defaults */ }
   return createPerfSettings('high');

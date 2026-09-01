@@ -373,6 +373,70 @@ export class Minimap {
     }
   }
 
+  createFramePacket(controls = this.sources.controls) {
+    const rgba = new Uint8ClampedArray(SIZE * SIZE * 4);
+    if (this.config.mode === 'color') {
+      const view = this._viewState();
+      this.camera.left = view.centerX - view.halfSpan;
+      this.camera.right = view.centerX + view.halfSpan;
+      this.camera.top = view.centerZ + view.halfSpan;
+      this.camera.bottom = view.centerZ - view.halfSpan;
+      this.camera.position.set(view.centerX, this.maxHeight + 2000, view.centerZ);
+      this.camera.lookAt(view.centerX, 0, view.centerZ);
+      this.camera.updateProjectionMatrix();
+      this.camera.updateMatrixWorld(true);
+      const previous = this.renderer.getRenderTarget();
+      try {
+        this.renderer.setRenderTarget(this.target);
+        this.renderer.clear();
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
+      } finally {
+        this.renderer.setRenderTarget(previous);
+      }
+      for (let y = 0; y < SIZE; y += 1) {
+        const source = (SIZE - 1 - y) * SIZE * 4;
+        rgba.set(this._pixels.subarray(source, source + SIZE * 4), y * SIZE * 4);
+      }
+    } else {
+      const cell = SIZE / SAMPLE_RES;
+      for (let sy = 0; sy < SAMPLE_RES; sy += 1) {
+        for (let sx = 0; sx < SAMPLE_RES; sx += 1) {
+          const px = sx * cell + cell * 0.5;
+          const py = sy * cell + cell * 0.5;
+          const world = this.canvasToWorld(px, py);
+          const sample = this._sample(world.x, world.z);
+          const pixel = sample ? this._pixelForMode(sample) : { r: 0, g: 0, b: 0 };
+          for (let oy = 0; oy < cell; oy += 1) {
+            for (let ox = 0; ox < cell; ox += 1) {
+              const index = (((sy * cell + oy) * SIZE) + sx * cell + ox) * 4;
+              rgba[index] = pixel.r;
+              rgba[index + 1] = pixel.g;
+              rgba[index + 2] = pixel.b;
+              rgba[index + 3] = 255;
+            }
+          }
+        }
+      }
+    }
+    const focus = controls?.target ? this.worldToCanvas(controls.target.x, controls.target.z) : null;
+    const view = this._viewState();
+    return {
+      width: SIZE,
+      height: SIZE,
+      rgba,
+      overlay: {
+        focus,
+        theta: controls?.theta ?? 0,
+        hover: this._hover,
+        zoom: view.zoom,
+        span: Math.round(view.halfSpan * 2),
+        showChunkGrid: !!this.config.showChunkGrid,
+        chunkCount: this.sources.getChunkCount?.() || 0,
+      },
+    };
+  }
+
   dispose() {
     this.target.dispose();
   }

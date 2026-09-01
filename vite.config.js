@@ -10,6 +10,11 @@ export default defineConfig({
     jsx: 'automatic',
   },
   plugins: [react({ jsxRuntime: 'automatic' }), surfaceMaterialsApi()],
+  worker: {
+    // The render worker loads optional world/export bundles dynamically, so it
+    // must remain an ES-module graph rather than Vite's single-file IIFE mode.
+    format: 'es',
+  },
   server: {
     port: 6061,
     strictPort: false,  // allow port shifting if 6061 is in use

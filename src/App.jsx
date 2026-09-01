@@ -3,7 +3,6 @@ import { createEngineProxy } from './engine/EngineProxy.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_TILE_DEBUG } from './engine/panelResets.js';
 import { clonePlanetStyle } from './engine/style/PlanetStyleConfig.js';
-import { buildActiveSurfaceAtlas } from './engine/terrain/surface/applyTerrainSurface.js';
 import { resetSurfaceLibraryState } from './engine/terrain/surface/SurfaceLibrary.js';
 import { SURFACE_TEXTURE_SOURCE, normalizeSurfaceTextureSource, sourceUsesTextureAtlas } from './engine/terrain/surface/SurfaceTextureSources.js';
 import { colorToHex } from './engine/style/ColorPalette.js';
@@ -378,17 +377,17 @@ export default function App() {
     };
 
     const retryBoot = (event) => {
-      const mode = event?.detail?.mode === 'compatibility' ? 'compatibility' : 'full';
+      const mode = 'full';
       landingRef.current?.setBootError?.(null);
       landingRef.current?.setBootReady(false);
       landingRef.current?.setBootProgress?.({
         stage: 'planning',
-        label: mode === 'compatibility' ? 'Planning compatibility scene…' : 'Planning final frame…',
+        label: 'Planning exact scene…',
         progress: 0,
       });
       loadingRef.current.start('boot', {
         blocking: true,
-        label: mode === 'compatibility' ? 'Starting compatibility mode…' : 'Retrying final scene…',
+        label: 'Retrying exact scene…',
         detail: 'Rebuilding the complete launch frame',
       });
       const target = engineRef.current || engine;
@@ -399,6 +398,15 @@ export default function App() {
       }
     };
     window.addEventListener('terrain-boot:retry', retryBoot);
+    const exportBootDiagnostics = async () => {
+      const diagnostics = await (engineRef.current || engine)?.getGraphicsDiagnostics?.();
+      if (!diagnostics) return;
+      await saveBlob(
+        new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' }),
+        `terrain-graphics-diagnostics-${Date.now()}.json`,
+      );
+    };
+    window.addEventListener('terrain-boot:diagnostics', exportBootDiagnostics);
 
     // Engine owns the bounded degraded-release policy. This UI timer only
     // refreshes the message while the first safe interactive frame is pending.
@@ -578,7 +586,7 @@ export default function App() {
     engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
     // seed the undo history baseline from the freshly-built default project
-    try { historyRef.current = { past: [], future: [], present: JSON.stringify(engine.serializeState()) }; } catch { /* ignore */ }
+    try { historyRef.current = { past: [], future: [], present: JSON.stringify(await engine.serializeState()) }; } catch { /* ignore */ }
     nativeHistoryActionsRef.current = [];
     nativeHistoryCursorRef.current = -1;
     setNativeHistoryActions([]);
@@ -594,6 +602,7 @@ export default function App() {
     return () => {
       cancelled = true;
       window.removeEventListener('terrain-boot:retry', retryBoot);
+      window.removeEventListener('terrain-boot:diagnostics', exportBootDiagnostics);
       if (bootTimer) clearTimeout(bootTimer);
       engine?.dispose();
       engineRef.current = null;
@@ -603,6 +612,12 @@ export default function App() {
 
   useEffect(() => {
     if (!import.meta.hot) return undefined;
+    const reloadTransferredCanvas = () => {
+      // An HTMLCanvasElement can transfer control only once. React Fast
+      // Refresh would otherwise remount the engine against the already-
+      // transferred element and fail. A document reload creates a fresh canvas.
+      if (engineRef.current?.rendererConfig?.workerActive) window.location.reload();
+    };
     const disposeEngine = () => {
       const e = engineRef.current;
       if (!e) return;
@@ -610,8 +625,12 @@ export default function App() {
       engineRef.current = null;
       if (import.meta.env.DEV && window.terrainStudio === e) window.terrainStudio = null;
     };
+    import.meta.hot.on?.('vite:beforeUpdate', reloadTransferredCanvas);
     import.meta.hot.dispose(disposeEngine);
-    return disposeEngine;
+    return () => {
+      import.meta.hot.off?.('vite:beforeUpdate', reloadTransferredCanvas);
+      disposeEngine();
+    };
   }, []);
 
   const engine = () => engineRef.current;
@@ -650,7 +669,7 @@ export default function App() {
     const project = normalizeProject({
       id: current?.id,
       metadata: { ...current?.metadata, name },
-      terrain: eng.createProjectPayload(),
+      terrain: await eng.createProjectPayload(),
       exportHistory: current?.exportHistory ?? [],
     });
     const projectDocument = createEditableProjectDocument(project);
@@ -691,7 +710,7 @@ export default function App() {
     try {
       let thumbnail = null;
       if (captureFresh) {
-        try { thumbnail = eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
+        try { thumbnail = await eng.capturePreviewThumbnail?.() || null; } catch { /* thumbnail capture is best effort */ }
       }
       if (!thumbnail) {
         try { thumbnail = canvasRef.current?.toDataURL?.('image/webp', 0.72) || null; } catch { /* canvas capture is best effort */ }
@@ -705,7 +724,7 @@ export default function App() {
           name,
           thumbnail,
         },
-        terrain: eng.createProjectPayload(),
+        terrain: await eng.createProjectPayload(),
         exportHistory: current?.exportHistory ?? [],
       });
       const saved = await projectStore.save(project);
@@ -738,7 +757,6 @@ export default function App() {
       detail: 'Preparing terrain…',
     }, async (update) => {
       blockingUpdateRef.current = update;
-      const previousWorldMode = worldModeRef.current;
       histSuppressRef.current = true;
       if (histTimerRef.current) {
         clearTimeout(histTimerRef.current);
@@ -752,16 +770,16 @@ export default function App() {
           : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
             ? terrain.worldMode
             : 'studio');
-        if (worldModeRef.current !== targetWorldMode) {
-          await runModeSwitchRef.current(targetWorldMode, { silent: true });
-          blockingUpdateRef.current = update;
-        }
         update({
           detail: terrain.realWorldSource
             ? 'Downloading elevation and imagery…'
             : 'Building terrain…',
         });
-        await engineRef.current?.loadSeedJSON(terrain, {
+        await engineRef.current?.transitionMode({
+          worldMode: targetWorldMode,
+          projectMode: terrain.editorMode || 'procedural',
+          project: terrain,
+          reason: 'project-open',
           onRealWorldProgress: terrain.realWorldSource
             ? (progress) => update({
               progress,
@@ -771,10 +789,11 @@ export default function App() {
             })
             : undefined,
         });
+        setWorldMode(targetWorldMode);
         setRealTerrainMode(terrain.workspacePreset === 'real-terrain');
         const eng = engineRef.current;
         if (eng) {
-          const baseline = eng.serializeState();
+          const baseline = await eng.serializeState();
           historyRef.current = {
             past: [],
             future: [],
@@ -788,21 +807,21 @@ export default function App() {
           // Seed the newly loaded document's corresponding blobs before history
           // resumes, otherwise its first paint/sculpt edit would Undo to null.
           if ((baseline.paintRev ?? 0) > 0) {
-            const blob = eng.serializePaint();
+            const blob = await eng.serializePaint();
             if (blob) paintBlobsRef.current.set(baseline.paintRev, blob);
           }
           if ((baseline.erosionRev ?? 0) > 0) {
-            const blob = eng.serializeErosion();
+            const blob = await eng.serializeErosion();
             if (blob) erosionBlobsRef.current.set(baseline.erosionRev, blob);
           }
           if ((baseline.manualSculptRev ?? 0) > 0) {
-            const blob = eng.serializeManualSculpt();
+            const blob = await eng.serializeManualSculpt();
             if (blob) {
               manualSculptBlobsRef.current.set(baseline.manualSculptRev, blob);
             }
           }
           if ((baseline.manualSurfaceRev ?? 0) > 0) {
-            const blob = eng.serializeManualSurface();
+            const blob = await eng.serializeManualSurface();
             if (blob) {
               manualSurfaceBlobsRef.current.set(baseline.manualSurfaceRev, blob);
             }
@@ -815,9 +834,6 @@ export default function App() {
         setCurrentProject(project);
         if (project) showToast(`Opened ${name}`, 'success');
       } catch (error) {
-        if (worldModeRef.current !== previousWorldMode) {
-          await runModeSwitchRef.current(previousWorldMode, { silent: true });
-        }
         showToast(`Could not open ${name}`, 'error');
         throw error;
       } finally {
@@ -850,7 +866,7 @@ export default function App() {
           ...(activeProjectRef.current || {}),
           metadata: { ...(activeProjectRef.current?.metadata || {}), name: sourceName },
         },
-        eng.createProjectPayload(),
+        await eng.createProjectPayload(),
         sourceMode,
       );
       createdProject = await projectStore.save(createdProject);
@@ -893,7 +909,7 @@ export default function App() {
   const importTerrainIntoManual = useCallback(async (sourceProject) => {
     const eng = engineRef.current;
     if (!eng || projectMode !== 'manual' || !sourceProject) return false;
-    const currentPayload = eng.createProjectPayload();
+    const currentPayload = await eng.createProjectPayload();
     const currentProject = normalizeProject({
       ...(activeProjectRef.current || {}),
       id: activeProjectRef.current?.id,
@@ -924,13 +940,14 @@ export default function App() {
       engineRef.current?.setManualWorkspaceActive(true);
 
       let thumbnail = importedProject.metadata.thumbnail;
-      try { thumbnail = engineRef.current?.capturePreviewThumbnail?.() || thumbnail; } catch { /* best effort */ }
+      try { thumbnail = await engineRef.current?.capturePreviewThumbnail?.() || thumbnail; } catch { /* best effort */ }
+      const liveTerrain = await engineRef.current?.createProjectPayload?.();
       const saved = await projectStore.save(normalizeProject({
         ...importedProject,
         metadata: { ...importedProject.metadata, thumbnail },
         // Save the live document after its Manual fields have reprojected onto
         // the imported Tile bounds.
-        terrain: engineRef.current?.createProjectPayload?.() || importedProject.terrain,
+        terrain: liveTerrain || importedProject.terrain,
       }));
       setCurrentProject(saved);
       setManualImportDialog({ open: false, loading: false, busy: false, projects: [] });
@@ -1098,7 +1115,7 @@ export default function App() {
     const project = normalizeProject({
       id: current?.id,
       metadata: { ...current?.metadata, name },
-      terrain: eng.createProjectPayload(),
+      terrain: await eng.createProjectPayload(),
       exportHistory: current?.exportHistory ?? [],
     });
     const desktop = isDesktopApp();
@@ -1193,7 +1210,7 @@ export default function App() {
           historyRef.current = {
             past: [],
             future: [],
-            present: JSON.stringify(eng.serializeState()),
+            present: JSON.stringify(await eng.serializeState()),
           };
           paintBlobsRef.current.clear();
           erosionBlobsRef.current.clear();
@@ -1408,32 +1425,32 @@ export default function App() {
   // ---------------------------------------------------------- undo / redo
   worldModeRef.current = worldMode;
 
-  const captureSnapshot = useCallback(() => {
+  const captureSnapshot = useCallback(async () => {
     const eng = engineRef.current;
     if (!eng) return null;
     try {
-      const state = eng.serializeState();
+      const state = await eng.serializeState();
       const rev = state.paintRev ?? 0;
       // dedupe the heavy paint blob: store one copy per revision, referenced
       // from the (tiny) snapshot string by its rev number.
       if (rev > 0 && !paintBlobsRef.current.has(rev)) {
-        const blob = eng.serializePaint();
+        const blob = await eng.serializePaint();
         if (blob) paintBlobsRef.current.set(rev, blob);
       }
       // same dedupe for the heavy baked-erosion blob (delta grid + masks).
       const erev = state.erosionRev ?? 0;
       if (erev > 0 && !erosionBlobsRef.current.has(erev)) {
-        const blob = eng.serializeErosion();
+        const blob = await eng.serializeErosion();
         if (blob) erosionBlobsRef.current.set(erev, blob);
       }
       const srev = state.manualSculptRev ?? 0;
       if (srev > 0 && !manualSculptBlobsRef.current.has(srev)) {
-        const blob = eng.serializeManualSculpt();
+        const blob = await eng.serializeManualSculpt();
         if (blob) manualSculptBlobsRef.current.set(srev, blob);
       }
       const surfaceRev = state.manualSurfaceRev ?? 0;
       if (surfaceRev > 0 && !manualSurfaceBlobsRef.current.has(surfaceRev)) {
-        const blob = eng.serializeManualSurface();
+        const blob = await eng.serializeManualSurface();
         if (blob) manualSurfaceBlobsRef.current.set(surfaceRev, blob);
       }
       return JSON.stringify(state);
@@ -1479,10 +1496,10 @@ export default function App() {
     for (const key of surfaceMap.keys()) if (!liveSurface.has(key)) surfaceMap.delete(key);
   }, []);
 
-  const recordHistory = useCallback(() => {
+  const recordHistory = useCallback(async () => {
     const eng = engineRef.current;
     if (!eng || histSuppressRef.current) return;
-    const snap = captureSnapshot();
+    const snap = await captureSnapshot();
     if (snap == null) return;
     const h = historyRef.current;
     if (h.present == null) { h.present = snap; return; }  // first run → baseline
@@ -1515,14 +1532,14 @@ export default function App() {
     if (histTimerRef.current) clearTimeout(histTimerRef.current);
     histTimerRef.current = setTimeout(() => {
       histTimerRef.current = null;
-      recordHistory();
+      void recordHistory();
     }, 350);
   }, [recordHistory]);
   scheduleRecordRef.current = scheduleRecord;
 
-  const flushRecord = useCallback(() => {
+  const flushRecord = useCallback(async () => {
     if (histTimerRef.current) { clearTimeout(histTimerRef.current); histTimerRef.current = null; }
-    recordHistory();
+    await recordHistory();
   }, [recordHistory]);
 
   const applySnapshot = useCallback(async (snapStr) => {
@@ -1561,7 +1578,7 @@ export default function App() {
       // serialises with a newer paintRev than the snapshot we navigated to.
       // Re-baseline `present` to the actual live state so the next edit diffs
       // against it (and we don't log a spurious "paintRev-only" history entry).
-      const live = captureSnapshot();
+      const live = await captureSnapshot();
       if (live) historyRef.current.present = live;
       return true;
     } catch (err) {
@@ -1577,9 +1594,9 @@ export default function App() {
     }
   }, [captureSnapshot]);
 
-  const restoreNativeHistoryAction = useCallback((id) => {
+  const restoreNativeHistoryAction = useCallback(async (id) => {
     if (histSuppressRef.current || modeLockRef.current) return;
-    flushRecord();
+    await flushRecord();
     const actions = nativeHistoryActionsRef.current;
     const index = actions.findIndex((action) => action.id === id);
     if (index < 0) return;
@@ -1611,9 +1628,9 @@ export default function App() {
     });
   }, [applySnapshot, flushRecord]);
 
-  const undo = useCallback(() => {
+  const undo = useCallback(async () => {
     if (histSuppressRef.current || modeLockRef.current) return;
-    flushRecord();
+    await flushRecord();
     const h = historyRef.current;
     if (!h.past.length) return;
     const previous = {
@@ -1641,9 +1658,9 @@ export default function App() {
     });
   }, [flushRecord, applySnapshot]);
 
-  const redo = useCallback(() => {
+  const redo = useCallback(async () => {
     if (histSuppressRef.current || modeLockRef.current) return;
-    flushRecord();
+    await flushRecord();
     const h = historyRef.current;
     if (!h.future.length) return;
     const previous = {
@@ -2216,8 +2233,9 @@ export default function App() {
     if (landingActive || !bootedRef.current) return;
     const h = historyRef.current;
     if (h.past.length === 0 && h.future.length === 0) {
-      const snap = captureSnapshot();
-      if (snap) h.present = snap;
+      void captureSnapshot().then((snap) => {
+        if (snap && h.past.length === 0 && h.future.length === 0) h.present = snap;
+      });
     }
   }, [landingActive, captureSnapshot]);
 
@@ -2254,8 +2272,8 @@ export default function App() {
     if (!eng) return { anyPresent: false };
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source ?? eng.params?.surfaceTextureSource, surfaceTextureMode: eng.params?.surfaceTextureMode });
     if (!sourceUsesTextureAtlas(surfaceTextureSource)) return { anyPresent: false, source: surfaceTextureSource };
-    if (!force && eng.installCachedSurfaceAtlas?.(surfaceTextureSource)) {
-      const cached = eng.getCachedSurfaceAtlas?.(surfaceTextureSource);
+    if (!force && await eng.installCachedSurfaceAtlas?.(surfaceTextureSource)) {
+      const cached = await eng.getCachedSurfaceAtlas?.(surfaceTextureSource);
       return {
         anyPresent: !!cached?.anyPresent,
         bakedAt: cached?.bakedAt,
@@ -2265,8 +2283,7 @@ export default function App() {
         cached: true,
       };
     }
-    const atlas = await buildActiveSurfaceAtlas({ source: surfaceTextureSource });
-    eng.setSurfaceAtlas(atlas, surfaceTextureSource);
+    const atlas = await eng.buildAndSetSurfaceAtlas(surfaceTextureSource);
     return {
       anyPresent: atlas.anyPresent,
       bakedAt: atlas.bakedAt,
@@ -2405,10 +2422,10 @@ export default function App() {
     // history entry afterwards so the whole bake is a single Ctrl+Z away.
     onErosionBake: async (onProgress) => {
       const ok = await engine().bakeErosion({ onProgress });
-      if (ok) flushRecord();
+      if (ok) await flushRecord();
       return ok;
     },
-    onErosionReset: () => { engine().clearErosion(); flushRecord(); },
+    onErosionReset: async () => { await engine().clearErosion(); await flushRecord(); },
     onErosionPreset: (key) => engine().applyErosionPreset(key),
     erosionHasResult: engineRef.current?.erosionField?.hasResult?.() ?? false,
     onPerfReset: () => engine().resetPerfSettings(),

@@ -46,6 +46,7 @@ vec3 brightSample(vec2 uv) {
 
 void main() {
   vec3 col = texture2D(tDiffuse, vUv).rgb;
+#if USE_BLOOM
   vec2 px = uTexel * 2.0;
   vec3 bloom = vec3(0.0);
   bloom += brightSample(vUv + vec2( px.x,  0.0));
@@ -57,7 +58,9 @@ void main() {
   bloom += brightSample(vUv + vec2( px.x, -px.y) * 1.7);
   bloom += brightSample(vUv + vec2(-px.x, -px.y) * 1.7);
   col += bloom * (uBloomStrength / 8.0);
+#endif
 
+#if USE_SUN_RAYS
   if (uSunVisible > 0.5 && uSunRaysStrength > 0.001) {
     vec2 dir = uSunScreen - vUv;
     float dist = length(dir);
@@ -115,6 +118,7 @@ void main() {
       * uSunRaysStrength
       * 0.90;
   }
+#endif
 
   col *= max(uExposure, 0.0);
   col = (col - 0.5) * uContrast + 0.5;
@@ -181,12 +185,16 @@ vec3 sampleClean(vec2 uv) {
 vec3 sampleSource(vec2 uv) {
   uv = clamp(uv, vec2(0.001), vec2(0.999));
   vec3 result = texture2D(tDiffuse, uv).rgb;
+#if USE_PIXELATED
   if (uReconstructionMode > 1.5) {
     vec2 snapped = (floor(uv * uSourceSize) + 0.5) / uSourceSize;
     result = texture2D(tDiffuse, snapped).rgb;
-  } else if (uReconstructionMode > 0.5) {
+  }
+#elif USE_CLEAN_RECONSTRUCTION
+  if (uReconstructionMode > 0.5) {
     result = sampleClean(uv);
   }
+#endif
   return result;
 }
 
@@ -207,21 +215,31 @@ float bayer4(vec2 p) {
 }
 
 void main() {
+#if USE_CRT
   float crtStrength = uCrt * uCrtStrength;
   vec2 centered = vUv * 2.0 - 1.0;
   float r2 = dot(centered, centered);
   vec2 warped = centered * (1.0 + crtStrength * uCrtLensBend * 0.18 * r2);
   vec2 uv = warped * 0.5 + 0.5;
   float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+#else
+  float crtStrength = 0.0;
+  vec2 centered = vUv * 2.0 - 1.0;
+  vec2 uv = vUv;
+  float inside = 1.0;
+#endif
 
   vec3 col = sampleSource(uv);
+#if USE_CHROMATIC || USE_CRT
   float chromaPixels = uChromatic * uChromaticStrength + crtStrength * 1.25;
   if (chromaPixels > 0.001) {
     vec2 chroma = centered * chromaPixels / max(uOutputSize, vec2(1.0));
     col.r = sampleSource(uv + chroma).r;
     col.b = sampleSource(uv - chroma).b;
   }
+#endif
 
+#if USE_DITHERING
   if (uDithering > 0.5 && uDitherStrength > 0.001) {
     vec2 ditherCoord = uReconstructionMode > 1.5 ? floor(uv * uSourceSize) : gl_FragCoord.xy;
     ditherCoord = floor(ditherCoord / max(uDitherScale, 1.0));
@@ -230,7 +248,9 @@ void main() {
     vec3 quantized = floor(clamp(col, 0.0, 1.0) * steps + threshold + 0.5) / steps;
     col = mix(col, quantized, uDitherStrength);
   }
+#endif
 
+#if USE_CRT
   if (crtStrength > 0.001) {
     float lineWidth = max(uCrtLineWidth, 1.0);
     float scanPhase = mod(gl_FragCoord.y, lineWidth * 2.0) / lineWidth;
@@ -245,6 +265,7 @@ void main() {
     col += noise * crtStrength;
     col *= mix(1.0, edge, crtStrength * 0.45);
   }
+#endif
 
   gl_FragColor = vec4(max(col, vec3(0.0)) * inside, 1.0);
 }
@@ -292,6 +313,7 @@ export class VisualPostProcess {
       },
       depthTest: false,
       depthWrite: false,
+      defines: { USE_BLOOM: 0, USE_SUN_RAYS: 0 },
     });
     this._cameraMaterial = new THREE.ShaderMaterial({
       vertexShader: VERTEX,
@@ -315,6 +337,13 @@ export class VisualPostProcess {
       },
       depthTest: false,
       depthWrite: false,
+      defines: {
+        USE_PIXELATED: 0,
+        USE_CLEAN_RECONSTRUCTION: 0,
+        USE_DITHERING: 0,
+        USE_CRT: 0,
+        USE_CHROMATIC: 0,
+      },
     });
     this._quad = new THREE.Mesh(fullscreenGeometry(), this._lookMaterial);
     this._quad.frustumCulled = false;
@@ -383,6 +412,7 @@ export class VisualPostProcess {
     this._worldMode = worldMode;
     this._inputTextureOverride = null;
     this._requiresSharedOpaque = requireSharedOpaque;
+    this._applyStructuralVariants(params || {}, plan);
 
     if (plan.usesSceneTarget) {
       this._sceneRT = this._ensureTarget(
@@ -407,6 +437,29 @@ export class VisualPostProcess {
     }
     this.update(params || {}, time, sunScreen, sunColor);
     return plan;
+  }
+
+  _applyStructuralVariants(params, plan) {
+    const lookDefines = {
+      USE_BLOOM: (params.visualsPostEnabled !== false && (params.visualsBloomStrength ?? 0) > 0.001) ? 1 : 0,
+      USE_SUN_RAYS: (params.visualsSunRaysStrength ?? 0) > 0.001 ? 1 : 0,
+    };
+    const cameraDefines = {
+      USE_PIXELATED: params.visualsPixelatedEnabled ? 1 : 0,
+      USE_CLEAN_RECONSTRUCTION: !params.visualsPixelatedEnabled && plan.reconstructionMode === 'clean' ? 1 : 0,
+      USE_DITHERING: params.visualsDitheringEnabled ? 1 : 0,
+      USE_CRT: params.visualsCrtEnabled ? 1 : 0,
+      USE_CHROMATIC: params.visualsChromaticAberrationEnabled ? 1 : 0,
+    };
+    const apply = (material, next) => {
+      const signature = JSON.stringify(next);
+      if (material.userData.terrainVariantSignature === signature) return;
+      material.defines = next;
+      material.userData.terrainVariantSignature = signature;
+      material.needsUpdate = true;
+    };
+    apply(this._lookMaterial, lookDefines);
+    apply(this._cameraMaterial, cameraDefines);
   }
 
   update(params, time, sunScreen, sunColor = null) {

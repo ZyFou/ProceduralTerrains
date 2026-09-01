@@ -179,13 +179,10 @@ async function rtToCanvas(renderer, rt, w, h) {
 }
 
 async function canvasToUint8Array(canvas) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(new Uint8Array(reader.result));
-      reader.readAsArrayBuffer(blob);
-    }, 'image/png');
-  });
+  const blob = typeof canvas.convertToBlob === 'function'
+    ? await canvas.convertToBlob({ type: 'image/png' })
+    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 export class TerrainExporter {

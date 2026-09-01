@@ -3,6 +3,9 @@ const desktop = () => globalThis.window?.proceduralTerrainsDesktop ?? null;
 export const isDesktopApp = () => !!desktop();
 
 export async function saveBlob(blob, suggestedName, { mime = blob?.type || 'application/octet-stream' } = {}) {
+  if (typeof globalThis.__terrainSaveBlob === 'function') {
+    return globalThis.__terrainSaveBlob(blob, suggestedName, { mime });
+  }
   const bridge = desktop();
   if (bridge) {
     const bytes = new Uint8Array(await blob.arrayBuffer());

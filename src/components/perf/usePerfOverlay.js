@@ -38,6 +38,7 @@ export function usePerfOverlay(engineRef, loadingTasks) {
   settingsRef.current = settings;
   const loadingRef = useRef(loadingTasks);
   loadingRef.current = loadingTasks;
+  const profiledEngineRef = useRef(null);
 
   // persist
   useEffect(() => {
@@ -47,8 +48,14 @@ export function usePerfOverlay(engineRef, loadingTasks) {
   // detailed collection only while the overlay is open
   useEffect(() => {
     profiler.setActive(settings.open);
-    return () => profiler.setActive(false);
-  }, [settings.open]);
+    const engine = engineRef.current;
+    Promise.resolve(engine?.setPerformanceProfilerActive?.(settings.open)).catch(() => {});
+    return () => {
+      profiler.setActive(false);
+      Promise.resolve(engine?.setPerformanceProfilerActive?.(false)).catch(() => {});
+      if (profiledEngineRef.current === engine) profiledEngineRef.current = null;
+    };
+  }, [settings.open, engineRef]);
 
   const patch = useCallback((p) => setSettings((s) => ({ ...s, ...p })), []);
   const toggleOpen = useCallback(() => setSettings((s) => ({ ...s, open: !s.open })), []);
@@ -84,13 +91,25 @@ export function usePerfOverlay(engineRef, loadingTasks) {
       return next;
     };
 
-    const tick = () => {
-      const base = profiler.snapshot();
+    let cancelled = false;
+    let polling = false;
+    const tick = async () => {
+      if (polling) return;
+      polling = true;
+      let base = profiler.snapshot();
       let diag = null;
       const eng = engineRef.current;
       if (eng && typeof eng.getPerfDiagnostics === 'function') {
-        try { diag = eng.getPerfDiagnostics(); } catch { diag = null; }
+        try {
+          if (profiledEngineRef.current !== eng) {
+            await eng.setPerformanceProfilerActive?.(true);
+            profiledEngineRef.current = eng;
+          }
+          diag = await eng.getPerfDiagnostics();
+          if (diag?.performance) base = diag.performance;
+        } catch { diag = null; }
       }
+      if (cancelled) return;
       const appTasks = (loadingRef.current || []).map((t) => ({
         id: `app-${t.id}`,
         name: t.label || t.id,
@@ -107,10 +126,14 @@ export function usePerfOverlay(engineRef, loadingTasks) {
         drawCalls: push(h.drawCalls, base.render?.calls ?? 0),
         triangles: push(h.triangles, (base.render?.triangles ?? 0) / 1000),
       }));
+      polling = false;
     };
     tick();
     const h = setInterval(tick, period);
-    return () => clearInterval(h);
+    return () => {
+      cancelled = true;
+      clearInterval(h);
+    };
   }, [settings.open, engineRef]);
 
   return {

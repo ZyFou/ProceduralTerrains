@@ -123,14 +123,11 @@ async function rtToCanvas(renderer, rt, w, h) {
   return canvas;
 }
 
-function canvasToPng(canvas) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      const r = new FileReader();
-      r.onload = () => resolve(new Uint8Array(r.result));
-      r.readAsArrayBuffer(blob);
-    }, 'image/png');
-  });
+async function canvasToPng(canvas) {
+  const blob = typeof canvas.convertToBlob === 'function'
+    ? await canvas.convertToBlob({ type: 'image/png' })
+    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 export class PlanetExporter {

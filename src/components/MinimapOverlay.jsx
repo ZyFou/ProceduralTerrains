@@ -48,6 +48,7 @@ export default function MinimapOverlay({
   const [showChunkGrid, setShowChunkGrid] = useState(false);
   const [hoverInfo, setHoverInfo] = useState(null);
   const wrapRef = useRef(null);
+  const hoverRequestRef = useRef(0);
 
   useEffect(() => {
     onConfigChange?.({ mode, zoom, showChunkGrid });
@@ -64,10 +65,20 @@ export default function MinimapOverlay({
     const px = ((event.clientX - rect.left) / rect.width) * 256;
     const py = ((event.clientY - rect.top) / rect.height) * 256;
     onHoverChange?.({ x: px, y: py });
-    setHoverInfo(onHoverInfoRequest?.(px, py) ?? null);
+    const requestId = hoverRequestRef.current + 1;
+    hoverRequestRef.current = requestId;
+    const result = onHoverInfoRequest?.(px, py) ?? null;
+    if (result && typeof result.then === 'function') {
+      void result.then((info) => {
+        if (hoverRequestRef.current === requestId) setHoverInfo(info ?? null);
+      }).catch(() => {
+        if (hoverRequestRef.current === requestId) setHoverInfo(null);
+      });
+    } else setHoverInfo(result);
   };
 
   const clearHover = () => {
+    hoverRequestRef.current += 1;
     onHoverChange?.(null);
     setHoverInfo(null);
   };

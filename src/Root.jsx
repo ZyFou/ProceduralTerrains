@@ -48,13 +48,13 @@ export default function Root() {
     [visible, exiting, bootReady, bootError, bootProgress, dismiss, sessionSeed],
   );
 
-  const retryBoot = useCallback((mode) => {
+  const retryBoot = useCallback(() => {
     setBootError(null);
     setBootProgress({
       ...INITIAL_BOOT_PROGRESS,
-      label: mode === 'compatibility' ? 'Planning compatibility scene…' : 'Planning final frame…',
+      label: 'Planning exact scene…',
     });
-    window.dispatchEvent(new CustomEvent('terrain-boot:retry', { detail: { mode } }));
+    window.dispatchEvent(new CustomEvent('terrain-boot:retry'));
   }, []);
 
   return (

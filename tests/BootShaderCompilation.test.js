@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Engine } from '../src/engine/Engine.js';
 
 function engineHarness() {
@@ -57,5 +57,36 @@ describe('boot shader compilation', () => {
     expect(materials).not.toContain(hiddenMaterial);
     expect(materials).not.toContain(engine.visualPost._cameraMaterial);
     expect(materials).not.toContain(engine.underwater._material);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])('stagger=%s is selected for renderWorker=%s', async (renderWorker, stagger) => {
+    const engine = engineHarness();
+    Object.assign(engine, {
+      _renderWorker: renderWorker,
+      _applyCompatibilityBootProfile: vi.fn(),
+      _prepareCameraPipeline: vi.fn(),
+      _prepareStudioHeightCacheAsync: vi.fn(async () => true),
+      params: { waterEnabled: false, cloudsEnabled: false, seaLevel: 0 },
+      worldMode: 'studio',
+      visualPost: { _plan: {} },
+      _resolveCameraCompileTarget: () => ({ renderTarget: null }),
+      _finalBootMaterials: () => [{ id: 1 }],
+      _compileMaterialVariants: vi.fn(async () => ({ ready: true })),
+    });
+    const context = {
+      mode: 'full',
+      runId: 1,
+      assertCurrent: vi.fn(),
+    };
+
+    await engine._prepareFinalBootResources(context);
+
+    expect(engine._compileMaterialVariants).toHaveBeenCalledWith(
+      [{ id: 1 }],
+      expect.objectContaining({ stagger }),
+    );
   });
 });
