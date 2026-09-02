@@ -323,6 +323,7 @@ describe('shared Tile and Infinite terrain program', () => {
     materials.push(boot);
 
     expect(boot.userData.minimalFragment).toBe(true);
+    expect(boot.userData.terrainVariant).toBe('boot');
     expect(boot.defines).toEqual({ OCTAVES: 6 });
     expect(boot.defines.INFINITE_MODE).toBeUndefined();
   });

@@ -1,7 +1,7 @@
 # Terrain Studio — Performance Roadmap
 
 > The definitive plan for killing startup freeze and runtime heaviness.
-> Branch of record: `background_loading`. All file paths are relative to repo root.
+> Current implementation status: 2026-09-02. All file paths are relative to repo root.
 
 ---
 
@@ -18,7 +18,13 @@ to reduce the freeze are:
 1. **Split** the compiles so the worst single stall = one shader (not the sum). ✅ done
 2. **Shrink** each shader compiled up-front (fewer unrolled octaves/steps). ✅ partly done
 3. **Defer** non-essential compiles until after first paint. ✅ partly done
-4. **Move the GL context off the main thread entirely** (OffscreenCanvas + Worker). ⬜ **the ultimate task** — see §3
+4. **Move the GL context off the main thread entirely** (OffscreenCanvas + Worker). ✅ done, with the main-thread fallback retained
+
+The remaining cold-start bottleneck is the production terrain program itself.
+Normal launches now present the compact `terrain:boot` material first, defer
+water, and warm the requested final terrain variant once in the background.
+Benchmark/cold-run launches still put the full production graph on the critical
+path so their attribution remains valid.
 
 Everything else (LOD, bake resolution, auto-quality) is about *runtime* FPS, not the boot freeze.
 
@@ -145,7 +151,7 @@ hashes and sizes, not shader source text.
 
 ---
 
-## 3. THE ULTIMATE TASK — OffscreenCanvas + Worker
+## 3. OffscreenCanvas + Worker — implemented
 
 **Goal:** move the entire renderer (and thus all shader compilation) onto a Web
 Worker via `OffscreenCanvas`, so the main/UI thread NEVER freezes during compile,
@@ -186,21 +192,22 @@ the build (Vite worker bundling) and messaging patterns exist to copy from.
 - **Verification can't be done in the Claude preview** (it lands on `chrome-error://`
   for this WebGL app) — must be tested on a real GPU.
 
-### Phased plan (each phase ships independently, flag-gated)
+### Implemented phases
 
-1. **Phase 0 - DONE.** Introduce `EngineProxy` (main thread) with the exact public
-   method surface React uses today, currently delegating to an in-thread `Engine`.
-   No behavior change. Add `perf.useWorker` flag (default OFF).
-2. **Phase 1 — worker boot.** When the flag is ON and OffscreenCanvas is supported,
+1. **Phase 0 — done.** Introduce `EngineProxy` with the exact public method surface.
+2. **Phase 1 — done.** When OffscreenCanvas is supported,
    create the `Engine` inside `engine.worker.js` with the transferred canvas; wire
-   `postMessage` for params-in and the `callbacks` surface out. Camera controls stay
-   on the main thread, posting camera state each frame.
-3. **Phase 2 — input + resize.** Forward pointer/wheel/key + ResizeObserver +
+   `postMessage` for commands and callback events.
+3. **Phase 2 — done.** Forward pointer/wheel/key + ResizeObserver +
    visibilitychange. Move paint/tile raycasting behind a request/response message.
-4. **Phase 3 — minimap + exports.** Worker → `ImageBitmap` for the minimap; exports
+4. **Phase 3 — done.** Worker → `ImageBitmap` for the minimap; exports
    return `Blob` via `postMessage`.
-5. **Phase 4 — flip the flag.** Default `useWorker` ON where supported, keep the
+5. **Phase 4 — done.** Default `useWorker` ON where supported, keep the
    in-thread fallback. Measure boot + frame on the user's GPU.
+
+The current hardening target is eliminating unnecessary shader translations
+when VisualPost recreates a compatible render target, and continuing to reduce
+the generated `terrain:detail` program.
 
 ### Definition of done
 

@@ -10,6 +10,27 @@ function engineHarness() {
 }
 
 describe('boot shader compilation', () => {
+  it('reuses a compiled camera program when only render-target identity or size changes', () => {
+    const engine = engineHarness();
+    const makeTarget = (width, height, type = 1016) => ({
+      width,
+      height,
+      samples: 0,
+      depthBuffer: true,
+      stencilBuffer: false,
+      texture: { format: 1023, type, colorSpace: 'srgb-linear' },
+    });
+
+    expect(engine._sameCameraCompileTarget(
+      { usesSceneTarget: true, renderTarget: makeTarget(1280, 720) },
+      { usesSceneTarget: true, renderTarget: makeTarget(1920, 1080) },
+    )).toBe(true);
+    expect(engine._sameCameraCompileTarget(
+      { usesSceneTarget: true, renderTarget: makeTarget(1280, 720) },
+      { usesSceneTarget: true, renderTarget: makeTarget(1280, 720, 1015) },
+    )).toBe(false);
+  });
+
   it('forces a distinct shader source key only when a cold-run token is active', () => {
     const engine = engineHarness();
     const material = { defines: { EXISTING_DEFINE: 1 }, needsUpdate: false };
@@ -123,6 +144,51 @@ describe('boot shader compilation', () => {
 
     expect(order).toEqual(['benchmark', 'production']);
     expect(context.compilePlan.materials).toEqual([{ id: 1 }]);
+  });
+
+  it.each([
+    ['normal launch', null, true, 0],
+    ['cold diagnostic launch', { token: 'cold-1', defineValue: 17 }, false, 1],
+  ])('keeps water off the interactive path for a %s', async (
+    _label,
+    shaderColdRun,
+    expectedDeferred,
+    expectedPreparedCount,
+  ) => {
+    const engine = engineHarness();
+    const waterMaterial = { id: 9 };
+    const prepareInitialMaterials = vi.fn(() => [waterMaterial]);
+    Object.assign(engine, {
+      _renderWorker: true,
+      _shaderBenchmarkOptions: null,
+      _shaderColdRun: shaderColdRun,
+      _applyCompatibilityBootProfile: vi.fn(),
+      _prepareCameraPipeline: vi.fn(),
+      _prepareStudioHeightCacheAsync: vi.fn(async () => true),
+      _compileMaterialVariants: vi.fn(async () => ({ ready: true })),
+      params: {
+        waterEnabled: true,
+        waterMode: 'legacy',
+        seaLevel: 100,
+        cloudsEnabled: false,
+      },
+      worldMode: 'studio',
+      waterSystem: { prepareInitialMaterials },
+      visualPost: { _plan: {} },
+      _resolveCameraCompileTarget: () => ({ renderTarget: null }),
+      _finalBootMaterials: (extra) => [{ id: 1 }, ...extra],
+    });
+    const context = {
+      mode: 'full',
+      runId: 1,
+      assertCurrent: vi.fn(),
+    };
+
+    const manifest = await engine._prepareFinalBootResources(context);
+
+    expect(manifest.waterDeferred).toBe(expectedDeferred);
+    expect(prepareInitialMaterials).toHaveBeenCalledTimes(expectedPreparedCount);
+    expect(context.compilePlan.materials).toHaveLength(expectedPreparedCount + 1);
   });
 
   it('builds deterministic family candidates and deduplicates matching topology variants', () => {

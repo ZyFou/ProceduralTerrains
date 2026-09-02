@@ -1365,6 +1365,7 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = true;
+  mat.userData.terrainVariant = 'boot';
   mat.userData.heightProgramSig = stackGLSL.sig;
   return mat;
 }

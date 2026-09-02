@@ -692,18 +692,18 @@ describe('water startup shaders', () => {
     expect(engine.cb.onBootComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('uses Base as the interactive boot variant on every GPU tier', () => {
+  it('warms the requested terrain variant directly on every GPU tier', () => {
     const engine = Object.create(Engine.prototype);
     engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
     engine.projectMode = 'procedural';
     engine.params = {};
 
     engine.gpuTier = 'high';
-    expect(engine._bootTerrainVariant()).toBe('base');
+    expect(engine._bootTerrainVariant()).toBe('detail');
     engine.gpuTier = 'medium';
-    expect(engine._bootTerrainVariant()).toBe('base');
+    expect(engine._bootTerrainVariant()).toBe('detail');
     engine.gpuTier = 'low';
-    expect(engine._bootTerrainVariant()).toBe('base');
+    expect(engine._bootTerrainVariant()).toBe('detail');
   });
 
   it('keeps the watchdog safety frame behind the overlay until final terrain is ready', () => {

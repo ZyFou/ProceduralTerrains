@@ -649,8 +649,8 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
           aria-live="polite"
         >
           <div className="landing-preview-loader-content">
-            <strong>{bootError ? 'Final scene could not be prepared' : visualBootStage === 'loading' ? 'Starting terrain editor' : 'Terrain ready'}</strong>
-            <small>{bootError?.message || (visualBootStage === 'loading' ? 'The first visible frame will be the finished scene.' : 'Bringing your workspace into view…')}</small>
+            <strong>{bootError ? 'Terrain could not be prepared' : visualBootStage === 'loading' ? 'Starting terrain editor' : 'Terrain ready'}</strong>
+            <small>{bootError?.message || (visualBootStage === 'loading' ? 'Preparing a responsive first frame; final detail continues safely in the background.' : 'Bringing your workspace into view…')}</small>
             {!bootError && (
               <BootTerrainProgress
                 bootProgress={bootProgress}

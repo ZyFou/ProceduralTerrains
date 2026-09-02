@@ -178,7 +178,7 @@ const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
 //   onTimeOfDayChange(value)    time-of-day slider changed
 //   onBootProgress(progress)    final-frame boot stage/progress
 //   onBootError(error)          blocking failure; UI offers explicit retry
-//   onBootComplete(result)      exact final frame has been presented
+//   onBootComplete(result)      coherent interactive frame has been presented
 //   onModeProgress(progress)    atomic mode-transition stage/progress
 //   onModeError(error)          target failed; previous mode was restored
 //   onModeComplete(result)      target final frame has been presented
@@ -754,15 +754,21 @@ export class Engine {
     // shared shader uniforms: terrain + water read the same objects
     this.uniforms = createTerrainUniforms();
     const oct = Math.round(this.params.octaves);
-    // Install the requested final terrain material from the first scene frame.
-    // Shader compilation stays behind the loading overlay; users must never see
-    // a temporary low-detail terrain that changes underneath an open project.
-    this.terrainMaterial = createTerrainMaterial(
-      this.uniforms,
-      oct,
-      this._stackGLSL,
-      { variant: this._targetTerrainVariant() },
-    );
+    // Normal launches start with the exact terrain height/topology but a compact
+    // fragment. On Windows/ANGLE the full detail fragment is the dominant cold
+    // boot cost (often tens of seconds); it is warmed and atomically published
+    // after the first interactive frame. Diagnostic launches deliberately keep
+    // the requested production shader on the critical path so their timings and
+    // source hashes continue to describe the program users eventually receive.
+    const diagnosticShaderBoot = !!(this._shaderBenchmarkOptions || this._shaderColdRun);
+    this.terrainMaterial = diagnosticShaderBoot
+      ? createTerrainMaterial(
+          this.uniforms,
+          oct,
+          this._stackGLSL,
+          { variant: this._targetTerrainVariant() },
+        )
+      : createBootTerrainMaterial(this.uniforms, oct, this._stackGLSL);
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
     // water plane at sea level
@@ -4617,9 +4623,26 @@ export class Engine {
   }
 
   _sameCameraCompileTarget(a, b) {
-    return !!a && !!b
-      && a.usesSceneTarget === b.usesSceneTarget
-      && a.renderTarget === b.renderTarget;
+    if (!a || !b || a.usesSceneTarget !== b.usesSceneTarget) return false;
+    if (a.renderTarget === b.renderTarget) return true;
+    if (!a.renderTarget || !b.renderTarget) return false;
+    // VisualPost may replace a render-target object after a resize or mode
+    // transition while retaining the same framebuffer/program contract. Shader
+    // linkage does not depend on target dimensions or object identity; forcing
+    // another 20–50 second ANGLE translation in that case only wastes work.
+    const signature = (target) => {
+      const texture = target.texture || {};
+      return [
+        target.samples || 0,
+        target.depthBuffer !== false,
+        target.stencilBuffer === true,
+        texture.format ?? 'default',
+        texture.internalFormat ?? 'default',
+        texture.type ?? 'default',
+        texture.colorSpace || 'default',
+      ].join(':');
+    };
+    return signature(a.renderTarget) === signature(b.renderTarget);
   }
   _compileCameraTargetMaterials(mats, { timeoutMs = 120000, stagger = false } = {}) {
     const { renderTarget } = this._resolveCameraCompileTarget();
@@ -5807,17 +5830,19 @@ export class Engine {
     context.assertCurrent();
     if (!cacheReady) throw new Error('Final terrain height source is not ready');
 
-    // Prepare the requested water material without compiling or attaching it.
-    // Terrain and water are intentionally submitted together in the compile
-    // stage so KHR_parallel_shader_compile can translate both heavy programs in
-    // parallel instead of paying their cold-driver waits serially.
+    // Diagnostic launches preserve the exact production graph so isolated
+    // attribution remains valid. Normal launches keep water outside the
+    // interactive critical path; the existing post-paint warmup prepares and
+    // atomically activates it from the completed Studio height bake.
     const bootParams = this._bootRuntimeParams || this.params;
     context.bootParams = bootParams;
     const waterMode = resolveEffectiveWaterMode(bootParams, this.worldMode);
-    const waterRequired = bootParams.waterEnabled !== false
+    const requestedWater = bootParams.waterEnabled !== false
       && isWaterActive(waterMode, bootParams.seaLevel);
-    context.waterRequired = waterRequired;
-    context.preparedWaterMaterials = waterRequired
+    const diagnosticShaderBoot = !!(this._shaderBenchmarkOptions || this._shaderColdRun);
+    context.waterRequired = diagnosticShaderBoot && requestedWater;
+    context.deferredWaterRequired = !diagnosticShaderBoot && requestedWater;
+    context.preparedWaterMaterials = context.waterRequired
       ? [...(this.waterSystem?.prepareInitialMaterials(bootParams, this.worldMode) || [])]
       : [];
 
@@ -5853,7 +5878,8 @@ export class Engine {
     this._submitFinalBootCompilePlan(context);
     return {
       terrainReady: true,
-      waterPrepared: !waterRequired || context.preparedWaterMaterials.length > 0,
+      waterPrepared: !context.waterRequired || context.preparedWaterMaterials.length > 0,
+      waterDeferred: context.deferredWaterRequired,
       cloudsReady: context.mode === 'compatibility' || !this.params.cloudsEnabled || this.studioCloud?.ready,
     };
   }
@@ -6353,7 +6379,13 @@ export class Engine {
   _completeFinalFrameBoot(result) {
     if (this._disposed || !this._bootPresented) return;
     this._bootPending = false;
-    this._qualityPending = false;
+    const qualityPending = !!(
+      this.terrainMaterial?.userData?.minimalFragment
+      || (this.params?.waterEnabled !== false && this._waterDeferred)
+      || this.board?.isBuilding
+      || (this.board?._lodRebuildQueue?.length > 0)
+    );
+    this._qualityPending = qualityPending;
     this._bootShaderPending = false;
     this._bootError = null;
     this.cb.onStatus?.('Ready', false);
@@ -6373,9 +6405,11 @@ export class Engine {
       ...result,
       backend: this.rendererConfig?.activeBackend || 'webgl2',
       transport: this._renderWorker ? 'worker' : 'main-thread',
+      initialQuality: this.terrainMaterial?.userData?.minimalFragment ? 'bootstrap' : 'final',
+      qualityPending,
     });
     console.info(
-      `[boot] final frame ready in ${result.duration.toFixed(0)}ms `
+      `[boot] ${qualityPending ? 'interactive' : 'final'} frame ready in ${result.duration.toFixed(0)}ms `
       + `(${result.mode}, ${this.rendererConfig?.activeBackend || 'webgl2'}, `
       + `${this._renderWorker ? 'worker' : 'main-thread'})`,
     );
@@ -6387,6 +6421,16 @@ export class Engine {
           .map(([stage, duration]) => `${stage}=${Number(duration).toFixed(0)}ms`)
           .join(' '),
       );
+    }
+    if (qualityPending) {
+      // Landing intentionally defers the large final terrain translation until
+      // the user enters the editor. Do not start a 30-second watchdog for work
+      // that is deliberately paused; setLandingShowcase(false) starts it.
+      if (!this._landingShowcase) {
+        this._bgWorkStart('boot-quality', 'Improving terrain quality…');
+        this._startQualityWatchdog();
+      }
+      this._schedulePostFirstPaintWarmups(850, this._resolveCameraCompileTarget().renderTarget);
     }
     this._scheduleErosionGPUWarmImport();
   }
@@ -6432,7 +6476,7 @@ export class Engine {
     return this._startFinalFrameBoot({ mode, reason: 'retry' });
   }
 
-  /** Compile a final-quality first frame behind the loading overlay. */
+  /** Compile and present the first coherent interactive frame. */
   async _warmupInitialShaders() {
     return this._startFinalFrameBoot({ mode: this._bootMode, reason: 'legacy-entrypoint' });
   }
@@ -6500,9 +6544,9 @@ export class Engine {
     this._qualityWatchdogTimer = setTimeout(() => {
       this._qualityWatchdogTimer = null;
       if (this._disposed || !this._qualityPending) return;
-      console.warn('[boot] optional quality work is still pending', this._bootReadinessSnapshot());
+      console.info('[boot] optional quality work is still pending', this._bootReadinessSnapshot());
       this._bgWorkEnd('boot-quality');
-    }, 30000);
+    }, 120000);
   }
 
   _completeBootIfInteractiveReady(reason = 'interactive terrain ready', { alreadyRendered = false } = {}) {
@@ -6885,7 +6929,10 @@ export class Engine {
   }
 
   _bootTerrainVariant() {
-    return 'base';
+    // Compile the requested production variant once. The former minimal →
+    // Base → requested sequence paid for two very large ANGLE translations
+    // on the first launch even though Base was only an intermediate frame.
+    return this._targetTerrainVariant();
   }
 
   _scheduleTerrainQualityUpgrade(renderTarget = null, delayMs = 500) {
@@ -7638,6 +7685,11 @@ export class Engine {
       this.controls.enabled = true;
       this.controls.blendToDefault(this.boardSize);
       this._needsRender = true;
+      if (this._qualityPending) {
+        this._bgWorkStart('boot-quality', 'Improving terrain quality…');
+        this._startQualityWatchdog();
+        this._schedulePostFirstPaintWarmups(100, this._resolveCameraCompileTarget().renderTarget);
+      }
     }
   }
 

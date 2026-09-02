@@ -371,7 +371,7 @@ export default function App() {
         bootTimer = null;
       }
       landingRef.current?.setBootError?.(null);
-      landingRef.current?.setBootProgress?.({ stage: 'ready', label: 'Final frame ready', progress: 1 });
+      landingRef.current?.setBootProgress?.({ stage: 'ready', label: 'Interactive terrain ready', progress: 1 });
       loadingRef.current.done('boot');
       landingRef.current?.setBootReady(true);
     };
@@ -413,7 +413,7 @@ export default function App() {
     bootTimer = setTimeout(() => {
       if (bootedRef.current || cancelled) return;
       loadingRef.current.update('boot', {
-        detail: 'Finalizing terrain mesh, materials and water…',
+        detail: 'Preparing the first interactive terrain frame…',
       });
     }, 15000);
 
@@ -465,7 +465,7 @@ export default function App() {
               label: error?.message || 'Graphics initialization failed',
             }));
             loadingRef.current.update('boot', {
-              label: 'Final scene could not be prepared',
+              label: 'Terrain could not be prepared',
               detail: error?.message || 'Graphics initialization failed',
               progress: undefined,
             });
