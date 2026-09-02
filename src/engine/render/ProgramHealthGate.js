@@ -6,6 +6,15 @@ const fnv1a = (text = '') => {
   return (hash >>> 0).toString(16).padStart(8, '0');
 };
 
+const stableDefines = (defines = {}) => Object.fromEntries(
+  Object.keys(defines).sort().map((key) => [key, defines[key]]),
+);
+
+const withoutBenchmarkDefine = (source = '') => source.replace(
+  /^[\t ]*#define[\t ]+TERRAIN_BENCHMARK_RUN[\t ]+\S+[\t ]*(?:\r?\n|$)/gm,
+  '',
+);
+
 const samplerTypes = (gl) => new Set([
   gl.SAMPLER_2D, gl.SAMPLER_CUBE, gl.SAMPLER_3D, gl.SAMPLER_2D_SHADOW,
   gl.SAMPLER_2D_ARRAY, gl.SAMPLER_2D_ARRAY_SHADOW, gl.SAMPLER_CUBE_SHADOW,
@@ -18,7 +27,8 @@ export function materialProgramDescriptor(material, role = null) {
   const vertexShader = material?.vertexShader || '';
   const fragmentShader = material?.fragmentShader || '';
   const defines = material?.defines || {};
-  const sourceKey = JSON.stringify({ vertexShader, fragmentShader, defines });
+  const normalizedDefines = stableDefines(defines);
+  const sourceKey = JSON.stringify({ vertexShader, fragmentShader, defines: normalizedDefines });
   const fragmentSamplerNames = [...fragmentShader.matchAll(
     /uniform\s+(?:[iu]?sampler\w+)\s+([A-Za-z_]\w*)\s*(?:\[\s*\d+\s*\])?\s*;/g,
   )].map((match) => match[1]);
@@ -26,9 +36,10 @@ export function materialProgramDescriptor(material, role = null) {
     role: role || material?.name || material?.type || 'material',
     materialId: material?.id ?? null,
     sourceHash: fnv1a(sourceKey),
+    definesHash: fnv1a(JSON.stringify(normalizedDefines)),
     vertexChars: vertexShader.length,
     fragmentChars: fragmentShader.length,
-    defines: { ...defines },
+    defines: normalizedDefines,
     fragmentSamplerNames,
   };
 }
@@ -46,6 +57,20 @@ export function inspectProgram(gl, programWrapper, descriptor = {}) {
   try { programWrapper?.getUniforms?.(); } catch { /* link status below is authoritative */ }
 
   const linked = gl.getProgramParameter(program, gl.LINK_STATUS) === true;
+  let linkedVertexSource = '';
+  let linkedFragmentSource = '';
+  try {
+    for (const shader of gl.getAttachedShaders?.(program) || []) {
+      const source = gl.getShaderSource?.(shader) || '';
+      const type = gl.getShaderParameter?.(shader, gl.SHADER_TYPE);
+      if (type === gl.VERTEX_SHADER) linkedVertexSource = source;
+      else if (type === gl.FRAGMENT_SHADER) linkedFragmentSource = source;
+    }
+  } catch { /* linked source introspection is optional */ }
+  const linkedSource = `${linkedVertexSource}\n${linkedFragmentSource}`;
+  const productionVertexSource = withoutBenchmarkDefine(linkedVertexSource);
+  const productionFragmentSource = withoutBenchmarkDefine(linkedFragmentSource);
+  const productionLinkedSource = `${productionVertexSource}\n${productionFragmentSource}`;
   const activeUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) || 0;
   const types = samplerTypes(gl);
   let activeSamplers = 0;
@@ -66,6 +91,16 @@ export function inspectProgram(gl, programWrapper, descriptor = {}) {
     ok: linked,
     code: linked ? null : 'PROGRAM_LINK_FAILED',
     linked,
+    linkedSourceHash: linkedVertexSource || linkedFragmentSource
+      ? fnv1a(linkedSource)
+      : null,
+    productionLinkedSourceHash: linkedVertexSource || linkedFragmentSource
+      ? fnv1a(productionLinkedSource)
+      : null,
+    linkedVertexChars: linkedVertexSource.length || descriptor.vertexChars || 0,
+    linkedFragmentChars: linkedFragmentSource.length || descriptor.fragmentChars || 0,
+    productionLinkedVertexChars: productionVertexSource.length || descriptor.vertexChars || 0,
+    productionLinkedFragmentChars: productionFragmentSource.length || descriptor.fragmentChars || 0,
     activeUniforms,
     activeSamplers,
     programLog: gl.getProgramInfoLog(program) || '',

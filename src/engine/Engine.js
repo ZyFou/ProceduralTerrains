@@ -147,6 +147,10 @@ import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 import { GpuWorkScheduler } from './render/GpuWorkScheduler.js';
 import { GpuResourceLedger, rendererAdmission } from './render/GpuResourceLedger.js';
 import { materialProgramDescriptor, programHealthError, validatePrograms } from './render/ProgramHealthGate.js';
+import {
+  ShaderBenchmarkRunner,
+  classifyShaderBenchmarkRole,
+} from './render/ShaderBenchmark.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
@@ -271,6 +275,7 @@ export class Engine {
     perfSettingsStored,
     renderWorker = false,
     coldShaderRun = null,
+    shaderBenchmark = null,
     initialView = 'landing',
     initialBootMode = 'full',
   }) {
@@ -284,7 +289,9 @@ export class Engine {
     this._bootPresented = false;
     this._bootPipeline = null;
     this._renderWorker = !!renderWorker;
-    this._shaderColdRun = readShaderColdRun(coldShaderRun);
+    this._shaderBenchmarkOptions = shaderBenchmark?.enabled ? shaderBenchmark : null;
+    this._shaderBenchmarkResult = null;
+    this._shaderColdRun = this._shaderBenchmarkOptions ? null : readShaderColdRun(coldShaderRun);
     this._shaderColdRunLogged = false;
     this._modeTransitionCoordinator = null;
     this._modeResourceCache = new ModeResourceCache({ maxInactive: 2 });
@@ -5037,7 +5044,7 @@ export class Engine {
   }
 
   _compileMaterialDescriptor(material) {
-    let role = material?.name || material?.type || 'material';
+    let role = material?.userData?.benchmarkRole || material?.name || material?.type || 'material';
     const requestedWater = this.waterSystem?.getRequestedMaterial?.(this.worldMode);
     if (material === this.terrainMaterial) {
       role = `terrain:${material.userData?.terrainVariant || 'unknown'}`;
@@ -5049,6 +5056,9 @@ export class Engine {
         || material === this.infiniteWorld?.waterPlane?.material
         || material === this.planetWater?.material) {
       role = `water:${this.waterSystem?.getEffectiveMode?.() || 'unknown'}`;
+    } else if (this.planetWorld?.materials?.includes?.(material)
+        || material?.userData?.modeCacheRole === 'planet-terrain-program') {
+      role = 'planet-terrain';
     } else if (material === this.visualPost?._lookMaterial) {
       role = 'post:look';
     } else if (material === this.visualPost?._cameraMaterial) {
@@ -5056,8 +5066,12 @@ export class Engine {
     } else if (material === this.underwater?._material) {
       role = 'post:underwater';
     } else if (material === this.studioCloud?.material
-        || material === this.studioCloud?.mesh?.material) {
-      role = 'cloud:studio';
+        || material === this.studioCloud?.mesh?.material
+        || material === this.infiniteCloud?.material
+        || material === this.infiniteCloud?.mesh?.material
+        || material === this.planetCloudLayer?.material
+        || material === this.planetCloudLayer?.mesh?.material) {
+      role = `cloud:${this.worldMode || 'active'}`;
     }
     return {
       ...materialProgramDescriptor(material, role),
@@ -5074,6 +5088,10 @@ export class Engine {
     stagger = false,
     onProgress,
     renderTarget = null,
+    sources = [],
+    camera = this.camera,
+    targetScene = this.scene,
+    logCompile = true,
   } = {}) {
     // Capture the renderer for the whole operation. Vite HMR and explicit
     // disposal can replace/null `this.renderer` while the driver is linking a
@@ -5092,7 +5110,10 @@ export class Engine {
         asyncWaitMs: 0,
       };
     }
-    const list = mats.filter(Boolean);
+    const pairs = mats
+      .map((material, index) => ({ material, source: sources[index] || null }))
+      .filter(({ material }) => Boolean(material));
+    const list = pairs.map(({ material }) => material);
     if (!list.length) {
       return {
         ready: true,
@@ -5111,12 +5132,16 @@ export class Engine {
     if (stagger && list.length > 1) {
       let done = 0;
       const results = [];
-      for (const m of list) {
-        results.push(await this._compileMaterialVariants([m], {
+      for (const pair of pairs) {
+        results.push(await this._compileMaterialVariants([pair.material], {
           canvasOnly,
           timeoutMs,
           onProgress: (stepDone) => onProgress?.(done + stepDone, total),
           renderTarget,
+          sources: [pair.source],
+          camera,
+          targetScene,
+          logCompile,
         }));
         done += passesPerMaterial;
         await yieldTask();
@@ -5128,17 +5153,32 @@ export class Engine {
         pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
         waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
         syncCompileMs: results.reduce((sum, result) => sum + result.syncCompileMs, 0),
+        rendererCompileMs: results.reduce((sum, result) => sum + (result.rendererCompileMs || 0), 0),
         asyncWaitMs: results.reduce((sum, result) => sum + result.asyncWaitMs, 0),
+        validationMs: results.reduce((sum, result) => sum + (result.validationMs || 0), 0),
       };
     }
 
     const group = new THREE.Group();
-    for (const m of list) group.add(new THREE.Mesh(this._warmGeo, m));
+    for (const { material, source } of pairs) {
+      let probe;
+      if (source?.clone) {
+        probe = source.clone(false);
+        probe.material = material;
+        if (probe.isInstancedMesh && probe.count < 1) probe.count = 1;
+      } else {
+        probe = new THREE.Mesh(source?.geometry || this._warmGeo, material);
+      }
+      probe.castShadow = Boolean(source?.castShadow);
+      probe.receiveShadow = Boolean(source?.receiveShadow);
+      group.add(probe);
+    }
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
     const previousTarget = renderer.getRenderTarget();
     let pending;
+    let rendererCompileMs = 0;
     try {
       renderer.setRenderTarget(renderTarget);
       const compileKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
@@ -5146,9 +5186,19 @@ export class Engine {
       pending = this._gpuWorkScheduler
         ? await this._gpuWorkScheduler.schedule(
             compileKey,
-            () => renderer.compile(group, this.camera, this.scene),
+            () => {
+              const startedAt = performance.now();
+              const value = renderer.compile(group, camera, targetScene);
+              rendererCompileMs = performance.now() - startedAt;
+              return value;
+            },
           )
-        : renderer.compile(group, this.camera, this.scene);
+        : (() => {
+            const startedAt = performance.now();
+            const value = renderer.compile(group, camera, targetScene);
+            rendererCompileMs = performance.now() - startedAt;
+            return value;
+          })();
     } finally {
       renderer.setRenderTarget(previousTarget);
     }
@@ -5166,9 +5216,11 @@ export class Engine {
         asyncWaitMs,
       };
     }
+    const validationStartedAt = performance.now();
     const canvasHealth = canvasResult.ready
-      ? await this._validateCompiledPrograms(list, group, renderTarget)
+      ? await this._validateCompiledPrograms(list, group, renderTarget, camera)
       : { ok: false, code: 'PROGRAM_NOT_READY', diagnostics: [] };
+    const validationMs = performance.now() - validationStartedAt;
     if (!canvasHealth.ok) {
       const error = programHealthError(canvasHealth);
       console.error('[shader health]', error, canvasHealth);
@@ -5179,22 +5231,26 @@ export class Engine {
         health: canvasHealth,
         materialCount: list.length,
         syncCompileMs,
+        rendererCompileMs,
         asyncWaitMs,
+        validationMs,
       };
     }
     const parallelCompile = Boolean(
       renderer.getContext?.()?.getExtension?.('KHR_parallel_shader_compile')
     );
-    console.info(
-      `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
-      + ` materials=${list.length}`
-      + ` sync=${syncCompileMs.toFixed(0)}ms`
-      + ` async=${asyncWaitMs.toFixed(0)}ms`
-      + ` ready=${canvasResult.ready}`
-      + ` pending=${canvasResult.pendingCount}`
-      + ` parallel=${parallelCompile}`
-    );
-    if (canvasResult.readyTimeline?.length) {
+    if (logCompile) {
+      console.info(
+        `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
+        + ` materials=${list.length}`
+        + ` sync=${syncCompileMs.toFixed(0)}ms`
+        + ` async=${asyncWaitMs.toFixed(0)}ms`
+        + ` ready=${canvasResult.ready}`
+        + ` pending=${canvasResult.pendingCount}`
+        + ` parallel=${parallelCompile}`
+      );
+    }
+    if (logCompile && canvasResult.readyTimeline?.length) {
       console.info(
         '[shader ready] '
         + canvasResult.readyTimeline
@@ -5211,7 +5267,9 @@ export class Engine {
         health: canvasHealth,
         materialCount: list.length,
         syncCompileMs,
+        rendererCompileMs,
         asyncWaitMs,
+        validationMs,
       };
     }
 
@@ -5223,26 +5281,28 @@ export class Engine {
     const pendingRt = this._gpuWorkScheduler
       ? await this._gpuWorkScheduler.schedule(
           rtKey,
-          () => renderer.compile(group, this.camera, this.scene),
+          () => renderer.compile(group, camera, targetScene),
         )
-      : renderer.compile(group, this.camera, this.scene);
+      : renderer.compile(group, camera, targetScene);
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
     renderer.setRenderTarget(null);
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
     const rtHealth = rtResult.ready
-      ? await this._validateCompiledPrograms(list, group, this.underwater._rt)
+      ? await this._validateCompiledPrograms(list, group, this.underwater._rt, camera)
       : { ok: false, code: 'PROGRAM_NOT_READY', diagnostics: [] };
-    console.info(
-      `[shader compile] pass=underwater`
-      + ` materials=${list.length}`
-      + ` sync=${rtSyncCompileMs.toFixed(0)}ms`
-      + ` async=${rtAsyncWaitMs.toFixed(0)}ms`
-      + ` ready=${rtResult.ready}`
-      + ` pending=${rtResult.pendingCount}`
-      + ` parallel=${parallelCompile}`
-    );
+    if (logCompile) {
+      console.info(
+        `[shader compile] pass=underwater`
+        + ` materials=${list.length}`
+        + ` sync=${rtSyncCompileMs.toFixed(0)}ms`
+        + ` async=${rtAsyncWaitMs.toFixed(0)}ms`
+        + ` ready=${rtResult.ready}`
+        + ` pending=${rtResult.pendingCount}`
+        + ` parallel=${parallelCompile}`
+      );
+    }
     onProgress?.(total, total);
     return {
       ready: canvasResult.ready && rtResult.ready && rtHealth.ok,
@@ -5256,7 +5316,7 @@ export class Engine {
     };
   }
 
-  async _validateCompiledPrograms(materials, group, renderTarget = null) {
+  async _validateCompiledPrograms(materials, group, renderTarget = null, camera = this.camera) {
     const renderer = this.renderer;
     if (!renderer || this._disposed) {
       return { ok: false, code: 'RENDERER_UNAVAILABLE', diagnostics: [] };
@@ -5281,7 +5341,7 @@ export class Engine {
         try {
           renderer.setRenderTarget(target);
           renderer.clear();
-          renderer.render(group, this.camera);
+          renderer.render(group, camera);
         } finally {
           renderer.setRenderTarget(previous);
           target.dispose();
@@ -5779,18 +5839,18 @@ export class Engine {
     );
     context.compileTarget = target;
     context.compileMaterials = materials;
-    context.compilePromise = this._compileMaterialVariants(materials, {
-      canvasOnly: true,
-      // The main-thread fallback must never submit the entire ANGLE graph in
-      // one browser task. KHR_parallel_shader_compile moves link completion,
-      // not necessarily GLSL->HLSL translation, off the UI thread.
-      stagger: !this._renderWorker,
-      timeoutMs: 120000,
-      renderTarget: target.renderTarget,
-    });
-    // Cancellation can retire the pipeline during geometry. Keep the submitted
-    // driver job observed until its owning compile stage either awaits or drops it.
-    context.compilePromise.catch(() => {});
+    context.compilePlan = this._buildFinalBootCompilePlan(materials, target.renderTarget);
+    if (this._shaderBenchmarkOptions) {
+      const benchmark = await this._runInitialShaderBenchmark(context);
+      context.assertCurrent();
+      if (benchmark.status !== 'passed') {
+        const error = new Error('Shader benchmark validation failed');
+        error.code = benchmark.contextLost ? 'CONTEXT_LOST' : 'SHADER_BENCHMARK_FAILED';
+        error.shaderBenchmark = benchmark;
+        throw error;
+      }
+    }
+    this._submitFinalBootCompilePlan(context);
     return {
       terrainReady: true,
       waterPrepared: !waterRequired || context.preparedWaterMaterials.length > 0,
@@ -5845,6 +5905,7 @@ export class Engine {
       materials.add(this.visualPost._cameraMaterial);
     }
     for (const layer of [this.studioCloud, this.infiniteCloud, this.planetCloudLayer]) {
+      if (layer?.active && layer?.material) materials.add(layer.material);
       if (layer?.active && layer?.usesLowRes && layer?._lowResPass?._composite) {
         materials.add(layer._lowResPass._composite);
       }
@@ -5856,6 +5917,354 @@ export class Engine {
     return [...materials];
   }
 
+  _shaderBenchmarkTargetKey(renderTarget = null) {
+    if (!renderTarget) return 'canvas';
+    const texture = renderTarget.texture || {};
+    return [
+      'target',
+      `${renderTarget.width || 0}x${renderTarget.height || 0}`,
+      `samples=${renderTarget.samples || 0}`,
+      `format=${texture.format ?? 'default'}`,
+      `type=${texture.type ?? 'default'}`,
+      `color=${texture.colorSpace || 'default'}`,
+    ].join(':');
+  }
+
+  _shaderBenchmarkTopology(object = null) {
+    let kind = 'mesh';
+    if (object?.isInstancedMesh) kind = 'instanced-mesh';
+    else if (object?.isSkinnedMesh) kind = 'skinned-mesh';
+    else if (object?.isPoints) kind = 'points';
+    else if (object?.isLineSegments) kind = 'line-segments';
+    else if (object?.isLine) kind = 'line';
+    const attributes = Object.keys(object?.geometry?.attributes || {}).sort().join(',');
+    const morph = Object.keys(object?.geometry?.morphAttributes || {}).sort().join(',');
+    return `${kind}[${attributes || 'default'}]${morph ? `[morph:${morph}]` : ''}`;
+  }
+
+  _buildFinalBootCompilePlan(materials = [], renderTarget = null) {
+    const allowed = new Set(materials.filter(Boolean));
+    const candidates = [];
+    const seen = new Set();
+    const add = (material, source = null, {
+      camera = this.camera,
+      targetScene = this.scene,
+      target = renderTarget,
+      role = null,
+    } = {}) => {
+      if (!allowed.has(material)) return;
+      const descriptor = this._compileMaterialDescriptor(material);
+      const stableRole = role || descriptor.role;
+      const topology = this._shaderBenchmarkTopology(source);
+      const targetKey = this._shaderBenchmarkTargetKey(target);
+      const key = `${material.id ?? descriptor.sourceHash}:${topology}:${targetKey}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({
+        key,
+        material,
+        materialId: material.id ?? null,
+        source,
+        topology,
+        camera,
+        targetScene,
+        renderTarget: target,
+        targetKey,
+        role: stableRole,
+        family: classifyShaderBenchmarkRole(stableRole),
+        productionDescriptor: descriptor,
+      });
+    };
+
+    this.scene?.traverse?.((object) => {
+      if (!this._isRenderable(object)) return;
+      const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of objectMaterials) add(material, object);
+    });
+
+    const waterSources = [
+      this.water,
+      this.infiniteWorld?.waterPlane,
+      this.planetWater,
+    ].filter(Boolean);
+    const cloudSources = [
+      this.studioCloud?.mesh,
+      this.infiniteCloud?.mesh,
+      this.planetCloudLayer?.mesh,
+    ].filter(Boolean);
+    for (const material of allowed) {
+      if (candidates.some((candidate) => candidate.material === material)) continue;
+      const role = this._compileMaterialDescriptor(material).role;
+      const source = role.startsWith('water:')
+        ? waterSources.find((source) => source.material === material) || waterSources[0]
+        : role.startsWith('cloud:')
+          ? cloudSources.find((candidate) => candidate.material === material) || cloudSources[0]
+          : null;
+      add(material, source);
+    }
+
+    const replacePass = (material, pass) => {
+      if (!material || !allowed.has(material)) return;
+      for (let index = candidates.length - 1; index >= 0; index -= 1) {
+        if (candidates[index].material === material) {
+          seen.delete(candidates[index].key);
+          candidates.splice(index, 1);
+        }
+      }
+      add(material, pass.source, pass);
+    };
+    const post = this.visualPost;
+    replacePass(post?._lookMaterial, {
+      source: post?._quad,
+      camera: post?._quadCam,
+      targetScene: post?._quadScene,
+      target: post?._plan?.needsFinalPass ? post?._lookRT : null,
+      role: 'post:look',
+    });
+    replacePass(post?._cameraMaterial, {
+      source: post?._quad,
+      camera: post?._quadCam,
+      targetScene: post?._quadScene,
+      target: null,
+      role: 'post:camera',
+    });
+    replacePass(this.underwater?._material, {
+      source: this.underwater?._quadScene?.children?.[0] || null,
+      camera: this.underwater?._quadCam,
+      targetScene: this.underwater?._quadScene,
+      target: null,
+      role: 'post:underwater',
+    });
+    for (const layer of [this.studioCloud, this.infiniteCloud, this.planetCloudLayer]) {
+      const lowRes = layer?._lowResPass;
+      replacePass(lowRes?._composite, {
+        source: lowRes?._quad,
+        camera: lowRes?._quadCam,
+        targetScene: lowRes?._quadScene,
+        target: renderTarget,
+        role: `cloud:composite:${layer?.constructor?.name || 'layer'}`,
+      });
+    }
+
+    return {
+      materials: [...allowed],
+      candidates,
+      renderTarget,
+      targetKey: this._shaderBenchmarkTargetKey(renderTarget),
+      constructedAt: performance.now(),
+    };
+  }
+
+  _submitFinalBootCompilePlan(context) {
+    if (context.compilePromise) return context.compilePromise;
+    const plan = context.compilePlan || this._buildFinalBootCompilePlan(
+      context.compileMaterials || [],
+      context.compileTarget?.renderTarget || null,
+    );
+    context.compilePlan = plan;
+    context.compilePromise = this._compileMaterialVariants(plan.materials, {
+      canvasOnly: true,
+      stagger: !this._renderWorker,
+      timeoutMs: 120000,
+      renderTarget: plan.renderTarget,
+    });
+    // Cancellation can retire the pipeline during geometry. Keep the submitted
+    // driver job observed until its owning compile stage either awaits or drops it.
+    context.compilePromise.catch(() => {});
+    return context.compilePromise;
+  }
+
+  async _runInitialShaderBenchmark(context) {
+    const options = this._shaderBenchmarkOptions;
+    if (!options) return null;
+    if (options.coldShaderRunIgnored) {
+      console.info('[shader benchmark] coldShaderRun ignored while benchmark mode is active');
+    }
+    const runner = new ShaderBenchmarkRunner({
+      compileCase: async (candidate, runOptions) => {
+        context.assertCurrent();
+        const result = await this._compileShaderBenchmarkCandidate(candidate, runOptions);
+        // Context loss retires the boot generation immediately. Let the runner
+        // serialize that terminal case before the outer pipeline observes its
+        // cancellation, so exported diagnostics still explain the abort.
+        if (!result.contextLost) context.assertCurrent();
+        return result;
+      },
+      onProgress: ({ family, completed, total }) => context.progress(
+        `Benchmarking ${family} shaders…`,
+        completed,
+        Math.max(1, total),
+      ),
+    });
+    const result = await runner.run({
+      options,
+      candidates: context.compilePlan?.candidates || [],
+      metadata: {
+        runId: context.runId,
+        transport: this._renderWorker ? 'worker' : 'main-thread',
+        renderer: {
+          backend: this.rendererConfig?.activeBackend || 'webgl2',
+          detected: this.rendererCapabilities?.detectedRenderer || 'Unknown',
+          drawingBuffer: this.rendererCapabilities?.drawingBuffer || null,
+          contextAttributes: this.rendererCapabilities?.contextAttributes || null,
+        },
+        gpu: {
+          tier: this.gpuTier,
+          name: this.rendererCapabilities?.detectedGpu || this.gpuNameFull || this.gpuName || null,
+          vendor: this.rendererCapabilities?.vendor || null,
+          renderer: this.rendererCapabilities?.renderer || null,
+        },
+        renderKey: context.renderKey?.serialized || context.renderKey || null,
+        worldMode: this.worldMode,
+        projectMode: this.projectMode,
+        parallelCompilation: Boolean(
+          this.renderer?.getContext?.()?.getExtension?.('KHR_parallel_shader_compile'),
+        ),
+        preconditions: {
+          resourcePreparationComplete: true,
+          excludedFromFamilyTiming: true,
+          programs: (this._programHealthDiagnostics || []).flatMap((entry) => (
+            entry?.diagnostics || []
+          )).map((program) => ({
+            role: program.role || null,
+            sourceHash: program.sourceHash || null,
+            linked: program.linked === true,
+          })),
+        },
+      },
+    });
+    this._shaderBenchmarkResult = result;
+    return result;
+  }
+
+  async _compileShaderBenchmarkCandidate(candidate, options) {
+    const liveMaterial = candidate.material;
+    const production = candidate.productionDescriptor
+      || this._compileMaterialDescriptor(liveMaterial);
+    const clone = liveMaterial?.clone?.();
+    if (!clone) {
+      return {
+        status: 'failed',
+        code: 'MATERIAL_CLONE_UNAVAILABLE',
+        productionSourceHash: production.sourceHash,
+      };
+    }
+    clone.name = liveMaterial.name;
+    clone.userData = { ...(clone.userData || {}), benchmarkRole: candidate.role };
+    clone.defines = {
+      ...(clone.defines || {}),
+      TERRAIN_BENCHMARK_RUN: options.defineValue,
+    };
+    clone.needsUpdate = true;
+    const benchmark = this._compileMaterialDescriptor(clone);
+    const originalDefines = liveMaterial.defines;
+    const startedAt = performance.now();
+    try {
+      const compiled = await this._compileMaterialVariants([clone], {
+        canvasOnly: true,
+        timeoutMs: 120000,
+        renderTarget: candidate.renderTarget,
+        sources: [candidate.source],
+        camera: candidate.camera || this.camera,
+        targetScene: candidate.targetScene || this.scene,
+        logCompile: false,
+      });
+      const health = compiled.health;
+      const program = health?.diagnostics?.[0] || {};
+      let contextLost = Boolean(health?.contextLost || this._contextLost);
+      let status = compiled.ready === true && health?.ok !== false ? 'passed' : 'failed';
+      let code = status === 'passed' ? null
+        : contextLost ? 'CONTEXT_LOST'
+          : compiled.timedOut ? 'SHADER_TIMEOUT'
+            : health?.code || compiled.error?.code || 'SHADER_COMPILE_FAILED';
+      let publicationBindMs = 0;
+      if (status === 'passed') {
+        liveMaterial.defines = {
+          ...(liveMaterial.defines || {}),
+          TERRAIN_BENCHMARK_RUN: options.defineValue,
+        };
+        liveMaterial.needsUpdate = true;
+        const bindStartedAt = performance.now();
+        const publication = await this._compileMaterialVariants([liveMaterial], {
+          canvasOnly: true,
+          timeoutMs: 120000,
+          renderTarget: candidate.renderTarget,
+          sources: [candidate.source],
+          camera: candidate.camera || this.camera,
+          targetScene: candidate.targetScene || this.scene,
+          logCompile: false,
+        });
+        publicationBindMs = performance.now() - bindStartedAt;
+        contextLost = contextLost || Boolean(publication.health?.contextLost || this._contextLost);
+        if (publication.ready !== true || publication.health?.ok === false) {
+          status = 'failed';
+          code = contextLost
+            ? 'CONTEXT_LOST'
+            : publication.timedOut
+              ? 'SHADER_CACHE_BIND_TIMEOUT'
+              : publication.health?.code || 'SHADER_CACHE_BIND_FAILED';
+          liveMaterial.defines = originalDefines;
+          liveMaterial.needsUpdate = true;
+        }
+      }
+      return {
+        status,
+        code,
+        topology: candidate.topology,
+        renderTarget: candidate.targetKey,
+        productionSourceHash: program.productionLinkedSourceHash || production.sourceHash,
+        benchmarkSourceHash: program.linkedSourceHash || benchmark.sourceHash,
+        linkedBenchmarkSourceHash: program.linkedSourceHash || null,
+        productionDefinesHash: production.definesHash,
+        benchmarkDefinesHash: benchmark.definesHash,
+        productionDefines: production.defines,
+        benchmarkDefines: benchmark.defines,
+        productionSourceSizes: {
+          vertexChars: program.productionLinkedVertexChars || production.vertexChars,
+          fragmentChars: program.productionLinkedFragmentChars || production.fragmentChars,
+        },
+        benchmarkSourceSizes: {
+          vertexChars: program.linkedVertexChars || benchmark.vertexChars,
+          fragmentChars: program.linkedFragmentChars || benchmark.fragmentChars,
+        },
+        vertexChars: program.linkedVertexChars || benchmark.vertexChars,
+        fragmentChars: program.linkedFragmentChars || benchmark.fragmentChars,
+        activeSamplers: program.activeSamplers ?? null,
+        activeUniforms: program.activeUniforms ?? null,
+        submitMs: compiled.rendererCompileMs ?? compiled.syncCompileMs ?? 0,
+        queueWaitMs: Math.max(0, (compiled.syncCompileMs || 0) - (compiled.rendererCompileMs || 0)),
+        driverWaitMs: compiled.asyncWaitMs || 0,
+        validationMs: compiled.validationMs || 0,
+        publicationBindMs,
+        totalMs: performance.now() - startedAt,
+        linked: program.linked ?? null,
+        linkStatus: program.linked === true ? 'passed' : program.linked === false ? 'failed' : 'unknown',
+        canaryPassed: health?.ok === true,
+        canaryStatus: health?.ok === true ? 'passed' : 'failed',
+        glErrors: [...(health?.glErrors || [])],
+        timedOut: Boolean(compiled.timedOut),
+        contextLost,
+        aborted: Boolean(compiled.aborted),
+      };
+    } catch (error) {
+      if (liveMaterial.defines?.TERRAIN_BENCHMARK_RUN === options.defineValue) {
+        liveMaterial.defines = originalDefines;
+        liveMaterial.needsUpdate = true;
+      }
+      return {
+        status: 'failed',
+        code: error?.code || 'SHADER_BENCHMARK_ERROR',
+        message: error?.message || String(error),
+        productionSourceHash: production.sourceHash,
+        benchmarkSourceHash: benchmark.sourceHash,
+        totalMs: performance.now() - startedAt,
+        contextLost: Boolean(this._contextLost),
+      };
+    } finally {
+      clone.dispose();
+    }
+  }
+
   async _compileFinalBootGraph(context) {
     context.assertCurrent();
     const target = context.compileTarget || this._resolveCameraCompileTarget();
@@ -5864,19 +6273,11 @@ export class Engine {
       this.visualPost?._plan,
     );
     context.progress('Compiling final shaders…', 0, Math.max(1, materials.length));
-    const result = await (context.compilePromise || this._compileMaterialVariants(materials, {
-      canvasOnly: true,
-      // The exact visible graph is deliberately small (normally terrain,
-      // water, sky/plinth and the active final post pass). Submit it once so
-      // ANGLE can link the two expensive programs in parallel. Incremental
-      // submission made cold boot nearly twice as long because browser task
-      // delivery was delayed until each preceding driver compile completed.
-      // Hidden mode/effect materials are filtered by _finalBootMaterials(), so
-      // this no longer recreates the old 35-program compiler saturation.
-      stagger: !this._renderWorker,
-      timeoutMs: 120000,
-      renderTarget: target.renderTarget,
-    }));
+    if (!context.compilePlan) {
+      context.compilePlan = this._buildFinalBootCompilePlan(materials, target.renderTarget);
+    }
+    this._submitFinalBootCompilePlan(context);
+    const result = await context.compilePromise;
     context.assertCurrent();
     if (result?.ready !== true) {
       const error = new Error('Final shader graph did not become ready');
@@ -11440,6 +11841,7 @@ export class Engine {
       capabilities: this.rendererCapabilities,
       resourceLedger: this._gpuResourceLedger?.snapshot?.() || null,
       programHealth: [...this._programHealthDiagnostics],
+      shaderBenchmark: this._shaderBenchmarkResult,
       contextLossTimeline: [...this._contextLossTimeline],
       bootError: this._bootError ? {
         code: this._bootError.code,
@@ -12218,6 +12620,7 @@ export class Engine {
         ),
         resourceLedger: this._gpuResourceLedger?.snapshot?.() || null,
         programHealth: this._programHealthDiagnostics.slice(-12),
+        shaderBenchmark: this._shaderBenchmarkResult,
         contextLossTimeline: [...this._contextLossTimeline],
       },
       drawingBuffer: this.renderer

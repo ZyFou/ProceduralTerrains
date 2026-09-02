@@ -49,6 +49,28 @@ describe('GPU safety infrastructure', () => {
     expect(result).toMatchObject({ ok: false, code: 'PROGRAM_LINK_FAILED', activeSamplers: 1 });
   });
 
+  it('hashes linked benchmark and normalized production sources without exporting source text', () => {
+    const gl = fakeGl();
+    const vertex = { type: 10 };
+    const fragment = { type: 11 };
+    Object.assign(gl, {
+      VERTEX_SHADER: 10,
+      FRAGMENT_SHADER: 11,
+      SHADER_TYPE: 12,
+      getAttachedShaders: () => [vertex, fragment],
+      getShaderParameter: (shader) => shader.type,
+      getShaderSource: (shader) => shader === vertex
+        ? '#define TERRAIN_BENCHMARK_RUN 9\nvoid main(){}'
+        : 'void main(){}',
+    });
+
+    const result = inspectProgram(gl, { program: {} }, { role: 'terrain' });
+
+    expect(result.linkedSourceHash).not.toBe(result.productionLinkedSourceHash);
+    expect(result.productionLinkedVertexChars).toBeLessThan(result.linkedVertexChars);
+    expect(JSON.stringify(result)).not.toContain('void main');
+  });
+
   it('fails a linked program when the exact canary reports a GL error', async () => {
     const gl = fakeGl();
     const material = { id: 1, name: 'terrain' };

@@ -2,6 +2,7 @@ import { hasStoredPerfSettings, loadPerfSettings } from './render/PerformanceSet
 import { InputFrameBridge } from './InputFrameBridge.js';
 import { MinimapPresenter } from './MinimapPresenter.js';
 import { saveBlob } from '../platform/DesktopBridge.js';
+import { parseShaderBenchmarkOptions } from './render/ShaderBenchmark.js';
 
 const DEVELOPMENT_WORKER_OVERRIDE = import.meta.env.DEV && typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('workerRenderer')
@@ -119,6 +120,7 @@ export class WorkerEngineTransport {
       initialView: options.initialView,
       initialBootMode: options.initialBootMode,
       coldShaderRun: options.coldShaderRun,
+      shaderBenchmark: options.shaderBenchmark,
       viewport: {
         width: Math.max(1, rect.width),
         height: Math.max(1, rect.height),
@@ -377,13 +379,17 @@ export async function createEngineProxy(options) {
   const coldShaderRun = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('coldShaderRun')
     : null;
+  const shaderBenchmark = typeof location !== 'undefined'
+    ? parseShaderBenchmarkOptions(location.search)
+    : null;
   const transport = useWorker ? new WorkerEngineTransport() : new MainThreadEngineTransport();
   const client = new EngineClient({
     ...options,
     initialPerf: perf,
     perfSettingsStored: DEVELOPMENT_WORKER_OVERRIDE != null || hasStoredPerfSettings(),
     renderWorker: useWorker,
-    coldShaderRun,
+    coldShaderRun: shaderBenchmark ? null : coldShaderRun,
+    shaderBenchmark,
   }, transport);
   await client.initialize();
   const rendererConfig = {

@@ -5,6 +5,7 @@ const { pathToFileURL } = require('node:url');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const desktopState = require('./desktop-state.cjs');
+const { addShaderBenchmarkQuery, parseShaderBenchmarkArgv } = require('./shader-benchmark.cjs');
 
 if (process.argv.some((argument) => argument.startsWith('--squirrel-'))) process.exit(0);
 
@@ -32,6 +33,7 @@ let activeBackend = null;
 const writableDocumentPaths = new Set();
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 const execFileAsync = promisify(execFile);
+const shaderBenchmarkLaunch = parseShaderBenchmarkArgv(process.argv);
 
 if (!gotSingleInstanceLock) {
   app.quit();
@@ -266,8 +268,8 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
-  if (rendererUrl) mainWindow.loadURL(rendererUrl);
-  else mainWindow.loadURL(`${APP_SCHEME}://app/index.html`);
+  const launchUrl = rendererUrl || `${APP_SCHEME}://app/index.html`;
+  mainWindow.loadURL(addShaderBenchmarkQuery(launchUrl, shaderBenchmarkLaunch));
 }
 
 app.whenReady().then(async () => {

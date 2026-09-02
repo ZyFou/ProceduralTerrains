@@ -185,6 +185,7 @@ async function initialize(payload) {
     perfSettingsStored: payload.perfSettingsStored,
     renderWorker: true,
     coldShaderRun: payload.coldShaderRun,
+    shaderBenchmark: payload.shaderBenchmark,
     initialView: payload.initialView,
     initialBootMode: payload.initialBootMode,
   });
