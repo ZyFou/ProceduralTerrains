@@ -35,6 +35,7 @@ export class InputFrameBridge {
     this.frame = 0;
     this.disposed = false;
     this.listeners = [];
+    this.suppressContextMenuUntil = 0;
     this._bind();
   }
 
@@ -44,8 +45,34 @@ export class InputFrameBridge {
   }
 
   _bind() {
+    // Camera controls live inside the render worker, so their contextmenu
+    // handler runs against the worker DOM shim and cannot cancel the browser's
+    // native menu. Cancel it on the real canvas before forwarding input. The
+    // document listener also covers a right-drag released over landing/editor
+    // UI after it started on the canvas.
+    const onContextMenu = (event) => {
+      const path = event.composedPath?.() || [];
+      const fromCanvas = event.target === this.canvas || path.includes(this.canvas);
+      const followsCanvasRightPress = performance.now() <= this.suppressContextMenuUntil;
+      if (!fromCanvas && !followsCanvasRightPress) return;
+      event.preventDefault();
+      this.suppressContextMenuUntil = 0;
+    };
+    this._listen(this.canvas, 'contextmenu', onContextMenu);
+    this._listen(document, 'contextmenu', onContextMenu, true);
     for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave']) {
       this._listen(this.canvas, type, (event) => {
+        if (type === 'pointerdown') {
+          // Worker-side setPointerCapture() is necessarily a no-op. Mirror it
+          // on the actual canvas so camera drags continue across UI overlays.
+          try { this.canvas.setPointerCapture?.(event.pointerId); } catch { /* unsupported pointer */ }
+          if (event.button === 2) {
+            this.suppressContextMenuUntil = performance.now() + 1500;
+            event.preventDefault();
+          }
+        } else if (type === 'pointerup' || type === 'pointercancel') {
+          try { this.canvas.releasePointerCapture?.(event.pointerId); } catch { /* already released */ }
+        }
         this.pointerEvents.push(pointerPayload(event));
         this._schedule();
       }, { passive: type === 'pointermove' });
@@ -102,6 +129,7 @@ export class InputFrameBridge {
     this.disposed = true;
     if (this.frame) cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.suppressContextMenuUntil = 0;
     this.resizeObserver?.disconnect?.();
     this.listeners.splice(0).forEach((dispose) => dispose());
   }
