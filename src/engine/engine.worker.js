@@ -1,5 +1,6 @@
 import { Engine } from './Engine.js';
 import { ENGINE_METHODS } from './EngineProxy.js';
+import { prepareWorkerResult } from './WorkerProtocol.js';
 
 class TerrainEventTarget {
   constructor() { this.listeners = new Map(); }
@@ -225,7 +226,8 @@ self.onmessage = async ({ data }) => {
     if (!allowedMethods.has(method) || typeof engine?.[method] !== 'function') {
       throw new Error(`Unknown engine method: ${method}`);
     }
-    const result = await engine[method](...(methodArgs || []));
+    const engineResult = await engine[method](...(methodArgs || []));
+    const result = await prepareWorkerResult(method, engineResult);
     if (!cancelledRequests.delete(id)) postResult(id, result);
   } catch (error) {
     if (!cancelledRequests.delete(id)) self.postMessage({ type: 'error', id, error: serializeError(error) });

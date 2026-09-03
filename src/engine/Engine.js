@@ -11842,6 +11842,7 @@ export class Engine {
       if (target?.dispatchTerrainEvent) target.dispatchTerrainEvent(type, payload);
     };
     for (const event of frame.pointerEvents || []) dispatch(this.canvas, event.type, event);
+    for (const event of frame.dragEvents || []) dispatch(this.canvas, event.type, event);
     if (frame.wheel) dispatch(this.canvas, 'wheel', frame.wheel);
     for (const event of frame.keyEvents || []) dispatch(globalThis.document, event.type, event);
     if (frame.touchInput) this.setTouchInput(frame.touchInput);

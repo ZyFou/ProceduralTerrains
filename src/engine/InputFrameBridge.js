@@ -25,11 +25,32 @@ const keyPayload = (event) => ({
   metaKey: event.metaKey,
 });
 
+const TERRAIN_SHAPE_DRAG_TYPE = 'application/x-terrain-shape';
+
+const hasTerrainShapeDrag = (event) => {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  if (typeof types.contains === 'function') return types.contains(TERRAIN_SHAPE_DRAG_TYPE);
+  return Array.from(types).includes(TERRAIN_SHAPE_DRAG_TYPE);
+};
+
+const dragPayload = (event) => ({
+  type: event.type,
+  clientX: event.clientX,
+  clientY: event.clientY,
+  ctrlKey: event.ctrlKey,
+  shiftKey: event.shiftKey,
+  altKey: event.altKey,
+  metaKey: event.metaKey,
+  dataTransfer: { dropEffect: 'copy' },
+});
+
 export class InputFrameBridge {
   constructor({ canvas, send }) {
     this.canvas = canvas;
     this.send = send;
     this.pointerEvents = [];
+    this.dragEvents = [];
     this.keyEvents = [];
     this.wheel = null;
     this.frame = 0;
@@ -77,6 +98,19 @@ export class InputFrameBridge {
         this._schedule();
       }, { passive: type === 'pointermove' });
     }
+    for (const type of ['dragover', 'drop']) {
+      this._listen(this.canvas, type, (event) => {
+        if (!hasTerrainShapeDrag(event)) return;
+        // A real dragover must be cancelled on the main thread or the browser
+        // will never emit drop. Forward a cloneable event to the render worker
+        // so ManualTerrainModeManager can update/commit its placement preview.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        this.dragEvents.push(dragPayload(event));
+        if (type === 'drop') this._flush();
+        else this._schedule();
+      });
+    }
     this._listen(this.canvas, 'wheel', (event) => {
       event.preventDefault();
       const current = this.wheel || { type: 'wheel', deltaX: 0, deltaY: 0, deltaMode: event.deltaMode };
@@ -114,15 +148,23 @@ export class InputFrameBridge {
     if (this.frame || this.disposed) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
-      const payload = {
-        pointerEvents: this.pointerEvents.splice(0),
-        keyEvents: this.keyEvents.splice(0),
-        wheel: this.wheel,
-        visible: document.visibilityState === 'visible',
-      };
-      this.wheel = null;
-      void this.send('applyInputFrame', [payload]);
+      this._flush();
     });
+  }
+
+  _flush() {
+    if (this.disposed) return;
+    if (this.frame) cancelAnimationFrame(this.frame);
+    this.frame = 0;
+    const payload = {
+      pointerEvents: this.pointerEvents.splice(0),
+      dragEvents: this.dragEvents.splice(0),
+      keyEvents: this.keyEvents.splice(0),
+      wheel: this.wheel,
+      visible: document.visibilityState === 'visible',
+    };
+    this.wheel = null;
+    void this.send('applyInputFrame', [payload]);
   }
 
   dispose() {

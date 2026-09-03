@@ -1858,7 +1858,7 @@ export default function App() {
     setTerrainGraph(next);
     setGraphView(nextView);
     engineRef.current?.setGraphView(nextView);
-    const graphResult = engineRef.current?.setTerrainGraph(next, {
+    const graphResult = await engineRef.current?.setTerrainGraph(next, {
       structural: true,
       atomic: true,
       affectedNodeIds: next.nodes.map((node) => node.id),
