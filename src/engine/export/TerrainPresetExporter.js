@@ -1,6 +1,7 @@
 // ============================================================================
 // Export / import planet style presets (palette + style tuning).
 // ============================================================================
+import { saveBlob } from '../../platform/DesktopBridge.js';
 
 export function exportPlanetStyle(planetStyle) {
   return {
@@ -12,15 +13,10 @@ export function exportPlanetStyle(planetStyle) {
   };
 }
 
-export function downloadPlanetStyleJSON(planetStyle, filename = 'planet-style.json') {
+export async function downloadPlanetStyleJSON(planetStyle, filename = 'planet-style.json') {
   const data = exportPlanetStyle(planetStyle);
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return saveBlob(blob, filename);
 }
 
 export function parsePlanetStyleJSON(json) {

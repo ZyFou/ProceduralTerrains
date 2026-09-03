@@ -44,7 +44,9 @@ export default function TopBar({
   shortcutsEnabled = true,
   projectName = 'Untitled terrain',
   onProjectNameChange,
-  previewMode, onNew, onRandomize, onSave, onLoadJSON, onDownload,
+  previewMode, onNew, onRandomize, onSave, onSaveAs, onLoadJSON, onOpenDocument, onDownload,
+  recentDocuments = [], onOpenRecentDocument,
+  documentPath = '', documentDirty = false,
   canOpenInManual = false, onOpenInManual,
   canImportTerrain = false, onImportTerrain,
   manualBaseSource = null, manualWorkspace = 'manual', onManualWorkspace,
@@ -74,7 +76,8 @@ export default function TopBar({
     newTerrain: onNew,
     projects: onOpenProjects,
     save: onSave,
-    load: () => fileRef.current?.click(),
+    saveAs: onSaveAs,
+    load: onOpenDocument || (() => fileRef.current?.click()),
     download: onDownload,
     settings: onOpenUiSettings,
     randomSeed: projectMode === 'procedural' ? onRandomize : null,
@@ -212,10 +215,23 @@ export default function TopBar({
               <Save size={14} strokeWidth={1.75} aria-hidden /> Save
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.save} className="tb-menu-shortcut" />
             </button>
-            <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, () => fileRef.current?.click())}>
+            {onSaveAs && <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onSaveAs)}>
+              <Save size={14} strokeWidth={1.75} aria-hidden /> Save as…
+              <ShortcutHint shortcut={EDITOR_SHORTCUTS.saveAs} className="tb-menu-shortcut" />
+            </button>}
+            <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenDocument || (() => fileRef.current?.click()))}>
               <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> Load
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.load} className="tb-menu-shortcut" />
             </button>
+            {recentDocuments.length > 0 && <>
+              <div className="tb-menu-divider" role="separator" />
+              <div className="tb-menu-section-label">Recent files</div>
+              {recentDocuments.slice(0, 6).map((entry) => (
+                <button key={entry.path} type="button" role="menuitem" title={entry.path} onClick={() => runMenuAction(setFileMenuOpen, () => onOpenRecentDocument?.(entry.path))}>
+                  <FolderOpen size={14} strokeWidth={1.75} aria-hidden /> {entry.name}
+                </button>
+              ))}
+            </>}
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onDownload)}>
               <Download size={14} strokeWidth={1.75} aria-hidden /> Download
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.download} className="tb-menu-shortcut" />
@@ -234,6 +250,9 @@ export default function TopBar({
             </> : null}
           </div>
         </div>
+        {documentPath && <span className={`tb-document-state${documentDirty ? ' dirty' : ''}`} title={documentPath}>
+          {documentDirty ? '● Unsaved' : 'Saved'}
+        </span>}
 
         <div className="tb-dropdown" ref={editMenuRef}>
           <button
@@ -400,7 +419,7 @@ export default function TopBar({
         <span className="app-version">v{APP_VERSION}</span>
       </div>
 
-      <input type="file" ref={fileRef} accept="application/json" hidden onChange={onFile} />
+      <input type="file" ref={fileRef} accept=".ptrterrain,application/json" hidden onChange={onFile} />
     </header>
   );
 }

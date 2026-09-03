@@ -95,6 +95,54 @@ Implementation notes:
   so it cannot hold the loading overlay open.
 - WebGL2 still does not expose portable program binaries. Chrome's own shader disk cache remains the only practical persisted GPU program cache.
 
+### Isolated shader benchmark mode
+
+Benchmark mode is developer-only and opt-in. It measures the exact active launch
+configuration before normal final-graph submission, validates every measured
+program with the normal link-status and offscreen-canary gate, then continues the
+ordinary boot. A successful measurement applies the same inert cache-key define
+to the live material, so production submission can reuse that program.
+
+Use a separate cold launch for attribution. Run each active family at least three
+times and compare the per-program timings in the `[shader benchmark]` console
+table or the exported graphics diagnostics JSON:
+
+```text
+http://localhost:6061/?shaderBenchmark=terrain
+http://localhost:6061/?shaderBenchmark=water
+http://localhost:6061/?shaderBenchmark=cloud
+http://localhost:6061/?shaderBenchmark=post
+http://localhost:6061/?shaderBenchmark=scene
+```
+
+For repeatable source keys, append `&shaderBenchmarkToken=<value>`. Without a
+token the app generates a unique token for every launch. `coldShaderRun` is
+ignored whenever benchmark mode is active.
+
+Packaged Windows examples:
+
+```powershell
+& '.\Procedural Terrains.exe' --shader-benchmark=terrain
+& '.\Procedural Terrains.exe' --shader-benchmark=water --shader-benchmark-token=water-01
+& '.\Procedural Terrains.exe' --shader-benchmark=all
+```
+
+Close an already-running packaged application before starting one of these
+commands: benchmark arguments are intentionally accepted only by the initial
+single-instance launch.
+
+`shaderBenchmark=all` (or `--shader-benchmark=all`) is a sequential smoke-test
+suite in the fixed order terrain, water, cloud, post, scene. Its summed duration
+does not predict normal production wall time because ordinary boot can submit
+independent programs together when parallel compilation is available. Isolated
+cold launches are the canonical evidence for optimization decisions. Families
+with no active launch candidate are reported as `skipped: no-active-candidates`.
+
+The versioned result is available at both
+`getGraphicsDiagnostics().shaderBenchmark` and
+`getPerfDiagnostics().renderer.shaderBenchmark`. It includes source/define
+hashes and sizes, not shader source text.
+
 ---
 
 ## 3. THE ULTIMATE TASK — OffscreenCanvas + Worker

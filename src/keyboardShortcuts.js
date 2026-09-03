@@ -2,6 +2,7 @@ export const EDITOR_SHORTCUTS = Object.freeze({
   newTerrain: Object.freeze({ key: 'n', displayKey: 'N' }),
   projects: Object.freeze({ key: 'o', displayKey: 'O', shiftKey: true }),
   save: Object.freeze({ key: 's', displayKey: 'S' }),
+  saveAs: Object.freeze({ key: 's', displayKey: 'S', shiftKey: true }),
   load: Object.freeze({ key: 'o', displayKey: 'O' }),
   download: Object.freeze({ key: 'd', displayKey: 'D' }),
   settings: Object.freeze({ key: ',', displayKey: ',' }),

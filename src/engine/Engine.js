@@ -124,6 +124,7 @@ import {
 import { profiler } from './perf/PerformanceProfiler.js';
 import { GPUProfiler } from './perf/GPUProfiler.js';
 import { APP_VERSION } from '../constants/app.js';
+import { saveBlob } from '../platform/DesktopBridge.js';
 import { TerrainPicker } from './terrain/TerrainPicker.js';
 import { SplineManager } from '../creator/splines/SplineManager.js';
 import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManager.js';
@@ -141,7 +142,15 @@ import {
   ModeResourceCache,
   createModeRenderKey,
 } from './mode/ModeTransitionCoordinator.js';
+import { PreparedModeBundle, SharedResourceRegistry } from './mode/PreparedModeBundle.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
+import { GpuWorkScheduler } from './render/GpuWorkScheduler.js';
+import { GpuResourceLedger, rendererAdmission } from './render/GpuResourceLedger.js';
+import { materialProgramDescriptor, programHealthError, validatePrograms } from './render/ProgramHealthGate.js';
+import {
+  ShaderBenchmarkRunner,
+  classifyShaderBenchmarkRole,
+} from './render/ShaderBenchmark.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
@@ -213,10 +222,11 @@ function yieldFrame() {
 // cache. For controlled cold-compile measurements, a distinct URL token adds
 // an otherwise-unused define to every submitted material. The shader math is
 // unchanged, but the generated source/program key is new for each token.
-function readShaderColdRun() {
-  if (typeof window === 'undefined') return null;
+function readShaderColdRun(explicitToken = null) {
   try {
-    const raw = new URLSearchParams(window.location.search).get('coldShaderRun');
+    const raw = explicitToken ?? (typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('coldShaderRun')
+      : null);
     const token = raw?.trim().slice(0, 64);
     if (!token) return null;
     let hash = 2166136261;
@@ -261,6 +271,11 @@ export class Engine {
     minimapOverlay,
     callbacks = {},
     initialParams,
+    initialPerf,
+    perfSettingsStored,
+    renderWorker = false,
+    coldShaderRun = null,
+    shaderBenchmark = null,
     initialView = 'landing',
     initialBootMode = 'full',
   }) {
@@ -273,10 +288,19 @@ export class Engine {
     this._bootError = null;
     this._bootPresented = false;
     this._bootPipeline = null;
-    this._shaderColdRun = readShaderColdRun();
+    this._renderWorker = !!renderWorker;
+    this._shaderBenchmarkOptions = shaderBenchmark?.enabled ? shaderBenchmark : null;
+    this._shaderBenchmarkResult = null;
+    this._shaderColdRun = this._shaderBenchmarkOptions ? null : readShaderColdRun(coldShaderRun);
     this._shaderColdRunLogged = false;
     this._modeTransitionCoordinator = null;
     this._modeResourceCache = new ModeResourceCache({ maxInactive: 2 });
+    this._sharedModeResources = new SharedResourceRegistry();
+    this._activeModeBundle = null;
+    this._gpuWorkScheduler = new GpuWorkScheduler({ yieldTask, maxConcurrent: 1 });
+    this._programHealthDiagnostics = [];
+    this._contextLossTimeline = [];
+    this._bootRetryCount = 0;
     this._modeTransitionContext = null;
     this._initialParamKeys = new Set(Object.keys(initialParams || {}));
     this.params = normalizeCloudFormation(normalizeSurfaceTextureParams(
@@ -482,8 +506,8 @@ export class Engine {
     this.timeOfDay = 0.38;         // default: morning
 
     // Centralized performance settings (persisted across sessions)
-    this._firstRun = !hasStoredPerfSettings();
-    this.perf = loadPerfSettings();
+    this._firstRun = perfSettingsStored == null ? !hasStoredPerfSettings() : !perfSettingsStored;
+    this.perf = initialPerf ? sanitizePerfSettings(initialPerf) : loadPerfSettings();
     this.qualityPreset = this.perf.preset;
     this.gpuTier = null;
     this._tierNotice = null;
@@ -532,6 +556,11 @@ export class Engine {
     this._onContextLost = (event) => {
       event.preventDefault();
       this._contextLost = true;
+      this._contextLossTimeline.push({
+        at: performance.now(),
+        phase: this._bootPipeline?.state || this._modeTransitionCoordinator?.state || 'runtime',
+      });
+      this._gpuWorkScheduler?.cancelPending?.();
       console.warn('[graphics] context lost; aborting boot generation');
       if (this._modeTransitionRequest) {
         const request = this._modeTransitionRequest;
@@ -557,15 +586,16 @@ export class Engine {
         request.contextLost = false;
         request.resolveContextRestore?.();
         request.resolveContextRestore = null;
-      } else if (this._bootPending) this.retryBoot({ mode: this._bootMode });
-      else {
-        this.cb.onStatus('Ready', false);
-        this._needsRender = true;
+      } else {
+        const error = new Error('Graphics context restored. Retry the exact render profile to continue.');
+        error.code = 'CONTEXT_RESTORED_RETRY_REQUIRED';
+        this._failFinalFrameBoot(error, 'renderer');
       }
     };
     this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
     this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
     this._autoSelectPresetByGpu();   // first run only: pick a preset for the GPU
+    this._gpuResourceLedger = new GpuResourceLedger({ tier: this.gpuTier });
     this.destructionField = new DestructionField({ resolution: destructionResolutionForTier(this.gpuTier) });
     this._initScene(minimapBase, minimapOverlay);
     this._initControls();
@@ -680,8 +710,8 @@ export class Engine {
       appliedGpuPreferenceLabel: labelGpuPreference(requestedGpuPreference),
       activeGpuPreference: actualOptions.powerPreference || 'default',
       activeGpuPreferenceLabel: labelGpuPreference(actualOptions.powerPreference || 'default'),
-      workerRequested: !!this.perf?.useWorker,
-      workerActive: false,
+      workerRequested: this._renderWorker || !!this.perf?.useWorker,
+      workerActive: this._renderWorker,
       webgpuRequestedButUnavailable: requestedBackend === 'webgpu' && !webgpu.supported,
       webgpuRequestedButNotActive: requestedBackend === 'webgpu',
       reloadRequired: false,
@@ -4464,7 +4494,15 @@ export class Engine {
 
   getCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
-    return this._surfaceAtlasCache?.[surfaceTextureSource] ?? null;
+    const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
+    if (!atlas) return null;
+    return {
+      anyPresent: !!atlas.anyPresent,
+      bakedAt: atlas.bakedAt,
+      coverage: atlas.coverage,
+      layers: atlas.layers,
+      source: surfaceTextureSource,
+    };
   }
 
   _applyVisualSettings() {
@@ -4522,7 +4560,7 @@ export class Engine {
           && (!!this.planetCloudLayer?.active || !!this.planetCloudChunks?.active)));
     const requireSharedOpaque = cloudsNeedDepth
       || !!this.waterSystem?.needsSceneRefraction?.();
-    return this.visualPost.prepare(this.renderer, {
+    const plan = this.visualPost.prepare(this.renderer, {
       params: {
         ...runtimeParams,
         ...this._pendingTerrainParams,
@@ -4538,6 +4576,35 @@ export class Engine {
       requireSceneTarget: !!this.underwater?.active,
       requireSharedOpaque,
     });
+    this._syncRenderTargetLedger();
+    return plan;
+  }
+
+  _syncRenderTargetLedger() {
+    if (!this._gpuResourceLedger) return;
+    const targets = {
+      'post:scene': this.visualPost?._sceneRT,
+      'post:look': this.visualPost?._lookRT,
+      'post:opaque': this.visualPost?._opaqueRT,
+      underwater: this.underwater?._rt,
+      minimap: this.minimap?.target,
+    };
+    for (const [id, target] of Object.entries(targets)) {
+      if (!target) {
+        this._gpuResourceLedger.release(id);
+        continue;
+      }
+      this._gpuResourceLedger.reserve(id, {
+        kind: 'render-target',
+        width: target.width,
+        height: target.height,
+        type: target.texture?.type,
+        channels: 4,
+        depthBytes: target.depthBuffer === false ? 0 : 4,
+        samples: Math.max(1, target.samples || 1),
+        mipmaps: !!target.texture?.generateMipmaps,
+      });
+    }
   }
 
   _resolveCameraCompileTarget() {
@@ -4977,7 +5044,7 @@ export class Engine {
   }
 
   _compileMaterialDescriptor(material) {
-    let role = material?.name || material?.type || 'material';
+    let role = material?.userData?.benchmarkRole || material?.name || material?.type || 'material';
     const requestedWater = this.waterSystem?.getRequestedMaterial?.(this.worldMode);
     if (material === this.terrainMaterial) {
       role = `terrain:${material.userData?.terrainVariant || 'unknown'}`;
@@ -4989,6 +5056,9 @@ export class Engine {
         || material === this.infiniteWorld?.waterPlane?.material
         || material === this.planetWater?.material) {
       role = `water:${this.waterSystem?.getEffectiveMode?.() || 'unknown'}`;
+    } else if (this.planetWorld?.materials?.includes?.(material)
+        || material?.userData?.modeCacheRole === 'planet-terrain-program') {
+      role = 'planet-terrain';
     } else if (material === this.visualPost?._lookMaterial) {
       role = 'post:look';
     } else if (material === this.visualPost?._cameraMaterial) {
@@ -4996,10 +5066,15 @@ export class Engine {
     } else if (material === this.underwater?._material) {
       role = 'post:underwater';
     } else if (material === this.studioCloud?.material
-        || material === this.studioCloud?.mesh?.material) {
-      role = 'cloud:studio';
+        || material === this.studioCloud?.mesh?.material
+        || material === this.infiniteCloud?.material
+        || material === this.infiniteCloud?.mesh?.material
+        || material === this.planetCloudLayer?.material
+        || material === this.planetCloudLayer?.mesh?.material) {
+      role = `cloud:${this.worldMode || 'active'}`;
     }
     return {
+      ...materialProgramDescriptor(material, role),
       role,
       id: material?.id ?? null,
       vertexChars: material?.vertexShader?.length ?? 0,
@@ -5013,6 +5088,10 @@ export class Engine {
     stagger = false,
     onProgress,
     renderTarget = null,
+    sources = [],
+    camera = this.camera,
+    targetScene = this.scene,
+    logCompile = true,
   } = {}) {
     // Capture the renderer for the whole operation. Vite HMR and explicit
     // disposal can replace/null `this.renderer` while the driver is linking a
@@ -5031,7 +5110,10 @@ export class Engine {
         asyncWaitMs: 0,
       };
     }
-    const list = mats.filter(Boolean);
+    const pairs = mats
+      .map((material, index) => ({ material, source: sources[index] || null }))
+      .filter(({ material }) => Boolean(material));
+    const list = pairs.map(({ material }) => material);
     if (!list.length) {
       return {
         ready: true,
@@ -5050,12 +5132,16 @@ export class Engine {
     if (stagger && list.length > 1) {
       let done = 0;
       const results = [];
-      for (const m of list) {
-        results.push(await this._compileMaterialVariants([m], {
+      for (const pair of pairs) {
+        results.push(await this._compileMaterialVariants([pair.material], {
           canvasOnly,
           timeoutMs,
           onProgress: (stepDone) => onProgress?.(done + stepDone, total),
           renderTarget,
+          sources: [pair.source],
+          camera,
+          targetScene,
+          logCompile,
         }));
         done += passesPerMaterial;
         await yieldTask();
@@ -5067,20 +5153,52 @@ export class Engine {
         pendingCount: results.reduce((sum, result) => sum + result.pendingCount, 0),
         waitMs: results.reduce((sum, result) => sum + result.waitMs, 0),
         syncCompileMs: results.reduce((sum, result) => sum + result.syncCompileMs, 0),
+        rendererCompileMs: results.reduce((sum, result) => sum + (result.rendererCompileMs || 0), 0),
         asyncWaitMs: results.reduce((sum, result) => sum + result.asyncWaitMs, 0),
+        validationMs: results.reduce((sum, result) => sum + (result.validationMs || 0), 0),
       };
     }
 
     const group = new THREE.Group();
-    for (const m of list) group.add(new THREE.Mesh(this._warmGeo, m));
+    for (const { material, source } of pairs) {
+      let probe;
+      if (source?.clone) {
+        probe = source.clone(false);
+        probe.material = material;
+        if (probe.isInstancedMesh && probe.count < 1) probe.count = 1;
+      } else {
+        probe = new THREE.Mesh(source?.geometry || this._warmGeo, material);
+      }
+      probe.castShadow = Boolean(source?.castShadow);
+      probe.receiveShadow = Boolean(source?.receiveShadow);
+      group.add(probe);
+    }
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
     const previousTarget = renderer.getRenderTarget();
     let pending;
+    let rendererCompileMs = 0;
     try {
       renderer.setRenderTarget(renderTarget);
-      pending = renderer.compile(group, this.camera, this.scene);
+      const compileKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
+        + `:target:${renderTarget ? `${renderTarget.width}x${renderTarget.height}:${renderTarget.samples || 0}` : 'canvas'}`;
+      pending = this._gpuWorkScheduler
+        ? await this._gpuWorkScheduler.schedule(
+            compileKey,
+            () => {
+              const startedAt = performance.now();
+              const value = renderer.compile(group, camera, targetScene);
+              rendererCompileMs = performance.now() - startedAt;
+              return value;
+            },
+          )
+        : (() => {
+            const startedAt = performance.now();
+            const value = renderer.compile(group, camera, targetScene);
+            rendererCompileMs = performance.now() - startedAt;
+            return value;
+          })();
     } finally {
       renderer.setRenderTarget(previousTarget);
     }
@@ -5098,19 +5216,41 @@ export class Engine {
         asyncWaitMs,
       };
     }
+    const validationStartedAt = performance.now();
+    const canvasHealth = canvasResult.ready
+      ? await this._validateCompiledPrograms(list, group, renderTarget, camera)
+      : { ok: false, code: 'PROGRAM_NOT_READY', diagnostics: [] };
+    const validationMs = performance.now() - validationStartedAt;
+    if (!canvasHealth.ok) {
+      const error = programHealthError(canvasHealth);
+      console.error('[shader health]', error, canvasHealth);
+      return {
+        ...canvasResult,
+        ready: false,
+        error,
+        health: canvasHealth,
+        materialCount: list.length,
+        syncCompileMs,
+        rendererCompileMs,
+        asyncWaitMs,
+        validationMs,
+      };
+    }
     const parallelCompile = Boolean(
       renderer.getContext?.()?.getExtension?.('KHR_parallel_shader_compile')
     );
-    console.info(
-      `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
-      + ` materials=${list.length}`
-      + ` sync=${syncCompileMs.toFixed(0)}ms`
-      + ` async=${asyncWaitMs.toFixed(0)}ms`
-      + ` ready=${canvasResult.ready}`
-      + ` pending=${canvasResult.pendingCount}`
-      + ` parallel=${parallelCompile}`
-    );
-    if (canvasResult.readyTimeline?.length) {
+    if (logCompile) {
+      console.info(
+        `[shader compile] pass=${renderTarget ? 'scene-target' : 'canvas'}`
+        + ` materials=${list.length}`
+        + ` sync=${syncCompileMs.toFixed(0)}ms`
+        + ` async=${asyncWaitMs.toFixed(0)}ms`
+        + ` ready=${canvasResult.ready}`
+        + ` pending=${canvasResult.pendingCount}`
+        + ` parallel=${parallelCompile}`
+      );
+    }
+    if (logCompile && canvasResult.readyTimeline?.length) {
       console.info(
         '[shader ready] '
         + canvasResult.readyTimeline
@@ -5122,37 +5262,105 @@ export class Engine {
     onProgress?.(list.length, total);
 
     if (canvasOnly) {
-      return { ...canvasResult, materialCount: list.length, syncCompileMs, asyncWaitMs };
+      return {
+        ...canvasResult,
+        health: canvasHealth,
+        materialCount: list.length,
+        syncCompileMs,
+        rendererCompileMs,
+        asyncWaitMs,
+        validationMs,
+      };
     }
 
     this.underwater._ensureTarget(renderer);
     renderer.setRenderTarget(this.underwater._rt);
     const rtCompileStartedAt = performance.now();
-    const pendingRt = renderer.compile(group, this.camera, this.scene);
+    const rtKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
+      + `:target:${this.underwater._rt.width}x${this.underwater._rt.height}:${this.underwater._rt.samples || 0}`;
+    const pendingRt = this._gpuWorkScheduler
+      ? await this._gpuWorkScheduler.schedule(
+          rtKey,
+          () => renderer.compile(group, camera, targetScene),
+        )
+      : renderer.compile(group, camera, targetScene);
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
     renderer.setRenderTarget(null);
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
-    console.info(
-      `[shader compile] pass=underwater`
-      + ` materials=${list.length}`
-      + ` sync=${rtSyncCompileMs.toFixed(0)}ms`
-      + ` async=${rtAsyncWaitMs.toFixed(0)}ms`
-      + ` ready=${rtResult.ready}`
-      + ` pending=${rtResult.pendingCount}`
-      + ` parallel=${parallelCompile}`
-    );
+    const rtHealth = rtResult.ready
+      ? await this._validateCompiledPrograms(list, group, this.underwater._rt, camera)
+      : { ok: false, code: 'PROGRAM_NOT_READY', diagnostics: [] };
+    if (logCompile) {
+      console.info(
+        `[shader compile] pass=underwater`
+        + ` materials=${list.length}`
+        + ` sync=${rtSyncCompileMs.toFixed(0)}ms`
+        + ` async=${rtAsyncWaitMs.toFixed(0)}ms`
+        + ` ready=${rtResult.ready}`
+        + ` pending=${rtResult.pendingCount}`
+        + ` parallel=${parallelCompile}`
+      );
+    }
     onProgress?.(total, total);
     return {
-      ready: canvasResult.ready && rtResult.ready,
+      ready: canvasResult.ready && rtResult.ready && rtHealth.ok,
       timedOut: canvasResult.timedOut || rtResult.timedOut,
       materialCount: list.length,
       pendingCount: canvasResult.pendingCount + rtResult.pendingCount,
       waitMs: canvasResult.waitMs + rtResult.waitMs,
       syncCompileMs: syncCompileMs + rtSyncCompileMs,
       asyncWaitMs: asyncWaitMs + rtAsyncWaitMs,
+      health: { canvas: canvasHealth, underwater: rtHealth },
     };
+  }
+
+  async _validateCompiledPrograms(materials, group, renderTarget = null, camera = this.camera) {
+    const renderer = this.renderer;
+    if (!renderer || this._disposed) {
+      return { ok: false, code: 'RENDERER_UNAVAILABLE', diagnostics: [] };
+    }
+    // Prototype-level unit harnesses intentionally omit Three's private
+    // renderer-properties table. Real WebGLRenderer instances always expose it.
+    const gl = renderer.getContext?.();
+    if (!renderer.properties?.get || !gl?.getProgramParameter || !renderer.render) {
+      return { ok: true, skipped: 'renderer-introspection-unavailable', diagnostics: [] };
+    }
+    const health = await validatePrograms({
+      renderer,
+      materials,
+      describe: (material) => this._compileMaterialDescriptor(material),
+      canary: async () => {
+        const options = { depthBuffer: true, stencilBuffer: false };
+        if (renderTarget?.texture?.type != null) options.type = renderTarget.texture.type;
+        if (renderTarget?.texture?.format != null) options.format = renderTarget.texture.format;
+        if (renderTarget?.texture?.colorSpace) options.colorSpace = renderTarget.texture.colorSpace;
+        const target = new THREE.WebGLRenderTarget(1, 1, options);
+        const previous = renderer.getRenderTarget();
+        try {
+          renderer.setRenderTarget(target);
+          renderer.clear();
+          renderer.render(group, camera);
+        } finally {
+          renderer.setRenderTarget(previous);
+          target.dispose();
+        }
+      },
+    });
+    const samplerLimit = this.rendererCapabilities?.limits?.maxTextureImageUnits || 0;
+    const overLimit = samplerLimit > 0
+      ? health.diagnostics?.find((entry) => entry.activeSamplers > samplerLimit)
+      : null;
+    if (overLimit) {
+      health.ok = false;
+      health.code = 'FRAGMENT_SAMPLER_LIMIT';
+      health.reason = `${overLimit.role} uses ${overLimit.activeSamplers} active fragment samplers; the device exposes ${samplerLimit}.`;
+    }
+    if (!this._programHealthDiagnostics) this._programHealthDiagnostics = [];
+    this._programHealthDiagnostics.push({ at: performance.now(), ...health });
+    if (this._programHealthDiagnostics.length > 64) this._programHealthDiagnostics.shift();
+    return health;
   }
 
 
@@ -5520,9 +5728,7 @@ export class Engine {
 
     context.renderKey = createBootRenderKey({
       shaderColdRun: this._shaderColdRun?.token || null,
-      backend: context.mode === 'compatibility'
-        ? 'webgl2'
-        : (this.rendererConfig?.activeBackend || 'webgl2'),
+      backend: this.rendererConfig?.activeBackend || 'webgl2',
       mode: context.mode,
       view: this._initialView,
       viewport: this._bootViewportSnapshot(),
@@ -5533,30 +5739,24 @@ export class Engine {
         seed: this.params.seed,
         source: this._liveGenerationSource,
         sourceSignature: this._activeHeightProgram('studio')?.sig || null,
-        variant: context.mode === 'compatibility' ? 'base' : this._targetTerrainVariant(),
+        variant: this._targetTerrainVariant(),
         octaves: Math.round(this.params.octaves),
       },
       water: {
         enabled: this.params.waterEnabled !== false,
-        mode: context.mode === 'compatibility'
-          ? 'legacy'
-          : resolveEffectiveWaterMode(this.params, this.worldMode),
+        mode: resolveEffectiveWaterMode(this.params, this.worldMode),
       },
-      clouds: context.mode === 'compatibility'
-        ? { enabled: false }
-        : {
-            enabled: !!this.params.cloudsEnabled,
-            quality: resolveCloudQuality({ ...this.params, ...this.perf }),
-          },
-      post: context.mode === 'compatibility'
-        ? { enabled: true, essentialOnly: true }
-        : {
-            enabled: this.params.visualsPostEnabled !== false,
-            pixelated: !!this.params.visualsPixelatedEnabled,
-            dithering: !!this.params.visualsDitheringEnabled,
-            crt: !!this.params.visualsCrtEnabled,
-            chromaticAberration: !!this.params.visualsChromaticAberrationEnabled,
-          },
+      clouds: {
+        enabled: !!this.params.cloudsEnabled,
+        quality: resolveCloudQuality({ ...this.params, ...this.perf }),
+      },
+      post: {
+        enabled: this.params.visualsPostEnabled !== false,
+        pixelated: !!this.params.visualsPixelatedEnabled,
+        dithering: !!this.params.visualsDitheringEnabled,
+        crt: !!this.params.visualsCrtEnabled,
+        chromaticAberration: !!this.params.visualsChromaticAberrationEnabled,
+      },
     });
     return { renderKey: context.renderKey.serialized };
   }
@@ -5573,47 +5773,29 @@ export class Engine {
       error.code = 'WEBGL2_REQUIRED';
       throw error;
     }
+    const admission = rendererAdmission(this.rendererCapabilities);
+    if (!admission.ok) {
+      const error = new Error(admission.reason);
+      error.code = admission.code;
+      error.admission = admission;
+      throw error;
+    }
     this._prepareCameraPipeline();
     return {
       backend: this.rendererConfig?.activeBackend || 'webgl2',
       renderer: this.rendererCapabilities?.detectedRenderer || 'Unknown',
+      capabilities: this.rendererCapabilities,
+      resourceLedger: this._gpuResourceLedger?.snapshot?.() || null,
     };
   }
 
   async _applyCompatibilityBootProfile(context) {
     if (context.mode !== 'compatibility') return;
     context.assertCurrent();
+    // Compatibility retries are deliberately exact: they recreate and
+    // revalidate the requested graph without changing project-visible output.
     this._bootCompatibilityMode = true;
-    this._bootRuntimeParams = {
-      ...this.params,
-      waterMode: 'legacy',
-      waterQualityPreset: 'legacy',
-      cloudsEnabled: false,
-      visualsBloomStrength: 0,
-      visualsSunRaysStrength: 0,
-      visualsPixelatedEnabled: false,
-      visualsDitheringEnabled: false,
-      visualsCrtEnabled: false,
-      visualsChromaticAberrationEnabled: false,
-    };
-    this.studioCloud?.setInScene(false);
-    const program = this._activeHeightProgram('studio');
-    if (this.terrainMaterial?.userData?.terrainVariant !== 'base') {
-      const replacement = createTerrainMaterial(
-        this.uniforms,
-        Math.round(this.params.octaves),
-        program,
-        { variant: 'base' },
-      );
-      const previous = this.terrainMaterial;
-      this.terrainMaterial = replacement;
-      if (this.board) {
-        this.board.material = replacement;
-        for (const chunk of this.board.chunks) chunk.mesh.material = replacement;
-      }
-      if (this.diskWall) this.diskWall.material = replacement;
-      previous?.dispose?.();
-    }
+    this._bootRuntimeParams = this.params;
   }
 
   async _prepareFinalBootResources(context) {
@@ -5639,7 +5821,7 @@ export class Engine {
       ? [...(this.waterSystem?.prepareInitialMaterials(bootParams, this.worldMode) || [])]
       : [];
 
-    if (context.mode !== 'compatibility' && this.params.cloudsEnabled) {
+    if (this.params.cloudsEnabled) {
       const cloudReady = await this.studioCloud?.waitUntilReady?.({
         isCurrent: () => !this._disposed && context.runId === this._bootPipeline?.runId,
       });
@@ -5657,14 +5839,18 @@ export class Engine {
     );
     context.compileTarget = target;
     context.compileMaterials = materials;
-    context.compilePromise = this._compileMaterialVariants(materials, {
-      canvasOnly: true,
-      timeoutMs: 120000,
-      renderTarget: target.renderTarget,
-    });
-    // Cancellation can retire the pipeline during geometry. Keep the submitted
-    // driver job observed until its owning compile stage either awaits or drops it.
-    context.compilePromise.catch(() => {});
+    context.compilePlan = this._buildFinalBootCompilePlan(materials, target.renderTarget);
+    if (this._shaderBenchmarkOptions) {
+      const benchmark = await this._runInitialShaderBenchmark(context);
+      context.assertCurrent();
+      if (benchmark.status !== 'passed') {
+        const error = new Error('Shader benchmark validation failed');
+        error.code = benchmark.contextLost ? 'CONTEXT_LOST' : 'SHADER_BENCHMARK_FAILED';
+        error.shaderBenchmark = benchmark;
+        throw error;
+      }
+    }
+    this._submitFinalBootCompilePlan(context);
     return {
       terrainReady: true,
       waterPrepared: !waterRequired || context.preparedWaterMaterials.length > 0,
@@ -5719,6 +5905,7 @@ export class Engine {
       materials.add(this.visualPost._cameraMaterial);
     }
     for (const layer of [this.studioCloud, this.infiniteCloud, this.planetCloudLayer]) {
+      if (layer?.active && layer?.material) materials.add(layer.material);
       if (layer?.active && layer?.usesLowRes && layer?._lowResPass?._composite) {
         materials.add(layer._lowResPass._composite);
       }
@@ -5730,6 +5917,354 @@ export class Engine {
     return [...materials];
   }
 
+  _shaderBenchmarkTargetKey(renderTarget = null) {
+    if (!renderTarget) return 'canvas';
+    const texture = renderTarget.texture || {};
+    return [
+      'target',
+      `${renderTarget.width || 0}x${renderTarget.height || 0}`,
+      `samples=${renderTarget.samples || 0}`,
+      `format=${texture.format ?? 'default'}`,
+      `type=${texture.type ?? 'default'}`,
+      `color=${texture.colorSpace || 'default'}`,
+    ].join(':');
+  }
+
+  _shaderBenchmarkTopology(object = null) {
+    let kind = 'mesh';
+    if (object?.isInstancedMesh) kind = 'instanced-mesh';
+    else if (object?.isSkinnedMesh) kind = 'skinned-mesh';
+    else if (object?.isPoints) kind = 'points';
+    else if (object?.isLineSegments) kind = 'line-segments';
+    else if (object?.isLine) kind = 'line';
+    const attributes = Object.keys(object?.geometry?.attributes || {}).sort().join(',');
+    const morph = Object.keys(object?.geometry?.morphAttributes || {}).sort().join(',');
+    return `${kind}[${attributes || 'default'}]${morph ? `[morph:${morph}]` : ''}`;
+  }
+
+  _buildFinalBootCompilePlan(materials = [], renderTarget = null) {
+    const allowed = new Set(materials.filter(Boolean));
+    const candidates = [];
+    const seen = new Set();
+    const add = (material, source = null, {
+      camera = this.camera,
+      targetScene = this.scene,
+      target = renderTarget,
+      role = null,
+    } = {}) => {
+      if (!allowed.has(material)) return;
+      const descriptor = this._compileMaterialDescriptor(material);
+      const stableRole = role || descriptor.role;
+      const topology = this._shaderBenchmarkTopology(source);
+      const targetKey = this._shaderBenchmarkTargetKey(target);
+      const key = `${material.id ?? descriptor.sourceHash}:${topology}:${targetKey}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({
+        key,
+        material,
+        materialId: material.id ?? null,
+        source,
+        topology,
+        camera,
+        targetScene,
+        renderTarget: target,
+        targetKey,
+        role: stableRole,
+        family: classifyShaderBenchmarkRole(stableRole),
+        productionDescriptor: descriptor,
+      });
+    };
+
+    this.scene?.traverse?.((object) => {
+      if (!this._isRenderable(object)) return;
+      const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of objectMaterials) add(material, object);
+    });
+
+    const waterSources = [
+      this.water,
+      this.infiniteWorld?.waterPlane,
+      this.planetWater,
+    ].filter(Boolean);
+    const cloudSources = [
+      this.studioCloud?.mesh,
+      this.infiniteCloud?.mesh,
+      this.planetCloudLayer?.mesh,
+    ].filter(Boolean);
+    for (const material of allowed) {
+      if (candidates.some((candidate) => candidate.material === material)) continue;
+      const role = this._compileMaterialDescriptor(material).role;
+      const source = role.startsWith('water:')
+        ? waterSources.find((source) => source.material === material) || waterSources[0]
+        : role.startsWith('cloud:')
+          ? cloudSources.find((candidate) => candidate.material === material) || cloudSources[0]
+          : null;
+      add(material, source);
+    }
+
+    const replacePass = (material, pass) => {
+      if (!material || !allowed.has(material)) return;
+      for (let index = candidates.length - 1; index >= 0; index -= 1) {
+        if (candidates[index].material === material) {
+          seen.delete(candidates[index].key);
+          candidates.splice(index, 1);
+        }
+      }
+      add(material, pass.source, pass);
+    };
+    const post = this.visualPost;
+    replacePass(post?._lookMaterial, {
+      source: post?._quad,
+      camera: post?._quadCam,
+      targetScene: post?._quadScene,
+      target: post?._plan?.needsFinalPass ? post?._lookRT : null,
+      role: 'post:look',
+    });
+    replacePass(post?._cameraMaterial, {
+      source: post?._quad,
+      camera: post?._quadCam,
+      targetScene: post?._quadScene,
+      target: null,
+      role: 'post:camera',
+    });
+    replacePass(this.underwater?._material, {
+      source: this.underwater?._quadScene?.children?.[0] || null,
+      camera: this.underwater?._quadCam,
+      targetScene: this.underwater?._quadScene,
+      target: null,
+      role: 'post:underwater',
+    });
+    for (const layer of [this.studioCloud, this.infiniteCloud, this.planetCloudLayer]) {
+      const lowRes = layer?._lowResPass;
+      replacePass(lowRes?._composite, {
+        source: lowRes?._quad,
+        camera: lowRes?._quadCam,
+        targetScene: lowRes?._quadScene,
+        target: renderTarget,
+        role: `cloud:composite:${layer?.constructor?.name || 'layer'}`,
+      });
+    }
+
+    return {
+      materials: [...allowed],
+      candidates,
+      renderTarget,
+      targetKey: this._shaderBenchmarkTargetKey(renderTarget),
+      constructedAt: performance.now(),
+    };
+  }
+
+  _submitFinalBootCompilePlan(context) {
+    if (context.compilePromise) return context.compilePromise;
+    const plan = context.compilePlan || this._buildFinalBootCompilePlan(
+      context.compileMaterials || [],
+      context.compileTarget?.renderTarget || null,
+    );
+    context.compilePlan = plan;
+    context.compilePromise = this._compileMaterialVariants(plan.materials, {
+      canvasOnly: true,
+      stagger: !this._renderWorker,
+      timeoutMs: 120000,
+      renderTarget: plan.renderTarget,
+    });
+    // Cancellation can retire the pipeline during geometry. Keep the submitted
+    // driver job observed until its owning compile stage either awaits or drops it.
+    context.compilePromise.catch(() => {});
+    return context.compilePromise;
+  }
+
+  async _runInitialShaderBenchmark(context) {
+    const options = this._shaderBenchmarkOptions;
+    if (!options) return null;
+    if (options.coldShaderRunIgnored) {
+      console.info('[shader benchmark] coldShaderRun ignored while benchmark mode is active');
+    }
+    const runner = new ShaderBenchmarkRunner({
+      compileCase: async (candidate, runOptions) => {
+        context.assertCurrent();
+        const result = await this._compileShaderBenchmarkCandidate(candidate, runOptions);
+        // Context loss retires the boot generation immediately. Let the runner
+        // serialize that terminal case before the outer pipeline observes its
+        // cancellation, so exported diagnostics still explain the abort.
+        if (!result.contextLost) context.assertCurrent();
+        return result;
+      },
+      onProgress: ({ family, completed, total }) => context.progress(
+        `Benchmarking ${family} shaders…`,
+        completed,
+        Math.max(1, total),
+      ),
+    });
+    const result = await runner.run({
+      options,
+      candidates: context.compilePlan?.candidates || [],
+      metadata: {
+        runId: context.runId,
+        transport: this._renderWorker ? 'worker' : 'main-thread',
+        renderer: {
+          backend: this.rendererConfig?.activeBackend || 'webgl2',
+          detected: this.rendererCapabilities?.detectedRenderer || 'Unknown',
+          drawingBuffer: this.rendererCapabilities?.drawingBuffer || null,
+          contextAttributes: this.rendererCapabilities?.contextAttributes || null,
+        },
+        gpu: {
+          tier: this.gpuTier,
+          name: this.rendererCapabilities?.detectedGpu || this.gpuNameFull || this.gpuName || null,
+          vendor: this.rendererCapabilities?.vendor || null,
+          renderer: this.rendererCapabilities?.renderer || null,
+        },
+        renderKey: context.renderKey?.serialized || context.renderKey || null,
+        worldMode: this.worldMode,
+        projectMode: this.projectMode,
+        parallelCompilation: Boolean(
+          this.renderer?.getContext?.()?.getExtension?.('KHR_parallel_shader_compile'),
+        ),
+        preconditions: {
+          resourcePreparationComplete: true,
+          excludedFromFamilyTiming: true,
+          programs: (this._programHealthDiagnostics || []).flatMap((entry) => (
+            entry?.diagnostics || []
+          )).map((program) => ({
+            role: program.role || null,
+            sourceHash: program.sourceHash || null,
+            linked: program.linked === true,
+          })),
+        },
+      },
+    });
+    this._shaderBenchmarkResult = result;
+    return result;
+  }
+
+  async _compileShaderBenchmarkCandidate(candidate, options) {
+    const liveMaterial = candidate.material;
+    const production = candidate.productionDescriptor
+      || this._compileMaterialDescriptor(liveMaterial);
+    const clone = liveMaterial?.clone?.();
+    if (!clone) {
+      return {
+        status: 'failed',
+        code: 'MATERIAL_CLONE_UNAVAILABLE',
+        productionSourceHash: production.sourceHash,
+      };
+    }
+    clone.name = liveMaterial.name;
+    clone.userData = { ...(clone.userData || {}), benchmarkRole: candidate.role };
+    clone.defines = {
+      ...(clone.defines || {}),
+      TERRAIN_BENCHMARK_RUN: options.defineValue,
+    };
+    clone.needsUpdate = true;
+    const benchmark = this._compileMaterialDescriptor(clone);
+    const originalDefines = liveMaterial.defines;
+    const startedAt = performance.now();
+    try {
+      const compiled = await this._compileMaterialVariants([clone], {
+        canvasOnly: true,
+        timeoutMs: 120000,
+        renderTarget: candidate.renderTarget,
+        sources: [candidate.source],
+        camera: candidate.camera || this.camera,
+        targetScene: candidate.targetScene || this.scene,
+        logCompile: false,
+      });
+      const health = compiled.health;
+      const program = health?.diagnostics?.[0] || {};
+      let contextLost = Boolean(health?.contextLost || this._contextLost);
+      let status = compiled.ready === true && health?.ok !== false ? 'passed' : 'failed';
+      let code = status === 'passed' ? null
+        : contextLost ? 'CONTEXT_LOST'
+          : compiled.timedOut ? 'SHADER_TIMEOUT'
+            : health?.code || compiled.error?.code || 'SHADER_COMPILE_FAILED';
+      let publicationBindMs = 0;
+      if (status === 'passed') {
+        liveMaterial.defines = {
+          ...(liveMaterial.defines || {}),
+          TERRAIN_BENCHMARK_RUN: options.defineValue,
+        };
+        liveMaterial.needsUpdate = true;
+        const bindStartedAt = performance.now();
+        const publication = await this._compileMaterialVariants([liveMaterial], {
+          canvasOnly: true,
+          timeoutMs: 120000,
+          renderTarget: candidate.renderTarget,
+          sources: [candidate.source],
+          camera: candidate.camera || this.camera,
+          targetScene: candidate.targetScene || this.scene,
+          logCompile: false,
+        });
+        publicationBindMs = performance.now() - bindStartedAt;
+        contextLost = contextLost || Boolean(publication.health?.contextLost || this._contextLost);
+        if (publication.ready !== true || publication.health?.ok === false) {
+          status = 'failed';
+          code = contextLost
+            ? 'CONTEXT_LOST'
+            : publication.timedOut
+              ? 'SHADER_CACHE_BIND_TIMEOUT'
+              : publication.health?.code || 'SHADER_CACHE_BIND_FAILED';
+          liveMaterial.defines = originalDefines;
+          liveMaterial.needsUpdate = true;
+        }
+      }
+      return {
+        status,
+        code,
+        topology: candidate.topology,
+        renderTarget: candidate.targetKey,
+        productionSourceHash: program.productionLinkedSourceHash || production.sourceHash,
+        benchmarkSourceHash: program.linkedSourceHash || benchmark.sourceHash,
+        linkedBenchmarkSourceHash: program.linkedSourceHash || null,
+        productionDefinesHash: production.definesHash,
+        benchmarkDefinesHash: benchmark.definesHash,
+        productionDefines: production.defines,
+        benchmarkDefines: benchmark.defines,
+        productionSourceSizes: {
+          vertexChars: program.productionLinkedVertexChars || production.vertexChars,
+          fragmentChars: program.productionLinkedFragmentChars || production.fragmentChars,
+        },
+        benchmarkSourceSizes: {
+          vertexChars: program.linkedVertexChars || benchmark.vertexChars,
+          fragmentChars: program.linkedFragmentChars || benchmark.fragmentChars,
+        },
+        vertexChars: program.linkedVertexChars || benchmark.vertexChars,
+        fragmentChars: program.linkedFragmentChars || benchmark.fragmentChars,
+        activeSamplers: program.activeSamplers ?? null,
+        activeUniforms: program.activeUniforms ?? null,
+        submitMs: compiled.rendererCompileMs ?? compiled.syncCompileMs ?? 0,
+        queueWaitMs: Math.max(0, (compiled.syncCompileMs || 0) - (compiled.rendererCompileMs || 0)),
+        driverWaitMs: compiled.asyncWaitMs || 0,
+        validationMs: compiled.validationMs || 0,
+        publicationBindMs,
+        totalMs: performance.now() - startedAt,
+        linked: program.linked ?? null,
+        linkStatus: program.linked === true ? 'passed' : program.linked === false ? 'failed' : 'unknown',
+        canaryPassed: health?.ok === true,
+        canaryStatus: health?.ok === true ? 'passed' : 'failed',
+        glErrors: [...(health?.glErrors || [])],
+        timedOut: Boolean(compiled.timedOut),
+        contextLost,
+        aborted: Boolean(compiled.aborted),
+      };
+    } catch (error) {
+      if (liveMaterial.defines?.TERRAIN_BENCHMARK_RUN === options.defineValue) {
+        liveMaterial.defines = originalDefines;
+        liveMaterial.needsUpdate = true;
+      }
+      return {
+        status: 'failed',
+        code: error?.code || 'SHADER_BENCHMARK_ERROR',
+        message: error?.message || String(error),
+        productionSourceHash: production.sourceHash,
+        benchmarkSourceHash: benchmark.sourceHash,
+        totalMs: performance.now() - startedAt,
+        contextLost: Boolean(this._contextLost),
+      };
+    } finally {
+      clone.dispose();
+    }
+  }
+
   async _compileFinalBootGraph(context) {
     context.assertCurrent();
     const target = context.compileTarget || this._resolveCameraCompileTarget();
@@ -5738,18 +6273,11 @@ export class Engine {
       this.visualPost?._plan,
     );
     context.progress('Compiling final shaders…', 0, Math.max(1, materials.length));
-    const result = await (context.compilePromise || this._compileMaterialVariants(materials, {
-      canvasOnly: true,
-      // The exact visible graph is deliberately small (normally terrain,
-      // water, sky/plinth and the active final post pass). Submit it once so
-      // ANGLE can link the two expensive programs in parallel. Incremental
-      // submission made cold boot nearly twice as long because browser task
-      // delivery was delayed until each preceding driver compile completed.
-      // Hidden mode/effect materials are filtered by _finalBootMaterials(), so
-      // this no longer recreates the old 35-program compiler saturation.
-      timeoutMs: 120000,
-      renderTarget: target.renderTarget,
-    }));
+    if (!context.compilePlan) {
+      context.compilePlan = this._buildFinalBootCompilePlan(materials, target.renderTarget);
+    }
+    this._submitFinalBootCompilePlan(context);
+    const result = await context.compilePromise;
     context.assertCurrent();
     if (result?.ready !== true) {
       const error = new Error('Final shader graph did not become ready');
@@ -5844,10 +6372,12 @@ export class Engine {
     this.cb.onBootComplete?.({
       ...result,
       backend: this.rendererConfig?.activeBackend || 'webgl2',
+      transport: this._renderWorker ? 'worker' : 'main-thread',
     });
     console.info(
       `[boot] final frame ready in ${result.duration.toFixed(0)}ms `
-      + `(${result.mode}, ${this.rendererConfig?.activeBackend || 'webgl2'})`,
+      + `(${result.mode}, ${this.rendererConfig?.activeBackend || 'webgl2'}, `
+      + `${this._renderWorker ? 'worker' : 'main-thread'})`,
     );
     const stageDurations = result.manifest?.stageDurations;
     if (stageDurations) {
@@ -5868,7 +6398,7 @@ export class Engine {
       stage,
       code: error?.code || 'BOOT_FAILED',
       message: error?.message || 'Graphics initialization failed',
-      retryable: true,
+      retryable: error?.code !== 'BOOT_RETRY_EXHAUSTED',
       cause: error,
     };
     this._bootError = normalized;
@@ -5892,6 +6422,13 @@ export class Engine {
 
   retryBoot({ mode = this._bootMode || 'full' } = {}) {
     if (this._disposed) return Promise.resolve(null);
+    if (this._bootRetryCount >= 1) {
+      const error = new Error('The exact graphics profile already used its one retry.');
+      error.code = 'BOOT_RETRY_EXHAUSTED';
+      this._failFinalFrameBoot(error, 'renderer');
+      return Promise.resolve(null);
+    }
+    this._bootRetryCount += 1;
     return this._startFinalFrameBoot({ mode, reason: 'retry' });
   }
 
@@ -7126,6 +7663,10 @@ export class Engine {
     return this.minimap.infoAtCanvas(px, py);
   }
 
+  getMinimapFrame() {
+    return this.minimap.createFramePacket(this.controls);
+  }
+
   focusCenter() { this.controls.focusCenter(); }
   setCameraMode(mode) { this.controls.setMode(mode); }
   setCameraView(view) { this.controls.setView(view); }
@@ -7975,7 +8516,14 @@ export class Engine {
     context.targetProjectMode = context.input.projectMode || this.projectMode;
     context.renderKey = this._modeRenderKey(requested, context.targetProjectMode);
     context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+    context.bundle = new PreparedModeBundle({
+      key: context.renderKey.serialized,
+      worldMode: requested,
+      projectMode: context.targetProjectMode,
+      registry: this._sharedModeResources,
+    });
     this._activeModeTransitionContext = context;
+    if (this._modeTransitionRequest) this._modeTransitionRequest.context = context;
     context.progress(context.cacheHit ? 'Reusable mode cache found' : 'Final scene planned', 1, 1);
     return { cacheHit: context.cacheHit, from: this.worldMode, to: requested };
   }
@@ -7987,7 +8535,8 @@ export class Engine {
       context.planetModules = await this._loadPlanetModules();
       context.assertCurrent();
     }
-    context.cachedResources = this._modeResourceCache.get(context.renderKey.serialized)?.resources || null;
+    const cachedBundle = this._modeResourceCache.get(context.renderKey.serialized);
+    context.cachedResources = cachedBundle?.resources || null;
     context.progress(context.cachedResources ? 'Reusing compiled resources' : 'Resources ready', 1, 1);
     return { reusedResources: Boolean(context.cachedResources) };
   }
@@ -8004,7 +8553,10 @@ export class Engine {
       if (project.params || project.editorMode || project.generationSource) {
         // loadSeedJSON installs the complete document synchronously and returns
         // the exact material/geometry readiness promise. Keep it for compile.
-        context.projectReady = this.loadSeedJSON(project, { silent: true });
+        context.projectReady = this.loadSeedJSON(project, {
+          silent: true,
+          onRealWorldProgress: context.input.onRealWorldProgress,
+        });
       } else {
         this.newProject({ ...project, projectMode: context.targetProjectMode, silent: true });
       }
@@ -8029,6 +8581,15 @@ export class Engine {
         context.targetProjectMode,
       );
       context.cacheHit = this._modeResourceCache.has(context.renderKey.serialized);
+      if (context.bundle?.key !== context.renderKey.serialized) {
+        context.bundle?.dispose?.();
+        context.bundle = new PreparedModeBundle({
+          key: context.renderKey.serialized,
+          worldMode: context.targetWorldMode,
+          projectMode: context.targetProjectMode,
+          registry: this._sharedModeResources,
+        });
+      }
     }
     context.assertCurrent();
     context.progress('Visible geometry ready', 1, 1);
@@ -8057,6 +8618,20 @@ export class Engine {
     }
     context.assertCurrent();
     context.keepaliveMaterials = result?.keepaliveMaterials || [];
+    context.keepaliveMaterials.forEach((material, index) => {
+      context.bundle?.own(`keepalive:${index}`, material);
+    });
+    if (context.planetModules) {
+      context.bundle?.own('planet-modules', context.planetModules, {
+        shared: true,
+        dispose: () => {},
+      });
+    }
+    context.bundle?.validate({
+      ok: result?.ready !== false && !result?.error,
+      health: result?.health || null,
+      materialCount: result?.materialCount ?? context.keepaliveMaterials.length,
+    });
     context.progress('Final shaders ready', 1, 1);
     // Completion manifests are immutable diagnostics. Never place live Three
     // resources in them: freezing a material would freeze shared uniforms and
@@ -8086,21 +8661,12 @@ export class Engine {
     await yieldFrame();
     context.assertCurrent();
     context.progress('Final frame presented', 2, 2);
-    const cacheValue = this._modeResourceCache.get(context.renderKey.serialized) || {
-      worldMode: context.targetWorldMode,
-      renderKey: context.renderKey,
-      resources: {},
-    };
-    cacheValue.resources = {
-      modules: context.planetModules || cacheValue.resources?.modules || null,
-      keepaliveMaterials: context.keepaliveMaterials?.length
-        ? context.keepaliveMaterials
-        : (cacheValue.resources?.keepaliveMaterials || []),
-    };
-    this._modeResourceCache.activate(context.renderKey.serialized, cacheValue, {
-      dispose: (entry) => {
-        for (const material of entry?.resources?.keepaliveMaterials || []) material?.dispose?.();
-      },
+    if (this._activeModeBundle && this._activeModeBundle !== context.bundle
+        && this._activeModeBundle.state === 'active') this._activeModeBundle.park();
+    context.bundle?.publish();
+    this._activeModeBundle = context.bundle;
+    this._modeResourceCache.activate(context.renderKey.serialized, context.bundle, {
+      dispose: (bundle) => bundle?.dispose?.(),
     });
     this._needsRender = false;
     return { presentedFrames: 2 };
@@ -8111,6 +8677,7 @@ export class Engine {
     projectMode = this.projectMode,
     project = null,
     reason = 'user',
+    onRealWorldProgress = null,
   } = {}) {
     if (this._disposed) throw new ModeTransitionCancelledError('Engine is disposed');
     if (worldMode === this.worldMode && projectMode === this.projectMode && project == null) {
@@ -8128,7 +8695,7 @@ export class Engine {
       : null;
     const request = {
       target: worldMode,
-      input: { worldMode, projectMode, project },
+      input: { worldMode, projectMode, project, onRealWorldProgress },
       reason,
       resizeRevision: 0,
     };
@@ -8160,8 +8727,12 @@ export class Engine {
         }
       }
     } catch (error) {
+      request.context?.bundle?.dispose?.();
       if (error?.code === 'MODE_TRANSITION_CANCELLED') throw error;
-      if (!this._disposed && previousProjectState) {
+      if (this._contextLost) {
+        // Never submit reconstruction work to a lost context. The blocking
+        // recovery flow will recreate and validate the exact profile.
+      } else if (!this._disposed && previousProjectState) {
         try {
           await this.restoreState(previousProjectState, { rollbackOnError: false });
           this._renderFrozenModeFrame();
@@ -9429,6 +10000,7 @@ export class Engine {
   setPerfSetting(key, value) {
     if (!(key in this.perf)) return;
     const next = { ...this.perf, [key]: value };
+    if (key === 'useWorker') next.workerPreferenceExplicit = true;
     // meta toggles that don't change visual quality keep the current preset
     const keepsPreset = key === 'autoPerf'
       || key === 'underwaterEffect'
@@ -9448,7 +10020,7 @@ export class Engine {
         requestedGpuPreference: this.perf.gpuPreference,
         requestedGpuPreferenceLabel: labelGpuPreference(this.perf.gpuPreference),
         workerRequested: !!this.perf.useWorker,
-        workerActive: false,
+        workerActive: !!cfg.workerActive,
         reloadRequired: this.perf.rendererBackend !== cfg.appliedRendererBackend
           || this.perf.gpuPreference !== cfg.appliedGpuPreference
           || !!this.perf.useWorker !== !!cfg.workerActive,
@@ -10118,7 +10690,7 @@ export class Engine {
   saveSeed() {
     const data = this.createProjectPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    this._download(URL.createObjectURL(blob), `terrain-seed-${data.params.seed}.json`);
+    this._download(blob, `terrain-seed-${data.params.seed}.json`);
     this.cb.onToast('Seed saved as JSON');
   }
 
@@ -10764,7 +11336,7 @@ export class Engine {
     if (!names.length) { this.cb.onToast('No water masks exported'); return; }
     const { zipSync } = await import('fflate');
     const zipped = zipSync(files);
-    this._download(URL.createObjectURL(new Blob([zipped])), `water_masks-${this.params.seed}.zip`);
+    await this._download(new Blob([zipped], { type: 'application/zip' }), `water_masks-${this.params.seed}.zip`);
     this.cb.onToast(`Exported water masks (${names.length} file${names.length > 1 ? 's' : ''})`);
   }
 
@@ -10860,9 +11432,7 @@ export class Engine {
       this.profiler.captureRenderer(this.renderer);
       const performanceSnapshot = this.profiler.snapshot();
       const diagnostics = this.getPerfDiagnostics();
-      const png = await new Promise((resolve) => {
-        this.renderer.domElement.toBlob(resolve, 'image/png');
-      });
+      const png = await this._canvasToBlob(this.renderer.domElement, 'image/png');
       if (!png) throw new Error('Water baseline screenshot could not be encoded');
 
       const report = createWaterBaselineReport({
@@ -10880,10 +11450,7 @@ export class Engine {
         [`${scene.value}.png`]: pngBytes,
         [`${scene.value}.json`]: reportBytes,
       });
-      this._download(
-        URL.createObjectURL(new Blob([archive], { type: 'application/zip' })),
-        `water-baseline-${scene.value}.zip`,
-      );
+      await this._download(new Blob([archive], { type: 'application/zip' }), `water-baseline-${scene.value}.zip`);
       this.cb.onToast(`Water baseline captured: ${scene.label}`);
       return report;
     } finally {
@@ -10907,12 +11474,34 @@ export class Engine {
 
   // --------------------------------------------------------------- exports
 
-  _download(url, filename) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  async _download(blob, filename) {
+    if (this.cb.onArtifact) return this.cb.onArtifact({ blob, filename, mime: blob?.type });
+    return saveBlob(blob, filename);
+  }
+
+  async _canvasToBlob(canvas, type = 'image/png', quality) {
+    const source = canvas?.canvas || canvas;
+    if (typeof source?.convertToBlob === 'function') {
+      return source.convertToBlob({ type, quality });
+    }
+    return new Promise((resolve) => source?.toBlob?.(resolve, type, quality));
+  }
+
+  async _blobToDataUrl(blob) {
+    if (typeof FileReader !== 'undefined') {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return `data:${blob.type || 'application/octet-stream'};base64,${btoa(binary)}`;
   }
 
   _captureOverlayRoots() {
@@ -10987,23 +11576,28 @@ export class Engine {
     });
   }
 
-  exportScreenshot() {
+  async exportScreenshot() {
     this._renderCameraCapture();
-    this.renderer.domElement.toBlob((blob) => {
-      if (!blob) return this.cb.onToast('Export failed');
-      this._download(URL.createObjectURL(blob), `terrain-${this.params.seed}.png`);
-      this.cb.onToast('Screenshot exported');
-    });
+    const blob = await this._canvasToBlob(this.renderer.domElement, 'image/png');
+    if (!blob) { this.cb.onToast('Export failed'); return null; }
+    await this._download(blob, `terrain-${this.params.seed}.png`);
+    this.cb.onToast('Screenshot exported');
+    return blob;
   }
 
-  capturePreviewThumbnail(width = 480, height = 270) {
+  async capturePreviewThumbnail(width = 480, height = 270) {
     // Render through the exact same path used by screenshot export, then scale
     // the actual WebGL canvas into a compact data URL for template previews.
     this._renderCameraCapture();
     const thumbnail = document.createElement('canvas');
     thumbnail.width = width; thumbnail.height = height;
-    thumbnail.getContext('2d')?.drawImage(this.renderer.domElement, 0, 0, width, height);
-    return thumbnail.toDataURL('image/webp', 0.8);
+    thumbnail.getContext('2d')?.drawImage(
+      this.renderer.domElement?.canvas || this.renderer.domElement,
+      0, 0, width, height,
+    );
+    if (typeof thumbnail.toDataURL === 'function') return thumbnail.toDataURL('image/webp', 0.8);
+    const blob = await this._canvasToBlob(thumbnail, 'image/webp', 0.8);
+    return blob ? this._blobToDataUrl(blob) : null;
   }
 
   async exportHeightmap() {
@@ -11041,11 +11635,11 @@ export class Engine {
       img.data.set(pixels.subarray(src, src + SIZE * 4), y * SIZE * 4);
     }
     ctx.putImageData(img, 0, 0);
-    canvas.toBlob((blob) => {
-      if (!blob) return this.cb.onToast('Export failed');
-      this._download(URL.createObjectURL(blob), `heightmap-${this.params.seed}.png`);
-      this.cb.onToast('Heightmap exported');
-    });
+    const blob = await this._canvasToBlob(canvas, 'image/png');
+    if (!blob) { this.cb.onToast('Export failed'); return null; }
+    await this._download(blob, `heightmap-${this.params.seed}.png`);
+    this.cb.onToast('Heightmap exported');
+    return blob;
   }
 
   async export3DTerrain(options) {
@@ -11149,7 +11743,7 @@ export class Engine {
         const value = source[i * 4 + channel]; const v = signed ? Math.round(Math.max(0, Math.min(255, 128 + value * 2))) : value;
         const o = i * 4; image.data[o] = image.data[o + 1] = image.data[o + 2] = v; image.data[o + 3] = 255;
       }
-      ctx.putImageData(image, 0, 0); const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      ctx.putImageData(image, 0, 0); const blob = await this._canvasToBlob(canvas, 'image/png');
       return [name, new Uint8Array(await blob.arrayBuffer())];
     };
     const entries = await Promise.all([
@@ -11166,6 +11760,7 @@ export class Engine {
     const h = Math.max(1, rect.height);
     const roundedW = Math.round(w);
     const roundedH = Math.round(h);
+    this._admitViewportResources(w, h);
     const changed = this._lastViewportWidth != null
       && (this._lastViewportWidth !== roundedW || this._lastViewportHeight !== roundedH);
     this._lastViewportWidth = roundedW;
@@ -11187,6 +11782,123 @@ export class Engine {
       this._modeTransitionRequest.resizeRevision += 1;
       this._modeTransitionCoordinator?.cancel?.();
     }
+  }
+
+  setViewport({ width, height, pixelRatio, visible } = {}) {
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      this.canvas?.setTerrainViewport?.(width, height);
+      if (Number.isFinite(pixelRatio)) this.renderer?.setPixelRatio?.(pixelRatio);
+      this._onResize();
+    }
+    if (visible === true) this._onVisibility?.();
+  }
+
+  applyInputFrame(frame = {}) {
+    const dispatch = (target, type, payload = {}) => {
+      if (target?.dispatchTerrainEvent) target.dispatchTerrainEvent(type, payload);
+    };
+    for (const event of frame.pointerEvents || []) dispatch(this.canvas, event.type, event);
+    if (frame.wheel) dispatch(this.canvas, 'wheel', frame.wheel);
+    for (const event of frame.keyEvents || []) dispatch(globalThis.document, event.type, event);
+    if (frame.touchInput) this.setTouchInput(frame.touchInput);
+    if (typeof frame.visible === 'boolean') this.setViewport({ visible: frame.visible });
+  }
+
+  getClientSnapshot() {
+    return {
+      params: this._paramsSnapshot?.() || { ...(this.params || {}) },
+      perf: { ...(this.perf || {}) },
+      gpuName: this.gpuName || '',
+      rendererConfig: { ...(this.rendererConfig || {}) },
+      rendererCapabilities: this.rendererCapabilities || null,
+      worldMode: this.worldMode,
+      projectMode: this.projectMode,
+      workspacePreset: this.workspacePreset,
+      realWorldSource: this.realWorldSource,
+      timeOfDay: this.timeOfDay,
+      soloLayerId: this._soloLayerId ?? null,
+      disposed: !!this._disposed,
+      erosionHasResult: this.erosionField?.hasResult?.() ?? false,
+      targetTerrainVariant: this._targetTerrainVariant?.() ?? null,
+      boot: {
+        pending: !!this._bootPending,
+        mode: this._bootMode,
+        error: this._bootError ? {
+          code: this._bootError.code,
+          message: this._bootError.message,
+          stage: this._bootError.stage,
+          retryable: this._bootError.retryable,
+        } : null,
+      },
+    };
+  }
+
+  getGraphicsDiagnostics() {
+    return {
+      capturedAt: new Date().toISOString(),
+      gpuName: this.gpuNameFull || this.gpuName,
+      rendererConfig: this.rendererConfig,
+      capabilities: this.rendererCapabilities,
+      resourceLedger: this._gpuResourceLedger?.snapshot?.() || null,
+      programHealth: [...this._programHealthDiagnostics],
+      shaderBenchmark: this._shaderBenchmarkResult,
+      contextLossTimeline: [...this._contextLossTimeline],
+      bootError: this._bootError ? {
+        code: this._bootError.code,
+        message: this._bootError.message,
+        stage: this._bootError.stage,
+        retryable: this._bootError.retryable,
+      } : null,
+    };
+  }
+
+  setClientState(patch = {}) {
+    if ('workspacePreset' in patch) this.workspacePreset = patch.workspacePreset;
+    return this.getClientSnapshot();
+  }
+
+  hasErosionResult() { return this.erosionField?.hasResult?.() ?? false; }
+  getTargetTerrainVariant() { return this._targetTerrainVariant(); }
+
+  async buildAndSetSurfaceAtlas(source) {
+    const { buildActiveSurfaceAtlas } = await import('./terrain/surface/applyTerrainSurface.js');
+    const atlas = await buildActiveSurfaceAtlas({ source });
+    this.setSurfaceAtlas(atlas, source);
+    return {
+      anyPresent: !!atlas.anyPresent,
+      bakedAt: atlas.bakedAt,
+      coverage: atlas.coverage,
+      layers: atlas.layers,
+      source,
+    };
+  }
+
+  _admitViewportResources(width, height) {
+    if (!this.renderer || !this._gpuResourceLedger) return;
+    const pixelRatio = Math.max(0.1, this.renderer.getPixelRatio?.() || 1);
+    const bufferWidth = Math.max(1, Math.ceil(width * pixelRatio));
+    const bufferHeight = Math.max(1, Math.ceil(height * pixelRatio));
+    const maxViewport = this.rendererCapabilities?.limits?.maxViewportDims;
+    const maxRenderbuffer = this.rendererCapabilities?.limits?.maxRenderbufferSize || Infinity;
+    const maxWidth = Array.isArray(maxViewport) ? maxViewport[0] : Infinity;
+    const maxHeight = Array.isArray(maxViewport) ? maxViewport[1] : Infinity;
+    if (bufferWidth > maxWidth || bufferHeight > maxHeight
+        || bufferWidth > maxRenderbuffer || bufferHeight > maxRenderbuffer) {
+      const error = new Error(
+        `Requested drawing buffer ${bufferWidth}×${bufferHeight} exceeds this device's WebGL limits.`,
+      );
+      error.code = 'DRAWING_BUFFER_LIMIT_EXCEEDED';
+      throw error;
+    }
+    const antialias = !!this.rendererCapabilities?.contextAttributes?.antialias;
+    this._gpuResourceLedger.reserve('drawing-buffer', {
+      kind: 'drawing-buffer',
+      width: bufferWidth,
+      height: bufferHeight,
+      channels: 4,
+      depthBytes: 4,
+      samples: antialias ? 4 : 1,
+    });
   }
 
   _tick() {
@@ -11859,6 +12571,10 @@ export class Engine {
   }
 
   // ----------------------------------------------------------- diagnostics
+  setPerformanceProfilerActive(active) {
+    this.profiler?.setActive?.(!!active);
+  }
+
   // Snapshot of engine state for the Performance Overlay. Read-only, defensive:
   // every world-mode system may be absent (mode not active / disabled). Never
   // throws so the overlay can poll it safely at any time.
@@ -11880,6 +12596,7 @@ export class Engine {
     const waterEnabled = !!this.waterSystem?.isEnabled();
 
     const diag = {
+      performance: this.profiler?.snapshot?.() || null,
       version: APP_VERSION,
       mode: this.worldMode,
       exploreMode: this.exploreMode,
@@ -11901,6 +12618,10 @@ export class Engine {
             || !!perf.useWorker !== !!this.rendererConfig.workerActive
           )
         ),
+        resourceLedger: this._gpuResourceLedger?.snapshot?.() || null,
+        programHealth: this._programHealthDiagnostics.slice(-12),
+        shaderBenchmark: this._shaderBenchmarkResult,
+        contextLossTimeline: [...this._contextLossTimeline],
       },
       drawingBuffer: this.renderer
         ? { w: this.renderer.domElement.width, h: this.renderer.domElement.height }
@@ -12061,6 +12782,8 @@ export class Engine {
     this._modeTransitionRequest?.resolveContextRestore?.();
     this._modeTransitionRequest = null;
     this._modeResourceCache?.clear?.();
+    this._gpuWorkScheduler?.dispose?.();
+    this._gpuResourceLedger?.clear?.();
     this._cancelScheduledNoiseStackCompile();
     this._clock?.dispose?.();
     if (this._bootResizeTimer) {

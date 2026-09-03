@@ -215,7 +215,7 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
           label="Worker Renderer"
           value={!!perf.useWorker}
           onChange={(v) => onPerfSetting('useWorker', v)}
-          info="Experimental seam for moving rendering to OffscreenCanvas later. This build keeps the in-thread renderer active."
+          info="Keeps shader compilation and rendering off the UI thread when OffscreenCanvas is supported. Disable only for compatibility diagnostics; reloading is required."
           settingId="performance.useWorker"
         />
         <div className="gpu-cap-list">

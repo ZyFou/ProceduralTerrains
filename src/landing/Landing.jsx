@@ -659,8 +659,10 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
             )}
             {bootError && (
               <div className="landing-preview-error-actions">
-                <button type="button" onClick={() => onRetryBoot?.('full')}>Retry full scene</button>
-                <button type="button" onClick={() => onRetryBoot?.('compatibility')}>Start compatibility mode</button>
+                {bootError.retryable !== false && (
+                  <button type="button" onClick={() => onRetryBoot?.()}>Retry exact scene</button>
+                )}
+                <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('terrain-boot:diagnostics'))}>Export diagnostics</button>
               </div>
             )}
           </div>

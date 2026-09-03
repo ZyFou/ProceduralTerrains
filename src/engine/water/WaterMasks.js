@@ -2,6 +2,7 @@
 // WaterMasks — CPU-side mask generation from terrain height data.
 // Used for debug previews and export; not regenerated every frame.
 // ============================================================================
+import { saveDataUrl } from '../../platform/DesktopBridge.js';
 
 /**
  * Generate water-related masks from a height sampler.
@@ -120,12 +121,9 @@ export function maskToPngDataUrl(mask, resolution, { colorize = false } = {}) {
   return canvas.toDataURL('image/png');
 }
 
-export function downloadMaskPng(mask, resolution, filename, opts) {
+export async function downloadMaskPng(mask, resolution, filename, opts) {
   const url = maskToPngDataUrl(mask, resolution, opts);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
+  return saveDataUrl(url, filename);
 }
 
 /** Encode a float mask as PNG bytes (Uint8Array) for bundling into a zip. */

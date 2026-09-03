@@ -13,11 +13,13 @@ export function probeWebGL() {
     const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : '';
     const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
     if (/disabled/i.test(vendor) || /disabled/i.test(renderer)) {
+      try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ignore */ }
       return {
         ok: false,
         reason: 'GPU rendering appears disabled. Enable hardware acceleration in your browser settings, then reload.',
       };
     }
+    try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ignore */ }
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: e?.message || 'WebGL probe failed.' };

@@ -21,6 +21,7 @@ describe('editor keyboard shortcuts', () => {
     expect(isMacPlatform('Win32')).toBe(false);
     expect(shortcutText(EDITOR_SHORTCUTS.save, 'MacIntel')).toBe('Command + S');
     expect(shortcutText(EDITOR_SHORTCUTS.save, 'Win32')).toBe('Ctrl + S');
+    expect(shortcutText(EDITOR_SHORTCUTS.saveAs, 'Win32')).toBe('Ctrl + Shift + S');
     expect(shortcutText(EDITOR_SHORTCUTS.projects, 'Win32')).toBe('Ctrl + Shift + O');
   });
 
@@ -28,6 +29,7 @@ describe('editor keyboard shortcuts', () => {
     expect(matchesShortcut(keyEvent('s', { metaKey: true }), EDITOR_SHORTCUTS.save, 'MacIntel')).toBe(true);
     expect(matchesShortcut(keyEvent('s', { ctrlKey: true }), EDITOR_SHORTCUTS.save, 'MacIntel')).toBe(false);
     expect(matchesShortcut(keyEvent('s', { ctrlKey: true }), EDITOR_SHORTCUTS.save, 'Win32')).toBe(true);
+    expect(matchesShortcut(keyEvent('s', { ctrlKey: true, shiftKey: true }), EDITOR_SHORTCUTS.saveAs, 'Win32')).toBe(true);
     expect(matchesShortcut(keyEvent('s', { metaKey: true }), EDITOR_SHORTCUTS.save, 'Win32')).toBe(false);
   });
 

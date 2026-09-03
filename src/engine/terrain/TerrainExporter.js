@@ -27,6 +27,7 @@ import {
   decodePackedHeight01,
   encodeUnityRaw16FromPackedPixels,
 } from '../../export/runtime/HeightfieldEncoding.js';
+import { saveBlob } from '../../platform/DesktopBridge.js';
 
 const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
@@ -178,13 +179,10 @@ async function rtToCanvas(renderer, rt, w, h) {
 }
 
 async function canvasToUint8Array(canvas) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(new Uint8Array(reader.result));
-      reader.readAsArrayBuffer(blob);
-    }, 'image/png');
-  });
+  const blob = typeof canvas.convertToBlob === 'function'
+    ? await canvas.convertToBlob({ type: 'image/png' })
+    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 export class TerrainExporter {
@@ -817,15 +815,6 @@ export class TerrainExporter {
     }
 
     // Download helpers
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    }
-
     // Download results
     const modelExt = format === 'glb' ? 'glb' : 'obj';
     if (exportedModel) {
@@ -884,7 +873,7 @@ export class TerrainExporter {
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing export package (ZIP)...');
       const zipped = zipSync(zipFiles);
-      downloadBlob(new Blob([zipped]), `${options.exportPresetId && options.exportPresetId !== 'custom' ? `${options.exportPresetId}_` : ''}terrain_export-${engineParams.seed}.zip`);
+      await saveBlob(new Blob([zipped], { type: 'application/zip' }), `${options.exportPresetId && options.exportPresetId !== 'custom' ? `${options.exportPresetId}_` : ''}terrain_export-${engineParams.seed}.zip`);
     }
 
     onToast('Export completed successfully!');
