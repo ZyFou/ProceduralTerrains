@@ -151,6 +151,10 @@ import {
   ShaderBenchmarkRunner,
   classifyShaderBenchmarkRole,
 } from './render/ShaderBenchmark.js';
+import {
+  finalTerrainShaderPendingError,
+  requiresFinalTerrainShader,
+} from './TerrainModeAvailability.js';
 
 const IMPORT_MODES = { disabled: 0, preview: 1, replace: 2, blend: 3 };
 const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
@@ -179,6 +183,7 @@ const NODE_NEUTRAL_PALETTE = Object.fromEntries(PALETTE_KEYS.map((key) => [
 //   onBootProgress(progress)    final-frame boot stage/progress
 //   onBootError(error)          blocking failure; UI offers explicit retry
 //   onBootComplete(result)      coherent interactive frame has been presented
+//   onTerrainShaderReady(ready) final terrain shader replaced the low-cost boot shader
 //   onModeProgress(progress)    atomic mode-transition stage/progress
 //   onModeError(error)          target failed; previous mode was restored
 //   onModeComplete(result)      target final frame has been presented
@@ -366,6 +371,7 @@ export class Engine {
     this._initialShaderRetryTimer = null;
     this._initialShaderRetryCount = 0;
     this._bootDegradedMaterial = null;
+    this._terrainShaderReadyLast = null;
     this._bootWatchdogTimer = null;
     this._qualityWatchdogTimer = null;
     this._bootGateLogAt = 0;
@@ -657,6 +663,7 @@ export class Engine {
     // is ever rendered to the canvas.
     this._createFinalFrameBootPipeline();
     this._createModeTransitionCoordinator();
+    this._emitTerrainShaderReadiness(true);
     void this._startFinalFrameBoot({ mode: this._initialBootMode, reason: 'initial' });
   }
 
@@ -2537,6 +2544,7 @@ export class Engine {
     noiseStackPresetKey = null,
     initialGraph = null,
   } = {}) {
+    this._assertFinalTerrainShaderForMode({ worldMode: 'studio', projectMode });
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
     this.workspacePreset = workspacePreset === 'real-terrain' ? 'real-terrain' : null;
     this._clearPendingTerrainParams();
@@ -2676,6 +2684,7 @@ export class Engine {
           : 'New procedural terrain';
       this.cb.onToast(label);
     }
+    this._emitTerrainShaderReadiness();
   }
 
   // ---------------------------------------------------------- planet style
@@ -3785,6 +3794,7 @@ export class Engine {
         } else if (this._infiniteTerrainMat) {
           rebuildTerrainShaderSource(this._infiniteTerrainMat, sg, { variant: terrainVariant });
         }
+        if (modeAtStart === 'studio') this._emitTerrainShaderReadiness();
         if (heightSourceChanged && this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
           rebuildWaterShaderSource(this._infiniteWaterMat, sg);
         }
@@ -6388,6 +6398,7 @@ export class Engine {
     this._qualityPending = qualityPending;
     this._bootShaderPending = false;
     this._bootError = null;
+    this._emitTerrainShaderReadiness();
     this.cb.onStatus?.('Ready', false);
     if (this._landingShowcase) {
       this._landingOrbitPending = (this.board?.remainingChunks ?? 0) > 0;
@@ -6479,6 +6490,26 @@ export class Engine {
   /** Compile and present the first coherent interactive frame. */
   async _warmupInitialShaders() {
     return this._startFinalFrameBoot({ mode: this._bootMode, reason: 'legacy-entrypoint' });
+  }
+
+  _isFinalTerrainShaderReady() {
+    // This gate targets the deliberately-present low-cost boot material. A
+    // missing material is handled by the existing renderer/transition checks.
+    return this.terrainMaterial?.userData?.minimalFragment !== true;
+  }
+
+  _emitTerrainShaderReadiness(force = false) {
+    const ready = this._isFinalTerrainShaderReady();
+    if (!force && ready === this._terrainShaderReadyLast) return ready;
+    this._terrainShaderReadyLast = ready;
+    this.cb.onTerrainShaderReady?.(ready);
+    return ready;
+  }
+
+  _assertFinalTerrainShaderForMode({ worldMode, projectMode, project } = {}) {
+    if (this._isFinalTerrainShaderReady()
+        || !requiresFinalTerrainShader({ worldMode, projectMode, project })) return;
+    throw finalTerrainShaderPendingError();
   }
 
 
@@ -6881,6 +6912,7 @@ export class Engine {
           rebuildTerrainShaderSource(this.terrainMaterial, heightProgram, { variant });
           swapMs = performance.now() - tSwap;
           swapped = true;
+          this._emitTerrainShaderReadiness();
           this._needsRender = true;
           this._minimapDirtyAt = performance.now();
           this.minimap.requestRedraw();
@@ -8732,6 +8764,7 @@ export class Engine {
     onRealWorldProgress = null,
   } = {}) {
     if (this._disposed) throw new ModeTransitionCancelledError('Engine is disposed');
+    this._assertFinalTerrainShaderForMode({ worldMode, projectMode, project });
     if (worldMode === this.worldMode && projectMode === this.projectMode && project == null) {
       return { unchanged: true, worldMode, projectMode };
     }
@@ -8815,6 +8848,7 @@ export class Engine {
   }
 
   async _setWorldModeImmediate(mode, { planetModules = null, deferCompile = false } = {}) {
+    this._assertFinalTerrainShaderForMode({ worldMode: mode, projectMode: this.projectMode });
     const transitionToken = (this._worldModeToken ?? 0) + 1;
     this._worldModeToken = transitionToken;
     if (mode === this.worldMode) return null;
@@ -10752,6 +10786,22 @@ export class Engine {
       this.cb.onToast('Not a valid terrain seed file');
       return Promise.reject(new Error('Invalid terrain seed'));
     }
+    const requestedProjectMode = json?.editorMode === 'nodes'
+      || json?.generationSource === 'graph'
+      ? 'nodes'
+      : json?.editorMode === 'manual'
+        ? 'manual'
+        : 'procedural';
+    try {
+      // loadSeedJSON remains part of the public engine contract, so protect it
+      // even when callers bypass App's project-open and transitionMode paths.
+      this._assertFinalTerrainShaderForMode({
+        worldMode: 'studio',
+        projectMode: requestedProjectMode,
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const rollbackState = {
       ...this.serializeState(),
       paint: this.serializePaint(),
@@ -11872,6 +11922,7 @@ export class Engine {
       disposed: !!this._disposed,
       erosionHasResult: this.erosionField?.hasResult?.() ?? false,
       targetTerrainVariant: this._targetTerrainVariant?.() ?? null,
+      terrainShaderReady: this._isFinalTerrainShaderReady(),
       boot: {
         pending: !!this._bootPending,
         mode: this._bootMode,

@@ -50,6 +50,19 @@ describe('EngineClient', () => {
     unsubscribe();
   });
 
+  it('mirrors final terrain shader readiness from engine events', async () => {
+    const onTerrainShaderReady = vi.fn();
+    const transport = new FakeTransport();
+    const client = new EngineClient({ callbacks: { onTerrainShaderReady } }, transport);
+    await client.initialize();
+
+    transport.options.callbacks.onTerrainShaderReady(false);
+    expect(client.terrainShaderReady).toBe(false);
+    transport.options.callbacks.onTerrainShaderReady(true);
+    expect(client.terrainShaderReady).toBe(true);
+    expect(onTerrainShaderReady).toHaveBeenLastCalledWith(true);
+  });
+
   it('rejects commands deterministically after disposal', async () => {
     const client = new EngineClient({ callbacks: {} }, new FakeTransport());
     await client.initialize();

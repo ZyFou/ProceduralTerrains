@@ -38,3 +38,14 @@ export const matchesShortcut = (event, shortcut, platform = getPlatformName()) =
     && !!event.altKey === !!shortcut.altKey
     && String(event.key ?? '').toLowerCase() === String(shortcut.key).toLowerCase();
 };
+
+/**
+ * Resolve the first active editor shortcut. Random seed is reserved even when
+ * unavailable so Ctrl/Cmd+R can never fall through to a browser reload.
+ */
+export const resolveEditorShortcutAction = (event, actions = {}, platform = getPlatformName()) => (
+  Object.entries(EDITOR_SHORTCUTS).find(([actionId, shortcut]) => (
+    (actions[actionId] || actionId === 'randomSeed')
+    && matchesShortcut(event, shortcut, platform)
+  ))?.[0] ?? null
+);

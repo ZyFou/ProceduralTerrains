@@ -41,6 +41,7 @@ import { usePopup } from './components/ui/PopupProvider.jsx';
 import { useLanding } from './landing/landingContext.jsx';
 import { usePerfOverlay } from './components/perf/usePerfOverlay.js';
 import { labelGpuPreference, labelRendererBackend } from './engine/render/RendererCapabilities.js';
+import { requiresFinalTerrainShader } from './engine/TerrainModeAvailability.js';
 import {
   createManualProjectCopy,
   importTerrainIntoManualProject,
@@ -441,6 +442,9 @@ export default function App() {
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
           },
           onBootComplete: completeBootUi,
+          onTerrainShaderReady: (ready) => {
+            landingRef.current?.setTerrainShaderReady?.(ready === true);
+          },
           onBootProgress: ({ stage, label, completed, total, overallProgress }) => {
             canvas.dataset.bootState = stage;
             const progress = Number.isFinite(overallProgress)
@@ -585,6 +589,7 @@ export default function App() {
     engine.setCullingEnabled(cullingEnabled);
     engine.setBehindCameraCulling(behindCameraCulling);
     engineRef.current = engine;
+    landingRef.current?.setTerrainShaderReady?.(engine.terrainShaderReady === true);
     // seed the undo history baseline from the freshly-built default project
     try { historyRef.current = { past: [], future: [], present: JSON.stringify(await engine.serializeState()) }; } catch { /* ignore */ }
     nativeHistoryActionsRef.current = [];
@@ -634,6 +639,15 @@ export default function App() {
   }, []);
 
   const engine = () => engineRef.current;
+
+  const allowFinalTerrainMode = useCallback((request, { notify = true } = {}) => {
+    const allowed = landingRef.current?.terrainShaderReady === true
+      || !requiresFinalTerrainShader(request);
+    if (!allowed && notify) {
+      showToast('Final terrain shader is still loading. Infinite World, Planet, Nodes, and Manual Terrain will unlock when it is ready.', 'info');
+    }
+    return allowed;
+  }, [showToast]);
 
   const setCurrentProject = useCallback((project) => {
     activeProjectRef.current = project;
@@ -746,6 +760,18 @@ export default function App() {
     const project = json.terrain ? normalizeProject(json) : null;
     const terrain = project?.terrain ?? normalizeProject({ terrain: json }).terrain;
     const name = project?.metadata?.name ?? 'terrain project';
+    const targetWorldMode = terrain.editorMode === 'nodes'
+      || terrain.editorMode === 'manual'
+      || terrain.realWorldSource
+      ? 'studio'
+      : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
+        ? terrain.worldMode
+        : 'studio');
+    if (!allowFinalTerrainMode({
+      worldMode: targetWorldMode,
+      projectMode: terrain.editorMode || 'procedural',
+      project: terrain,
+    })) return false;
     if (terrain.editorMode === 'nodes' || terrain.manualTerrain?.baseSource === 'nodes') {
       loadNodeWorkspace().catch(() => {});
     }
@@ -763,13 +789,6 @@ export default function App() {
         histTimerRef.current = null;
       }
       try {
-        const targetWorldMode = terrain.editorMode === 'nodes'
-          || terrain.editorMode === 'manual'
-          || terrain.realWorldSource
-          ? 'studio'
-          : (terrain.worldMode === 'infinite' || terrain.worldMode === 'planet'
-            ? terrain.worldMode
-            : 'studio');
         update({
           detail: terrain.realWorldSource
             ? 'Downloading elevation and imagery…'
@@ -844,12 +863,13 @@ export default function App() {
         setTimeout(() => { histSuppressRef.current = false; }, 60);
       }
     });
-  }, [setCurrentProject, showToast]);
+  }, [allowFinalTerrainMode, setCurrentProject, showToast]);
 
   const openInManualTerrain = useCallback(async () => {
     const eng = engineRef.current;
     if (!eng || worldModeRef.current !== 'studio' || realTerrainMode
         || !['procedural', 'nodes'].includes(projectMode)) return false;
+    if (!allowFinalTerrainMode({ worldMode: 'studio', projectMode: 'manual' })) return false;
     const sourceMode = projectMode;
     const sourceName = String(projectNameRef.current || 'Untitled terrain').trim() || 'Untitled terrain';
     const confirmed = await showConfirm({
@@ -882,7 +902,7 @@ export default function App() {
       showToast(error instanceof Error ? error.message : 'Could not create the Manual copy', 'error');
       return false;
     }
-  }, [loadProjectJSON, projectMode, realTerrainMode, showConfirm, showToast]);
+  }, [allowFinalTerrainMode, loadProjectJSON, projectMode, realTerrainMode, showConfirm, showToast]);
 
   const openManualTerrainImport = useCallback(async () => {
     if (projectMode !== 'manual' || realTerrainMode || worldModeRef.current !== 'studio') return;
@@ -1132,6 +1152,7 @@ export default function App() {
     if (!eng) return;
     const realPreset = editorMode === 'real';
     const nextMode = editorMode === 'nodes' ? 'nodes' : editorMode === 'manual' ? 'manual' : 'procedural';
+    if (!allowFinalTerrainMode({ worldMode: 'studio', projectMode: nextMode })) return null;
     const template = nextMode === 'nodes'
       ? getNodeProjectTemplate(templateId)
       : nextMode === 'manual'
@@ -1255,7 +1276,7 @@ export default function App() {
       setRealWorldMapRequest((request) => request + 1);
     }
     return created;
-  }, [saveCurrentProject, showToast]);
+  }, [allowFinalTerrainMode, saveCurrentProject, showToast]);
 
   useEffect(() => {
     const onNewProject = (event) => {
@@ -1336,6 +1357,7 @@ export default function App() {
   // presented. No polling or safety delay can release an incomplete mode.
   const runModeSwitch = (next, { silent = false } = {}) => {
     if (next === worldMode || modeLockRef.current) return Promise.resolve();
+    if (!allowFinalTerrainMode({ worldMode: next, projectMode })) return Promise.resolve();
     modeLockRef.current = true;
     setModeLocked(true);
     const label = MODE_LABEL[next] ?? next;
@@ -2495,6 +2517,7 @@ export default function App() {
       <TopBar
         projectMode={realTerrainMode ? 'real' : projectMode}
         shortcutsEnabled={!landingMode}
+        canRandomize={worldMode === 'studio' && !realTerrainMode && projectMode === 'procedural'}
         projectName={projectName}
         onProjectNameChange={updateProjectName}
         previewMode={previewMode}
@@ -2509,7 +2532,7 @@ export default function App() {
         onOpenRecentDocument={openRecentDesktopProjectDocument}
         documentPath={desktopDocument.path}
         documentDirty={desktopDocument.dirty}
-        canOpenInManual={worldMode === 'studio' && !realTerrainMode && ['procedural', 'nodes'].includes(projectMode)}
+        canOpenInManual={landing.terrainShaderReady === true && worldMode === 'studio' && !realTerrainMode && ['procedural', 'nodes'].includes(projectMode)}
         onOpenInManual={openInManualTerrain}
         canImportTerrain={worldMode === 'studio' && !realTerrainMode && projectMode === 'manual'}
         onImportTerrain={openManualTerrainImport}
@@ -2828,6 +2851,7 @@ export default function App() {
           worldMode={realTerrainMode ? 'real' : worldMode}
           onSetWorldMode={selectWorldMode}
           modeLocked={modeLocked}
+          terrainShaderReady={landing.terrainShaderReady === true}
           modeDisplay={uiPrefs.modeDisplay}
           visible={!paintMode}
         />

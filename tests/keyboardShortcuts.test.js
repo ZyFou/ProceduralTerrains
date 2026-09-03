@@ -3,6 +3,7 @@ import {
   EDITOR_SHORTCUTS,
   isMacPlatform,
   matchesShortcut,
+  resolveEditorShortcutAction,
   shortcutText,
 } from '../src/keyboardShortcuts.js';
 
@@ -38,5 +39,18 @@ describe('editor keyboard shortcuts', () => {
     expect(matchesShortcut(keyEvent('o', { ctrlKey: true }), EDITOR_SHORTCUTS.projects, 'Win32')).toBe(false);
     expect(matchesShortcut(keyEvent('p', { ctrlKey: true }), EDITOR_SHORTCUTS.paintMode, 'Win32')).toBe(true);
     expect(matchesShortcut(keyEvent('r', { ctrlKey: true }), EDITOR_SHORTCUTS.paintMode, 'Win32')).toBe(false);
+  });
+
+  it('reserves Ctrl+R for the editor even when randomization is unavailable', () => {
+    expect(resolveEditorShortcutAction(
+      keyEvent('r', { ctrlKey: true }),
+      {},
+      'Win32',
+    )).toBe('randomSeed');
+    expect(resolveEditorShortcutAction(
+      keyEvent('s', { ctrlKey: true }),
+      {},
+      'Win32',
+    )).toBeNull();
   });
 });

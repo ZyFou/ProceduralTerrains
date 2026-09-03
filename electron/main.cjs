@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, net, protocol } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -274,6 +274,11 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   app.setAppUserModelId(APP_ID);
+  // The editor owns Ctrl+R as "Random seed" in procedural Tile mode. Electron's
+  // default application menu registers Ctrl+R as a native Reload accelerator
+  // and handles it before the renderer can preventDefault(), so remove that
+  // hidden/default menu in favor of the app's own TopBar menus.
+  Menu.setApplicationMenu(null);
   registerFileAssociation();
   const distRoot = app.isPackaged ? path.join(process.resourcesPath, 'dist') : path.join(__dirname, '..', 'dist');
   protocol.handle(APP_SCHEME, async (request) => {

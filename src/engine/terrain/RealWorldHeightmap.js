@@ -15,6 +15,8 @@
 // <canvas>/<img> for decoding and returns plain data.
 // ============================================================================
 
+import { zlibSync } from 'fflate';
+
 const TILE = 256;
 // Single swappable endpoint — if CORS ever breaks, only this line changes.
 const ENDPOINT = 'https://elevation-tiles-prod.s3.dualstack.us-east-1.amazonaws.com/terrarium';
@@ -310,7 +312,11 @@ function pickZoom(loc) {
   return 1;
 }
 
-function loadTile(url, signal) {
+function abortError() {
+  return new DOMException('Aborted', 'AbortError');
+}
+
+function loadTileWithImage(url, signal) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -320,6 +326,39 @@ function loadTile(url, signal) {
     if (signal) signal.addEventListener('abort', () => { img.src = ''; resolve(null); }, { once: true });
     img.src = url;
   });
+}
+
+async function loadTile(url, signal) {
+  if (signal?.aborted) throw abortError();
+  if (typeof Image !== 'undefined') return loadTileWithImage(url, signal);
+
+  // Dedicated render workers do not expose the DOM Image constructor. Decode
+  // the same CORS-enabled response into an ImageBitmap, which drawImage accepts
+  // on an OffscreenCanvas 2D context.
+  if (typeof fetch !== 'function' || typeof createImageBitmap !== 'function') return null;
+  try {
+    const response = await fetch(url, {
+      signal,
+      mode: 'cors',
+      credentials: 'omit',
+    });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (signal?.aborted) throw abortError();
+    return await createImageBitmap(blob);
+  } catch (error) {
+    if (error?.name === 'AbortError' || signal?.aborted) throw abortError();
+    return null; // tolerate a missing tile, matching the DOM Image path
+  }
+}
+
+function createRasterCanvas(width, height) {
+  const canvas = typeof Image === 'undefined' && typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(width, height)
+    : document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
 }
 
 function elevationTileUrl(z, x, y) {
@@ -339,8 +378,7 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
   const ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
   const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
 
-  const stitch = document.createElement('canvas');
-  stitch.width = nx * TILE; stitch.height = ny * TILE;
+  const stitch = createRasterCanvas(nx * TILE, ny * TILE);
   const sctx = stitch.getContext('2d', { willReadFrequently: true });
 
   const total = nx * ny;
@@ -350,8 +388,12 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const img = await loadTile(tileUrl(z, tx, ty), signal);
       const dx = (tx - tx0) * TILE, dy = (ty - ty0) * TILE;
-      if (img) { sctx.drawImage(img, dx, dy); ok++; }
-      else { sctx.fillStyle = missingFill; sctx.fillRect(dx, dy, TILE, TILE); }
+      try {
+        if (img) { sctx.drawImage(img, dx, dy); ok++; }
+        else { sctx.fillStyle = missingFill; sctx.fillRect(dx, dy, TILE, TILE); }
+      } finally {
+        img?.close?.();
+      }
       done++; onProgress?.(done / total);
     }
   }
@@ -364,50 +406,115 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
   return { imageData, width: imageData.width, height: imageData.height, ok };
 }
 
+const PNG_SIGNATURE = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
+const PNG_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function writeUint32(bytes, offset, value) {
+  bytes[offset] = (value >>> 24) & 255;
+  bytes[offset + 1] = (value >>> 16) & 255;
+  bytes[offset + 2] = (value >>> 8) & 255;
+  bytes[offset + 3] = value & 255;
+}
+
+function pngCrc32(type, data) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < type.length; i++) crc = PNG_CRC_TABLE[(crc ^ type[i]) & 255] ^ (crc >>> 8);
+  for (let i = 0; i < data.length; i++) crc = PNG_CRC_TABLE[(crc ^ data[i]) & 255] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(name, data = new Uint8Array()) {
+  const type = Uint8Array.from(name, (char) => char.charCodeAt(0));
+  const chunk = new Uint8Array(12 + data.length);
+  writeUint32(chunk, 0, data.length);
+  chunk.set(type, 4);
+  chunk.set(data, 8);
+  writeUint32(chunk, 8 + data.length, pngCrc32(type, data));
+  return chunk;
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x4000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+/** Encode the tiny inspector preview synchronously in both Window and Worker. */
+function rgbaPngDataUrl(rgba, width, height) {
+  const ihdr = new Uint8Array(13);
+  writeUint32(ihdr, 0, width);
+  writeUint32(ihdr, 4, height);
+  ihdr.set([8, 6, 0, 0, 0], 8); // 8-bit RGBA, deflate, no interlace
+  const stride = width * 4;
+  const scanlines = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (stride + 1);
+    scanlines[row] = 0; // PNG filter: None
+    scanlines.set(rgba.subarray(y * stride, (y + 1) * stride), row + 1);
+  }
+  const chunks = [
+    PNG_SIGNATURE,
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', zlibSync(scanlines, { level: 6 })),
+    pngChunk('IEND'),
+  ];
+  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const png = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    png.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return `data:image/png;base64,${bytesToBase64(png)}`;
+}
+
 function makePreview(floatData, W, H, maxSide = 160) {
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const pw = Math.max(1, Math.round(W * scale));
   const ph = Math.max(1, Math.round(H * scale));
-  const c = document.createElement('canvas');
-  c.width = pw; c.height = ph;
-  const cx = c.getContext('2d');
-  const out = cx.createImageData(pw, ph);
+  const out = new Uint8ClampedArray(pw * ph * 4);
   for (let y = 0; y < ph; y++) {
     for (let x = 0; x < pw; x++) {
       const sx = Math.min(W - 1, Math.floor(x / scale));
       const sy = Math.min(H - 1, Math.floor(y / scale));
       const b = Math.round(floatData[sy * W + sx] * 255);
       const o = (y * pw + x) * 4;
-      out.data[o] = out.data[o + 1] = out.data[o + 2] = b;
-      out.data[o + 3] = 255;
+      out[o] = out[o + 1] = out[o + 2] = b;
+      out[o + 3] = 255;
     }
   }
-  cx.putImageData(out, 0, 0);
-  return c.toDataURL('image/png');
+  return rgbaPngDataUrl(out, pw, ph);
 }
 
 function makeColorPreview(rgba, W, H, maxSide = 160) {
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const pw = Math.max(1, Math.round(W * scale));
   const ph = Math.max(1, Math.round(H * scale));
-  const c = document.createElement('canvas');
-  c.width = pw; c.height = ph;
-  const cx = c.getContext('2d');
-  const out = cx.createImageData(pw, ph);
+  const out = new Uint8ClampedArray(pw * ph * 4);
   for (let y = 0; y < ph; y++) {
     for (let x = 0; x < pw; x++) {
       const sx = Math.min(W - 1, Math.floor(x / scale));
       const sy = Math.min(H - 1, Math.floor(y / scale));
       const si = (sy * W + sx) * 4;
       const o = (y * pw + x) * 4;
-      out.data[o] = rgba[si];
-      out.data[o + 1] = rgba[si + 1];
-      out.data[o + 2] = rgba[si + 2];
-      out.data[o + 3] = 255;
+      out[o] = rgba[si];
+      out[o + 1] = rgba[si + 1];
+      out[o + 2] = rgba[si + 2];
+      out[o + 3] = 255;
     }
   }
-  cx.putImageData(out, 0, 0);
-  return c.toDataURL('image/png');
+  return rgbaPngDataUrl(out, pw, ph);
 }
 
 /** Effective slippy zoom a bbox will be fetched at (after the tile cap). */

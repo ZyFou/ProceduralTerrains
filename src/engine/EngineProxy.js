@@ -317,6 +317,7 @@ export class EngineClient {
     if (name === 'onPerfChange') patch.perf = args[0];
     if (name === 'onProjectMode') patch.projectMode = args[0];
     if (name === 'onTimeOfDayChange') patch.timeOfDay = args[0];
+    if (name === 'onTerrainShaderReady') patch.terrainShaderReady = args[0] === true;
     this._setSnapshot({ ...this.snapshot, ...patch });
   }
 
@@ -347,6 +348,7 @@ const snapshotGetters = {
   params: 'params', perf: 'perf', gpuName: 'gpuName', rendererConfig: 'rendererConfig',
   rendererCapabilities: 'rendererCapabilities', worldMode: 'worldMode',
   projectMode: 'projectMode', realWorldSource: 'realWorldSource', timeOfDay: 'timeOfDay',
+  terrainShaderReady: 'terrainShaderReady',
   _soloLayerId: 'soloLayerId', _disposed: 'disposed',
 };
 for (const [property, snapshotKey] of Object.entries(snapshotGetters)) {

@@ -14,6 +14,7 @@ export default function WorldModeBar({
   worldMode,
   onSetWorldMode,
   modeLocked,
+  terrainShaderReady = false,
   modeDisplay = 'both',
   visible = true,
 }) {
@@ -30,15 +31,18 @@ export default function WorldModeBar({
     >
       {MODES.map((m) => {
         const Icon = m.Icon;
+        const waitingForTerrain = !terrainShaderReady && m.id !== 'studio';
+        const disabled = modeLocked || waitingForTerrain;
         return (
           <button
             key={m.id}
             type="button"
-            className={`camera-bar-btn mode-bar-btn${worldMode === m.id ? ' active' : ''}`}
-            onClick={() => onSetWorldMode(m.id)}
-            disabled={modeLocked}
+            className={`camera-bar-btn mode-bar-btn${worldMode === m.id ? ' active' : ''}${waitingForTerrain ? ' waiting-for-terrain' : ''}`}
+            onClick={() => { if (!disabled) onSetWorldMode(m.id); }}
+            disabled={disabled}
+            aria-disabled={disabled}
             aria-pressed={worldMode === m.id}
-            title={m.label}
+            title={waitingForTerrain ? `${m.label} unlocks when the final terrain shader is ready` : m.label}
           >
             {showIcons && <Icon size={14} strokeWidth={1.75} aria-hidden />}
             {showLabels && <span className="mode-bar-label">{m.label}</span>}

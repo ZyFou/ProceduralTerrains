@@ -21,6 +21,7 @@ import { usePopup } from '../components/ui/PopupProvider.jsx';
 import AdminDashboard from '../admin/AdminDashboard.jsx';
 import ConfidentialityPage from '../legal/ConfidentialityPage.jsx';
 import PluginsPage from './plugins/PluginsPage.jsx';
+import { requiresFinalTerrainShader } from '../engine/TerrainModeAvailability.js';
 
 const NODE_TEMPLATE_ICONS = { boxes: Boxes, mountain: Mountain, layers: Layers3, waves: Waves, orbit: Orbit, route: Route };
 const VISIBILITY_ICONS = { private: Lock, unlisted: Eye, public: Globe2 };
@@ -100,7 +101,7 @@ const relTime = (value) => {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
 };
 
-export default function Landing({ exiting, bootReady, bootError, bootProgress, onRetryBoot, onLaunch }) {
+export default function Landing({ exiting, bootReady, terrainShaderReady = false, bootError, bootProgress, onRetryBoot, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
   const { showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
@@ -150,6 +151,8 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
 
   const visualBootStage = HASH_VIEWS.has(view) ? 'ready' : bootStage;
   const menuReady = bootReady && visualBootStage === 'ready';
+  const canOpenTerrain = (project) => terrainShaderReady === true
+    || !requiresFinalTerrainShader({ project: project?.terrain || project });
 
   useEffect(() => {
     const load = () => projectStore.list().then((items) => {
@@ -242,6 +245,8 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   }, [view, authStatus, user]);
   const create = (templateId, editorMode = 'procedural') => {
     if (!menuReady || exiting) return;
+    if (terrainShaderReady !== true
+        && requiresFinalTerrainShader({ projectMode: editorMode, worldMode: 'studio' })) return;
     setCreateOpen(false);
     dispatch('terrain-project:new', {
       templateId,
@@ -252,6 +257,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   };
   const open = (project) => {
     if (!menuReady || exiting) return;
+    if (!canOpenTerrain(project)) return;
     dispatch('terrain-project:open', { project });
     onLaunch();
   };
@@ -259,6 +265,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   const goHome = () => { showView('home'); setSelectedProjectId(projects[0]?.id ?? null); };
   const selectTemplate = (id, editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    if (nextKind === 'nodes' && terrainShaderReady !== true) return;
     const nextTemplate = nextKind === 'nodes' ? getNodeProjectTemplate(id) : null;
     setTemplateKind(nextKind);
     setSelectedTemplateId(id);
@@ -272,6 +279,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   };
   const openTemplates = (editorMode = templateKind) => {
     const nextKind = editorMode === 'nodes' ? 'nodes' : 'procedural';
+    if (nextKind === 'nodes' && terrainShaderReady !== true) return;
     const catalog = nextKind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
     const currentExists = catalog.some((item) => item.id === selectedTemplateId);
     const nextTemplateId = currentExists ? selectedTemplateId : catalog[0].id;
@@ -364,9 +372,10 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
     const syncLabel = isSynced ? 'Synced to cloud' : 'Not synced to cloud';
     const visibilityLabel = cloudProject?.visibility ? `Cloud visibility: ${cloudProject.visibility}` : '';
     const SyncIcon = isSynced ? CloudCheck : CloudOff;
+    const modeUnavailable = !canOpenTerrain(project);
     return (
     <article className={`lp-card${menuFor === project.id ? ' menu-open' : ''}`} key={project.id}>
-      <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!menuReady || exiting}>
+      <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!menuReady || exiting || modeUnavailable} title={modeUnavailable ? 'Available when the final terrain shader is ready' : undefined}>
         <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
         <span role="img" className={`lp-card-cloud-badge${isSynced ? ' synced' : ' unsynced'}`} title={visibilityLabel ? `${syncLabel} · ${visibilityLabel}` : syncLabel} aria-label={visibilityLabel ? `${syncLabel}. ${visibilityLabel}.` : syncLabel}>
           <SyncIcon size={13} aria-hidden />
@@ -390,7 +399,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
       ><EllipsisVertical size={15} /></button>
       {menuFor === project.id && (
         <div className="lp-card-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); open(project); }} disabled={!menuReady || exiting}><FolderOpen size={13} /> Open</button>
+          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); open(project); }} disabled={!menuReady || exiting || modeUnavailable}><FolderOpen size={13} /> Open</button>
           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); renameProject(project); }} disabled={projectActionBusy}><Pencil size={13} /> Rename</button>
           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); duplicateProject(project); }} disabled={projectActionBusy}><Copy size={13} /> Duplicate</button>
           <button type="button" role="menuitem" className="danger" onClick={() => { setMenuFor(null); setDeleteTarget(project); }} disabled={projectActionBusy}><Trash2 size={13} /> Delete</button>
@@ -546,6 +555,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               <ProjectLibrary
                 localProjects={projects}
                 bootReady={menuReady}
+                canOpenProject={canOpenTerrain}
                 exiting={exiting}
                 onOpen={open}
                 onCreate={() => setCreateOpen(true)}
@@ -569,7 +579,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
                 <div><h2>Terrain templates</h2><p>Choose one authoring workflow. Procedural selections preview live; Nodes opens straight into the editor.</p></div>
                 <div className="lp-template-kind-switch" role="tablist" aria-label="Template type">
                   <button type="button" role="tab" aria-selected={templateKind === 'procedural'} className={templateKind === 'procedural' ? 'active' : ''} onClick={() => openTemplates('procedural')}><SlidersHorizontal size={13} /> Procedural</button>
-                  <button type="button" role="tab" aria-selected={templateKind === 'nodes'} className={templateKind === 'nodes' ? 'active' : ''} onClick={() => openTemplates('nodes')}><Boxes size={13} /> Nodes</button>
+                  <button type="button" role="tab" aria-selected={templateKind === 'nodes'} className={templateKind === 'nodes' ? 'active' : ''} onClick={() => openTemplates('nodes')} disabled={terrainShaderReady !== true} title={terrainShaderReady !== true ? 'Available when the final terrain shader is ready' : undefined}><Boxes size={13} /> Nodes</button>
                 </div>
               </div>
               <div className="lp-search">
@@ -580,7 +590,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               <div className="lp-card-grid">
                 {filtered.map((item) => (
                   <article className={`lp-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={item.id}>
-                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
+                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)} disabled={templateKind === 'nodes' && terrainShaderReady !== true}>
                       <span className={`lp-card-thumb${templateKind === 'nodes' ? ' nodes' : ''}`}>{templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : (() => { const Icon = NODE_TEMPLATE_ICONS[item.icon] || LayoutTemplate; return <Icon size={22} />; })()}</span>
                       <span className="lp-card-info">
                         <strong>{item.name}</strong>
@@ -619,7 +629,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
                 </section>
               ) : null}
               <p className="lp-template-hint">{templateKind === 'nodes' ? 'Node templates load instantly; open the 2D preview when you need it.' : 'Selecting a template previews it live in the background.'}</p>
-              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!menuReady || exiting}><FilePlus2 size={15} /> Create {template.name}</button>
+              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!menuReady || exiting || (templateKind === 'nodes' && terrainShaderReady !== true)}><FilePlus2 size={15} /> Create {template.name}</button>
             </section>
             );
           })()}
@@ -681,13 +691,13 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               <small>The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.</small>
               <span className="landing-create-action">Choose a procedural template <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => chooseTemplateWorkflow('nodes')} disabled={!menuReady || exiting}>
+            <button type="button" onClick={() => chooseTemplateWorkflow('nodes')} disabled={!menuReady || exiting || terrainShaderReady !== true} title={terrainShaderReady !== true ? 'Available when the final terrain shader is ready' : undefined}>
               <span className="landing-create-icon nodes"><Boxes size={22} /></span>
               <strong>Nodes</strong>
               <small>A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.</small>
               <span className="landing-create-action">Choose a Nodes recipe <ArrowRight size={13} /></span>
             </button>
-            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!menuReady || exiting}>
+            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!menuReady || exiting || terrainShaderReady !== true} title={terrainShaderReady !== true ? 'Available when the final terrain shader is ready' : undefined}>
               <span className="landing-create-icon manual"><Mountain size={22} /></span>
               <strong>Manual Terrain</strong>
               <small>Drag mountains, valleys, ridges, plateaus, and craters onto a clean terrain and transform them directly.</small>

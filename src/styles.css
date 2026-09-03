@@ -4751,6 +4751,16 @@ input[type="color"].palette-color-input {
   width: 14px;
   height: 14px;
 }
+.viewport-mode-bar .mode-bar-btn:disabled {
+  opacity: 0.34;
+  color: var(--text-dim);
+  cursor: var(--cursor-not-allowed);
+}
+.viewport-mode-bar .mode-bar-btn.waiting-for-terrain:disabled {
+  background: transparent;
+  border-color: transparent;
+  filter: saturate(0.25);
+}
 .mode-bar-label { line-height: 1; }
 .mode-bar-divider {
   width: 1px;

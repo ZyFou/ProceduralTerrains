@@ -19,6 +19,7 @@ export default function Root() {
   const [visible, setVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
   const [bootReady, setBootReady] = useState(false);
+  const [terrainShaderReady, setTerrainShaderReady] = useState(false);
   const [bootError, setBootError] = useState(null);
   const [bootProgress, setBootProgress] = useState(INITIAL_BOOT_PROGRESS);
   const [sessionSeed] = useState(() => randomSessionSeed());
@@ -44,8 +45,8 @@ export default function Root() {
   }, []);
 
   const landing = useMemo(
-    () => ({ visible, exiting, bootReady, setBootReady, bootError, setBootError, bootProgress, setBootProgress, dismiss, sessionSeed }),
-    [visible, exiting, bootReady, bootError, bootProgress, dismiss, sessionSeed],
+    () => ({ visible, exiting, bootReady, setBootReady, terrainShaderReady, setTerrainShaderReady, bootError, setBootError, bootProgress, setBootProgress, dismiss, sessionSeed }),
+    [visible, exiting, bootReady, terrainShaderReady, bootError, bootProgress, dismiss, sessionSeed],
   );
 
   const retryBoot = useCallback(() => {
@@ -66,6 +67,7 @@ export default function Root() {
             <Landing
               exiting={exiting}
               bootReady={bootReady}
+              terrainShaderReady={terrainShaderReady}
               bootError={bootError}
               bootProgress={bootProgress}
               onRetryBoot={retryBoot}

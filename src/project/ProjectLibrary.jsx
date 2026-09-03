@@ -47,6 +47,7 @@ function projectDescription(entry) {
 export default function ProjectLibrary({
   localProjects,
   bootReady,
+  canOpenProject = () => true,
   exiting,
   onOpen,
   onCreate,
@@ -308,9 +309,10 @@ export default function ProjectLibrary({
             const name = projectName(entry);
             const modified = localProject?.metadata.modified ?? cloudProject?.updatedAt;
             const isConflict = entry.state === 'conflict' || entry.state === 'needs-review';
+            const modeUnavailable = Boolean(localProject && !canOpenProject(localProject));
             return (
               <article className={`project-library-card ${entry.state}${menuFor === entry.id ? ' menu-open' : ''}`} key={entry.id}>
-                <button type="button" className="project-library-main" onClick={() => openEntry(entry)} disabled={isBusy || !bootReady || exiting || (!localProject && !isCloudUsable)}>
+                <button type="button" className="project-library-main" onClick={() => openEntry(entry)} disabled={isBusy || !bootReady || exiting || modeUnavailable || (!localProject && !isCloudUsable)} title={modeUnavailable ? 'Available when the final terrain shader is ready' : undefined}>
                   <span className="project-library-thumb">
                     {localProject?.metadata.thumbnail ? <img src={localProject.metadata.thumbnail} alt="" /> : localProject ? <LayoutTemplate size={28} /> : <Cloud size={28} />}
                   </span>
@@ -334,7 +336,7 @@ export default function ProjectLibrary({
                 {menuFor === entry.id && (
                   <div className="project-library-menu" role="menu" onPointerDown={(event) => event.stopPropagation()}>
                     {localProject && <>
-                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openEntry(entry); }} disabled={!bootReady || exiting}><FolderOpen size={13} /> Open</button>
+                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openEntry(entry); }} disabled={!bootReady || exiting || modeUnavailable}><FolderOpen size={13} /> Open</button>
                       <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onRename(localProject); }} disabled={projectActionBusy}><Pencil size={13} /> Rename</button>
                       <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onDuplicate(localProject); }} disabled={projectActionBusy}><Copy size={13} /> Duplicate</button>
                     </>}

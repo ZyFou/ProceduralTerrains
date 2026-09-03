@@ -21,7 +21,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../constants/app.js';
-import { EDITOR_SHORTCUTS, matchesShortcut, SEARCH_SETTINGS_SHORTCUT, shortcutText } from '../keyboardShortcuts.js';
+import { EDITOR_SHORTCUTS, resolveEditorShortcutAction, SEARCH_SETTINGS_SHORTCUT, shortcutText } from '../keyboardShortcuts.js';
 import NotificationCenter from './ui/Toast.jsx';
 import ShortcutHint from './ui/ShortcutHint.jsx';
 
@@ -42,6 +42,7 @@ const Caret = () => (
 export default function TopBar({
   projectMode = 'procedural',
   shortcutsEnabled = true,
+  canRandomize = projectMode === 'procedural',
   projectName = 'Untitled terrain',
   onProjectNameChange,
   previewMode, onNew, onRandomize, onSave, onSaveAs, onLoadJSON, onOpenDocument, onDownload,
@@ -80,7 +81,7 @@ export default function TopBar({
     load: onOpenDocument || (() => fileRef.current?.click()),
     download: onDownload,
     settings: onOpenUiSettings,
-    randomSeed: projectMode === 'procedural' ? onRandomize : null,
+    randomSeed: canRandomize ? onRandomize : null,
   } : {};
 
   const anyMenuOpen = fileMenuOpen || editMenuOpen || viewMenuOpen;
@@ -116,16 +117,14 @@ export default function TopBar({
     const onShortcut = (event) => {
       if (event.defaultPrevented || event.repeat || event.isComposing) return;
 
-      const entry = Object.entries(EDITOR_SHORTCUTS).find(([actionId, shortcut]) => (
-        shortcutActionsRef.current[actionId] && matchesShortcut(event, shortcut)
-      ));
-      if (!entry) return;
+      const actionId = resolveEditorShortcutAction(event, shortcutActionsRef.current);
+      if (!actionId) return;
 
       event.preventDefault();
       setFileMenuOpen(false);
       setEditMenuOpen(false);
       setViewMenuOpen(false);
-      shortcutActionsRef.current[entry[0]]?.();
+      shortcutActionsRef.current[actionId]?.();
     };
 
     document.addEventListener('keydown', onShortcut, true);
@@ -283,7 +282,7 @@ export default function TopBar({
               <Settings size={14} strokeWidth={1.75} aria-hidden /> Settings
               <ShortcutHint shortcut={EDITOR_SHORTCUTS.settings} className="tb-menu-shortcut" />
             </button>
-            {projectMode === 'procedural' ? <>
+            {canRandomize ? <>
               <div className="tb-menu-divider" role="separator" />
               <button
                 type="button"
