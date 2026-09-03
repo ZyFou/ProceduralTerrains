@@ -1687,25 +1687,18 @@ export class Engine {
       return;
     }
     try {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.decoding = 'async';
-      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url; });
-      const warning = img.width > 4096 || img.height > 4096 ? 'Large image imported; processing was downscaled for performance.' : '';
-      const maxSide = 4096;
-      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-      const w = Math.max(1, Math.round(img.width * scale));
-      const h = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0, w, h);
-      const imageData = ctx.getImageData(0, 0, w, h);
-      const preview = canvas.toDataURL('image/png');
-      URL.revokeObjectURL(url);
+      const {
+        width: w,
+        height: h,
+        originalWidth,
+        originalHeight,
+        imageData,
+        preview,
+      } = await this._decodeImportedImage(file);
+      const warning = originalWidth > 4096 || originalHeight > 4096 ? 'Large image imported; processing was downscaled for performance.' : '';
       const previous = this.importedMaps[type];
       if (previous?.texture) previous.texture.dispose();
-      this.importedMaps[type] = { fileName: file.name, width: w, height: h, originalWidth: img.width, originalHeight: img.height, imageData, preview, settings: { ...DEFAULT_IMPORT_SETTINGS } };
+      this.importedMaps[type] = { fileName: file.name, width: w, height: h, originalWidth, originalHeight, imageData, preview, settings: { ...DEFAULT_IMPORT_SETTINGS } };
       // File height imports are not geo-referenced — drop any OpenTopoMap layer
       // and the saved geographic source tied to a previous real-world load so
       // neither can silently return when this project is reopened.
@@ -1728,6 +1721,57 @@ export class Engine {
       const error = 'Image failed to load or contains invalid image data.';
       this._setImportState(type, { error });
       this.cb.onToast(error);
+    }
+  }
+
+  async _decodeImportedImage(file) {
+    let image = null;
+    let objectUrl = null;
+    try {
+      // Engine imports also run in the render worker, where the DOM Image
+      // constructor is unavailable. ImageBitmap is transferable to an
+      // OffscreenCanvas-backed 2D context and works in both runtimes.
+      if (typeof createImageBitmap === 'function') {
+        image = await createImageBitmap(file);
+      } else {
+        if (typeof Image !== 'function') throw new Error('No image decoder is available');
+        objectUrl = URL.createObjectURL(file);
+        image = new Image();
+        image.decoding = 'async';
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+          image.src = objectUrl;
+        });
+      }
+
+      const originalWidth = image.naturalWidth || image.width;
+      const originalHeight = image.naturalHeight || image.height;
+      const maxSide = 4096;
+      const scale = Math.min(1, maxSide / Math.max(originalWidth, originalHeight));
+      const width = Math.max(1, Math.round(originalWidth * scale));
+      const height = Math.max(1, Math.round(originalHeight * scale));
+      const canvas = typeof OffscreenCanvas === 'function'
+        ? new OffscreenCanvas(width, height)
+        : document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('A 2D canvas context is unavailable');
+      ctx.drawImage(image, 0, 0, width, height);
+      const imageData = ctx.getImageData(0, 0, width, height);
+      let preview;
+      if (typeof canvas.toDataURL === 'function') {
+        preview = canvas.toDataURL('image/png');
+      } else {
+        const blob = await this._canvasToBlob(canvas, 'image/png');
+        if (!blob) throw new Error('Image preview could not be encoded');
+        preview = await this._blobToDataUrl(blob);
+      }
+      return { width, height, originalWidth, originalHeight, imageData, preview };
+    } finally {
+      image?.close?.();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     }
   }
 
