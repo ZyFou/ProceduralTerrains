@@ -1,19 +1,30 @@
-// Guesses which map slot a dropped/imported file belongs to, from its filename.
-// Used by drag-and-drop in the Surface Library so a user can drop a batch of
-// files from a third-party texture pack without manually picking each slot.
+// Match map labels in the basename, not parent folders. Underscores are word
+// characters in regexes, so normalize separators before using word boundaries.
 const SLOT_PATTERNS = [
-  { slot: 'displacement', re: /(displacement|_disp\b|heightmap|height[_-]?map|\bheight\b)/i },
-  { slot: 'normalDX', re: /(normal[_-]?dx|normaldx|nor[_-]?dx|_nor[_-]?dx_|\bnormal\b|\bnrm\b|\bnorm\b)/i },
-  { slot: 'roughness', re: /(roughness|_rough_|\brough\b)/i },
-  { slot: 'ao', re: /(ambient[_-]?occlusion|\bocclusion\b|_ao_|\bao\b)/i },
-  { slot: 'diffuse', re: /(base[_-]?color|albedo|diffuse|_diff_|\bdiff\b|\bcolou?r\b|\bcol\b)/i },
+  { slot: 'displacement', re: /\b(displacement|disp|height\s*map|height)\b/i },
+  { slot: 'normalDX', re: /\b(normal\s*(?:dx|directx)|nor\s*dx|normal|nrm|norm)\b/i },
+  { slot: 'roughness', re: /\b(roughness|rough)\b/i },
+  { slot: 'ao', re: /\b(ambient\s*occlusion|occlusion|ao)\b/i },
+  { slot: 'diffuse', re: /\b(base\s*colou?r|albedo|diffuse|diff|colou?r|col)\b/i },
 ];
 
-// Returns one of the SurfaceLibrary map slot keys, or null if nothing matched.
-export function detectSlotFromFilename(filename) {
-  const name = filename.toLowerCase();
+export function describeTextureFilename(filename) {
+  const basename = String(filename).replace(/\\/g, '/').split('/').pop();
+  const name = basename.replace(/\.[^.]+$/, '')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_.-]+/g, ' ').toLowerCase();
+  // The normal slot is DirectX. Do not silently interpret GL normals as DX.
+  if (/\b(?:normal|nor)\s*(?:gl|opengl)\b/.test(name)) return null;
   for (const { slot, re } of SLOT_PATTERNS) {
-    if (re.test(name)) return slot;
+    if (!re.test(name)) continue;
+    const setName = name.replace(re, ' ')
+      .replace(/\b(?:\d+k|\d{3,5}(?:x\d{3,5})?)\b/g, ' ')
+      .trim().replace(/\s+/g, ' ');
+    return { slot, setName };
   }
   return null;
+}
+
+export function detectSlotFromFilename(filename) {
+  return describeTextureFilename(filename)?.slot ?? null;
 }

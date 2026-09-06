@@ -5,7 +5,10 @@ import CollapsibleGroup from './CollapsibleGroup.jsx';
 import SurfaceMaterialPreviewSphere from './SurfaceMaterialPreviewSphere.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { colorToHex } from '../../engine/style/ColorPalette.js';
-import { detectSlotFromFilename } from '../../engine/terrain/surface/SurfaceTextureDetector.js';
+import {
+  collectSurfaceTextureSets, planSurfaceTextureImport,
+  SURFACE_IMAGE_EXT_RE, mimeForSurfaceTexture,
+} from '../../engine/terrain/surface/SurfaceTextureImport.js';
 import {
   loadMaterialsManifest, resolveCustomMapUrl,
   setOverrideUrl, clearOverrideUrl, getOverrideUrl, MAP_SLOT_LABELS,
@@ -24,13 +27,13 @@ import {
 
 const PREVIEW_SLOTS = ['diffuse', 'normalDX', 'roughness', 'ao'];
 const RENDERED_SLOTS = new Set(PREVIEW_SLOTS);
-const IMAGE_EXT_RE = /\.(png|jpe?g|webp|avif|gif|bmp)$/i;
 const ZIP_EXT_RE = /\.zip$/i;
 
 const STATUS_LABEL = {
   checking: '...',
   custom: 'Custom',
   missing: 'Missing',
+  invalid: 'Unsupported file',
 };
 
 const LAYER_STATUS_LABEL = {
@@ -59,81 +62,44 @@ function previewUrlsFor(role, variantIndex) {
   return urls;
 }
 
-function mimeForTextureName(name) {
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.avif')) return 'image/avif';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.bmp')) return 'image/bmp';
-  return 'application/octet-stream';
-}
-
 function isZipFile(file) {
   return ZIP_EXT_RE.test(file.name) || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
 }
 
-function isTextureEntryPath(name) {
-  const normalized = name.replace(/\\/g, '/').toLowerCase();
-  return normalized.startsWith('textures/') || normalized.includes('/textures/');
-}
-
-async function textureFilesFromZip(file, mapSlots) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const entries = unzipSync(bytes);
-  const matchedBySlot = new Map();
-  const unmatched = [];
-
-  Object.entries(entries).forEach(([entryName, data]) => {
-    if (!data?.length || !isTextureEntryPath(entryName) || !IMAGE_EXT_RE.test(entryName)) return;
-    const slot = detectSlotFromFilename(entryName);
-    if (!slot || !mapSlots.includes(slot)) {
-      unmatched.push(entryName.split(/[\\/]/).pop() || entryName);
-      return;
-    }
-    if (matchedBySlot.has(slot)) return;
-    const blob = new Blob([data], { type: mimeForTextureName(entryName) });
-    matchedBySlot.set(slot, {
-      name: entryName.split(/[\\/]/).pop() || entryName,
-      url: URL.createObjectURL(blob),
-    });
-  });
-
-  return { matchedBySlot, unmatched };
-}
-
 async function importDroppedTextures({ files, role, mapSlots, variantIndex }) {
-  const matched = [];
-  const unmatched = [];
-  const variantKey = getCustomVariantKey(variantIndex);
-  const filledSlots = new Set();
-
+  const entries = [];
+  const warnings = [];
   for (const file of files) {
     if (isZipFile(file)) {
-      const { matchedBySlot, unmatched: zipUnmatched } = await textureFilesFromZip(file, mapSlots);
-      for (const [slot, item] of matchedBySlot.entries()) {
-        if (filledSlots.has(slot)) continue;
-        setOverrideUrl(role.id, variantKey, slot, item.url);
-        filledSlots.add(slot);
-        matched.push(`${MAP_SLOT_LABELS[slot]} (${item.name})`);
+      try {
+        const unpacked = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        let count = 0;
+        for (const [name, data] of Object.entries(unpacked)) {
+          if (!data?.length || name.endsWith('/')) continue;
+          entries.push({ name, scope: file.name, blob: new Blob([data], { type: mimeForSurfaceTexture(name) }) });
+          if (SURFACE_IMAGE_EXT_RE.test(name)) count += 1;
+        }
+        if (!count) warnings.push(`${file.name}: no supported image maps found`);
+      } catch {
+        warnings.push(`${file.name}: could not read ZIP`);
       }
-      if (!matchedBySlot.size) unmatched.push(file.name);
-      else unmatched.push(...zipUnmatched.slice(0, 4));
-      continue;
-    }
-
-    const slot = detectSlotFromFilename(file.name);
-    if (slot && mapSlots.includes(slot) && IMAGE_EXT_RE.test(file.name) && !filledSlots.has(slot)) {
-      setOverrideUrl(role.id, variantKey, slot, URL.createObjectURL(file));
-      filledSlots.add(slot);
-      matched.push(`${MAP_SLOT_LABELS[slot]} (${file.name})`);
     } else {
-      unmatched.push(file.name);
+      entries.push({ name: file.name, blob: file });
     }
   }
-
-  return { matched, unmatched: unmatched.slice(0, 6) };
+  const { sets, unmatched } = collectSurfaceTextureSets(entries, mapSlots);
+  const plan = planSurfaceTextureImport(sets, variantIndex, (index) =>
+    mapSlots.every((slot) => !resolveCustomMapUrl(role, slot, index))
+  );
+  const matched = [];
+  // Apply the complete import in one synchronous batch so the debounced bake
+  // cannot capture half of a slowly decompressed multi-variant archive.
+  for (const entry of plan.assignments) {
+    setOverrideUrl(role.id, getCustomVariantKey(entry.variantIndex), entry.slot, URL.createObjectURL(entry.blob));
+    matched.push(`V${entry.variantIndex + 1} ${MAP_SLOT_LABELS[entry.slot]} (${entry.name})`);
+  }
+  const skipped = [...warnings, ...unmatched, ...plan.unmatched];
+  return { matched, unmatched: skipped.length > 6 ? [...skipped.slice(0, 6), `${skipped.length - 6} more skipped files/sets`] : skipped };
 }
 
 function FileSlotRow({ role, variantIndex, slot, onChanged }) {
@@ -149,6 +115,7 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
   }, [resolved]);
 
   const pick = (file) => {
+    if (!SURFACE_IMAGE_EXT_RE.test(file.name)) { setStatus('invalid'); return; }
     const url = URL.createObjectURL(file);
     setOverrideUrl(role.id, variantKey, slot, url);
     onChanged();
@@ -175,10 +142,12 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
         e.preventDefault();
-        e.stopPropagation();
         setDragOver(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) pick(file);
+        const files = [...(e.dataTransfer.files || [])];
+        // A ZIP or a batch dropped over a slot still belongs to the variant.
+        if (files.length !== 1 || isZipFile(files[0])) return;
+        e.stopPropagation();
+        pick(files[0]);
       }}
     >
       <span className="surface-slot-label">{MAP_SLOT_LABELS[slot]}</span>
@@ -227,9 +196,8 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
     if (!files.length) return;
     setImporting(true);
     try {
-      // Drop a ZIP containing textures/*_diff_*, *_nor_dx_*, *_rough_* and *_ao_*,
-      // or drop loose image maps directly onto the active variant.
-      // The first valid map per slot wins so accidental duplicates are ignored.
+      // Root/nested ZIPs and loose maps are grouped into named sets. The
+      // active variant receives the first set; extras fill empty variants.
       const { matched, unmatched } = await importDroppedTextures({ files, role, mapSlots, variantIndex });
       if (matched.length) onMaterialChanged?.();
       setDropSummary({ matched, unmatched });
@@ -296,7 +264,7 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
       {dropSummary && (
         <p className="section-hint surface-drop-summary">
           {dropSummary.matched.length > 0 && <>Matched: {dropSummary.matched.join(', ')}. </>}
-          {dropSummary.unmatched.length > 0 && <span className="warning">Could not match: {dropSummary.unmatched.join(', ')}.</span>}
+          {dropSummary.unmatched.length > 0 && <span className="warning">Skipped: {dropSummary.unmatched.join(', ')}.</span>}
         </p>
       )}
     </div>
@@ -309,13 +277,11 @@ function variantFromTarget(targetId, roleId) {
   return Math.max(0, Math.min(SURFACE_TEXTURE_VARIANT_COUNT - 1, Number(match[1]) || 0));
 }
 
-function firstAvailableVariantIndex(role, atlasLayer) {
-  for (let variantIndex = 0; variantIndex < SURFACE_TEXTURE_VARIANT_COUNT; variantIndex += 1) {
-    if (!resolveCustomMapUrl(role, 'diffuse', variantIndex)) return variantIndex;
+function firstAvailableVariantIndex(role, mapSlots) {
+  for (let index = 0; index < SURFACE_TEXTURE_VARIANT_COUNT; index += 1) {
+    if (mapSlots.every((slot) => !resolveCustomMapUrl(role, slot, index))) return index;
   }
-  const variants = atlasLayer?.variants || [];
-  const emptyIndex = variants.findIndex((variant) => !variant?.hasDiffuse);
-  return emptyIndex >= 0 ? emptyIndex : 0;
+  return -1;
 }
 
 function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialChanged }) {
@@ -323,6 +289,7 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
   const [activeVariant, setActiveVariant] = useState(() => variantFromTarget(targetId, role.id));
   const [forceOpenAfterDrop, setForceOpenAfterDrop] = useState(false);
   const [roleDragOver, setRoleDragOver] = useState(false);
+  const [roleDropSummary, setRoleDropSummary] = useState(null);
   const paletteHex = colorToHex(palette?.[role.id] ?? [0.5, 0.5, 0.5]);
   const layerStatus = atlasLayer?.status ?? 'notBaked';
   const statusLabel = LAYER_STATUS_LABEL[layerStatus] ?? 'Not baked';
@@ -352,15 +319,20 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
         setRoleDragOver(false);
         const files = [...(e.dataTransfer.files || [])];
         if (!files.length) return;
-        const nextVariant = firstAvailableVariantIndex(role, atlasLayer);
+        const nextVariant = firstAvailableVariantIndex(role, mapSlots);
+        if (nextVariant < 0) {
+          setRoleDropSummary({ matched: [], unmatched: ['All variants contain maps. Open a variant to replace it.'] });
+          return;
+        }
         setActiveVariant(nextVariant);
         setOpen(true);
         setForceOpenAfterDrop(true);
         try {
-          const { matched } = await importDroppedTextures({ files, role, mapSlots, variantIndex: nextVariant });
-          if (matched.length) onMaterialChanged?.();
-        } catch {
-          // Variant panel import shows detailed failures; closed-row drops stay quiet.
+          const summary = await importDroppedTextures({ files, role, mapSlots, variantIndex: nextVariant });
+          setRoleDropSummary(summary);
+          if (summary.matched.length) onMaterialChanged?.();
+        } catch (err) {
+          setRoleDropSummary({ matched: [], unmatched: [err.message || 'Texture import failed'] });
         }
       }}
     >
@@ -424,6 +396,12 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
           </>
         )}
       </CollapsibleGroup>
+      {roleDropSummary && (
+        <p className="section-hint surface-drop-summary" role="status">
+          {roleDropSummary.matched.length > 0 && <>Imported: {roleDropSummary.matched.join(', ')}. </>}
+          {roleDropSummary.unmatched.length > 0 && <span className="warning">Skipped: {roleDropSummary.unmatched.join(', ')}.</span>}
+        </p>
+      )}
     </div>
   );
 }
@@ -443,7 +421,7 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
   const coverage = status?.coverage;
   const coverageClass = !textureMode
     ? ''
-    : coverage?.missingDiffuse ? 'warning'
+    : status?.error || coverage?.missingDiffuse ? 'warning'
       : coverage?.missingOptional ? 'pending'
         : 'ok';
 
@@ -468,9 +446,11 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
               {applying ? 'Baking...' : 'Bake Custom Materials'}
             </button>
             <span className={`surface-apply-status ${coverageClass}`}>
-              {applying ? 'Building atlas' : coverageText(coverage)}
+              {applying ? 'Building atlas' : status?.error ? 'Bake failed' : coverageText(coverage)}
             </span>
           </div>
+          {status?.error && <p className="section-hint warning" role="alert">{status.error} Use Bake Custom Materials to retry.</p>}
+          <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads last for this browser session.</p>
           {SURFACE_MODE_SLIDERS.map((def) => (
             <SliderCtl
               key={def.key}
@@ -503,6 +483,9 @@ export default function SurfaceLibraryPanel({ ctx }) {
   const [applying, setApplying] = useState(false);
   const [status, setStatus] = useState(null);
   const bakeTimerRef = useRef(null);
+  const bakeRequestRef = useRef(0);
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
 
   useEffect(() => {
     let cancelled = false;
@@ -523,17 +506,20 @@ export default function SurfaceLibraryPanel({ ctx }) {
       setStatus(null);
       return null;
     }
+    const request = ++bakeRequestRef.current;
     setApplying(true);
-    setStatus((cur) => ({ ...(cur || {}), source: requestedSource, building: true }));
+    setStatus((cur) => ({ ...(cur || {}), source: requestedSource, building: true, error: null }));
     try {
       const res = await ctx.onApplySurfaceTextures({ source: requestedSource, force });
-      setStatus(res);
+      if (request === bakeRequestRef.current && sourceRef.current === requestedSource) setStatus(res);
       return res;
-    } catch {
-      setStatus({ source: requestedSource, error: true });
+    } catch (err) {
+      if (request === bakeRequestRef.current && sourceRef.current === requestedSource) {
+        setStatus({ source: requestedSource, error: err.message || 'Could not bake custom materials.' });
+      }
       return null;
     } finally {
-      setApplying(false);
+      if (request === bakeRequestRef.current && sourceRef.current === requestedSource) setApplying(false);
     }
   }, [ctx, source]);
 
@@ -547,17 +533,21 @@ export default function SurfaceLibraryPanel({ ctx }) {
     }, 160);
   }, [bake, source]);
 
-  useEffect(() => () => {
-    if (bakeTimerRef.current) window.clearTimeout(bakeTimerRef.current);
-  }, []);
+  useEffect(() => {
+    setApplying(false);
+    return () => {
+      bakeRequestRef.current += 1;
+      if (bakeTimerRef.current) window.clearTimeout(bakeTimerRef.current);
+    };
+  }, [source]);
 
   useEffect(() => {
     if (!sourceUsesTextureAtlas(source)) {
       setStatus(null);
       return;
     }
-    if (status?.source !== source || (!status?.coverage && !status?.building)) bake({ source });
-  }, [bake, source, status?.source, status?.coverage, status?.building]);
+    if (status?.source !== source || (!status?.coverage && !status?.building && !status?.error)) bake({ source });
+  }, [bake, source, status?.source, status?.coverage, status?.building, status?.error]);
 
   useEffect(() => {
     if (libraryRevision && sourceUsesTextureAtlas(source)) scheduleBake();

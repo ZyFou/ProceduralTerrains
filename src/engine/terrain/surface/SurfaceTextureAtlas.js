@@ -25,22 +25,50 @@ function atlasTileSize(rowCount) {
   return tile;
 }
 
-function loadImage(url) {
+async function loadImage(input) {
+  if (!input) return null;
+  // Image is a Window API. The render worker receives Blobs from the UI;
+  // built-in assets still arrive as URLs and use the same worker decoder.
+  if (typeof Image === 'undefined') {
+    if (typeof createImageBitmap !== 'function') throw new Error('Surface baking requires an image decoder.');
+    try {
+      let blob = input;
+      if (!(input instanceof Blob)) {
+        const response = await fetch(input);
+        if (!response.ok || (response.headers.get('content-type') || '').includes('text/html')) return null;
+        blob = await response.blob();
+      }
+      return await createImageBitmap(blob);
+    } catch {
+      return null; // Keep per-map missing/optional diagnostics on decode failure.
+    }
+  }
   return new Promise((resolve) => {
-    if (!url) { resolve(null); return; }
+    const objectUrl = input instanceof Blob ? URL.createObjectURL(input) : null;
     const img = new Image();
+    const finish = (result) => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      resolve(result);
+    };
     img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = url;
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    img.src = objectUrl || input;
   });
 }
 
-function makeAtlasCanvas(tile) {
-  const c = document.createElement('canvas');
-  c.width = tile;
-  c.height = tile * SURFACE_TEXTURE_ROWS;
+function makeCanvas(width, height) {
+  const c = typeof Image === 'undefined' && typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(width, height)
+    : document.createElement('canvas');
+  c.width = width;
+  c.height = height;
+  if (!c.getContext('2d')) throw new Error('Surface baking could not create a 2D canvas.');
   return c;
+}
+
+function makeAtlasCanvas(tile) {
+  return makeCanvas(tile, tile * SURFACE_TEXTURE_ROWS);
 }
 
 function fillMissingDiffuseRow(ctx, row, tile, materialId, variantIndex) {
@@ -80,17 +108,15 @@ function cellHash(x, y, salt) {
 }
 
 function drawImageCoverCell(ctx, img, x, y, w, h, salt) {
-  const rot = Math.floor(cellHash(x, y, salt + 1) * 4);
-  const mirrorX = cellHash(x, y, salt + 2) < 0.5 ? -1 : 1;
-  const mirrorY = cellHash(x, y, salt + 3) < 0.5 ? -1 : 1;
+  // Preserve tangent-space normal directions: crop/scale every map together
+  // instead of rotating or mirroring pixels without transforming normal XY.
   const scale = 1.12 + cellHash(x, y, salt + 4) * 0.26;
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();
   ctx.translate(x + w * 0.5, y + h * 0.5);
-  ctx.rotate(rot * Math.PI * 0.5);
-  ctx.scale(mirrorX * scale, mirrorY * scale);
+  ctx.scale(scale, scale);
   ctx.drawImage(img, -w * 0.58, -h * 0.58, w * 1.16, h * 1.16);
   ctx.restore();
 }
@@ -133,9 +159,7 @@ function makeAtlasTexture(canvas, { srgb }) {
 }
 
 function packPropertiesCanvas(canvases) {
-  const packed = document.createElement('canvas');
-  packed.width = canvases.normalDX.width;
-  packed.height = canvases.normalDX.height;
+  const packed = makeCanvas(canvases.normalDX.width, canvases.normalDX.height);
   const packedCtx = packed.getContext('2d');
   const normal = canvases.normalDX.getContext('2d').getImageData(0, 0, packed.width, packed.height).data;
   const roughness = canvases.roughness.getContext('2d').getImageData(0, 0, packed.width, packed.height).data;
@@ -151,7 +175,7 @@ function packPropertiesCanvas(canvases) {
   return packed;
 }
 
-// resolveUrl(materialId, slot, variantIndex) -> string|null
+// resolveUrl(materialId, slot, variantIndex) -> string|Blob|null
 // tilingFor(materialId) -> number
 export async function buildSurfaceAtlas({ source, resolveUrl, tilingFor, labelFor }) {
   const tileSize = atlasTileSize(SURFACE_TEXTURE_ROWS);
@@ -174,94 +198,100 @@ export async function buildSurfaceAtlas({ source, resolveUrl, tilingFor, labelFo
     const variants = new Array(SURFACE_TEXTURE_VARIANT_COUNT);
     const variantImages = new Array(SURFACE_TEXTURE_VARIANT_COUNT);
 
-    await Promise.all(Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, async (_, variantIndex) => {
-      const row = surfaceAtlasRow(roleIndex, variantIndex);
-      const imgs = {};
-      await Promise.all(SLOTS.map(async (slot) => {
-        imgs[slot] = await loadImage(resolveUrl(role.id, slot, variantIndex));
+    try {
+      await Promise.all(Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, async (_, variantIndex) => {
+        const row = surfaceAtlasRow(roleIndex, variantIndex);
+        const imgs = {};
+        await Promise.all(SLOTS.map(async (slot) => {
+          imgs[slot] = await loadImage(resolveUrl(role.id, slot, variantIndex));
+        }));
+        variantImages[variantIndex] = imgs;
+        const missingSlots = SLOTS.filter((slot) => !imgs[slot]);
+        const missingOptionalSlots = missingSlots.filter((slot) => slot !== 'diffuse');
+        const hasDiffuse = !!imgs.diffuse;
+        const status = !hasDiffuse ? 'missingDiffuse' : missingOptionalSlots.length ? 'missingOptional' : 'ready';
+        present[row] = hasDiffuse ? 1 : 0;
+        variants[variantIndex] = {
+          index: variantIndex,
+          row,
+          status,
+          hasDiffuse,
+          missingSlots,
+          missingOptionalSlots,
+        };
+        for (const slot of SLOTS) {
+          fillRow(ctx[slot], row, tileSize, imgs[slot], FALLBACK[slot], {
+            missingDiffuse: slot === 'diffuse' && !hasDiffuse,
+            materialId: role.id,
+            variantIndex,
+          });
+        }
       }));
-      variantImages[variantIndex] = imgs;
-      const missingSlots = SLOTS.filter((slot) => !imgs[slot]);
-      const missingOptionalSlots = missingSlots.filter((slot) => slot !== 'diffuse');
-      const hasDiffuse = !!imgs.diffuse;
-      const status = !hasDiffuse ? 'missingDiffuse' : missingOptionalSlots.length ? 'missingOptional' : 'ready';
-      present[row] = hasDiffuse ? 1 : 0;
-      variants[variantIndex] = {
-        index: variantIndex,
-        row,
+
+      // The shader samples row 0 for each role. Fold uploaded variants into that
+      // render row so the GLSL stays stable while variants still contribute.
+      const renderVariantIndex = variants.findIndex((variant) => variant.hasDiffuse);
+      const readyVariantImages = variants
+        .filter((variant) => variant.hasDiffuse)
+        .map((variant) => variantImages[variant.index]);
+      if (readyVariantImages.length > 1) {
+        const renderRow = surfaceAtlasRow(roleIndex, 0);
+        for (const slot of SLOTS) {
+          bakeVariantMosaicRow(
+            ctx[slot],
+            renderRow,
+            tileSize,
+            readyVariantImages,
+            slot,
+            FALLBACK[slot],
+            roleIndex * 17.31 // One layout for diffuse, normals, roughness and AO.
+          );
+        }
+        present[renderRow] = 1;
+      } else if (renderVariantIndex > 0) {
+        const renderRow = surfaceAtlasRow(roleIndex, 0);
+        const imgs = variantImages[renderVariantIndex] || {};
+        for (const slot of SLOTS) {
+          fillRow(ctx[slot], renderRow, tileSize, imgs[slot], FALLBACK[slot], {
+            missingDiffuse: false,
+            materialId: role.id,
+            variantIndex: renderVariantIndex,
+          });
+        }
+        present[renderRow] = 1;
+      }
+
+      const readyVariants = variants.filter((variant) => variant.hasDiffuse).length;
+      const completeVariants = variants.filter((variant) => variant.status === 'ready').length;
+      const missingOptionalSlots = [...new Set(variants.flatMap((variant) => (
+        variant.hasDiffuse ? variant.missingOptionalSlots : []
+      )))];
+      const status = readyVariants === 0
+        ? 'missingDiffuse'
+        : missingOptionalSlots.length
+          ? 'missingOptional'
+          : 'ready';
+      layers[roleIndex] = {
+        id: role.id,
+        name: labelFor?.(role.id) ?? role.label ?? role.id,
+        groupId: role.groupId,
+        groupLabel: role.groupLabel,
+        row: surfaceAtlasRow(roleIndex, 0),
+        roleIndex,
         status,
-        hasDiffuse,
-        missingSlots,
+        hasDiffuse: readyVariants > 0,
+        readyVariants,
+        completeVariants,
+        variantCount: SURFACE_TEXTURE_VARIANT_COUNT,
+        missingSlots: status === 'missingDiffuse' ? ['diffuse'] : [],
         missingOptionalSlots,
+        variants,
       };
-      for (const slot of SLOTS) {
-        fillRow(ctx[slot], row, tileSize, imgs[slot], FALLBACK[slot], {
-          missingDiffuse: slot === 'diffuse' && !hasDiffuse,
-          materialId: role.id,
-          variantIndex,
-        });
+    } finally {
+      for (const images of variantImages) {
+        for (const image of Object.values(images || {})) image?.close?.();
       }
-    }));
-
-    // The shader samples row 0 for each role. Fold uploaded variants into that
-    // render row so the GLSL stays stable while variants still contribute.
-    const renderVariantIndex = variants.findIndex((variant) => variant.hasDiffuse);
-    const readyVariantImages = variants
-      .filter((variant) => variant.hasDiffuse)
-      .map((variant) => variantImages[variant.index]);
-    if (readyVariantImages.length > 1) {
-      const renderRow = surfaceAtlasRow(roleIndex, 0);
-      for (const slot of SLOTS) {
-        bakeVariantMosaicRow(
-          ctx[slot],
-          renderRow,
-          tileSize,
-          readyVariantImages,
-          slot,
-          FALLBACK[slot],
-          roleIndex * 17.31 + slot.length * 5.7
-        );
-      }
-      present[renderRow] = 1;
-    } else if (renderVariantIndex > 0) {
-      const renderRow = surfaceAtlasRow(roleIndex, 0);
-      const imgs = variantImages[renderVariantIndex] || {};
-      for (const slot of SLOTS) {
-        fillRow(ctx[slot], renderRow, tileSize, imgs[slot], FALLBACK[slot], {
-          missingDiffuse: false,
-          materialId: role.id,
-          variantIndex: renderVariantIndex,
-        });
-      }
-      present[renderRow] = 1;
     }
-
-    const readyVariants = variants.filter((variant) => variant.hasDiffuse).length;
-    const completeVariants = variants.filter((variant) => variant.status === 'ready').length;
-    const missingOptionalSlots = [...new Set(variants.flatMap((variant) => (
-      variant.hasDiffuse ? variant.missingOptionalSlots : []
-    )))];
-    const status = readyVariants === 0
-      ? 'missingDiffuse'
-      : missingOptionalSlots.length
-        ? 'missingOptional'
-        : 'ready';
-    layers[roleIndex] = {
-      id: role.id,
-      name: labelFor?.(role.id) ?? role.label ?? role.id,
-      groupId: role.groupId,
-      groupLabel: role.groupLabel,
-      row: surfaceAtlasRow(roleIndex, 0),
-      roleIndex,
-      status,
-      hasDiffuse: readyVariants > 0,
-      readyVariants,
-      completeVariants,
-      variantCount: SURFACE_TEXTURE_VARIANT_COUNT,
-      missingSlots: status === 'missingDiffuse' ? ['diffuse'] : [],
-      missingOptionalSlots,
-      variants,
-    };
   }));
 
   const diffuseReady = layers.filter((layer) => layer.hasDiffuse).length;

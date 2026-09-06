@@ -5,9 +5,9 @@ import { buildSurfaceAtlas } from './SurfaceTextureAtlas.js';
 import { SURFACE_TEXTURE_SOURCE, normalizeSurfaceTextureSource } from './SurfaceTextureSources.js';
 
 // Builds the terrain surface atlas from the CURRENTLY selected variants /
-// overrides in the Surface Library. Returns the atlas (4 THREE textures +
-// present/tile arrays) ready to hand to Engine.setSurfaceAtlas().
-export async function buildActiveSurfaceAtlas({ source = SURFACE_TEXTURE_SOURCE.CUSTOM } = {}) {
+// overrides in the Surface Library, or an explicit snapshot supplied by the
+// UI to the renderer worker. Returns two textures plus coverage metadata.
+export async function buildActiveSurfaceAtlas({ source = SURFACE_TEXTURE_SOURCE.CUSTOM, customMaps } = {}) {
   const normalizedSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
   const manifest = await loadMaterialsManifest();
   const manifestById = Object.fromEntries((manifest.materials || []).map((material) => [material.id, material]));
@@ -16,7 +16,11 @@ export async function buildActiveSurfaceAtlas({ source = SURFACE_TEXTURE_SOURCE.
   const resolveUrl = (materialId, slot, variantIndex = 0) => {
     const mat = byId[materialId];
     if (!mat) return null;
-    if (normalizedSource === SURFACE_TEXTURE_SOURCE.CUSTOM) return resolveCustomMapUrl(mat, slot, variantIndex);
+    if (normalizedSource === SURFACE_TEXTURE_SOURCE.CUSTOM) {
+      // An explicitly empty snapshot must not read stale renderer-local state.
+      if (customMaps != null) return customMaps[materialId]?.[variantIndex]?.[slot] ?? null;
+      return resolveCustomMapUrl(mat, slot, variantIndex);
+    }
     if (normalizedSource === SURFACE_TEXTURE_SOURCE.BUILT_IN) {
       const material = manifestById[MANUAL_SURFACE_ASSET_BY_ROLE[materialId]];
       return material ? getDefaultMapUrl(material, slot) : null;

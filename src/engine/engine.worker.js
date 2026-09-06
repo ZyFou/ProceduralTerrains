@@ -76,6 +76,7 @@ class WorkerCanvasFacade extends TerrainEventTarget {
 
 let engine = null;
 let sequence = 0;
+let surfaceAtlasRevision = 0;
 const allowedMethods = new Set(ENGINE_METHODS);
 const cancelledRequests = new Set();
 
@@ -226,7 +227,19 @@ self.onmessage = async ({ data }) => {
     if (!allowedMethods.has(method) || typeof engine?.[method] !== 'function') {
       throw new Error(`Unknown engine method: ${method}`);
     }
-    const engineResult = await engine[method](...(methodArgs || []));
+    let engineResult;
+    if (method === 'buildAndSetSurfaceAtlas') {
+      const [source, customMaps, revision] = methodArgs;
+      const { buildAndInstallSurfaceAtlas, surfaceAtlasSuperseded } = await import('./terrain/surface/SurfaceAtlasBridge.js');
+      if (!Number.isFinite(revision) || revision < surfaceAtlasRevision) throw surfaceAtlasSuperseded();
+      surfaceAtlasRevision = revision;
+      const target = engine;
+      engineResult = await buildAndInstallSurfaceAtlas(target, source, customMaps, {
+        isCurrent: () => engine === target && revision === surfaceAtlasRevision && !cancelledRequests.has(id),
+      });
+    } else {
+      engineResult = await engine[method](...(methodArgs || []));
+    }
     const result = await prepareWorkerResult(method, engineResult);
     if (!cancelledRequests.delete(id)) postResult(id, result);
   } catch (error) {

@@ -93,6 +93,7 @@ export class WorkerEngineTransport {
     this.pending = new Map();
     this.nextId = 1;
     this.nextCallbackId = 1;
+    this.surfaceAtlasRevision = 0;
     this.remoteCallbacks = new Map();
     this.onEvent = null;
     this.inputBridge = null;
@@ -139,6 +140,7 @@ export class WorkerEngineTransport {
       this.minimapPresenter.setCanvases(args[0], args[1]);
       return null;
     }
+    if (method === 'buildAndSetSurfaceAtlas') return this._buildSurfaceAtlas(args[0], signal);
     const callbackIds = [];
     const encodedArgs = this._encodeCallbacks(args, callbackIds);
     const result = this._request('invoke', [method, encodedArgs], transfer, signal);
@@ -148,6 +150,15 @@ export class WorkerEngineTransport {
     return Promise.resolve(result).finally(() => {
       callbackIds.forEach((id) => this.remoteCallbacks.delete(id));
     });
+  }
+
+  async _buildSurfaceAtlas(source, signal) {
+    const revision = ++this.surfaceAtlasRevision;
+    const { captureSurfaceAtlasMaps, surfaceAtlasSuperseded } = await import('./terrain/surface/SurfaceAtlasBridge.js');
+    const maps = await captureSurfaceAtlasMaps(source, { signal });
+    if (signal?.aborted) throw Object.assign(new Error('Engine command cancelled'), { code: 'ENGINE_COMMAND_CANCELLED' });
+    if (revision !== this.surfaceAtlasRevision) throw surfaceAtlasSuperseded();
+    return this._request('invoke', ['buildAndSetSurfaceAtlas', [source, maps, revision]], [], signal);
   }
 
   _encodeCallbacks(value, callbackIds, seen = new WeakMap()) {
