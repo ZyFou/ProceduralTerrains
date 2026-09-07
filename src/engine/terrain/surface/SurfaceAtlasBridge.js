@@ -3,6 +3,10 @@ import { SURFACE_TEXTURE_SOURCE, normalizeSurfaceTextureSource } from './Surface
 
 const SLOTS = ['diffuse', 'normalDX', 'roughness', 'ao'];
 
+function abortError() {
+  return new DOMException('Aborted', 'AbortError');
+}
+
 export function surfaceAtlasSuperseded() {
   return Object.assign(new Error('A newer surface bake replaced this request.'), {
     code: 'SURFACE_ATLAS_SUPERSEDED',
@@ -27,7 +31,7 @@ async function collectSurfaceAtlasMapRefs(source, { resolveUrl, signal } = {}) {
   }
   // Abort as soon as the user changes source or cancels; this helper may
   // execute while the upload source is transiently reconfigured.
-  if (signal?.aborted) throw Object.assign(new Error('Engine command cancelled'), { code: 'ENGINE_COMMAND_CANCELLED' });
+  if (signal?.aborted) throw abortError();
   return maps;
 }
 
@@ -57,7 +61,7 @@ export async function captureSurfaceAtlasMaps(source, { resolveUrl, signal } = {
         pending.push(reads.get(url).then((blob) => {
           maps[role.id][variant][slot] = blob;
         }).catch((cause) => {
-          if (signal?.aborted) throw cause;
+          if (signal?.aborted) throw signal?.reason instanceof DOMException && signal.reason.name === 'AbortError' ? signal.reason : abortError();
           throw new Error(`Could not read ${role.label} V${variant + 1} ${slot}. Please upload that map again.`, { cause });
         }));
       }
