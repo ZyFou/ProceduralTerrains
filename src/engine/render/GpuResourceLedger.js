@@ -14,7 +14,10 @@ const bytesPerType = (type) => ({
   int: 4,
   float: 4,
   1009: 1, // THREE.UnsignedByteType
-  1011: 2, // THREE.UnsignedShortType
+  1010: 1, // THREE.ByteType
+  1011: 2, // THREE.ShortType
+  1012: 2, // THREE.UnsignedShortType
+  1013: 4, // THREE.IntType
   1014: 4, // THREE.UnsignedIntType
   1015: 4, // THREE.FloatType
   1016: 2, // THREE.HalfFloatType
@@ -41,6 +44,8 @@ export class GpuResourceLedger {
     this.tier = tier in DEFAULT_BUDGETS ? tier : 'medium';
     this.budgetBytes = Math.max(1, budgetBytes || DEFAULT_BUDGETS[this.tier]);
     this.entries = new Map();
+    this._totalBytes = 0;
+    this.peakBytes = 0;
   }
 
   reserve(id, descriptor = {}) {
@@ -49,11 +54,8 @@ export class GpuResourceLedger {
       ? Math.max(0, Math.ceil(descriptor.bytes))
       : estimateRenderTargetBytes(descriptor);
     const previous = this.entries.get(id);
-    this.entries.set(id, { ...descriptor, id, bytes });
-    if (this.totalBytes > this.budgetBytes) {
-      const attemptedTotalBytes = this.totalBytes;
-      if (previous) this.entries.set(id, previous);
-      else this.entries.delete(id);
+    const attemptedTotalBytes = this._totalBytes - (previous?.bytes || 0) + bytes;
+    if (attemptedTotalBytes > this.budgetBytes) {
       const error = new Error(
         `GPU resource budget exceeded: ${attemptedTotalBytes} bytes requested, ${this.budgetBytes} available`,
       );
@@ -63,17 +65,27 @@ export class GpuResourceLedger {
       error.budgetBytes = this.budgetBytes;
       throw error;
     }
+    this.entries.set(id, { ...descriptor, id, bytes });
+    this._totalBytes = attemptedTotalBytes;
+    this.peakBytes = Math.max(this.peakBytes, this._totalBytes);
     return this.entries.get(id);
   }
 
-  release(id) { return this.entries.delete(id); }
-  clear() { this.entries.clear(); }
-  get totalBytes() { return [...this.entries.values()].reduce((sum, entry) => sum + entry.bytes, 0); }
+  release(id) {
+    const entry = this.entries.get(id);
+    if (!entry) return false;
+    this._totalBytes -= entry.bytes;
+    return this.entries.delete(id);
+  }
+  clear() { this.entries.clear(); this._totalBytes = 0; }
+  get totalBytes() { return this._totalBytes; }
   snapshot() {
     return Object.freeze({
       tier: this.tier,
       budgetBytes: this.budgetBytes,
       totalBytes: this.totalBytes,
+      peakBytes: this.peakBytes,
+      scope: 'registered render targets; estimates, not measured VRAM',
       entries: [...this.entries.values()].map((entry) => ({ ...entry })),
     });
   }

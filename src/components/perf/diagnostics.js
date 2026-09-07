@@ -23,6 +23,7 @@ export function buildDiagnosticsObject(snap) {
     },
     renderer: snap?.render,
     rendererBackend: snap?.diag?.renderer,
+    comparison: snap?.diag?.comparison ?? null,
     gpuTiming: snap?.gpu,
     memory: snap?.memory,
     timings: (snap?.sections || []).map((s) => ({ name: s.name, avg: round(s.avg), max: round(s.max) })),

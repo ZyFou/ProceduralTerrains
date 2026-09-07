@@ -145,6 +145,7 @@ import {
 import { PreparedModeBundle, SharedResourceRegistry } from './mode/PreparedModeBundle.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 import { GpuWorkScheduler } from './render/GpuWorkScheduler.js';
+import { inspectRenderResources } from './render/ResourceInventory.js';
 import { GpuResourceLedger, rendererAdmission } from './render/GpuResourceLedger.js';
 import { materialProgramDescriptor, programHealthError, validatePrograms } from './render/ProgramHealthGate.js';
 import {
@@ -2778,9 +2779,12 @@ export class Engine {
     const overlay = this._rwLoadGroup;
     const overlayWas = !!overlay && overlay.visible;
     if (overlayWas) overlay.visible = false;
-    this.minimap.renderBase();
-    if (wasVisible) sky.setVisible(true);
-    if (overlayWas) overlay.visible = true;
+    try {
+      this.minimap.renderBase();
+    } finally {
+      if (wasVisible) sky.setVisible(true);
+      if (overlayWas) overlay.visible = true;
+    }
   }
 
   _applyStudioFogFromStyle() {
@@ -5191,21 +5195,24 @@ export class Engine {
 
     if (stagger && list.length > 1) {
       let done = 0;
-      const results = [];
-      for (const pair of pairs) {
-        results.push(await this._compileMaterialVariants([pair.material], {
-          canvasOnly,
-          timeoutMs,
-          onProgress: (stepDone) => onProgress?.(done + stepDone, total),
-          renderTarget,
-          sources: [pair.source],
-          camera,
-          targetScene,
-          logCompile,
-        }));
-        done += passesPerMaterial;
-        await yieldTask();
-      }
+      // The scheduler serializes submissions and yields between them. Driver
+      // readiness can overlap; awaiting a complete link here serialized every
+      // material on the main-thread path despite parallel-compile support.
+      const completed = new Map();
+      const results = await Promise.all(pairs.map((pair, index) => this._compileMaterialVariants([pair.material], {
+        canvasOnly,
+        timeoutMs,
+        onProgress: (step) => {
+          done += step - (completed.get(index) || 0);
+          completed.set(index, step);
+          onProgress?.(done, total);
+        },
+        renderTarget,
+        sources: [pair.source],
+        camera,
+        targetScene,
+        logCompile,
+      })));
       return {
         ready: results.every((result) => result.ready),
         timedOut: results.some((result) => result.timedOut),
@@ -5236,32 +5243,27 @@ export class Engine {
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
-    const previousTarget = renderer.getRenderTarget();
-    let pending;
     let rendererCompileMs = 0;
-    try {
-      renderer.setRenderTarget(renderTarget);
-      const compileKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
-        + `:target:${renderTarget ? `${renderTarget.width}x${renderTarget.height}:${renderTarget.samples || 0}` : 'canvas'}`;
-      pending = this._gpuWorkScheduler
-        ? await this._gpuWorkScheduler.schedule(
-            compileKey,
-            () => {
-              const startedAt = performance.now();
-              const value = renderer.compile(group, camera, targetScene);
-              rendererCompileMs = performance.now() - startedAt;
-              return value;
-            },
-          )
-        : (() => {
-            const startedAt = performance.now();
-            const value = renderer.compile(group, camera, targetScene);
-            rendererCompileMs = performance.now() - startedAt;
-            return value;
-          })();
-    } finally {
-      renderer.setRenderTarget(previousTarget);
-    }
+    const submit = () => {
+      if (this._disposed || this.renderer !== renderer) return new Set();
+      const previousTarget = renderer.getRenderTarget();
+      const face = renderer.getActiveCubeFace?.() ?? 0;
+      const mip = renderer.getActiveMipmapLevel?.() ?? 0;
+      const startedAt = performance.now();
+      try {
+        renderer.setRenderTarget(renderTarget);
+        return renderer.compile(group, camera, targetScene);
+      } finally {
+        rendererCompileMs = performance.now() - startedAt;
+        renderer.setRenderTarget(previousTarget, face, mip);
+      }
+    };
+    // A submission owns renderer state only synchronously. Never hold a target
+    // across the scheduler yield or another family's readiness wait. Let Three
+    // deduplicate program keys; topology/target-specific probes must all run.
+    const pending = this._gpuWorkScheduler
+      ? await this._gpuWorkScheduler.schedule(null, submit)
+      : submit();
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
     const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
@@ -5334,23 +5336,29 @@ export class Engine {
     }
 
     this.underwater._ensureTarget(renderer);
-    renderer.setRenderTarget(this.underwater._rt);
+    const underwaterTarget = this.underwater._rt;
     const rtCompileStartedAt = performance.now();
-    const rtKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
-      + `:target:${this.underwater._rt.width}x${this.underwater._rt.height}:${this.underwater._rt.samples || 0}`;
+    const submitUnderwater = () => {
+      if (this._disposed || this.renderer !== renderer) return new Set();
+      const previous = renderer.getRenderTarget();
+      const face = renderer.getActiveCubeFace?.() ?? 0;
+      const mip = renderer.getActiveMipmapLevel?.() ?? 0;
+      try {
+        renderer.setRenderTarget(underwaterTarget);
+        return renderer.compile(group, camera, targetScene);
+      } finally {
+        renderer.setRenderTarget(previous, face, mip);
+      }
+    };
     const pendingRt = this._gpuWorkScheduler
-      ? await this._gpuWorkScheduler.schedule(
-          rtKey,
-          () => renderer.compile(group, camera, targetScene),
-        )
-      : renderer.compile(group, camera, targetScene);
+      ? await this._gpuWorkScheduler.schedule(null, submitUnderwater)
+      : submitUnderwater();
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
-    renderer.setRenderTarget(null);
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
     const rtHealth = rtResult.ready
-      ? await this._validateCompiledPrograms(list, group, this.underwater._rt, camera)
+      ? await this._validateCompiledPrograms(list, group, underwaterTarget, camera)
       : { ok: false, code: 'PROGRAM_NOT_READY', diagnostics: [] };
     if (logCompile) {
       console.info(
@@ -5882,11 +5890,18 @@ export class Engine {
       : [];
 
     if (this.params.cloudsEnabled) {
-      const cloudReady = await this.studioCloud?.waitUntilReady?.({
+      context.cloudReadyPromise = Promise.resolve(this.studioCloud?.waitUntilReady?.({
         isCurrent: () => !this._disposed && context.runId === this._bootPipeline?.runId,
+      })).then((ready) => {
+        context.assertCurrent();
+        if (ready === false) throw new Error('Final cloud material did not become ready');
+        return ready;
       });
-      context.assertCurrent();
-      if (cloudReady === false) throw new Error('Final cloud material did not become ready');
+      // Geometry can outlive a cancelled boot. Observe the promise immediately
+      // while the compile stage remains responsible for propagating failures.
+      context.cloudReadyPromise.catch(() => {});
+      // Isolated shader benchmarks retain their existing resource precondition.
+      if (this._shaderBenchmarkOptions) await context.cloudReadyPromise;
     }
 
     // Shader linking is independent from the incremental visible-chunk build.
@@ -5923,13 +5938,17 @@ export class Engine {
     const dependencyHalo = 1.5;
     this.board?.prioritizeInitialCameraSet?.(this.camera, { dependencyHalo });
     let guard = 0;
+    const initialLodQueue = this.board?._lodRebuildQueue?.length || 0;
+    let maxBatchMs = 0;
     while (!this._disposed
         && this.board
         && (!this.board.initialCameraSetReady(this.camera, { dependencyHalo })
           || this.board._lodRebuildQueue.length > 0)) {
       context.assertCurrent();
+      const batchStartedAt = performance.now();
       this.board.processBuildQueue({ maxItems: 24, maxMs: 8 });
       this.board.updateLOD(this.camera.position);
+      maxBatchMs = Math.max(maxBatchMs, performance.now() - batchStartedAt);
       context.progress(
         'Building visible terrain…',
         this.board.activeChunkCount,
@@ -5947,6 +5966,10 @@ export class Engine {
       activeChunks: this.board?.activeChunkCount ?? 0,
       deferredChunks: this.board?.remainingChunks ?? 0,
       dependencyHalo,
+      geometryBatches: guard,
+      geometryMaxBatchMs: maxBatchMs,
+      initialLodQueue,
+      remainingLodQueue: this.board?._lodRebuildQueue?.length || 0,
     };
   }
 
@@ -6327,6 +6350,29 @@ export class Engine {
 
   async _compileFinalBootGraph(context) {
     context.assertCurrent();
+    if (context.cloudReadyPromise) {
+      await context.cloudReadyPromise;
+      context.assertCurrent();
+      const finalTarget = this._resolveCameraCompileTarget();
+      const finalMaterials = this._finalBootMaterials(
+        context.preparedWaterMaterials, this.visualPost?._plan,
+      );
+      const targetChanged = finalTarget.renderTarget !== context.compileTarget?.renderTarget;
+      const missing = targetChanged ? finalMaterials
+        : finalMaterials.filter((material) => !context.compileMaterials?.includes(material));
+      // Readiness can reveal the cloud/composite or replace a target. Warm that
+      // exact final variant too; never reveal the cover with an incomplete graph.
+      context.remainingCompilePromise = missing.length
+        ? this._compileMaterialVariants(missing, {
+            canvasOnly: true, stagger: !this._renderWorker, timeoutMs: 120000,
+            renderTarget: finalTarget.renderTarget,
+          })
+        : Promise.resolve({ ready: true });
+      context.remainingCompilePromise.catch(() => {});
+      context.compileMaterials = finalMaterials;
+      context.compileTarget = finalTarget;
+      context.compilePlan = this._buildFinalBootCompilePlan(finalMaterials, finalTarget.renderTarget);
+    }
     const target = context.compileTarget || this._resolveCameraCompileTarget();
     const materials = context.compileMaterials || this._finalBootMaterials(
       context.preparedWaterMaterials,
@@ -6337,11 +6383,14 @@ export class Engine {
       context.compilePlan = this._buildFinalBootCompilePlan(materials, target.renderTarget);
     }
     this._submitFinalBootCompilePlan(context);
-    const result = await context.compilePromise;
+    const [result, remaining] = await Promise.all([
+      context.compilePromise,
+      context.remainingCompilePromise || Promise.resolve({ ready: true }),
+    ]);
     context.assertCurrent();
-    if (result?.ready !== true) {
+    if (result?.ready !== true || remaining?.ready !== true) {
       const error = new Error('Final shader graph did not become ready');
-      error.code = result?.timedOut ? 'SHADER_TIMEOUT' : 'SHADER_COMPILE_FAILED';
+      error.code = result?.timedOut || remaining?.timedOut ? 'SHADER_TIMEOUT' : 'SHADER_COMPILE_FAILED';
       throw error;
     }
     if (context.waterRequired) {
@@ -6360,7 +6409,11 @@ export class Engine {
     return {
       compiledMaterials: materials.length,
       shaderCompileMs: (result.syncCompileMs || 0) + (result.asyncWaitMs || 0),
-      shaderReadyTimeline: result.readyTimeline || [],
+      shaderSubmitMs: result.rendererCompileMs ?? result.syncCompileMs ?? 0,
+      shaderWaitMs: result.asyncWaitMs || 0,
+      finalVariantCompileMs: (remaining.syncCompileMs || 0) + (remaining.asyncWaitMs || 0),
+      cloudsReady: !this.params.cloudsEnabled || this.studioCloud?.ready === true,
+      shaderReadyTimeline: [...(result.readyTimeline || []), ...(remaining.readyTimeline || [])],
       renderTarget: target.usesSceneTarget ? 'scene-target' : 'canvas',
     };
   }
@@ -11906,8 +11959,80 @@ export class Engine {
     };
   }
 
+  _performanceComparisonSnapshot() {
+    const renderer = this.renderer;
+    const boot = this._bootPipeline?.result;
+    return {
+      transport: this._renderWorker ? 'worker' : 'main-thread',
+      worldMode: this.worldMode,
+      projectMode: this.projectMode,
+      settings: { ...(this.perf || {}) },
+      scene: this._paramsSnapshot(),
+      pixels: {
+        cssWidth: this._lastViewportWidth ?? null,
+        cssHeight: this._lastViewportHeight ?? null,
+        drawingBufferWidth: renderer?.domElement?.width ?? null,
+        drawingBufferHeight: renderer?.domElement?.height ?? null,
+        actualPixelRatio: renderer?.getPixelRatio?.() ?? null,
+        basePixelRatio: this._basePixelRatio ?? null,
+        pixelRatioCeiling: this._pixelRatioCeiling ?? null,
+        requestedRenderScale: this.perf?.renderScale ?? null,
+        effectiveRenderScale: this._effectiveRenderScale(),
+        cameraPipeline: this.visualPost?.diagnostics?.() ?? null,
+      },
+      boot: {
+        state: this._bootPipeline?.state ?? null,
+        runId: this._bootPipeline?.runId ?? null,
+        durationMs: boot?.duration ?? null,
+        renderKey: boot?.renderKey?.serialized ?? null,
+        manifest: boot?.manifest ?? null,
+      },
+      shaderRun: {
+        benchmark: !!this._shaderBenchmarkOptions,
+        family: this._shaderBenchmarkOptions?.requestedFamily ?? null,
+        coldSource: !!this._shaderColdRun,
+      },
+      minimap: this.minimap?.getDiagnostics?.() ?? null,
+      retainedModes: {
+        count: this._modeResourceCache?.size ?? 0,
+        maxInactive: this._modeResourceCache?.maxInactive ?? 0,
+      },
+    };
+  }
+
+  _inspectRenderResources() {
+    const targets = {
+      'post:scene': this.visualPost?._sceneRT,
+      'post:look': this.visualPost?._lookRT,
+      'post:opaque': this.visualPost?._opaqueRT,
+      underwater: this.underwater?._rt,
+      minimap: this.minimap?.target,
+      'water:refraction': this.waterSystem?._surfacePass?.target,
+      'water:reflection': this.waterSystem?._planarReflectionPass?.target,
+    };
+    const materials = [this.terrainMaterial, this.waterMaterial];
+    for (const [name, layer] of Object.entries({
+      studio: this.studioCloud, infinite: this.infiniteCloud, planet: this.planetCloudLayer,
+    })) {
+      targets[`cloud:${name}:depth`] = layer?._depthTarget;
+      targets[`cloud:${name}:color`] = layer?._lowResPass?.rt;
+      for (const [index, target] of (layer?._occupancyPass?.targets || []).entries()) {
+        targets[`cloud:${name}:occupancy:${index}`] = target;
+      }
+      materials.push(layer?.material, layer?._lowResPass?._composite);
+    }
+    for (const entry of this._modeResourceCache?.entries?.values?.() || []) {
+      for (const { resource } of entry.value?.resources?.values?.() || []) {
+        if (resource?.isMaterial) materials.push(resource);
+      }
+    }
+    return inspectRenderResources({ scene: this.scene, targets, materials });
+  }
+
   getGraphicsDiagnostics() {
     return {
+      comparison: this._performanceComparisonSnapshot(),
+      resourceInventory: this._inspectRenderResources(),
       capturedAt: new Date().toISOString(),
       gpuName: this.gpuNameFull || this.gpuName,
       rendererConfig: this.rendererConfig,
@@ -12327,7 +12452,11 @@ export class Engine {
       manualEditing ||
       this.board?.isBuilding ||
       (!this._debug.freezeLod && this.board._lodRebuildQueue.length > 0);
-    const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;
+    // Hidden minimaps and worker maps (requested through getMinimapFrame) have
+    // no local canvas. Their dirty flag must not keep the main scene rendering
+    // forever, or force extra scene frames while an async map is already pending.
+    const minimapDirty = !!this.minimap.baseCtx && !this.minimap._pendingFrame
+      && this.minimap._dirty && now - this._minimapDirtyAt > 280;
     // Heartbeat safety net: redraw at least ~1 Hz so any state change that
     // forgot to invalidate self-heals within a second (cheap insurance).
     const heartbeat = now - this._lastRenderAt > 1000;
@@ -12669,6 +12798,7 @@ export class Engine {
     const waterEnabled = !!this.waterSystem?.isEnabled();
 
     const diag = {
+      comparison: this._performanceComparisonSnapshot(),
       performance: this.profiler?.snapshot?.() || null,
       version: APP_VERSION,
       mode: this.worldMode,

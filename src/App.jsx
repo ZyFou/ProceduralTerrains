@@ -78,10 +78,10 @@ const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet
 const NODE_PANEL_IDS = ['explode', 'planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
 const REAL_TERRAIN_PANEL_IDS = ['terrain', 'explode', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
-// Start loading the drawer chunk with the app so the first tool click does
-// not have to wait for the lazy module before anything can be shown.
-const sideDrawerModule = import('./components/ui/SideDrawer.jsx');
-const SideDrawer = lazy(() => sideDrawerModule);
+let sideDrawerModule;
+const loadSideDrawer = () => (sideDrawerModule ||= import('./components/ui/SideDrawer.jsx')
+  .catch((error) => { sideDrawerModule = null; throw error; }));
+const SideDrawer = lazy(loadSideDrawer);
 const loadNodeWorkspace = () => import('./components/nodes/NodeWorkspace.jsx');
 const NodeWorkspace = lazy(loadNodeWorkspace);
 const MANUAL_LIBRARY_HEIGHT_KEY = 'terrain-studio:manual-library-height';
@@ -150,6 +150,18 @@ export default function App() {
 
   const loading = useLoading();
   const landing = useLanding();
+  useEffect(() => {
+    // Keep the landing scene's requests/compilation ahead of editor-only work,
+    // then warm the drawer before the user reaches the first tool.
+    if (!landing.bootReady) return undefined;
+    const preload = () => { void loadSideDrawer().catch(() => {}); };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preload, { timeout: 1200 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(preload, 0);
+    return () => clearTimeout(id);
+  }, [landing.bootReady]);
   const { showPopup, showConfirm, showChoice } = usePopup();
   const landingRef = useRef(landing);
   landingRef.current = landing;

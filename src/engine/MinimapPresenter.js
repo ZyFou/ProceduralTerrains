@@ -4,24 +4,36 @@ export class MinimapPresenter {
     this.overlayCanvas = null;
     this.requestFrame = null;
     this.pending = false;
+    this.revision = 0;
+    this.refreshAgain = false;
   }
 
   setCanvases(baseCanvas, overlayCanvas) {
+    this.revision += 1;
     this.baseCanvas = baseCanvas;
     this.overlayCanvas = overlayCanvas;
     if (baseCanvas && overlayCanvas) void this.refresh();
   }
 
   async refresh() {
-    if (this.pending || !this.baseCanvas || !this.overlayCanvas || !this.requestFrame) return;
+    if (!this.baseCanvas || !this.overlayCanvas || !this.requestFrame) return;
+    if (this.pending) { this.refreshAgain = true; return; }
     this.pending = true;
+    const revision = this.revision;
     try {
       const packet = await this.requestFrame();
-      if (!packet || !this.baseCanvas || !this.overlayCanvas) return;
+      if (!packet || revision !== this.revision || !this.baseCanvas || !this.overlayCanvas) return;
       this._drawBase(packet);
       this._drawOverlay(packet.overlay || {}, packet.width, packet.height);
+    } catch {
+      // Context loss or a cancelled worker request must retain the last map,
+      // not produce an unhandled rejection from the periodic refresh.
     } finally {
       this.pending = false;
+      if (this.refreshAgain) {
+        this.refreshAgain = false;
+        void this.refresh();
+      }
     }
   }
 
