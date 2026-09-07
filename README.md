@@ -235,3 +235,13 @@ tests/               Frontend and integration tests
 The core project is released under the [MIT License](LICENSE). Plugin licenses
 are documented alongside their source packages: Unity is MIT licensed and the
 Blender extension is GPL-3.0-or-later.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=zyfou%2Fproceduralterrains&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zyfou/proceduralterrains&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zyfou/proceduralterrains&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zyfou/proceduralterrains&type=date&legend=top-left" />
+  </picture>
+</a>
