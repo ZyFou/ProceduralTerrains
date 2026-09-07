@@ -37,8 +37,11 @@ import { DEFAULT_PLANET_STYLE } from '../style/PlanetStyleConfig.js';
 // ============================================================================
 
 const MANUAL_ACTIVE_COMMON_SAMPLERS = new Set([
-  'uManualSurfaceTextureA',
-  'uManualSurfaceTextureB',
+  // Manual surface weights reuse the two authoring mask units. Keeping a
+  // second pair of samplers here is what pushed the hybrid shader over the
+  // guaranteed WebGL2 fragment budget once the surface atlas was enabled.
+  'uPaintBiomeTexture',
+  'uPaintPropsTexture',
   'uManualHeightTexture',
   'uTileOccupancy',
   'uDestructionTexture',
@@ -47,6 +50,26 @@ const MANUAL_ACTIVE_COMMON_SAMPLERS = new Set([
 const MANUAL_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
   /^uniform sampler2D ([A-Za-z0-9_]+);.*$/gm,
   (line, name) => (MANUAL_ACTIVE_COMMON_SAMPLERS.has(name) ? line : ''),
+);
+
+// Standard terrain never reads the standalone Manual surface textures. Manual
+// weights are packed into the existing paint biome/props units (see
+// MANUAL_SURFACE_WEIGHTS_GLSL), so declaring the old pair here would reserve
+// two more fragment texture units for no reason.
+const TERRAIN_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
+  /^uniform sampler2D (uManualSurfaceTextureA|uManualSurfaceTextureB|uSplineAuxTexture);.*$/gm,
+  '',
+);
+
+// Infinite terrain is rendered only after its clipmap program has been
+// prepared. Do not keep a procedural fallback in this material: that fallback
+// pulls every Studio authoring sampler into the live program and can take the
+// surface variant past MAX_TEXTURE_IMAGE_UNITS. The clipmap's ready flag still
+// drives the normal path; an unavailable sample is a temporary zero-height
+// value until the prepared cache is published.
+const INFINITE_FIELD_CACHE_STRICT_GLSL = INFINITE_FIELD_CACHE_GLSL.replace(
+  'return available > 0.5 ? field.r * uHeightScale : heightAt(xz);',
+  'return available > 0.5 ? field.r * uHeightScale : 0.0;',
 );
 
 const MANUAL_HEIGHT_GLSL = /* glsl */ `
@@ -115,116 +138,6 @@ Climate terrainCachedClimateAt(vec2 xz) {
   return climateAt(xz * uFrequency + uSeedOffset);
 }
 `;
-
-const buildVertex = (heightGLSL, variant = 'full') => {
-  const features = resolveTerrainVariant(variant);
-  const manual = features.manual;
-  const preview = variant === 'preview';
-  return /* glsl */ `
-${manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
-${NOISE_GLSL}
-${BIOME_GLSL}
-${heightGLSL}
-${manual
-    ? MANUAL_TERRAIN_CACHE_GLSL
-    : features.tileOnly
-      ? HYBRID_TILE_TERRAIN_CACHE_GLSL
-      : INFINITE_FIELD_CACHE_GLSL}
-
-uniform float uSkirtDepth;
-uniform float uPlinthBaseY;
-uniform float uWallThickness;
-${preview ? 'uniform float uEps;' : ''}
-
-attribute float aSkirt;
-attribute float aLod;
-attribute float aWall;   // 1 on the dedicated circular radial-wall mesh, else 0
-
-varying vec3  vWorldPos;
-varying float vLod;
-varying float vSkirt;
-varying float vWall;
-varying float vWallMesh;
-${preview ? 'varying vec3 vTerrainPreviewNormal;' : ''}
-
-void main() {
-  vec4 localPosition = vec4(position, 1.0);
-  #ifdef USE_INSTANCING
-    localPosition = instanceMatrix * localPosition;
-  #endif
-  vec4 wp = modelMatrix * localPosition;
-  float h = terrainCachedHeightAt(wp.xz);
-${preview ? /* glsl */ `
-  // Smooth lighting for the lightweight Node preview. Two extra height
-  // samples per vertex are much cheaper than evaluating the graph per pixel,
-  // and interpolate cleanly across the visible terrain triangles.
-  float normalEps = max(uEps, 0.001);
-  float hNormalX = terrainCachedHeightAt(wp.xz + vec2(normalEps, 0.0));
-  float hNormalZ = terrainCachedHeightAt(wp.xz + vec2(0.0, normalEps));
-  vTerrainPreviewNormal = normalize(vec3(
-    -(hNormalX - h) / normalEps,
-    1.0,
-    -(hNormalZ - h) / normalEps
-  ));
-` : ''}
-
-  float skirt = aSkirt;
-  float wall = 0.0;   // outer-perimeter skirt -> plinth wall
-  if (uInfiniteMode < 0.5) {
-    if (uUseTiles > 0.5) {
-      if (uTileShape > 0.5) {
-        if (aWall > 0.5) {
-          // Dedicated radial wall: top follows the same single analytic
-          // terrain sample; the base ring drops to the plinth.
-          wall = aSkirt;
-          skirt = 0.0;
-        } else {
-          // Retain both terrain-toned crack covers. Either neighbour can be
-          // the finer LOD, so fixed-side ownership can expose a T-junction.
-          skirt = aSkirt;
-          wall = 0.0;
-        }
-      } else {
-        // multi-cell square assembly: only skirts on a cell edge facing empty
-        // space become the plinth wall; shared seams stay continuous terrain.
-        vec3 tw = tileWall(wp.xz);
-        float onOuter = step(0.5, tw.x);
-        skirt = aSkirt;
-        wall = aSkirt * onOuter;
-        skirt *= 1.0 - onOuter;
-        wp.xz += tw.yz * (wall * uWallThickness);
-      }
-    } else {
-      float bx = abs(wp.x);
-      float bz = abs(wp.z);
-      float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
-      // outer-edge skirt verts become the plinth wall; interior skirts unchanged
-      wall = skirt * step(0.5, onOuter);
-      skirt *= 1.0 - step(0.5, onOuter);
-      // flare the wall base outward (away from the board) so it sits OUTSIDE the
-      // water plane edge — no z-fighting with the water, and it leans over any
-      // terrain edge that dips below the waterline so the side never shows through.
-      vec2 outDir = vec2(step(uBoardHalf - 1.0, bx) * sign(wp.x),
-                         step(uBoardHalf - 1.0, bz) * sign(wp.z));
-      wp.xz += outDir * (wall * uWallThickness);
-    }
-  }
-
-  // interior skirt drops by uSkirtDepth; the perimeter wall drops all the way to
-  // the plinth base so the terrain's own edge masks the under-the-map view at
-  // whatever LOD the border chunks are rendered at.
-  wp.y = mix(h - skirt * uSkirtDepth, uPlinthBaseY, wall);
-
-  vWorldPos = wp.xyz;
-  vLod = aLod;
-  vSkirt = max(skirt, wall);
-  vWall = wall;
-  vWallMesh = aWall;
-
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`;
-};
 
 const DEFAULT_TERRAIN_GRAPH_COLOR_GLSL = /* glsl */ `
 vec3 applyTerrainGraphColor(vec3 fallback, vec2 xz, float h01, float slope, float detail, float moisture) {
@@ -383,48 +296,175 @@ function resolveTerrainVariant(variant = 'full') {
     // With zero Manual paint coverage the atlas graph is a provable no-op.
     // Preserve the exact terrain/detail result and defer that large graph until
     // a surface-paint tool or loaded document actually needs it.
-    return { name: 'manual-empty', detail: true, surface: false, manual: true };
+    return { name: 'manual-empty', detail: true, surface: false, manual: true, manualSurface: false };
   }
   if (variant === 'manual') {
-    return { name: 'manual', detail: true, surface: true, manual: true };
+    return { name: 'manual', detail: true, surface: true, manual: true, manualSurface: true };
   }
   if (variant === 'hybrid-surface') {
-    return { name: 'hybrid-surface', detail: false, surface: true, manual: false, tileOnly: true };
+    return { name: 'hybrid-surface', detail: false, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
   if (variant === 'hybrid') {
-    return { name: 'hybrid', detail: true, surface: true, manual: false, tileOnly: true };
+    return { name: 'hybrid', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
-  if (variant === 'base') return { name: 'base', detail: false, surface: false };
-  if (variant === 'detail') return { name: 'detail', detail: true, surface: false };
-  if (variant === 'surface') return { name: 'surface', detail: false, surface: true };
-  return { name: 'full', detail: true, surface: true, manual: false };
+  if (variant === 'base') return { name: 'base', detail: false, surface: false, manualSurface: false };
+  if (variant === 'detail') return { name: 'detail', detail: true, surface: false, manualSurface: false };
+  if (variant === 'surface') return { name: 'surface', detail: false, surface: true, manualSurface: false };
+  return { name: 'full', detail: true, surface: true, manual: false, manualSurface: false };
 }
+
+const resolveTerrainWorldMode = (worldMode) => (
+  worldMode === 'infinite' || worldMode === 'shared' ? worldMode : 'studio'
+);
+
+const buildTerrainCacheGLSL = (features, worldMode) => {
+  if (features.manual) return MANUAL_TERRAIN_CACHE_GLSL;
+  if (features.tileOnly || worldMode === 'studio') return HYBRID_TILE_TERRAIN_CACHE_GLSL;
+  return worldMode === 'infinite'
+    ? INFINITE_FIELD_CACHE_STRICT_GLSL
+    : INFINITE_FIELD_CACHE_GLSL;
+};
+
+const buildVertex = (heightGLSL, variant = 'full', requestedWorldMode = 'studio') => {
+  const worldMode = resolveTerrainWorldMode(requestedWorldMode);
+  const features = resolveTerrainVariant(variant);
+  const manual = features.manual;
+  const terrainCacheGLSL = buildTerrainCacheGLSL(features, worldMode);
+  const commonUniformsGLSL = manual ? MANUAL_COMMON_UNIFORMS_GLSL : TERRAIN_COMMON_UNIFORMS_GLSL;
+  const preview = variant === 'preview';
+  return /* glsl */ `
+${commonUniformsGLSL}
+${NOISE_GLSL}
+${BIOME_GLSL}
+${heightGLSL}
+${terrainCacheGLSL}
+
+uniform float uSkirtDepth;
+uniform float uPlinthBaseY;
+uniform float uWallThickness;
+${preview ? 'uniform float uEps;' : ''}
+
+attribute float aSkirt;
+attribute float aLod;
+attribute float aWall;   // 1 on the dedicated circular radial-wall mesh, else 0
+
+varying vec3  vWorldPos;
+varying float vLod;
+varying float vSkirt;
+varying float vWall;
+varying float vWallMesh;
+${preview ? 'varying vec3 vTerrainPreviewNormal;' : ''}
+
+void main() {
+  vec4 localPosition = vec4(position, 1.0);
+  #ifdef USE_INSTANCING
+    localPosition = instanceMatrix * localPosition;
+  #endif
+  vec4 wp = modelMatrix * localPosition;
+  float h = terrainCachedHeightAt(wp.xz);
+${preview ? /* glsl */ `
+  // Smooth lighting for the lightweight Node preview. Two extra height
+  // samples per vertex are much cheaper than evaluating the graph per pixel,
+  // and interpolate cleanly across the visible terrain triangles.
+  float normalEps = max(uEps, 0.001);
+  float hNormalX = terrainCachedHeightAt(wp.xz + vec2(normalEps, 0.0));
+  float hNormalZ = terrainCachedHeightAt(wp.xz + vec2(0.0, normalEps));
+  vTerrainPreviewNormal = normalize(vec3(
+    -(hNormalX - h) / normalEps,
+    1.0,
+    -(hNormalZ - h) / normalEps
+  ));
+` : ''}
+
+  float skirt = aSkirt;
+  float wall = 0.0;   // outer-perimeter skirt -> plinth wall
+  if (uInfiniteMode < 0.5) {
+    if (uUseTiles > 0.5) {
+      if (uTileShape > 0.5) {
+        if (aWall > 0.5) {
+          // Dedicated radial wall: top follows the same single analytic
+          // terrain sample; the base ring drops to the plinth.
+          wall = aSkirt;
+          skirt = 0.0;
+        } else {
+          // Retain both terrain-toned crack covers. Either neighbour can be
+          // the finer LOD, so fixed-side ownership can expose a T-junction.
+          skirt = aSkirt;
+          wall = 0.0;
+        }
+      } else {
+        // multi-cell square assembly: only skirts on a cell edge facing empty
+        // space become the plinth wall; shared seams stay continuous terrain.
+        vec3 tw = tileWall(wp.xz);
+        float onOuter = step(0.5, tw.x);
+        skirt = aSkirt;
+        wall = aSkirt * onOuter;
+        skirt *= 1.0 - onOuter;
+        wp.xz += tw.yz * (wall * uWallThickness);
+      }
+    } else {
+      float bx = abs(wp.x);
+      float bz = abs(wp.z);
+      float onOuter = step(uBoardHalf - 1.0, bx) + step(uBoardHalf - 1.0, bz);
+      // outer-edge skirt verts become the plinth wall; interior skirts unchanged
+      wall = skirt * step(0.5, onOuter);
+      skirt *= 1.0 - step(0.5, onOuter);
+      // flare the wall base outward (away from the board) so it sits OUTSIDE the
+      // water plane edge — no z-fighting with the water, and it leans over any
+      // terrain edge that dips below the waterline so the side never shows through.
+      vec2 outDir = vec2(step(uBoardHalf - 1.0, bx) * sign(wp.x),
+                         step(uBoardHalf - 1.0, bz) * sign(wp.z));
+      wp.xz += outDir * (wall * uWallThickness);
+    }
+  }
+
+  // interior skirt drops by uSkirtDepth; the perimeter wall drops all the way to
+  // the plinth base so the terrain's own edge masks the under-the-map view at
+  // whatever LOD the border chunks are rendered at.
+  wp.y = mix(h - skirt * uSkirtDepth, uPlinthBaseY, wall);
+
+  vWorldPos = wp.xyz;
+  vLod = aLod;
+  vSkirt = max(skirt, wall);
+  vWall = wall;
+  vWallMesh = aWall;
+
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+};
 
 const buildFragment = (
   heightGLSL,
   graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
   variant = 'full',
+  requestedWorldMode = 'studio',
 ) => {
+  const worldMode = resolveTerrainWorldMode(requestedWorldMode);
   const features = resolveTerrainVariant(variant);
+  const terrainCacheGLSL = buildTerrainCacheGLSL(features, worldMode);
+  const commonUniformsGLSL = features.manual
+    ? MANUAL_COMMON_UNIFORMS_GLSL
+    : TERRAIN_COMMON_UNIFORMS_GLSL;
+  const terrainHeightGLSL = features.manual || worldMode === 'infinite'
+    ? ''
+    : TERRAIN_HEIGHT_TEX_GLSL;
+  const climateCacheGLSL = features.manual
+    ? MANUAL_TERRAIN_CLIMATE_GLSL
+    : worldMode === 'shared' && !features.tileOnly
+      ? TERRAIN_CLIMATE_CACHE_GLSL
+      : '';
   return /* glsl */ `
 precision highp float;
 
-${features.manual ? MANUAL_COMMON_UNIFORMS_GLSL : COMMON_UNIFORMS_GLSL}
+${commonUniformsGLSL}
 ${features.manual ? '' : IMPORTED_IMAGERY_ALBEDO_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
-${features.manual ? '' : TERRAIN_HEIGHT_TEX_GLSL}
-${features.manual
-    ? MANUAL_TERRAIN_CACHE_GLSL
-    : features.tileOnly
-      ? HYBRID_TILE_TERRAIN_CACHE_GLSL
-      : INFINITE_FIELD_CACHE_GLSL}
-${features.manual
-    ? MANUAL_TERRAIN_CLIMATE_GLSL
-    : features.tileOnly
-      ? ''
-      : TERRAIN_CLIMATE_CACHE_GLSL}
+${terrainHeightGLSL}
+${terrainCacheGLSL}
+${climateCacheGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${graphColorGLSL}
@@ -1024,7 +1064,7 @@ void main() {
 }
 `;
 
-// 1x1 mid-grey fallback so the four surface-texture samplers are always bound
+// 1x1 mid-grey fallback so the two surface-texture samplers are always bound
 // (avoids "no texture" warnings while the real atlas is null / before build).
 let _surfFallbackTex = null;
 function surfFallbackTexture() {
@@ -1317,22 +1357,25 @@ export function createTerrainMaterial(
   options = {},
 ) {
   const variant = resolveTerrainVariant(options.variant).name;
+  const worldMode = resolveTerrainWorldMode(options.worldMode);
   const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);
   const material = new THREE.ShaderMaterial({
     uniforms,
     defines: { OCTAVES: octaves },
-    vertexShader: buildVertex(h, variant),
+    vertexShader: buildVertex(h, variant, worldMode),
     fragmentShader: buildFragment(
       h,
       stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
       variant,
+      worldMode,
     ),
     side: THREE.DoubleSide,
     extensions: { derivatives: true },
   });
   material.userData.terrainVariant = variant;
+  material.userData.terrainWorldMode = worldMode;
   material.userData.heightProgramSig = stackGLSL.sig;
   return material;
 }
@@ -1343,9 +1386,14 @@ export function createInfiniteTerrainMaterial(
   stackGLSL = DEFAULT_STACK_GLSL,
   options = {},
 ) {
-  // A distinct material object keeps mode ownership/disposal simple, while the
-  // identical source + defines let Three.js reuse Tile's compiled GPU program.
-  return createTerrainMaterial(uniforms, octaves, stackGLSL, options);
+  // A distinct material object keeps mode ownership/disposal simple. Infinite
+  // uses a cache-only source, while Studio uses the Tile analytic/bake source;
+  // keeping those programs separate is necessary to avoid reserving both
+  // worlds' sampler sets in a custom-surface fragment shader.
+  return createTerrainMaterial(uniforms, octaves, stackGLSL, {
+    ...options,
+    worldMode: options.worldMode ?? 'infinite',
+  });
 }
 
 /**
@@ -1375,17 +1423,20 @@ export function createBootTerrainMaterial(uniforms, octaves = 7, stackGLSL = DEF
 // served from three's cache.
 export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   const variant = resolveTerrainVariant(options.variant).name;
+  const worldMode = resolveTerrainWorldMode(options.worldMode ?? mat?.userData?.terrainWorldMode);
   const h = resolveTerrainVariant(variant).manual
     ? MANUAL_HEIGHT_GLSL
     : buildHeightGLSL(stackGLSL.body2d);
-  mat.vertexShader = buildVertex(h, variant);
+  mat.vertexShader = buildVertex(h, variant, worldMode);
   mat.fragmentShader = buildFragment(
     h,
     stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
     variant,
+    worldMode,
   );
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.userData.terrainVariant = variant;
+  mat.userData.terrainWorldMode = worldMode;
   mat.userData.heightProgramSig = stackGLSL.sig;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;

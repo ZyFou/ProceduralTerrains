@@ -370,13 +370,16 @@ vec2 manualSurfaceUvAt(vec2 xz) {
 vec4 manualSurfaceWeightsAAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uManualSurfaceTextureA, uv);
+  // Manual Terrain's packed maps are bound to the existing paint biome/props
+  // units while Manual mode is active. Reusing those units avoids adding a
+  // second sampler pair to the terrain surface program.
+  return texture2D(uPaintBiomeTexture, uv);
 }
 
 vec4 manualSurfaceWeightsBAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uManualSurfaceTextureB, uv);
+  return texture2D(uPaintPropsTexture, uv);
 }
 `;
 

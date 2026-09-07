@@ -761,7 +761,7 @@ export class Engine {
       this.uniforms,
       oct,
       this._stackGLSL,
-      { variant: this._targetTerrainVariant() },
+      { variant: this._targetTerrainVariant(), worldMode: 'studio' },
     );
     this.board = new TerrainBoard(this.scene, this.terrainMaterial);
 
@@ -934,10 +934,17 @@ export class Engine {
     uniforms.uPaintBiomeTexture.value = this.paintMode.layers.biomeTexture;
     uniforms.uPaintPropsTexture.value = this.paintMode.layers.propsTexture;
     if (manual) {
-      this.manualTerrain.surfaceField.bind(uniforms);
+      // The Manual surface shader reads its packed A/B maps through the two
+      // existing paint sampler units. This keeps the hybrid/custom terrain
+      // program within WebGL's guaranteed 16 fragment texture units.
+      this.manualTerrain.surfaceField.bind(uniforms, { aliasPaintTextures: true });
       uniforms.uManualSurfaceMode.value = 1;
       uniforms.uManualBaseGenerated.value = this._manualHasGeneratedBase() ? 1 : 0;
     } else {
+      // Clear the alias when returning to a standard project. The field stays
+      // bound so a later lazy allocation cannot put Manual textures back into
+      // the standard paint uniforms.
+      this.manualTerrain?.surfaceField?.bind(uniforms, { aliasPaintTextures: false });
       uniforms.uManualSurfaceMode.value = 0;
       uniforms.uManualBaseGenerated.value = 0;
     }
@@ -3687,7 +3694,10 @@ export class Engine {
     try {
       warm = [nodePreviewMaterial
         ? createBootTerrainMaterial(this.uniforms, oct, sg)
-        : createTerrainMaterial(this.uniforms, oct, sg, { variant: terrainVariant })];
+        : createTerrainMaterial(this.uniforms, oct, sg, {
+          variant: terrainVariant,
+          worldMode: modeAtStart === 'infinite' ? 'infinite' : 'studio',
+        })];
       const waterActive = this.params.waterEnabled !== false;
       if ((heightSourceChanged || octavesChanged) && waterActive) {
         if (this.worldMode === 'infinite') {
@@ -3814,14 +3824,20 @@ export class Engine {
         }
         if (modeAtStart === 'studio') {
           if (nodePreviewMaterial) rebuildTerrainPreviewShaderSource(this.terrainMaterial, sg);
-          else rebuildTerrainShaderSource(this.terrainMaterial, sg, { variant: terrainVariant });
+           else rebuildTerrainShaderSource(this.terrainMaterial, sg, {
+             variant: terrainVariant,
+             worldMode: 'studio',
+           });
           if (heightSourceChanged
               && this.waterMaterial
               && !this.waterSystem?.ownsMaterial?.(this.waterMaterial)) {
             rebuildWaterShaderSource(this.waterMaterial, sg);
           }
         } else if (this._infiniteTerrainMat) {
-          rebuildTerrainShaderSource(this._infiniteTerrainMat, sg, { variant: terrainVariant });
+          rebuildTerrainShaderSource(this._infiniteTerrainMat, sg, {
+            variant: terrainVariant,
+            worldMode: 'infinite',
+          });
         }
         if (heightSourceChanged && this._infiniteWaterMat && !this.waterSystem?.ownsMaterial(this._infiniteWaterMat)) {
           rebuildWaterShaderSource(this._infiniteWaterMat, sg);
@@ -6845,7 +6861,10 @@ export class Engine {
       const t0 = performance.now();
       const oct = this.terrainMaterial.defines.OCTAVES;
       const heightProgram = this._activeHeightProgram('studio');
-      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, { variant });
+      const warm = createTerrainMaterial(this.uniforms, oct, heightProgram, {
+        variant,
+        worldMode: 'studio',
+      });
       const targetSnapshot = this._resolveCameraCompileTarget();
       const workId = `terrain-${variant}`;
       this._bgWorkStart(workId, variant === 'base'
@@ -6878,7 +6897,10 @@ export class Engine {
             this.terrainMaterial.defines.OCTAVES === oct &&
             this._activeHeightProgram('studio').sig === heightProgram.sig) {
           const tSwap = performance.now();
-          rebuildTerrainShaderSource(this.terrainMaterial, heightProgram, { variant });
+          rebuildTerrainShaderSource(this.terrainMaterial, heightProgram, {
+            variant,
+            worldMode: 'studio',
+          });
           swapMs = performance.now() - tSwap;
           swapped = true;
           this._needsRender = true;
@@ -8920,7 +8942,7 @@ export class Engine {
       this.uniforms,
       oct,
       this._stackGLSL,
-      { variant: this._targetTerrainVariant() },
+      { variant: this._targetTerrainVariant(), worldMode: 'infinite' },
     );
     this._infiniteTerrainMat.userData.modeCacheRole = 'infinite-terrain';
     this._infiniteTerrainMat.wireframe = p.wireframe;
@@ -10271,7 +10293,10 @@ export class Engine {
       this.uniforms,
       oct,
       program,
-      { variant },
+      {
+        variant,
+        worldMode: mode === 'infinite' ? 'infinite' : 'studio',
+      },
     );
     this._terrainVariantCompiling = true;
     this._bgWorkStart('terrain-variant', `Preparing ${variant} terrain shader…`);
@@ -10319,7 +10344,10 @@ export class Engine {
         ? this._infiniteTerrainMat
         : this.terrainMaterial;
       if (!target || target.userData?.minimalFragment) return false;
-      rebuildTerrainShaderSource(target, program, { variant });
+      rebuildTerrainShaderSource(target, program, {
+        variant,
+        worldMode: mode === 'infinite' ? 'infinite' : 'studio',
+      });
       this._needsRender = true;
       this._terrainVariantRetryCount = 0;
       this._terrainVariantFailed = false;

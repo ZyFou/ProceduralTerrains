@@ -11,17 +11,42 @@ export function surfaceAtlasSuperseded() {
 
 // The UI owns the upload URLs. Send immutable, structured-cloneable Blobs, not
 // the UI's module-local Map or URLs that replacing an upload can revoke.
-export async function captureSurfaceAtlasMaps(source, { resolveUrl, signal } = {}) {
+async function collectSurfaceAtlasMapRefs(source, { resolveUrl, signal } = {}) {
   if (normalizeSurfaceTextureSource({ surfaceTextureSource: source }) !== SURFACE_TEXTURE_SOURCE.CUSTOM) return null;
   const resolve = resolveUrl || (await import('./SurfaceLibrary.js')).resolveCustomMapUrl;
   const maps = {};
-  const reads = new Map();
-  const pending = [];
   for (const role of SURFACE_TEXTURE_ROLES) {
     maps[role.id] = Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, () => ({}));
     for (let variant = 0; variant < SURFACE_TEXTURE_VARIANT_COUNT; variant += 1) {
       for (const slot of SLOTS) {
         const url = resolve(role.id, slot, variant);
+        if (!url) continue;
+        maps[role.id][variant][slot] = url;
+      }
+    }
+  }
+  // Abort as soon as the user changes source or cancels; this helper may
+  // execute while the upload source is transiently reconfigured.
+  if (signal?.aborted) throw Object.assign(new Error('Engine command cancelled'), { code: 'ENGINE_COMMAND_CANCELLED' });
+  return maps;
+}
+
+export async function captureSurfaceAtlasMapRefs(source, { resolveUrl, signal } = {}) {
+  return collectSurfaceAtlasMapRefs(source, { resolveUrl, signal });
+}
+
+// Legacy path for environments that need immutable blobs to cross the boundary.
+// This remains for environments that cannot (or should not) fetch object URLs
+// from the renderer worker.
+export async function captureSurfaceAtlasMaps(source, { resolveUrl, signal } = {}) {
+  const maps = await collectSurfaceAtlasMapRefs(source, { resolveUrl, signal });
+  if (!maps) return null;
+  const reads = new Map();
+  const pending = [];
+  for (const role of SURFACE_TEXTURE_ROLES) {
+    for (let variant = 0; variant < SURFACE_TEXTURE_VARIANT_COUNT; variant += 1) {
+      for (const slot of SLOTS) {
+        const url = maps[role.id]?.[variant]?.[slot];
         if (!url) continue;
         if (!reads.has(url)) {
           reads.set(url, fetch(url, { signal }).then((response) => {

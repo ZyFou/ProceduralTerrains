@@ -63,6 +63,7 @@ export class ManualSurfacePaintField {
     this._uploadAPending = false;
     this._uploadBPending = false;
     this._boundUniforms = null;
+    this._aliasPaintTextures = false;
     this._scratchCurrent = new Float32Array(CHANNEL_COUNT);
     this._scratchNext = new Float32Array(CHANNEL_COUNT);
     this._scratchAverage = new Float32Array(CHANNEL_COUNT);
@@ -85,11 +86,19 @@ export class ManualSurfacePaintField {
     this.textureB.version = previousTextureB.version;
     previousTextureA.dispose();
     previousTextureB.dispose();
-    if (this._boundUniforms) {
-      this._boundUniforms.uManualSurfaceTextureA.value = this.textureA;
-      this._boundUniforms.uManualSurfaceTextureB.value = this.textureB;
-    }
+    this._bindTexturesToUniforms();
     return true;
+  }
+
+  _bindTexturesToUniforms() {
+    if (!this._boundUniforms) return;
+    const uniforms = this._boundUniforms;
+    if (uniforms.uManualSurfaceTextureA) uniforms.uManualSurfaceTextureA.value = this.textureA;
+    if (uniforms.uManualSurfaceTextureB) uniforms.uManualSurfaceTextureB.value = this.textureB;
+    if (this._aliasPaintTextures) {
+      if (uniforms.uPaintBiomeTexture) uniforms.uPaintBiomeTexture.value = this.textureA;
+      if (uniforms.uPaintPropsTexture) uniforms.uPaintPropsTexture.value = this.textureB;
+    }
   }
 
   _readBounds() {
@@ -173,11 +182,11 @@ export class ManualSurfacePaintField {
     return this._syncBounds();
   }
 
-  bind(uniforms) {
+  bind(uniforms, { aliasPaintTextures = false } = {}) {
     if (!uniforms) return;
     this._boundUniforms = uniforms;
-    uniforms.uManualSurfaceTextureA.value = this.textureA;
-    uniforms.uManualSurfaceTextureB.value = this.textureB;
+    this._aliasPaintTextures = aliasPaintTextures === true;
+    this._bindTexturesToUniforms();
     this._applyBoundsToUniforms();
   }
 

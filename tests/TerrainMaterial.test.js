@@ -19,8 +19,8 @@ afterEach(() => {
 describe('shared Tile and Infinite terrain program', () => {
   it('builds byte-identical full shader programs for both modes', () => {
     const uniforms = createTerrainUniforms();
-    const tile = createTerrainMaterial(uniforms, 7);
-    const infinite = createInfiniteTerrainMaterial(uniforms, 7);
+    const tile = createTerrainMaterial(uniforms, 7, undefined, { worldMode: 'shared' });
+    const infinite = createInfiniteTerrainMaterial(uniforms, 7, undefined, { worldMode: 'shared' });
     materials.push(tile, infinite);
 
     expect(infinite).not.toBe(tile);
@@ -36,8 +36,8 @@ describe('shared Tile and Infinite terrain program', () => {
 
   it('uses one runtime mode uniform instead of preprocessor variants', () => {
     const uniforms = createTerrainUniforms();
-    const tile = createTerrainMaterial(uniforms, 5);
-    const infinite = createInfiniteTerrainMaterial(uniforms, 5);
+    const tile = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'shared' });
+    const infinite = createInfiniteTerrainMaterial(uniforms, 5, undefined, { worldMode: 'shared' });
     materials.push(tile, infinite);
 
     expect(uniforms.uInfiniteMode.value).toBe(0);
@@ -64,7 +64,7 @@ describe('shared Tile and Infinite terrain program', () => {
 
   it('returns fully initialized climate structs on every cache path', () => {
     const uniforms = createTerrainUniforms();
-    const material = createTerrainMaterial(uniforms, 5);
+    const material = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'shared' });
     materials.push(material);
 
     const start = material.fragmentShader.indexOf('Climate terrainCachedClimateAt');
@@ -222,7 +222,7 @@ describe('shared Tile and Infinite terrain program', () => {
 
   it('exposes manual surface weight maps and blends painted material roles', () => {
     const uniforms = createTerrainUniforms();
-    const tile = createTerrainMaterial(uniforms, 5);
+    const tile = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'studio' });
     materials.push(tile);
 
     expect(uniforms.uManualSurfaceMode.value).toBe(0);
@@ -231,8 +231,9 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
     expect(tile.fragmentShader).toContain('manualSurfaceWeightsBAt(wpos.xz)');
     const fragmentSamplers = [...tile.fragmentShader.matchAll(/uniform\s+sampler(?:2D|Cube)\s+([A-Za-z0-9_]+)/g)];
-    // Rolling caches plus the independent Destruction Lab height/scorch field.
-    expect(fragmentSamplers).toHaveLength(23);
+    // Studio keeps only the Tile bake path; Manual weights reuse the paint
+    // biome/props units and the unused spline auxiliary map is omitted.
+    expect(fragmentSamplers).toHaveLength(16);
     expect(tile.fragmentShader).toContain('destructionScorchAt(xz)');
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
@@ -253,8 +254,8 @@ describe('shared Tile and Infinite terrain program', () => {
 
     expect(manual.userData.terrainVariant).toBe('manual');
     expect(fragmentSamplers).toEqual([
-      'uManualSurfaceTextureA',
-      'uManualSurfaceTextureB',
+      'uPaintBiomeTexture',
+      'uPaintPropsTexture',
       'uManualHeightTexture',
       'uDestructionTexture',
       'uTileOccupancy',
@@ -262,8 +263,8 @@ describe('shared Tile and Infinite terrain program', () => {
       'uSurfProps',
     ]);
     expect(vertexSamplers).toEqual([
-      'uManualSurfaceTextureA',
-      'uManualSurfaceTextureB',
+      'uPaintBiomeTexture',
+      'uPaintPropsTexture',
       'uManualHeightTexture',
       'uDestructionTexture',
       'uTileOccupancy',
@@ -296,6 +297,8 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uInfiniteFieldTex0');
     expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uTerrainBiomeTex');
     expect(hybrid.fragmentShader).not.toContain('infiniteFieldSampleAt');
+    expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uManualSurfaceTextureA');
+    expect(hybrid.fragmentShader).not.toContain('uniform sampler2D uManualSurfaceTextureB');
     expect(hybrid.fragmentShader).toContain('return heightAt(xz);');
     expect(hybrid.fragmentShader).toContain('manualSurfaceWeightsAAt(wpos.xz)');
     expect(hybrid.fragmentShader).toContain('if (amount < 0.002) return res;');
