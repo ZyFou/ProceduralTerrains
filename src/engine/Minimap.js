@@ -1,7 +1,13 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const SIZE = 256;
 const SAMPLE_RES = 128;
+const SAMPLE_BATCH = 256;
+const SAMPLE_BUDGET_MS = 4;
+const yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+const sameView = (a, b) => !!a && !!b && a.halfSpan === b.halfSpan
+  && a.centerX === b.centerX && a.centerZ === b.centerZ;
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -39,6 +45,12 @@ export class Minimap {
     this.boardSize = 2048;
     this.maxHeight = 256;
     this._dirty = true;
+    this._revision = 0;
+    this._pendingFrame = null;
+    this._baseData = null;
+    this._spareData = null;
+    this._disposed = false;
+    this._stats = { completed: 0, discarded: 0, samples: 0, maxBatchMs: 0, errors: 0 };
     this._hover = null;
     this._lastView = null;
     this._baseImage = null;
@@ -65,6 +77,7 @@ export class Minimap {
 
   setCanvases(baseCanvas, overlayCanvas) {
     if (!baseCanvas || !overlayCanvas) {
+      this.requestRedraw();
       this.baseCanvas = null; this.overlayCanvas = null; this.baseCtx = null; this.overlayCtx = null;
       return;
     }
@@ -95,7 +108,6 @@ export class Minimap {
     if (
       prev.mode !== this.config.mode
       || prev.zoom !== this.config.zoom
-      || prev.showChunkGrid !== this.config.showChunkGrid
     ) {
       this.requestRedraw();
     }
@@ -106,7 +118,14 @@ export class Minimap {
   }
 
   requestRedraw() {
+    this._revision += 1;
     this._dirty = true;
+  }
+
+  getDiagnostics() {
+    return { ...this._stats, pending: !!this._pendingFrame, revision: this._revision,
+      resolution: SIZE, sampleResolution: SAMPLE_RES, batchSamples: SAMPLE_BATCH,
+      batchBudgetMs: SAMPLE_BUDGET_MS };
   }
 
   _viewState() {
@@ -154,6 +173,37 @@ export class Minimap {
       paintBiomeWeights,
     });
     return { ...surface, propsMask };
+  }
+
+  _sampleForMode(x, z) {
+    const sampler = this.sources.sampler;
+    // Analytical views consume only one field. Keep _sample's full surface
+    // result for hover details and samplers exposing only sampleSurfaceInfo.
+    switch (this.config.mode) {
+      case 'height':
+      case 'water':
+        if (sampler?.heightAt) {
+          const height = sampler.heightAt(x, z) + (this.sources.getPaintHeightOffset?.(x, z) ?? 0);
+          return { height, water: height <= (this.sources.getWaterLevel?.() ?? 0) + 0.01 };
+        }
+        break;
+      case 'noise':
+        if (sampler?.shapeAt) return { noise: sampler.shapeAt(x, z) };
+        break;
+      case 'biome':
+        if (sampler?.biomeAt) {
+          return { biome: sampler.biomeAt(x, z, this.sources.getPaintBiomeWeights?.(x, z) ?? null).label };
+        }
+        break;
+      case 'slope':
+        if (sampler?.normalAt) return { slope: clamp(1 - sampler.normalAt(x, z, 2.0).y, 0, 1) };
+        break;
+      case 'props':
+        return { propsMask: this.sources.getPropsMask?.(x, z) ?? { grass: 0, flowers: 0, mixed: 0 } };
+      default:
+        break;
+    }
+    return this._sample(x, z);
   }
 
   infoAtCanvas(px, py) {
@@ -225,47 +275,93 @@ export class Minimap {
   }
 
   renderBase() {
-    if (!this._dirty || !this.baseCtx) return;
-    this._dirty = false;
-
-    const sampler = this.sources.sampler;
-    if (!sampler) return;
-
-    if (this.config.mode === 'color') {
-      this._renderSceneColor();
-      this._lastView = this._viewState();
-      return;
-    }
-
-    const img = this.baseCtx.createImageData(SIZE, SIZE);
-    const cell = SIZE / SAMPLE_RES;
-    for (let sy = 0; sy < SAMPLE_RES; sy++) {
-      for (let sx = 0; sx < SAMPLE_RES; sx++) {
-        const px = sx * cell + cell * 0.5;
-        const py = sy * cell + cell * 0.5;
-        const world = this.canvasToWorld(px, py);
-        const sample = this._sample(world.x, world.z);
-        const pixel = sample ? this._pixelForMode(sample) : { r: 0, g: 0, b: 0 };
-        for (let oy = 0; oy < cell; oy++) {
-          for (let ox = 0; ox < cell; ox++) {
-            const x = sx * cell + ox;
-            const y = sy * cell + oy;
-            const idx = (y * SIZE + x) * 4;
-            img.data[idx] = pixel.r;
-            img.data[idx + 1] = pixel.g;
-            img.data[idx + 2] = pixel.b;
-            img.data[idx + 3] = 255;
-          }
-        }
-      }
-    }
-    this.baseCtx.putImageData(img, 0, 0);
-    this._baseImage = img;
-    this._lastView = this._viewState();
+    if (!this.baseCtx || this._disposed || this._pendingFrame) return;
+    const context = this.baseCtx;
+    // Rendering/readback submission is synchronous up to the first await. The
+    // engine can restore hidden sky/overlay objects immediately after this call.
+    void this._requestBaseFrame().then((rgba) => {
+      if (!rgba || this._disposed || this.baseCtx !== context) return;
+      if (!this._baseImage) this._baseImage = context.createImageData(SIZE, SIZE);
+      this._baseImage.data.set(rgba);
+      context.putImageData(this._baseImage, 0, 0);
+    }).catch(() => { /* Preserve the last valid image; the next dirty draw retries. */ });
   }
 
-  _renderSceneColor() {
+  _requestBaseFrame() {
+    if (this._disposed) return Promise.resolve(null);
+    if (this._pendingFrame) return this._pendingFrame;
     const view = this._viewState();
+    if (!sameView(view, this._lastView)) this._dirty = true;
+    if (!this._dirty && this._baseData) return Promise.resolve(this._baseData);
+    if (!this.sources.sampler) return Promise.resolve(null);
+
+    const revision = this._revision;
+    const current = () => !this._disposed && revision === this._revision
+      && sameView(view, this._viewState());
+    const rgba = this._spareData || new Uint8ClampedArray(SIZE * SIZE * 4);
+    this._spareData = null;
+    const task = this.config.mode === 'color'
+      ? this._renderSceneColor(view, rgba)
+      : this._renderAnalytical(view, rgba, current);
+    this._pendingFrame = task.then(() => {
+      if (!current()) {
+        this._stats.discarded += 1;
+        this._spareData = rgba;
+        return null;
+      }
+      this._spareData = this._baseData;
+      this._baseData = rgba;
+      this._lastView = view;
+      this._dirty = false;
+      this._stats.completed += 1;
+      return rgba;
+    }, (error) => {
+      this._spareData = rgba;
+      this._stats.errors += 1;
+      throw error;
+    }).finally(() => { this._pendingFrame = null; });
+    return this._pendingFrame;
+  }
+
+  async _renderAnalytical(view, rgba, current) {
+    const cell = SIZE / SAMPLE_RES;
+    const minX = view.centerX - view.halfSpan;
+    const minZ = view.centerZ - view.halfSpan;
+    const spanX = (view.centerX + view.halfSpan) - minX;
+    const spanZ = (view.centerZ + view.halfSpan) - minZ;
+    let index = 0;
+    while (index < SAMPLE_RES * SAMPLE_RES && current()) {
+      const startedAt = performance.now();
+      let count = 0;
+      do {
+        const sx = index % SAMPLE_RES;
+        const sy = Math.floor(index / SAMPLE_RES);
+        // Same cell centres and lerp arithmetic as canvasToWorld, evaluated
+        // against one immutable view instead of rebuilding it 16,384 times.
+        const x = minX + spanX * ((sx * cell + cell * 0.5) / SIZE);
+        const z = minZ + spanZ * ((sy * cell + cell * 0.5) / SIZE);
+        const sample = this._sampleForMode(x, z);
+        const pixel = sample ? this._pixelForMode(sample) : { r: 0, g: 0, b: 0 };
+        for (let oy = 0; oy < cell; oy += 1) {
+          for (let ox = 0; ox < cell; ox += 1) {
+            const offset = (((sy * cell + oy) * SIZE) + sx * cell + ox) * 4;
+            rgba[offset] = pixel.r;
+            rgba[offset + 1] = pixel.g;
+            rgba[offset + 2] = pixel.b;
+            rgba[offset + 3] = 255;
+          }
+        }
+        index += 1;
+        count += 1;
+      } while (index < SAMPLE_RES * SAMPLE_RES && count < SAMPLE_BATCH
+        && performance.now() - startedAt < SAMPLE_BUDGET_MS);
+      this._stats.samples += count;
+      this._stats.maxBatchMs = Math.max(this._stats.maxBatchMs, performance.now() - startedAt);
+      if (index < SAMPLE_RES * SAMPLE_RES) await yieldTask();
+    }
+  }
+
+  async _renderSceneColor(view, rgba) {
     this.camera.left = view.centerX - view.halfSpan;
     this.camera.right = view.centerX + view.halfSpan;
     this.camera.top = view.centerZ + view.halfSpan;
@@ -275,20 +371,24 @@ export class Minimap {
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
 
-    const prevTarget = this.renderer.getRenderTarget();
-    this.renderer.setRenderTarget(this.target);
-    this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
-    this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
-    this.renderer.setRenderTarget(prevTarget);
-
-    const img = this.baseCtx.createImageData(SIZE, SIZE);
-    for (let y = 0; y < SIZE; y++) {
-      const src = (SIZE - 1 - y) * SIZE * 4;
-      img.data.set(this._pixels.subarray(src, src + SIZE * 4), y * SIZE * 4);
+    const renderer = this.renderer;
+    const previous = renderer.getRenderTarget();
+    const face = renderer.getActiveCubeFace?.() ?? 0;
+    const mip = renderer.getActiveMipmapLevel?.() ?? 0;
+    let readback;
+    try {
+      renderer.setRenderTarget(this.target);
+      renderer.clear();
+      renderer.render(this.scene, this.camera);
+      readback = readRenderTargetPixelsAsync(renderer, this.target, 0, 0, SIZE, SIZE, this._pixels);
+    } finally {
+      renderer.setRenderTarget(previous, face, mip);
     }
-    this.baseCtx.putImageData(img, 0, 0);
-    this._baseImage = img;
+    const pixels = await readback;
+    for (let y = 0; y < SIZE; y += 1) {
+      const source = (SIZE - 1 - y) * SIZE * 4;
+      rgba.set(pixels.subarray(source, source + SIZE * 4), y * SIZE * 4);
+    }
   }
 
   _drawChunkGrid(ctx) {
@@ -373,52 +473,11 @@ export class Minimap {
     }
   }
 
-  createFramePacket(controls = this.sources.controls) {
-    const rgba = new Uint8ClampedArray(SIZE * SIZE * 4);
-    if (this.config.mode === 'color') {
-      const view = this._viewState();
-      this.camera.left = view.centerX - view.halfSpan;
-      this.camera.right = view.centerX + view.halfSpan;
-      this.camera.top = view.centerZ + view.halfSpan;
-      this.camera.bottom = view.centerZ - view.halfSpan;
-      this.camera.position.set(view.centerX, this.maxHeight + 2000, view.centerZ);
-      this.camera.lookAt(view.centerX, 0, view.centerZ);
-      this.camera.updateProjectionMatrix();
-      this.camera.updateMatrixWorld(true);
-      const previous = this.renderer.getRenderTarget();
-      try {
-        this.renderer.setRenderTarget(this.target);
-        this.renderer.clear();
-        this.renderer.render(this.scene, this.camera);
-        this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
-      } finally {
-        this.renderer.setRenderTarget(previous);
-      }
-      for (let y = 0; y < SIZE; y += 1) {
-        const source = (SIZE - 1 - y) * SIZE * 4;
-        rgba.set(this._pixels.subarray(source, source + SIZE * 4), y * SIZE * 4);
-      }
-    } else {
-      const cell = SIZE / SAMPLE_RES;
-      for (let sy = 0; sy < SAMPLE_RES; sy += 1) {
-        for (let sx = 0; sx < SAMPLE_RES; sx += 1) {
-          const px = sx * cell + cell * 0.5;
-          const py = sy * cell + cell * 0.5;
-          const world = this.canvasToWorld(px, py);
-          const sample = this._sample(world.x, world.z);
-          const pixel = sample ? this._pixelForMode(sample) : { r: 0, g: 0, b: 0 };
-          for (let oy = 0; oy < cell; oy += 1) {
-            for (let ox = 0; ox < cell; ox += 1) {
-              const index = (((sy * cell + oy) * SIZE) + sx * cell + ox) * 4;
-              rgba[index] = pixel.r;
-              rgba[index + 1] = pixel.g;
-              rgba[index + 2] = pixel.b;
-              rgba[index + 3] = 255;
-            }
-          }
-        }
-      }
-    }
+  async createFramePacket(controls = this.sources.controls) {
+    const data = await this._requestBaseFrame();
+    if (!data || this._disposed) return null;
+    // The worker transfers ownership. Never detach the cached image/buffers.
+    const rgba = data.slice();
     const focus = controls?.target ? this.worldToCanvas(controls.target.x, controls.target.z) : null;
     const view = this._viewState();
     return {
@@ -438,6 +497,17 @@ export class Minimap {
   }
 
   dispose() {
-    this.target.dispose();
+    if (this._disposed) return;
+    this._disposed = true;
+    this.requestRedraw();
+    // Three's async readback still owns its PBO/fence until it settles.
+    const release = () => {
+      this.target.dispose();
+      this._baseData = null;
+      this._spareData = null;
+      this._baseImage = null;
+    };
+    if (this._pendingFrame) this._pendingFrame.then(release, release);
+    else release();
   }
 }

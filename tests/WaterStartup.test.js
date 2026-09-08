@@ -518,7 +518,7 @@ describe('water startup shaders', () => {
       canvasOnly: true,
       renderTarget: sceneTarget,
     })).resolves.toMatchObject({ ready: true });
-    expect(engine.renderer.setRenderTarget.mock.calls).toEqual([[sceneTarget], [previousTarget]]);
+    expect(engine.renderer.setRenderTarget.mock.calls).toEqual([[sceneTarget], [previousTarget, 0, 0]]);
 
     material.dispose();
     engine._warmGeo.dispose();

@@ -59,6 +59,19 @@ describe('WaterPlanarReflectionPass', () => {
     expect(isPlanarReflectionMode('cinematic')).toBe(true);
   });
 
+  it.each(['off', 'legacy', 'realistic', 'volumetric'])('does not build scene revisions for %s water', (mode) => {
+    const pass = new WaterPlanarReflectionPass();
+    const revision = vi.fn(() => 'expensive-scene-snapshot');
+    const renderer = createRenderer();
+    expect(pass.capture(renderer, {}, createCamera(), {
+      params: cinematicParams, mode, worldMode: 'studio', revision,
+    })).toBe(false);
+    expect(revision).not.toHaveBeenCalled();
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(pass.target).toBeNull();
+    pass.dispose();
+  });
+
   it('scales resolution from reflection quality and the shared render scale', () => {
     expect(resolveWaterPlanarReflectionSize({
       width: 1920,
@@ -187,7 +200,7 @@ describe('WaterPlanarReflectionPass', () => {
     pass.dispose();
   });
 
-  it('keeps a static reflection until its scene revision changes', () => {
+  it.each([false, true])('keeps a static reflection until its scene revision changes (lazy=%s)', (lazy) => {
     const pass = new WaterPlanarReflectionPass();
     const renderer = createRenderer();
     const material = createReflectionMaterial();
@@ -198,7 +211,7 @@ describe('WaterPlanarReflectionPass', () => {
       mode: 'cinematic',
       worldMode: 'studio',
       materials: [material],
-      revision: 'camera:1|terrain:4',
+      revision: lazy ? () => 'camera:1|terrain:4' : 'camera:1|terrain:4',
     };
 
     pass.capture(renderer, {}, camera, options);
@@ -208,7 +221,7 @@ describe('WaterPlanarReflectionPass', () => {
 
     pass.capture(renderer, {}, camera, {
       ...options,
-      revision: 'camera:2|terrain:4',
+      revision: lazy ? () => 'camera:2|terrain:4' : 'camera:2|terrain:4',
     });
     expect(renderer.render).toHaveBeenCalledTimes(2);
     pass.dispose();

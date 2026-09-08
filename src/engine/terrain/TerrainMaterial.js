@@ -680,6 +680,27 @@ void main() {
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
   if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
+  // Ordinary plinth pixels have a constant fogged colour. Debug/export modes
+  // still need the exact terrain field, including along the perimeter wall.
+  if (vWall > 0.02 && uTileDebugView <= 0.5 && uColorMode <= 0.5) {
+    float wd = length(cameraPosition - vWorldPos);
+    float wfog = 1.0 - exp(-uFogDensity * uFogDensity * wd * wd);
+    vec3 wcol = mix(uPlinthColor, uFogColor, clamp(wfog, 0.0, 1.0));
+    gl_FragColor = vec4(wcol, 1.0);
+    return;
+  }
+
+  // Prop placement reads the rasterized height, which is already interpolated
+  // from the displaced vertices. No analytic climate/height/normal evaluations
+  // are needed for this readback. Keep Tile debug's existing precedence.
+  if (uColorMode > 2.5 && uTileDebugView <= 0.5) {
+    float h01 = clamp(vWorldPos.y / max(uHeightScale, 1e-3), 0.0, 1.0);
+    float hi = floor(h01 * 255.0) / 255.0;
+    float lo = fract(h01 * 255.0);
+    gl_FragColor = vec4(hi, lo, 0.0, 1.0);
+    return;
+  }
+
   // Correctness path: procedural terrain shading uses the same exact climate
   // function as terrain formation. The low-resolution climate cache introduced
   // visible color blocks and stale biome classifications after water changes.
@@ -735,7 +756,11 @@ ${features.manual ? /* glsl */ `
     hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).a * uHeightScale;
     nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
-    hC = terrainCachedHeightAt(xz);
+    // Tile's live heightAt wrapper computes this identical centre climate.
+    // Neighbours retain their own climate and every composed height offset.
+    hC = ${worldMode === 'studio' || features.tileOnly
+      ? 'heightAtWithClimate(xz, cl)'
+      : 'terrainCachedHeightAt(xz)'};
     float normalDistance = length(cameraPosition - vWorldPos);
     bool farInfiniteNormal = uInfiniteMode > 0.5
       && (vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0));
@@ -787,19 +812,6 @@ ${features.manual ? '' : /* glsl */ `
       // mode 1: 8-bit grayscale (heightmap export)
       gl_FragColor = vec4(vec3(h01), 1.0);
     }
-    return;
-  }
-
-  // perimeter plinth wall: flat plinth colour (with fog), no terrain shading.
-  // Placed after the export/debug early-outs so heightmap/minimap stay clean.
-  // vWall interpolates 0 (surface rim vertex) -> 1 (skirt vertex at the base),
-  // so a small threshold colours the whole wall, leaving only a hairline of
-  // terrain colour at the rim where it meets the surface (a natural transition).
-  if (vWall > 0.02) {
-    float wd = length(cameraPosition - vWorldPos);
-    float wfog = 1.0 - exp(-uFogDensity * uFogDensity * wd * wd);
-    vec3 wcol = mix(uPlinthColor, uFogColor, clamp(wfog, 0.0, 1.0));
-    gl_FragColor = vec4(wcol, 1.0);
     return;
   }
 

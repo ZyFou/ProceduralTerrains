@@ -162,6 +162,10 @@ vec3 surfTriRole(sampler2D atlas, int roleIndex, vec3 wp, vec3 blend, float tile
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
   float rowFi = surfRenderRowFi(roleIndex);
+  if (uSurfTriplanar <= 0.5) {
+    vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 2.0);
+    return texture2D(atlas, surfAtlasUV(rowFi, uvY)).rgb;
+  }
   vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, 1.0);
   vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 2.0);
   vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, 3.0);
@@ -175,6 +179,13 @@ vec3 surfTriNormalRole(int roleIndex, vec3 wp, vec3 blend, float tile, vec3 nGeo
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
   float rowFi = surfRenderRowFi(roleIndex);
+  if (uSurfTriplanar <= 0.5) {
+    vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 5.0);
+    vec2 ty = texture2D(uSurfProps, surfAtlasUV(rowFi, uvY)).rg * 2.0 - 1.0;
+    ty.y = -ty.y;
+    vec3 wY = normalize(nGeo + vec3(ty.x, 0.0, ty.y));
+    return normalize(wY);
+  }
   vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, 4.0);
   vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 5.0);
   vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, 6.0);
@@ -194,6 +205,10 @@ vec2 surfTriPropertiesRole(int roleIndex, vec3 wp, vec3 blend, float tile) {
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
   float rowFi = surfRenderRowFi(roleIndex);
+  if (uSurfTriplanar <= 0.5) {
+    vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 9.0);
+    return texture2D(uSurfProps, surfAtlasUV(rowFi, uvY)).ba;
+  }
   vec2 uvX = surfRandomizedUV(wp.zy * inv, roleFi, 8.0);
   vec2 uvY = surfRandomizedUV(wp.xz * inv, roleFi, 9.0);
   vec2 uvZ = surfRandomizedUV(wp.xy * inv, roleFi, 10.0);
