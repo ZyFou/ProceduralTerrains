@@ -345,7 +345,7 @@ export class Engine {
     this._lastHudUpdate = 0;
     this._lastTimeOfDayEmit = 0;
     this._frames = 0;
-    this._fpsTime = 0;
+    this._fpsTime = null;
     this._fps = 0;
     // On-demand studio rendering: skip the scene draw when nothing changed
     // (static camera, no animated layers). Saves GPU/heat on weak machines.
@@ -400,8 +400,8 @@ export class Engine {
     this._worldCompileGate = null;
     this._worldCompileSerial = 0;
     this._bgWork = new Map();   // id → label of non-blocking background compiles
-    // The underwater render-target program variants are deferred from boot and
-    // warmed lazily on first approach to water (see _warmUnderwaterShaders).
+    // Prepare the underwater composite at boot when water is enabled. Newly
+    // enabled water and resized targets use the same small-pass warmup lazily.
     this._underwaterWarmed = false;
     this._underwaterWarmIdentity = null;
     this._underwaterWarmPromise = null;
@@ -646,8 +646,12 @@ export class Engine {
     // intent-bearing events (not passive mouse movement) so an idle cursor does
     // not postpone the upgrade forever.
     this._lastUserActivityAt = performance.now();
-    this._onUserActivity = () => { this._lastUserActivityAt = performance.now(); };
+    this._onUserActivity = (event) => {
+      if (event?.type === 'pointermove' && !event.buttons && event.pointerType !== 'touch') return;
+      this._lastUserActivityAt = performance.now();
+    };
     window.addEventListener('pointerdown', this._onUserActivity, true);
+    window.addEventListener('pointermove', this._onUserActivity, { capture: true, passive: true });
     window.addEventListener('wheel', this._onUserActivity, { capture: true, passive: true });
     window.addEventListener('keydown', this._onUserActivity, true);
 
@@ -4791,7 +4795,7 @@ export class Engine {
         this.scene,
         this.camera,
         sceneSize,
-        revision,
+        revision ?? (() => this._sceneRevisionKey(sceneSize, true)),
       );
     } finally {
       this.profiler.end('water-reflection');
@@ -4919,6 +4923,8 @@ export class Engine {
         this._lastSharedOpaqueStats = {
           triangles: this.renderer.info.render.triangles,
           drawCalls: this.renderer.info.render.calls,
+          points: this.renderer.info.render.points,
+          lines: this.renderer.info.render.lines,
         };
       } finally {
         this.renderer.setRenderTarget(previousTarget);
@@ -5029,6 +5035,10 @@ export class Engine {
         + (this.renderer.info.render.triangles || 0),
       drawCalls: (this._lastSharedOpaqueStats?.drawCalls || 0)
         + (this.renderer.info.render.calls || 0),
+      points: (this._lastSharedOpaqueStats?.points || 0)
+        + (this.renderer.info.render.points || 0),
+      lines: (this._lastSharedOpaqueStats?.lines || 0)
+        + (this.renderer.info.render.lines || 0),
     };
   }
 
@@ -5048,18 +5058,19 @@ export class Engine {
       target,
       triangles: this.renderer.info.render.triangles,
       drawCalls: this.renderer.info.render.calls,
+      points: this.renderer.info.render.points,
+      lines: this.renderer.info.render.lines,
     };
   }
 
   _applyUnderwaterFromSharedTarget(target) {
     if (!this.underwater?.active || !target) return target;
     this._ensureUnderwaterWarmTarget(target);
-    const currentIdentity = this._captureUnderwaterWarmIdentity(target);
+    const currentIdentity = this._captureUnderwaterWarmIdentity();
     if (!this._underwaterWarmed
         || !this._sameUnderwaterWarmIdentity(this._underwaterWarmIdentity, currentIdentity)) {
-      // Never enter a post-process variant while its exact scene topology,
-      // material versions, or render targets are still linking. Keep the
-      // already-rendered scene visible for this frame.
+      // The scene has already rendered to its camera target. Only the composite
+      // program must be ready before this extra pass can consume that image.
       this._underwaterWarmed = false;
       this._underwaterWarmIdentity = null;
       void this._warmUnderwaterShaders(target);
@@ -6404,6 +6415,13 @@ export class Engine {
       this._waterWarmRetryCount = 0;
       this._waterWarmFailed = false;
       if (this.water?.material) this.water.visible = true;
+      if (this.underwater?.enabled) {
+        // Prepare the small fullscreen pass under the boot cover. The world
+        // programs are already prepared for their camera target above.
+        const underwaterReady = await this._warmUnderwaterShaders(target.renderTarget);
+        context.assertCurrent();
+        if (!underwaterReady) throw new Error('Underwater composite shader did not become ready');
+      }
     }
     context.progress('Compiling final shaders…', materials.length, materials.length);
     return {
@@ -7426,67 +7444,26 @@ export class Engine {
     return true;
   }
 
-  /**
-   * Lazily compile the underwater render-target program variants that were
-   * deferred from boot. Runs WITHOUT bumping _compiling, so the scene keeps
-   * rendering normally (the canvas programs are already linked) while the driver
-   * builds the RT variants on its own threads. Kicked off when the camera nears
-   * the surface so the programs are cached before the first submerged frame —
-   * no dive hitch, and zero cost for sessions that never touch water.
-   */
-  _activeUnderwaterTerrainMaterial() {
-    if (this.worldMode === 'infinite') return this._infiniteTerrainMat ?? null;
-    if (this.worldMode === 'planet') return this.planetWorld?.materials?.[0] ?? null;
-    return this.terrainMaterial ?? null;
-  }
-
-  _captureUnderwaterWarmIdentity(cameraRenderTarget = null) {
-    const unique = new Map();
-    this.scene?.traverse?.((obj) => {
-      if (!obj.material) return;
-      const topology = obj.isInstancedMesh ? 'instanced' : 'mesh';
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const material of mats) {
-        if (!material) continue;
-        const key = `${material.id}:${topology}`;
-        if (!unique.has(key)) {
-          unique.set(key, {
-            material,
-            version: material.version ?? 0,
-            topology,
-          });
-        }
-      }
-    });
-    const variants = [...unique.values()].sort((a, b) => {
-      const idDelta = (a.material?.id ?? 0) - (b.material?.id ?? 0);
-      return idDelta || a.topology.localeCompare(b.topology);
-    });
-    const quadMaterial = this.underwater?._material ?? null;
+  // The underwater composite samples a completed scene color/depth target.
+  // Its shader depends only on its own material and output target: recompiling
+  // every scene material here used to introduce cold hidden/instanced programs
+  // at the near-water threshold and detach clouds throughout that long wait.
+  _captureUnderwaterWarmIdentity() {
+    const material = this.underwater?._material ?? null;
     return {
-      worldMode: this.worldMode,
-      cameraRenderTarget,
+      renderer: this.renderer,
       underwaterRenderTarget: this.underwater?._rt ?? null,
-      quadMaterial,
-      quadVersion: quadMaterial?.version ?? 0,
-      variants,
+      quadMaterial: material,
+      quadVersion: material?.version ?? 0,
     };
   }
 
   _sameUnderwaterWarmIdentity(a, b) {
-    if (!a || !b
-        || a.worldMode !== b.worldMode
-        || a.cameraRenderTarget !== b.cameraRenderTarget
-        || a.underwaterRenderTarget !== b.underwaterRenderTarget
-        || a.quadMaterial !== b.quadMaterial
-        || a.quadVersion !== b.quadVersion
-        || a.variants.length !== b.variants.length) return false;
-    return a.variants.every((variant, index) => {
-      const current = b.variants[index];
-      return variant.material === current.material
-        && variant.version === current.version
-        && variant.topology === current.topology;
-    });
+    return !!a && !!b
+      && a.renderer === b.renderer
+      && a.underwaterRenderTarget === b.underwaterRenderTarget
+      && a.quadMaterial === b.quadMaterial
+      && a.quadVersion === b.quadVersion;
   }
 
   _ensureUnderwaterWarmTarget(cameraRenderTarget = null) {
@@ -7503,128 +7480,65 @@ export class Engine {
 
   _warmUnderwaterShaders(cameraRenderTarget = null) {
     if (this._disposed) return Promise.resolve(false);
-
+    if (this._underwaterWarmPromise) return this._underwaterWarmPromise;
     this._ensureUnderwaterWarmTarget(cameraRenderTarget);
-    const requestedIdentity = this._captureUnderwaterWarmIdentity(cameraRenderTarget);
+    const preparedIdentity = this._captureUnderwaterWarmIdentity();
     if (this._underwaterWarmed
-        && this._sameUnderwaterWarmIdentity(this._underwaterWarmIdentity, requestedIdentity)) {
+        && this._sameUnderwaterWarmIdentity(this._underwaterWarmIdentity, preparedIdentity)) {
       return Promise.resolve(true);
     }
-    if (this._underwaterWarmed) {
-      this._underwaterWarmed = false;
-      this._underwaterWarmIdentity = null;
-    }
-    if (this._underwaterWarmPromise) return this._underwaterWarmPromise;
+    this._underwaterWarmed = false;
+    this._underwaterWarmIdentity = null;
 
     const job = (async () => {
-      // The RT variants must be compiled from the full fragment. Finish the
-      // boot upgrade first so readiness cannot belong to a discarded source.
-      if (this.worldMode === 'studio'
-          && this.terrainMaterial?.userData?.minimalFragment) {
-        const upgraded = await this._upgradeMinimalTerrain();
-        if (upgraded?.ready !== true || this._disposed) return false;
+      // Never submit a cold shader inside the approach frame's render call.
+      await yieldTask();
+      if (this._disposed
+          || !this._sameUnderwaterWarmIdentity(preparedIdentity, this._captureUnderwaterWarmIdentity())) {
+        return false;
       }
-
-      const preparedMode = this.worldMode;
-      const preparedCameraTarget = this._resolveCameraCompileTarget();
-      if (cameraRenderTarget
-          && preparedCameraTarget.renderTarget !== cameraRenderTarget) return false;
-      this._ensureUnderwaterWarmTarget(preparedCameraTarget.renderTarget);
-      const preparedIdentity = this._captureUnderwaterWarmIdentity(
-        preparedCameraTarget.renderTarget,
-      );
-      const preparedTerrain = this._activeUnderwaterTerrainMaterial();
-      let sceneResult = null;
-      let instancedResult = { ready: true };
-      let quadResult = null;
-
-      await this._withStudioCloudDetached(async () => {
-        const skipMaterials = new Set();
-
-        // Infinite terrain's live draw defines USE_INSTANCING. A plain warm
-        // mesh is a different program and was the source of first-dive stalls.
-        if (preparedMode === 'infinite' && preparedTerrain) {
-          const source = this.infiniteWorld?.batches?.meshes?.find(Boolean);
-          if (!source?.geometry) throw new Error('Infinite terrain geometry unavailable');
-          instancedResult = await this._compileInstancedMaterialVariant(
-            preparedTerrain,
-            source.geometry,
-            preparedCameraTarget.renderTarget,
-          );
-          skipMaterials.add(preparedTerrain);
-        }
-
-        // Planet chunks own distinct material objects but share one source and
-        // define set. Compile one representative instead of yielding hundreds
-        // of equivalent warm meshes.
-        if (preparedMode === 'planet') {
-          for (const material of this.planetWorld?.materials?.slice(1) ?? []) {
-            skipMaterials.add(material);
-          }
-        }
-
-        sceneResult = await this._compileSceneStaggered(preparedCameraTarget.renderTarget, {
-          skipMaterials,
-          timeoutMs: 120000,
-        });
-        if (instancedResult?.ready !== true || sceneResult?.ready !== true) {
-          throw new Error('Underwater scene shaders did not become ready');
-        }
-
-        const quad = this.underwater._quadScene?.children?.[0] ?? null;
-        quadResult = await this._compileExactPass({
-          scene: this.underwater._quadScene,
-          camera: this.underwater._quadCam,
-          mesh: quad,
-          material: this.underwater._material,
-          renderTarget: this.underwater._rt,
-        }, { timeoutMs: 120000 });
-        if (quadResult?.ready !== true) {
-          throw new Error('Underwater composite shader did not become ready');
-        }
-      });
-
-      const currentCameraTarget = this._resolveCameraCompileTarget();
-      this._ensureUnderwaterWarmTarget(currentCameraTarget.renderTarget);
-      const currentIdentity = this._captureUnderwaterWarmIdentity(
-        currentCameraTarget.renderTarget,
-      );
-      if (this._disposed || this.worldMode !== preparedMode
-          || !this._sameUnderwaterWarmIdentity(preparedIdentity, currentIdentity)) {
+      const startedAt = performance.now();
+      const result = await this._compileExactPass({
+        scene: this.underwater._quadScene,
+        camera: this.underwater._quadCam,
+        mesh: this.underwater._quadScene?.children?.[0],
+        material: preparedIdentity.quadMaterial,
+        renderTarget: preparedIdentity.underwaterRenderTarget,
+      }, { timeoutMs: 120000 });
+      this.profiler?.setMetric?.('underwaterWarmSubmitMs', result?.syncCompileMs ?? 0);
+      this.profiler?.setMetric?.('underwaterWarmTotalMs', performance.now() - startedAt);
+      if (result?.ready !== true || this._disposed
+          || !this._sameUnderwaterWarmIdentity(preparedIdentity, this._captureUnderwaterWarmIdentity())) {
         return false;
       }
       this._underwaterWarmIdentity = preparedIdentity;
       this._underwaterWarmed = true;
+      this._needsRender = true;
       return true;
     })().catch((error) => {
-      this._underwaterWarmed = false;
-      this._underwaterWarmIdentity = null;
       console.warn('Underwater shader warmup failed', error);
       return false;
     });
 
     const pending = job.finally(() => {
-      if (this._underwaterWarmPromise === pending) {
-        this._underwaterWarmPromise = null;
-      }
+      if (this._underwaterWarmPromise === pending) this._underwaterWarmPromise = null;
     });
     this._underwaterWarmPromise = pending;
     return pending;
   }
 
-  /** Trigger the deferred underwater compile once the camera approaches water. */
-  _maybeWarmUnderwater() {
+  /** Fallback for newly enabled water or a resized target after boot. */
+  _maybeWarmUnderwater(cameraRenderTarget = null) {
     if (this._bootPending || !this.underwater?.enabled) return;
     const wl = this._waterLevel();
     if (wl == null || this.camera.position.y - wl >= 120) return;
-    const cameraTarget = this._resolveCameraCompileTarget().renderTarget;
-    this._ensureUnderwaterWarmTarget(cameraTarget);
-    const currentIdentity = this._captureUnderwaterWarmIdentity(cameraTarget);
+    this._ensureUnderwaterWarmTarget(cameraRenderTarget);
+    if (this._underwaterWarmPromise) return;
     if (this._underwaterWarmed
-        && this._sameUnderwaterWarmIdentity(this._underwaterWarmIdentity, currentIdentity)) return;
-    this._underwaterWarmed = false;
-    this._underwaterWarmIdentity = null;
-    void this._warmUnderwaterShaders(cameraTarget);
+        && this._sameUnderwaterWarmIdentity(
+          this._underwaterWarmIdentity, this._captureUnderwaterWarmIdentity(),
+        )) return;
+    void this._warmUnderwaterShaders(cameraRenderTarget);
   }
   _renderInitialStudioFrame({ frozen = false } = {}) {
     if (this.worldMode !== 'studio' || !this.board?.chunks?.length) return null;
@@ -8953,9 +8867,8 @@ export class Engine {
           : tileDebugView === 'biome' ? 3 : 0)
       : 0;
     this._markTerrainFieldDirty();   // uFrequency / falloff change with the mode
-    // The new mode's materials need their own underwater RT-variant programs;
-    // re-arm the lazy warm so they compile on first approach to water (three's
-    // program cache makes the recompile instant if already built this session).
+    // Recheck the composite output target after a mode transition. Scene
+    // material variants are owned by the mode/camera pipeline itself.
     this._underwaterWarmed = false;
 
     if (mode === 'infinite') return this._enterInfiniteMode({ deferCompile });
@@ -11554,7 +11467,7 @@ export class Engine {
       }
 
       const captureStats = this._renderCameraCapture();
-      this.profiler.captureRenderer(this.renderer);
+      this.profiler.captureRenderer(this.renderer, captureStats);
       const performanceSnapshot = this.profiler.snapshot();
       const diagnostics = this.getPerfDiagnostics();
       const png = await this._canvasToBlob(this.renderer.domElement, 'image/png');
@@ -11664,10 +11577,7 @@ export class Engine {
       const planetLowRes = this.worldMode === 'planet' && !!this.planetCloudLayer?.usesLowRes;
 
       const sharedOpaqueTarget = this._prepareSharedOpaque(plan, sceneSize);
-      this._captureWaterPlanarReflection(
-        sceneSize,
-        this._sceneRevisionKey(sceneSize, true),
-      );
+      this._captureWaterPlanarReflection(sceneSize);
       let rendered;
       if (typeof this.renderer.render === 'function') {
         rendered = this._renderPreparedCameraScene(target, sharedOpaqueTarget);
@@ -11919,6 +11829,15 @@ export class Engine {
   }
 
   applyInputFrame(frame = {}) {
+    // Worker event targets do not bubble to window, where the main-thread
+    // activity listener lives. Without this, interacting workers stay at the
+    // medium/low-tier idle cadence even while dragging or zooming.
+    const interacting = frame.wheel || frame.dragEvents?.length
+      || frame.keyEvents?.length || frame.touchInput
+      || frame.pointerEvents?.some((event) => event.type === 'pointerdown'
+        || event.type === 'pointerup' || event.buttons > 0
+        || event.pointerType === 'touch');
+    if (interacting) this._lastUserActivityAt = performance.now();
     const dispatch = (target, type, payload = {}) => {
       if (target?.dispatchTerrainEvent) target.dispatchTerrainEvent(type, payload);
     };
@@ -12220,7 +12139,6 @@ export class Engine {
 
     this._releaseWarmMaterialsAfterRender();
     this._autoPerfTick(now);
-    this.profiler.captureRenderer(this.renderer);
     this.profiler.endFrame();
   }
   _isRenderedWaterActive() {
@@ -12387,6 +12305,7 @@ export class Engine {
    */
   _continuousRenderInterval(now = performance.now()) {
     if (this._debug?.forceRender || this.exploreMode !== 'none') return 0;
+    if (this.controls?.isSettling) return 0;
     if (now - (this._lastUserActivityAt ?? now) < 900) return 0;
     if (this._landingShowcase) return 1000 / 30;
     if (this.gpuTier === 'low') return 1000 / 24;
@@ -12399,13 +12318,19 @@ export class Engine {
     return interval <= 0 || now - this._lastRenderAt >= interval - 0.5;
   }
 
-  _recordRenderedFrame(now) {
-    this._frames++;
-    if (now - this._fpsTime >= 1000) {
-      this._fps = this._frames;
+  _recordRenderedFrame(now, sceneStats) {
+    if (this._fpsTime == null) this._fpsTime = now;
+    else this._frames++;
+    const elapsed = now - this._fpsTime;
+    if (elapsed >= 1000) {
+      this._fps = Math.round(this._frames * 1000 / elapsed);
       this._frames = 0;
       this._fpsTime = now;
     }
+    this._lastTris = sceneStats.triangles;
+    this._lastDraws = sceneStats.drawCalls;
+    this.profiler.recordRenderedFrame(now, this._fps);
+    this.profiler.captureRenderer(this.renderer, sceneStats);
   }
 
   _tickStudio(dt, now) {
@@ -12523,12 +12448,9 @@ export class Engine {
       // pixel instead of re-evaluating the full height field.
       this._ensureTerrainHeightTexSafely();
 
-      this._maybeWarmUnderwater();
+      this._maybeWarmUnderwater(cameraTarget);
       const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
-      this._captureWaterPlanarReflection(
-        cameraSceneSize,
-        this._sceneRevisionKey(cameraSceneSize, true),
-      );
+      this._captureWaterPlanarReflection(cameraSceneSize);
       const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
       // capture the scene's tri/draw counts BEFORE the low-res cloud composite —
       // renderer.info auto-resets each render(), so the fullscreen composite quad
@@ -12543,7 +12465,7 @@ export class Engine {
       this.visualPost.finish(this.renderer);
       this.profiler.gpu?.frameEnd();
       this.profiler.end('render');
-      this._recordRenderedFrame(now);
+      this._recordRenderedFrame(now, rendered);
 
       // minimap: re-render base only after params settle, marker every frame
       this.profiler.begin('minimap');
@@ -12630,18 +12552,15 @@ export class Engine {
     if (!this._needsRender && !this._renderCadenceDue(now)) return;
     this._needsRender = false;
     this._lastRenderAt = now;
-    this._maybeWarmUnderwater();
     this.profiler.begin('render');
     this.profiler.gpu?.frameBegin();
     const cameraPlan = this._prepareCameraPipeline();
     const cameraSceneSize = this._cameraSceneSize(cameraPlan);
     const cameraTarget = cameraPlan.usesSceneTarget ? this.visualPost.inputTarget : null;
     const infiniteLowRes = !!this.infiniteCloud?.usesLowRes;
+    this._maybeWarmUnderwater(cameraTarget);
     const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
-    this._captureWaterPlanarReflection(
-      cameraSceneSize,
-      this._sceneRevisionKey(cameraSceneSize, true),
-    );
+    this._captureWaterPlanarReflection(cameraSceneSize);
     const rendered = this._renderPreparedCameraScene(cameraTarget, sharedOpaqueTarget);
     const triangles = rendered.triangles;
     const drawCalls = rendered.drawCalls;
@@ -12657,7 +12576,7 @@ export class Engine {
     if (this.infiniteWorld) this.infiniteWorld.notifyTriangles(triangles);
 
     // HUD updates at ~6 Hz
-    this._recordRenderedFrame(now);
+    this._recordRenderedFrame(now, rendered);
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
       if (this.cb.onInfiniteStats) {
@@ -12750,7 +12669,7 @@ export class Engine {
     this.profiler.end('render');
     if (this.planetWorld) this.planetWorld.notifyTriangles(triangles);
 
-    this._recordRenderedFrame(now);
+    this._recordRenderedFrame(now, rendered);
     if (now - this._lastHudUpdate > 160) {
       this._lastHudUpdate = now;
       if (this.cb.onInfiniteStats) {
@@ -13041,6 +12960,7 @@ export class Engine {
     if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility);
     if (this._onUserActivity) {
       window.removeEventListener('pointerdown', this._onUserActivity, true);
+      window.removeEventListener('pointermove', this._onUserActivity, true);
       window.removeEventListener('wheel', this._onUserActivity, true);
       window.removeEventListener('keydown', this._onUserActivity, true);
       this._onUserActivity = null;

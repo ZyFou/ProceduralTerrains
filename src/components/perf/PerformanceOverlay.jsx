@@ -136,7 +136,7 @@ export default function PerformanceOverlay({
             </div>
           </div>
 
-          <GraphCard label="Frame rate" hint="~24 s">
+          <GraphCard label="Frame rate" hint="Scene frames · ~24 s">
             <PerfSparkline
               data={history?.fps}
               color="var(--success)"
@@ -149,7 +149,7 @@ export default function PerformanceOverlay({
             />
           </GraphCard>
 
-          <GraphCard label="Frame time" hint="CPU ms">
+          <GraphCard label="Frame time" hint="Rendered frame · CPU ms">
             <PerfSparkline
               data={history?.frameMs}
               color="var(--accent)"

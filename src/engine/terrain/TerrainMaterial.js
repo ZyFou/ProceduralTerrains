@@ -690,6 +690,17 @@ void main() {
     return;
   }
 
+  // Prop placement reads the rasterized height, which is already interpolated
+  // from the displaced vertices. No analytic climate/height/normal evaluations
+  // are needed for this readback. Keep Tile debug's existing precedence.
+  if (uColorMode > 2.5 && uTileDebugView <= 0.5) {
+    float h01 = clamp(vWorldPos.y / max(uHeightScale, 1e-3), 0.0, 1.0);
+    float hi = floor(h01 * 255.0) / 255.0;
+    float lo = fract(h01 * 255.0);
+    gl_FragColor = vec4(hi, lo, 0.0, 1.0);
+    return;
+  }
+
   // Correctness path: procedural terrain shading uses the same exact climate
   // function as terrain formation. The low-resolution climate cache introduced
   // visible color blocks and stale biome classifications after water changes.
