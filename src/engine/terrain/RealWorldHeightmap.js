@@ -310,14 +310,49 @@ function pickZoom(loc) {
   return 1;
 }
 
-function loadTile(url, signal) {
+function createCanvas(width, height) {
+  const canvas = typeof OffscreenCanvas === 'function'
+    ? new OffscreenCanvas(width, height)
+    : document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+async function previewDataUrl(canvas) {
+  if (typeof canvas.toDataURL === 'function') return canvas.toDataURL('image/png');
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+async function loadTile(url, signal) {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const response = await fetch(url, { signal, mode: 'cors' });
+      if (!response.ok) return null;
+      return await createImageBitmap(await response.blob(), { colorSpaceConversion: 'none' });
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') throw error;
+      return null; // tolerate missing tiles, like the DOM decoder
+    }
+  }
   return new Promise((resolve) => {
     const img = new Image();
+    const finish = (value) => {
+      signal?.removeEventListener('abort', abort);
+      img.onload = img.onerror = null;
+      resolve(value);
+    };
+    const abort = () => { img.src = ''; finish(null); };
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);             // tolerate a missing tile
-    if (signal) signal.addEventListener('abort', () => { img.src = ''; resolve(null); }, { once: true });
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    signal?.addEventListener('abort', abort, { once: true });
     img.src = url;
   });
 }
@@ -339,8 +374,7 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
   const ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
   const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
 
-  const stitch = document.createElement('canvas');
-  stitch.width = nx * TILE; stitch.height = ny * TILE;
+  const stitch = createCanvas(nx * TILE, ny * TILE);
   const sctx = stitch.getContext('2d', { willReadFrequently: true });
 
   const total = nx * ny;
@@ -350,8 +384,15 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const img = await loadTile(tileUrl(z, tx, ty), signal);
       const dx = (tx - tx0) * TILE, dy = (ty - ty0) * TILE;
-      if (img) { sctx.drawImage(img, dx, dy); ok++; }
+      if (img) {
+        try {
+          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+          sctx.drawImage(img, dx, dy);
+          ok++;
+        } finally { img.close?.(); }
+      }
       else { sctx.fillStyle = missingFill; sctx.fillRect(dx, dy, TILE, TILE); }
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       done++; onProgress?.(done / total);
     }
   }
@@ -364,12 +405,11 @@ async function fetchBboxStitched(bbox, z, tileUrl, missingFill, { onProgress, si
   return { imageData, width: imageData.width, height: imageData.height, ok };
 }
 
-function makePreview(floatData, W, H, maxSide = 160) {
+async function makePreview(floatData, W, H, maxSide = 160) {
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const pw = Math.max(1, Math.round(W * scale));
   const ph = Math.max(1, Math.round(H * scale));
-  const c = document.createElement('canvas');
-  c.width = pw; c.height = ph;
+  const c = createCanvas(pw, ph);
   const cx = c.getContext('2d');
   const out = cx.createImageData(pw, ph);
   for (let y = 0; y < ph; y++) {
@@ -383,15 +423,14 @@ function makePreview(floatData, W, H, maxSide = 160) {
     }
   }
   cx.putImageData(out, 0, 0);
-  return c.toDataURL('image/png');
+  return previewDataUrl(c);
 }
 
-function makeColorPreview(rgba, W, H, maxSide = 160) {
+async function makeColorPreview(rgba, W, H, maxSide = 160) {
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const pw = Math.max(1, Math.round(W * scale));
   const ph = Math.max(1, Math.round(H * scale));
-  const c = document.createElement('canvas');
-  c.width = pw; c.height = ph;
+  const c = createCanvas(pw, ph);
   const cx = c.getContext('2d');
   const out = cx.createImageData(pw, ph);
   for (let y = 0; y < ph; y++) {
@@ -407,7 +446,7 @@ function makeColorPreview(rgba, W, H, maxSide = 160) {
     }
   }
   cx.putImageData(out, 0, 0);
-  return c.toDataURL('image/png');
+  return previewDataUrl(c);
 }
 
 /** Effective slippy zoom a bbox will be fetched at (after the tile cap). */
@@ -482,7 +521,7 @@ export async function fetchLocationHeightmap(loc, { onProgress, signal } = {}) {
     elev,
     zoom: z,
     fileName: `${loc.name} (real-world)`,
-    preview: makePreview(floatData, W, H),
+    preview: await makePreview(floatData, W, H),
     meta: { name: loc.name, zoom: z, minElev: minE, maxElev: maxE, source: ELEVATION_SOURCE },
   };
 }
@@ -529,7 +568,7 @@ function samplePatch(patch, u, v) {
  * @param tiles  occupied board cells [{cx, cz}, …]
  * @returns {{floatData, width, height, minElev, maxElev, preview, bounds}}
  */
-export function compositeCellPatches(cells, tiles, { maxSide = 4096 } = {}) {
+export async function compositeCellPatches(cells, tiles, { maxSide = 4096 } = {}) {
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const t of tiles) {
     if (t.cx < minX) minX = t.cx;
@@ -583,7 +622,7 @@ export function compositeCellPatches(cells, tiles, { maxSide = 4096 } = {}) {
     height: H,
     minElev: minE,
     maxElev: maxE,
-    preview: makePreview(floatData, W, H),
+    preview: await makePreview(floatData, W, H),
     bounds: { minX, minZ, maxX, maxZ, cols, rows },
   };
 }
@@ -613,7 +652,7 @@ function sampleColorPatch(patch, u, v, out, oi) {
  * @param cells  object keyed 'cx,cz' → { rgba, width, height }
  * @param tiles  occupied board cells [{cx, cz}, …]
  */
-export function compositeCellImagery(cells, tiles, { maxSide = 4096 } = {}) {
+export async function compositeCellImagery(cells, tiles, { maxSide = 4096 } = {}) {
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const t of tiles) {
     if (t.cx < minX) minX = t.cx;
@@ -654,7 +693,7 @@ export function compositeCellImagery(cells, tiles, { maxSide = 4096 } = {}) {
     rgba,
     width: W,
     height: H,
-    preview: makeColorPreview(rgba, W, H),
+    preview: await makeColorPreview(rgba, W, H),
     bounds: { minX, minZ, maxX, maxZ, cols, rows },
   };
 }

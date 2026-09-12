@@ -1832,6 +1832,7 @@ export class Engine {
     this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
     this._setImportState('height', { loading: true, error: '' });
     this._setImportState('imagery', { loading: true, error: '' });
+    this._realWorldLoadsInFlight = (this._realWorldLoadsInFlight ?? 0) + 1;
     try {
       // Raw-meters anchor patch for cell (0,0). The geo reference lets tile
       // expansion fetch the geographically ADJACENT area for each new cell.
@@ -1929,6 +1930,9 @@ export class Engine {
       this._setImportState('imagery', { loading: false });
       this.cb.onToast(error);
       return false;
+    } finally {
+      this._realWorldLoadsInFlight--;
+      this._needsRender = true;
     }
   }
 
@@ -2045,9 +2049,12 @@ export class Engine {
     // the union minimum) so a network hiccup never leaves the import texture
     // broken — called after every tile resolves so the terrain grows in as
     // each patch arrives instead of waiting for the whole batch.
-    const applyComposite = () => {
+    let compositeRevision = 0;
+    const applyComposite = async () => {
+      const revision = ++compositeRevision;
       if (this.importedMaps.height !== entry) return;
-      const c = compositeCellPatches(geo.cells, this.tiles);
+      const c = await compositeCellPatches(geo.cells, this.tiles);
+      if (revision !== compositeRevision || gen !== this._realWorldSyncGen || this.importedMaps.height !== entry) return;
       entry.floatData = c.floatData;
       entry.width = c.width;
       entry.height = c.height;
@@ -2061,7 +2068,8 @@ export class Engine {
       const imgEntry = this.importedMaps.imagery;
       if (imgEntry && Object.keys(geo.imageryCells).length) {
         try {
-          const ic = compositeCellImagery(geo.imageryCells, this.tiles);
+          const ic = await compositeCellImagery(geo.imageryCells, this.tiles);
+          if (revision !== compositeRevision || gen !== this._realWorldSyncGen || this.importedMaps.imagery !== imgEntry) return;
           imgEntry.rgba = ic.rgba;
           imgEntry.width = ic.width;
           imgEntry.height = ic.height;
@@ -2179,11 +2187,11 @@ export class Engine {
         // (and reset the overlay at its start, so no cleanup needed here)
         if (gen !== this._realWorldSyncGen) return;
         this._rwSetTileLoadProgress(t.cx, t.cz, null);
-        applyComposite();   // reveal this tile's terrain now, don't wait on the rest
+        await applyComposite();   // reveal this tile's terrain now, don't wait on the rest
       }));
       if (gen !== this._realWorldSyncGen) return;
     } else {
-      applyComposite();
+      await applyComposite();
     }
     if (gen !== this._realWorldSyncGen) return;   // newer run owns the overlay now
     this._rwClearTileLoadOverlay();
@@ -11975,6 +11983,10 @@ export class Engine {
   }
 
   _tick() {
+    // Keep the last frame while geographic data downloads/decodes. Retain the
+    // scene so failed loads recover without rebuilding GPU resources.
+    if (this._realWorldLoadsInFlight > 0) return;
+
     // Tab not visible: most browsers pause rAF, but some throttle it to ~1 Hz
     // instead. Skip all work in that case (and don't advance the clock) so a
     // backgrounded tab costs nothing; the next visible frame resumes cleanly.
