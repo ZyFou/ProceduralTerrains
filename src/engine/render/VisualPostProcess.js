@@ -422,6 +422,9 @@ export class VisualPostProcess {
         true,
         requireSceneDepth || requireSharedOpaque
       );
+    } else {
+      this._sceneRT?.dispose();
+      this._sceneRT = null;
     }
     if (requireSharedOpaque) {
       this._opaqueRT = this._ensureTarget(
@@ -431,9 +434,15 @@ export class VisualPostProcess {
         true,
         true
       );
+    } else {
+      this._opaqueRT?.dispose();
+      this._opaqueRT = null;
     }
     if (plan.lookEnabled && plan.needsFinalPass) {
       this._lookRT = this._ensureTarget(this._lookRT, plan.sceneWidth, plan.sceneHeight, false);
+    } else {
+      this._lookRT?.dispose();
+      this._lookRT = null;
     }
     this.update(params || {}, time, sunScreen, sunColor);
     return plan;

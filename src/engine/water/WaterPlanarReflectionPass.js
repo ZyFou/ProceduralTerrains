@@ -207,6 +207,10 @@ export class WaterPlanarReflectionPass {
       return false;
     }
 
+    // Building a scene revision serializes terrain settings and camera matrices.
+    // Legacy/Realistic/disabled water must not pay that cost every scene frame.
+    if (typeof revision === 'function') revision = revision();
+
     const fallbackSize = renderer.getDrawingBufferSize(new THREE.Vector2());
     const sourceWidth = sceneSize?.x ?? sceneSize?.width ?? fallbackSize.x;
     const sourceHeight = sceneSize?.y ?? sceneSize?.height ?? fallbackSize.y;

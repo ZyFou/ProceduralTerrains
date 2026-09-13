@@ -6,10 +6,10 @@
 // a single snapshot instead of scattered booleans and ad-hoc timers.
 //
 // Design rules (see TASK):
-//  - Cheap when the overlay is CLOSED: only frame time + FPS are tracked, with
+//  - Cheap when the overlay is CLOSED: scene counters + frame time/FPS use
 //    a couple of fixed rolling buffers (no allocations per frame, no history
-//    arrays that grow). Detailed section timers and renderer.info capture only
-//    run while `active` (overlay open).
+//    arrays that grow). Detailed section timers and renderer memory/program
+//    capture only run while `active` (overlay open).
 //  - No console spam, no forced GPU sync (GPU timing lives in GPUProfiler and
 //    is polled, never awaited).
 //  - The hot-path methods (`beginFrame`/`endFrame`/`begin`/`end`) must stay
@@ -77,7 +77,8 @@ class PerformanceProfiler {
     this.active = false;
 
     this.frame = new RollingStat(SHORT_WINDOW);   // full-frame CPU time (ms)
-    this.fpsBuf = new RollingStat(FPS_WINDOW);     // instantaneous fps samples
+    this.frameIntervals = new RollingStat(FPS_WINDOW); // rendered-frame intervals
+    this.fps = 0;                                // same one-second value as HUD
 
     this.sections = new Map();   // name -> { stat, _start }
     this.metrics = Object.create(null);
@@ -85,10 +86,11 @@ class PerformanceProfiler {
     this.tasks = new Map();      // id -> task object
     this._taskSeq = 0;
 
-    this._frameStart = 0;
-    this._lastNow = 0;
+    this._frameStart = null;
+    this._lastRenderedAt = null;
+    this._renderedThisFrame = false;
 
-    // renderer.info mirror, refreshed each active frame
+    // Camera-scene counters survive later fullscreen passes and idle callbacks.
     this.render = {
       calls: 0, triangles: 0, points: 0, lines: 0,
       geometries: 0, textures: 0, programs: 0,
@@ -107,18 +109,25 @@ class PerformanceProfiler {
 
   beginFrame(now) {
     this._frameStart = now;
-    if (this._lastNow) {
-      const dtMs = now - this._lastNow;
-      if (dtMs > 0 && dtMs < 1000) this.fpsBuf.push(1000 / dtMs);
+    this._renderedThisFrame = false;
+  }
+
+  recordRenderedFrame(now, fps) {
+    if (this._lastRenderedAt != null && now > this._lastRenderedAt) {
+      // Keep long intervals too: a stall must not disappear from the average.
+      this.frameIntervals.push(now - this._lastRenderedAt);
     }
-    this._lastNow = now;
+    this._lastRenderedAt = now;
+    this._renderedThisFrame = true;
+    this.fps = fps;
   }
 
   endFrame() {
-    if (!this._frameStart) return;
-    const ms = performance.now() - this._frameStart;
-    this.frame.push(ms);
-    this._frameStart = 0;
+    if (this._frameStart == null) return;
+    // Idle/compiling callbacks do not submit a scene frame. Including their
+    // near-zero CPU time made a slow renderer look fast in the overlay.
+    if (this._renderedThisFrame) this.frame.push(performance.now() - this._frameStart);
+    this._frameStart = null;
   }
 
   // ------------------------------------------------------------- section timers
@@ -157,15 +166,16 @@ class PerformanceProfiler {
 
   // --------------------------------------------------------- renderer capture
 
-  captureRenderer(renderer) {
-    if (!this.active || !renderer) return;
+  captureRenderer(renderer, sceneStats) {
+    if (!renderer) return;
     const info = renderer.info;
-    const r = info.render;
+    const r = sceneStats || info.render;
+    this.render.calls = r.drawCalls ?? r.calls ?? 0;
+    this.render.triangles = r.triangles ?? 0;
+    this.render.points = r.points ?? 0;
+    this.render.lines = r.lines ?? 0;
+    if (!this.active) return;
     const m = info.memory;
-    this.render.calls = r.calls;
-    this.render.triangles = r.triangles;
-    this.render.points = r.points;
-    this.render.lines = r.lines;
     this.render.geometries = m.geometries;
     this.render.textures = m.textures;
     this.render.programs = info.programs ? info.programs.length : 0;
@@ -247,8 +257,8 @@ class PerformanceProfiler {
 
     return {
       time: now,
-      fps: Math.round(this.fpsBuf.avg),
-      fpsAvg: Math.round(this.fpsBuf.avg),
+      fps: this.fps,
+      fpsAvg: this.frameIntervals.avg > 0 ? Math.round(1000 / this.frameIntervals.avg) : 0,
       frame: {
         cur: this.frame.cur,
         avg: this.frame.avg,
