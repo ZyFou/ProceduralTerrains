@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Spatial upscaler shader smoke test</title>
+<h1>Camera reconstruction shader checks</h1><pre id="result">Running…</pre>
+<script type="module">
+import source from '../src/engine/render/VisualPostProcess.js?raw';
+import { SPATIAL_UPSCALE_GLSL } from '../src/engine/render/SpatialUpscaler.js';
+import { runCameraShaderSmoke } from './spatial-upscaler.webgl.mjs';
+try {
+  const result = runCameraShaderSmoke(source, SPATIAL_UPSCALE_GLSL);
+  document.querySelector('#result').textContent = JSON.stringify(result, null, 2);
+} catch (error) {
+  document.querySelector('#result').textContent = `FAILED: ${error.stack || error}`;
+  console.error(error);
+}
+</script></html>
