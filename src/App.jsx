@@ -35,6 +35,10 @@ import MinimapOverlay from './components/MinimapOverlay.jsx';
 import PaintPanel from './components/paint/PaintPanel.jsx';
 import ManualTerrainPanel from './components/manual/ManualTerrainPanel.jsx';
 import LoadingOverlay from './components/ui/LoadingOverlay.jsx';
+import ExportDiagnosticsNotice from './components/ui/ExportDiagnosticsNotice.jsx';
+import { useExportDiagnostics } from './export/useExportDiagnostics.js';
+import { estimateExport, exportError, largeExportMessage } from './export/ExportDiagnostics.js';
+import { APP_VERSION } from './constants/app.js';
 import CompileProgressChip from './components/ui/CompileProgressChip.jsx';
 import { classifyToast } from './components/ui/Toast.jsx';
 import { usePopup } from './components/ui/PopupProvider.jsx';
@@ -312,6 +316,7 @@ export default function App() {
   const blockingUpdateRef = useRef(null); // current blocking task's update fn
   const bootedRef = useRef(false);
   const exportFailedRef = useRef(false);
+  const { diagnostics: exportDiagnostics, report: exportReport } = useExportDiagnostics();
 
   // ---- undo / redo history ----
   // Each entry is a JSON string from engine.serializeState() (every setting,
@@ -437,6 +442,10 @@ export default function App() {
           },
           onStatus: (text, busy) => {
             setStatus({ text, busy });
+            if (busy) exportDiagnostics.stage(text);
+            else if (exportDiagnostics.report?.status === 'running' && /context lost/i.test(text)) {
+              exportDiagnostics.record('warning', text);
+            }
             // feed the active blocking task's detail line
             if (busy && blockingUpdateRef.current) blockingUpdateRef.current({ detail: text });
           },
@@ -1711,19 +1720,39 @@ export default function App() {
   }, [undo, redo, splineState.enabled, analysisState.enabled, exploreMode]);
 
   // ---- export: blocking overlay, button disabled via panel busy state ----
-  const onExport = (options) => {
-    exportFailedRef.current = false;
-    return loading.run('export', { blocking: true, label: 'Exporting…', detail: 'Preparing scene…' }, async (update) => {
-      blockingUpdateRef.current = update;
-      try {
-        const exported = await engine().export3DTerrain(options);
-        if (!exported) exportFailedRef.current = true;
-      } finally {
-        blockingUpdateRef.current = null;
-      }
-    }).then(() => {
-      if (!exportFailedRef.current) showToast('Export complete', 'success');
+  const onExport = async (options) => {
+    if (exportDiagnostics.report?.status === 'running') return;
+    const currentEngine = engine();
+    const context = { worldMode, boardSize, tiles, tileAssemblyShape };
+    const estimate = estimateExport(options, context);
+    if (estimate.large && !await showConfirm({
+      title: 'Large terrain export', message: largeExportMessage(estimate),
+      confirmLabel: 'Export anyway', cancelLabel: 'Reduce settings',
+    })) return;
+    exportDiagnostics.start({ ...context, options: { ...options }, estimate,
+      appVersion: APP_VERSION, userAgent: navigator.userAgent,
+      renderer: currentEngine.rendererConfig, params: { ...currentEngine.params },
+      projectMode: currentEngine.projectMode, gpuName: currentEngine.gpuName,
+      capabilities: currentEngine.rendererCapabilities, performance: currentEngine.perf,
+      deviceMemoryGB: navigator.deviceMemory, hardwareConcurrency: navigator.hardwareConcurrency,
     });
+    exportFailedRef.current = false;
+    try {
+      await loading.run('export', { blocking: true, label: 'Exporting…', detail: 'Preparing scene…' }, async (update) => {
+        blockingUpdateRef.current = update;
+        try {
+          const exported = await currentEngine.export3DTerrain(options);
+          if (!exported) throw new Error('Export was blocked or did not finish. Check the export settings.');
+        } finally {
+          blockingUpdateRef.current = null;
+        }
+      });
+      exportDiagnostics.finish();
+      if (!exportFailedRef.current) showToast('Export complete', 'success');
+    } catch (error) {
+      exportFailedRef.current = true;
+      exportDiagnostics.finish(exportError(error));
+    }
   };
 
   const onExportScreenshot = () => { engine().exportScreenshot(); };
@@ -2806,6 +2835,7 @@ export default function App() {
 
           <CompileProgressChip progress={compileProgress} />
           {showBlockingOverlay && <LoadingOverlay task={block} />}
+          <ExportDiagnosticsNotice report={exportReport} />
         </div>
 
         {showToolPanels && drawerOpen && (

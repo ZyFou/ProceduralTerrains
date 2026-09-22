@@ -1,3 +1,5 @@
+import { exportError } from '../../export/ExportDiagnostics.js';
+
 /**
  * Backend-neutral render-target readback. WebGLRenderer accepts a caller-owned
  * buffer while the universal renderer returns one, so callers use this single
@@ -17,16 +19,23 @@ export async function readRenderTargetPixelsAsync(
   if (renderer.isWebGLRenderer) {
     const output = buffer || new Uint8Array(width * height * 4);
     if (typeof renderer.readRenderTargetPixelsAsync === 'function') {
-      await renderer.readRenderTargetPixelsAsync(
-        renderTarget,
-        x,
-        y,
-        width,
-        height,
-        output,
-        faceIndex,
-        textureIndex,
-      );
+      try {
+        if (renderer.getContext?.()?.isContextLost?.()) throw new Error('Graphics context is lost');
+        await renderer.readRenderTargetPixelsAsync(
+          renderTarget,
+          x,
+          y,
+          width,
+          height,
+          output,
+          faceIndex,
+          textureIndex,
+        );
+      } catch (reason) {
+        const error = exportError(reason, 'GPU readback failed without an error message (the graphics device may have been lost)');
+        error.code ||= 'GPU_READBACK_FAILED';
+        throw error;
+      }
     } else {
       renderer.readRenderTargetPixels(renderTarget, x, y, width, height, output, faceIndex);
     }
@@ -47,4 +56,16 @@ export async function readRenderTargetPixelsAsync(
   );
   if (buffer && output !== buffer) buffer.set(output);
   return buffer || output;
+}
+
+// Restore the caller's target and free temporary GPU storage even on rejection.
+export async function withExportRenderTarget(renderer, target, operation) {
+  const previous = renderer.getRenderTarget();
+  try {
+    renderer.setRenderTarget(target);
+    return await operation();
+  } finally {
+    renderer.setRenderTarget(previous);
+    target.dispose();
+  }
 }

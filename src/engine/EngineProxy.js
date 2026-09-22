@@ -2,6 +2,7 @@ import { hasStoredPerfSettings, loadPerfSettings } from './render/PerformanceSet
 import { InputFrameBridge } from './InputFrameBridge.js';
 import { MinimapPresenter } from './MinimapPresenter.js';
 import { saveBlob } from '../platform/DesktopBridge.js';
+import { exportError } from '../export/ExportDiagnostics.js';
 import { parseShaderBenchmarkOptions } from './render/ShaderBenchmark.js';
 
 const DEVELOPMENT_WORKER_OVERRIDE = import.meta.env.DEV && typeof location !== 'undefined'
@@ -290,7 +291,10 @@ export class EngineClient {
         this._applyEvent(name, args, seq);
         if (name === 'onArtifact') {
           const artifact = args[0];
-          void saveBlob(artifact.blob, artifact.filename, { mime: artifact.mime });
+          const saving = saveBlob(artifact.blob, artifact.filename, { mime: artifact.mime })
+            .then((result) => ({ result }), (error) => ({ error: exportError(error, 'Could not save export') }));
+          if (this.exportArtifactSaves) this.exportArtifactSaves.push(saving);
+          else void saving.then(({ error }) => { if (error) callbacks.onToast?.(`Export failed: ${error.message}`); });
           return;
         }
         callbacks[name]?.(...args);
@@ -307,6 +311,18 @@ export class EngineClient {
   command(method, args = [], options = {}) {
     if (this.disposed) throw Object.assign(new Error('Engine client disposed'), { code: 'ENGINE_DISPOSED' });
     if (options.signal?.aborted) throw Object.assign(new Error('Engine command cancelled'), { code: 'ENGINE_COMMAND_CANCELLED' });
+    if (method === 'export3DTerrain') {
+      if (this.exportArtifactSaves) return Promise.reject(new Error('An export is already running'));
+      const saves = this.exportArtifactSaves = [];
+      return Promise.resolve().then(() => this.transport.invoke(method, args, options)).then(async (result) => {
+        const outcomes = await Promise.all(saves);
+        for (const outcome of outcomes) {
+          if (outcome.error) throw outcome.error;
+          if (outcome.result?.canceled) throw new Error('Export save was canceled');
+        }
+        return result;
+      }).finally(() => { this.exportArtifactSaves = null; this._refreshSnapshot(); });
+    }
     const result = this.transport.invoke(method, args, options);
     if (result && typeof result.then === 'function') return result.finally(() => this._refreshSnapshot());
     this._refreshSnapshot();

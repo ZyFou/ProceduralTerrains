@@ -2,7 +2,8 @@
 // WaterMasks — CPU-side mask generation from terrain height data.
 // Used for debug previews and export; not regenerated every frame.
 // ============================================================================
-import { saveDataUrl } from '../../platform/DesktopBridge.js';
+import { saveBlob } from '../../platform/DesktopBridge.js';
+import { canvasPngBytes } from '../../export/ExportEncoding.js';
 
 /**
  * Generate water-related masks from a height sampler.
@@ -96,7 +97,7 @@ function smoothstep(edge0, edge1, x) {
 }
 
 /** Convert a float mask to PNG data URL for download. */
-export function maskToPngDataUrl(mask, resolution, { colorize = false } = {}) {
+function maskToCanvas(mask, resolution, { colorize = false } = {}) {
   const data = new Uint8ClampedArray(resolution * resolution * 4);
   for (let i = 0; i < mask.length; i++) {
     const v = Math.max(0, Math.min(1, mask[i]));
@@ -118,17 +119,18 @@ export function maskToPngDataUrl(mask, resolution, { colorize = false } = {}) {
   const img = ctx.createImageData(resolution, resolution);
   img.data.set(data);
   ctx.putImageData(img, 0, 0);
-  return canvas.toDataURL('image/png');
+  return canvas;
+}
+
+export function maskToPngDataUrl(mask, resolution, opts) {
+  return maskToCanvas(mask, resolution, opts).toDataURL('image/png');
 }
 
 export async function downloadMaskPng(mask, resolution, filename, opts) {
-  const url = maskToPngDataUrl(mask, resolution, opts);
-  return saveDataUrl(url, filename);
+  return saveBlob(new Blob([await maskToPngBytes(mask, resolution, opts)], { type: 'image/png' }), filename);
 }
 
 /** Encode a float mask as PNG bytes (Uint8Array) for bundling into a zip. */
 export async function maskToPngBytes(mask, resolution, opts) {
-  const url = maskToPngDataUrl(mask, resolution, opts);
-  const blob = await (await fetch(url)).blob();
-  return new Uint8Array(await blob.arrayBuffer());
+  return canvasPngBytes(maskToCanvas(mask, resolution, opts));
 }

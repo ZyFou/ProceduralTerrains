@@ -3644,6 +3644,16 @@ input[type="color"].palette-color-input {
   justify-items: center;
   gap: 10px;
 }
+.export-loading-detail { width: min(360px, 80vw); margin-top: 16px; text-align: center; }
+.export-loading-detail p { margin: 8px 0 12px; }
+.export-diagnostics-notice {
+  position: fixed; bottom: 60px; right: 20px; z-index: 200;
+  width: min(440px, calc(100vw - 40px)); padding: 18px;
+  background: #202126; color: #fff; border: 1px solid #ba8543; border-radius: 10px;
+  box-shadow: 0 8px 32px #0008; font-size: 13px; overflow-wrap: anywhere;
+}
+.export-diagnostics-notice p { margin: 8px 0; }
+.export-diagnostics-notice button { margin: 8px 10px 0 0; padding: 7px 10px; cursor: pointer; }
 .loading-card-visual .landing-boot-terrain {
   width: 68px;
   height: 44px;
