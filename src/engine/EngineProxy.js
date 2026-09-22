@@ -1,4 +1,4 @@
-import { hasStoredPerfSettings, loadPerfSettings } from './render/PerformanceSettings.js';
+import { hasStoredPerfSettings, loadPerfSettings, savePerfSettings } from './render/PerformanceSettings.js';
 import { InputFrameBridge } from './InputFrameBridge.js';
 import { MinimapPresenter } from './MinimapPresenter.js';
 import { saveBlob } from '../platform/DesktopBridge.js';
@@ -66,7 +66,7 @@ const cloneError = (payload) => {
 export class MainThreadEngineTransport {
   constructor() { this.engine = null; }
   async initialize(options) {
-    const { Engine } = await import('./Engine.js');
+    const { Engine } = await import('./EnergySavingEngine.js');
     this.engine = new Engine(options);
     return this.engine.getClientSnapshot();
   }
@@ -127,6 +127,7 @@ export class WorkerEngineTransport {
         width: Math.max(1, rect.width),
         height: Math.max(1, rect.height),
         pixelRatio: globalThis.devicePixelRatio || 1,
+        visible: document.visibilityState === 'visible',
       },
     }], [offscreen]);
     this.inputBridge = new InputFrameBridge({
@@ -346,7 +347,11 @@ export class EngineClient {
   _applyEvent(name, args, seq = null) {
     const patch = { lastEvent: { name, seq, at: performance.now() } };
     if (name === 'onParams') patch.params = args[0];
-    if (name === 'onPerfChange') patch.perf = args[0];
+    if (name === 'onPerfChange') {
+      patch.perf = args[0];
+      // Render workers have no localStorage. Persist their settings here too.
+      if (args[0]) savePerfSettings(args[0]);
+    }
     if (name === 'onProjectMode') patch.projectMode = args[0];
     if (name === 'onTimeOfDayChange') patch.timeOfDay = args[0];
     this._setSnapshot({ ...this.snapshot, ...patch });
