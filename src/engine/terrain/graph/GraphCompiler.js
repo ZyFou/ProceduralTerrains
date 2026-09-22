@@ -1,3 +1,4 @@
+import { compileSurfaceGraph } from '../surface/SurfaceGraph.js';
 import { blendGlslStmt, blendJs } from '../noise/blendModes.js';
 import { activeLayers, migrateStack } from '../noise/NoiseStack.js';
 import { evalStack2D, generateStackGLSL, packStackUniforms } from '../noise/noiseStackCodegen.js';
@@ -636,6 +637,7 @@ function structuralSignature(graph, ordered, slotById, colorSlotById) {
   const parts = [];
   for (const id of ordered) {
     const node = nodes.get(id); const definition = getGraphNodeDefinition(node.type);
+    if (definition?.executionKind === 'surface') continue;
     // Mountain's Reduce Details switch selects a materially smaller shader
     // implementation, so it must invalidate the source cache even though the
     // rest of the Mountain controls remain uniform-only.
@@ -645,7 +647,7 @@ function structuralSignature(graph, ordered, slotById, colorSlotById) {
     const params = structuralParams.map((key) => key === 'stack'
       ? generateStackGLSL(migrateStack(node.params?.stack)).sig
       : `${key}=${JSON.stringify(node.params?.[key])}`).join(',');
-    const links = (definition.inputs || []).map((port) => `${port.id}<-${inputEdge(graph, id, port.id)?.source || '?'}`).join(',');
+    const links = (definition.inputs || []).filter(port=>port.type!=='surface').map((port) => `${port.id}<-${inputEdge(graph, id, port.id)?.source || '?'}`).join(',');
     parts.push(`${node.type}@${slotById.get(id) ?? '-'}:${colorSlotById.get(id) ?? '-'}[${params}](${links})`);
   }
   return `graph-v2|${parts.join('|')}`;
@@ -1130,6 +1132,9 @@ function cpuEvaluator(graph) {
 export function compileTerrainGraph(graph) {
   const validation = validateGraph(graph);
   if (!validation.ok) return { ok: false, diagnostics: validation.diagnostics, program: null };
+  let surface;
+  try { surface = compileSurfaceGraph(graph); }
+  catch (error) { return {ok:false,diagnostics:[{code:"surface-graph",message:error.message}],program:null}; }
   const ordered = topologicalSort(graph, { reachableOnly: true });
   const reachable = reachableNodeIds(graph);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -1162,7 +1167,7 @@ export function compileTerrainGraph(graph) {
     });
   }
   const program = {
-    kind: 'graph', sig, heightSig,
+    kind: 'graph', sig, heightSig, surface,
     body2d: shaderSource.body2d,
     body3d: shaderSource.body3d,
     colorBody: shaderSource.colorBody,

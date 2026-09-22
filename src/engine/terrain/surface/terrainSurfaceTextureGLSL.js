@@ -1,3 +1,4 @@
+import { SURFACE_ARRAY_UNIFORMS, SURFACE_ARRAY_FUNCTIONS } from './SurfaceArrayGLSL.js';
 import {
   SURFACE_TEXTURE_LAYERS,
   SURFACE_TEXTURE_ROLE_COUNT,
@@ -24,8 +25,7 @@ export {
 // from dynamic uniform-array indexing and nested dynamic variant branches.
 
 export const SURFACE_TEXTURE_UNIFORMS_GLSL = /* glsl */ `
-uniform sampler2D uSurfDiffuse;
-uniform sampler2D uSurfProps; // RG normal XY, B roughness, A ambient occlusion
+${SURFACE_ARRAY_UNIFORMS}
 uniform float uSurfMode;        // 0 = procedural colours, 1 = custom texture atlas
 uniform float uSurfAmount;      // master blend of textures over colour (0..1)
 uniform float uSurfTint;        // legacy, unused by the palette-role path
@@ -64,7 +64,10 @@ struct SurfMaterialSample {
   float ao;
   float rough;
   float missing;
+  float height;
 };
+
+${SURFACE_ARRAY_FUNCTIONS}
 
 struct SurfRoleWeights {
   float sand;
@@ -158,6 +161,7 @@ vec2 surfRandomizedUV(vec2 uv, float roleFi, float salt) {
   return cell + p;
 }
 
+#ifndef SURFACE_ARRAYS
 vec3 surfTriRole(sampler2D atlas, int roleIndex, vec3 wp, vec3 blend, float tile) {
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
@@ -203,6 +207,7 @@ vec2 surfTriPropertiesRole(int roleIndex, vec3 wp, vec3 blend, float tile) {
   return cx * blend.x + cy * blend.y + cz * blend.z;
 }
 
+#endif
 vec3 surfPaletteForRole(int roleIndex) {
   if (roleIndex == 0) return applyPalettePost(uColSand);
   if (roleIndex == 1) return applyPalettePost(uColDune);
@@ -226,10 +231,14 @@ SurfMaterialSample surfMixSamples(SurfMaterialSample a, SurfMaterialSample b, fl
   outS.rough = mix(a.rough, b.rough, k);
   outS.ao = mix(a.ao, b.ao, k);
   outS.missing = mix(a.missing, b.missing, k);
+  outS.height = mix(a.height, b.height, k);
   return outS;
 }
 
 SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo) {
+  #ifdef SURFACE_ARRAYS
+  return pbrRole(roleIndex,wp,blend,nGeo);
+  #else
   SurfMaterialSample s;
   float tile = surfTileForRole(roleIndex);
   s.albedo = surfTriRole(uSurfDiffuse, roleIndex, wp, blend, tile);
@@ -240,6 +249,7 @@ SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo)
   vec2 properties = surfTriPropertiesRole(roleIndex, wp, blend, tile);
   s.rough = properties.x;
   s.ao = properties.y;
+  s.height = 0.5;
   s.missing = 1.0 - step(0.5, surfRoleReady(roleIndex));
 
   float tintAmt = clamp(uSurfPaletteInfluence, 0.0, 1.0) * (1.0 - step(0.5, s.missing));
@@ -248,6 +258,7 @@ SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo)
   vec3 tinted = palette * mix(0.48, 1.55, lum);
   s.albedo = mix(s.albedo, max(tinted, vec3(0.0)), tintAmt);
   return s;
+  #endif
 }
 
 SurfRoleWeights surfMaterialWeights(
@@ -329,6 +340,43 @@ void surfCheckRole(int roleIndex, float weight, inout int bestI, inout int secon
   }
 }
 
+
+#ifdef SURFACE_ARRAYS
+SurfMaterialSample pbrHeightMix(SurfMaterialSample a,SurfMaterialSample b,float k,float contrast){
+  if(k<=0.0)return a;if(k>=1.0)return b;
+  float h=max(a.height+1.0-k,b.height+k)-max(contrast,0.001);
+  float wa=max(0.0,a.height+1.0-k-h)*(1.0-k),wb=max(0.0,b.height+k-h)*k;
+  return surfMixSamples(a,b,wb/max(wa+wb,0.0001));
+}
+
+void pbrApplyPaint(inout SurfaceTexResult result,vec3 wp,vec3 ng,vec3 blend) {
+#ifdef SURFACE_PAINT_LAYERS
+  if(uSurfacePaintEnabled<0.5)return;
+  float weights[SURFACE_CONTRIBUTIONS];int slots[SURFACE_CONTRIBUTIONS];for(int i=0;i<SURFACE_CONTRIBUTIONS;i++){weights[i]=0.0;slots[i]=0;}
+  float total=0.0;
+  for(int i=0;i<32;i++){
+    float w=pbrPaintWeight(wp.xz,i)*uSurfacePaintOpacity[i];if(uSurfacePaintMap[i].x<0.0)w=0.0;total+=w;
+    int candidate=i;for(int j=0;j<SURFACE_CONTRIBUTIONS;j++){if(w>weights[j]){float oldW=weights[j];int oldI=slots[j];weights[j]=w;slots[j]=candidate;w=oldW;candidate=oldI;}}
+  }
+  if(total<0.0001)return;
+  vec3 color=vec3(0),normal=vec3(0);float rough=0.0,ao=0.0,kept=0.0;
+  for(int j=0;j<SURFACE_CONTRIBUTIONS;j++){
+    float w=weights[j];if(w<0.0001)continue;
+    int slot=slots[j];vec4 mapping=uSurfacePaintMap[slot];
+    SurfMaterialSample paintSample=pbrAsset(int(mapping.x),wp,blend,ng,mapping.w);
+    if(mapping.y>=0.0)paintSample=surfMixSamples(paintSample,pbrAsset(int(mapping.y),wp,blend,ng,mapping.w),smoothstep(0.3,0.7,vnoise(wp.xz*0.05)));
+    color+=paintSample.albedo*uSurfacePaintTint[slot]*(1.0-mapping.z*0.35)*w;normal+=paintSample.normal*w;
+    rough+=paintSample.rough*(1.0-mapping.z)*w;ao+=paintSample.ao*w;kept+=w;
+  }
+  float coverage=min(total,1.0);kept=max(kept,0.0001);
+  result.albedo=mix(result.albedo,color/kept,coverage);result.normal=normalize(mix(result.normal,normalize(normal),coverage));
+  result.rough=mix(result.rough,rough/kept,coverage);result.ao=mix(result.ao,ao/kept,coverage);result.amount=max(result.amount,coverage);
+#endif
+}
+/*SURFACE_GRAPH_BEGIN*/
+/*SURFACE_GRAPH_END*/
+#endif
+
 SurfaceTexResult applySurfaceMaterials(
   vec3 baseAlbedo, vec3 n, vec3 baseNormal, vec3 nGeo, vec3 wpos, float dist,
   TerrainColorResult tc, Climate cl, BiomeWeights bw, float slope, float hRel, float h01,
@@ -341,7 +389,11 @@ SurfaceTexResult applySurfaceMaterials(
   res.rough = 0.8;
   res.amount = 0.0;
 
+  #ifdef SURFACE_ARRAYS
+  float fade = 1.0;
+  #else
   float fade = 1.0 - smoothstep(uSurfNear, uSurfFar, dist);
+  #endif
   float baseAmount = uSurfMode * uSurfAmount * fade;
   float amount = uManualSurfaceMode > 0.5 ? fade : baseAmount;
   if (amount < 0.002) return res;
@@ -354,7 +406,16 @@ SurfaceTexResult applySurfaceMaterials(
     triBlend = vec3(0.0, 1.0, 0.0);
   }
 
+  #if defined(SURFACE_ARRAYS) && defined(SURFACE_GRAPH_ACTIVE)
+  SurfMaterialSample graphSample=evaluateSurfaceGraph(wpos,nGeo,triBlend,cl,bw,slope,h01);
+  res.albedo=graphSample.albedo;res.normal=graphSample.normal;res.ao=graphSample.ao;res.rough=graphSample.rough;res.amount=1.0;
+  pbrApplyPaint(res,wpos,nGeo,triBlend);
+  return res;
+  #endif
   bool manualMode = uManualSurfaceMode > 0.5;
+  #ifdef SURFACE_ARRAYS
+  manualMode=manualMode && uSurfacePaintEnabled<0.5;
+  #endif
   bool useManualWeights = false;
   float manualCoverage = 0.0;
   SurfRoleWeights w;
@@ -432,6 +493,9 @@ SurfaceTexResult applySurfaceMaterials(
   res.ao = mix(1.0, tex.ao, k * uSurfAOAmt);
   res.rough = mix(0.8, tex.rough, clamp(k * uSurfRoughAmt, 0.0, 1.0));
   res.amount = k;
+  #ifdef SURFACE_ARRAYS
+  pbrApplyPaint(res,wpos,nGeo,triBlend);
+  #endif
   return res;
 }
 `;

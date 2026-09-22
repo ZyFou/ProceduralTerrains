@@ -1,3 +1,4 @@
+import { buildSurfaceResources } from './SurfaceResources.js';
 import { getDefaultMapUrl, loadMaterialsManifest, resolveCustomMapUrl } from './SurfaceLibrary.js';
 import { MANUAL_SURFACE_ASSET_BY_ROLE } from '../../../manual/ManualSurfaceCatalog.js';
 import { SURFACE_TEXTURE_ROLES } from './SurfaceTextureRoles.js';
@@ -7,8 +8,9 @@ import { SURFACE_TEXTURE_SOURCE, normalizeSurfaceTextureSource } from './Surface
 // Builds the terrain surface atlas from the CURRENTLY selected variants /
 // overrides in the Surface Library, or an explicit snapshot supplied by the
 // UI to the renderer worker. Returns two textures plus coverage metadata.
-export async function buildActiveSurfaceAtlas({ source = SURFACE_TEXTURE_SOURCE.CUSTOM, customMaps } = {}) {
+export async function buildActiveSurfaceAtlas({ source = SURFACE_TEXTURE_SOURCE.CUSTOM, customMaps, document, signal, graph, paint } = {}) {
   const normalizedSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
+  if (normalizedSource === SURFACE_TEXTURE_SOURCE.PBR) return buildSurfaceResources({document,signal,graph,paint});
   const manifest = await loadMaterialsManifest();
   const manifestById = Object.fromEntries((manifest.materials || []).map((material) => [material.id, material]));
   const byId = Object.fromEntries(SURFACE_TEXTURE_ROLES.map((m) => [m.id, m]));

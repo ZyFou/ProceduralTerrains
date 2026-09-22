@@ -1,3 +1,4 @@
+import { installSurfaceMaterialBackend } from './surface/SurfaceArrayGLSL.js';
 import * as THREE from 'three';
 import {
   COMMON_UNIFORMS_GLSL,
@@ -1321,6 +1322,19 @@ export function createTerrainUniforms() {
     // Atlas samplers stay null until the engine builds them; uSurfMode 0 keeps the
     // whole feature a no-op (procedural colours), so the shader is unchanged until
     // the user switches to texture mode.
+    uSurfaceArrayMode: { value: 0 },
+    uSurfaceGraphCode: { value: "" },
+    uSurfacePaintArray: { value: new THREE.DataArrayTexture(new Uint8Array(4),1,1,1) },
+    uSurfacePaintEnabled: { value: 0 },
+    uSurfaceContributions: { value: 4 },
+    uSurfacePaintRegion: { value: new THREE.Vector4(0,0,1,1) },
+    uSurfacePaintOpacity: { value: new Array(32).fill(0) },
+    uSurfacePaintMap: { value: Array.from({length:32},()=>new THREE.Vector4(-1,-1,0,1)) },
+    uSurfacePaintTint: { value: Array.from({length:32},()=>new THREE.Vector3(1,1,1)) },
+    uSurfaceGraphParams: { value: Array.from({length:128},()=>new THREE.Vector4()) },
+    uSurfaceRoleMap: { value: Array.from({length:13},()=>new THREE.Vector4(0,-1,0,1)) },
+    uSurfaceRoleTint: { value: Array.from({length:13},()=>new THREE.Vector3(1,1,1)) },
+    uSurfaceAssetSize: { value: new Array(64).fill(2) },
     uSurfDiffuse:    { value: surfFallbackTexture() },
     uSurfProps:      { value: surfFallbackTexture() },
     uSurfMode:       { value: 0.0 },
@@ -1377,7 +1391,7 @@ export function createTerrainMaterial(
   material.userData.terrainVariant = variant;
   material.userData.terrainWorldMode = worldMode;
   material.userData.heightProgramSig = stackGLSL.sig;
-  return material;
+  return installSurfaceMaterialBackend(material);
 }
 
 export function createInfiniteTerrainMaterial(

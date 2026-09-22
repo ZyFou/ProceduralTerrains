@@ -1,10 +1,11 @@
+import { assertCloudSurfaceSafe } from './PortableProject.js';
 import { apiRequest } from '../auth/authApi.js';
 
 export const projectApi = {
   listMine: () => apiRequest('/me/projects'),
-  create: (input) => apiRequest('/me/projects', { method: 'POST', body: input }),
+  create: (input) => { assertCloudSurfaceSafe(input); return apiRequest('/me/projects', { method: 'POST', body: input }); },
   getMine: (projectId) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}`),
-  update: (projectId, input) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: input }),
+  update: (projectId, input) => { assertCloudSurfaceSafe(input); return apiRequest(`/me/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: input }); },
   remove: (projectId) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
   rotateShareCode: (projectId) => apiRequest(`/me/projects/${encodeURIComponent(projectId)}/share-code`, { method: 'POST' }),
   community: ({ query = '', type = '', page = 1 } = {}) => {

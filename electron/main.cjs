@@ -103,7 +103,12 @@ async function readDocument(documentPath) {
   if (!isDesktopDocumentPath(documentPath)) throw new Error('Choose a .ptrterrain or .json project file.');
   let parsed;
   try {
-    parsed = JSON.parse(await fs.readFile(documentPath, 'utf8'));
+    const bytes = await fs.readFile(documentPath);
+    if (bytes[0] === 80 && bytes[1] === 75) {
+      writableDocumentPaths.add(documentPath);
+      return {path:documentPath, data:new Uint8Array(bytes), legacy:false};
+    }
+    parsed = JSON.parse(bytes.toString('utf8'));
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error('This project file is not valid JSON.');
     throw new Error(`Could not read the project file: ${error.message}`);
@@ -147,7 +152,8 @@ async function saveDocument(payload = {}) {
     documentPath = result.filePath;
   }
   if (path.extname(documentPath).toLowerCase() !== '.ptrterrain') documentPath = `${documentPath}.ptrterrain`;
-  await fs.writeFile(documentPath, `${serialized}\n`, 'utf8');
+  if (payload.data instanceof Uint8Array) await fs.writeFile(documentPath, payload.data);
+  else await fs.writeFile(documentPath, `${serialized}\n`, 'utf8');
   writableDocumentPaths.add(documentPath);
   await rememberDocument(documentPath, document);
   return { canceled: false, path: documentPath };

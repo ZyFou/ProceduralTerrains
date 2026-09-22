@@ -1,3 +1,5 @@
+import { SURFACE_TEXTURE_UNIFORMS_GLSL, SURFACE_TEXTURE_FUNCTIONS_GLSL } from './surface/terrainSurfaceTextureGLSL.js';
+import { installSurfaceMaterialBackend } from './surface/SurfaceArrayGLSL.js';
 import * as THREE from 'three';
 import { readRenderTargetPixelsAsync, withExportRenderTarget } from '../render/RendererReadback.js';
 import { serializeGlb, canvasPngBytes } from '../../export/ExportEncoding.js';
@@ -56,6 +58,8 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
   ${graphColorGLSL}
+  ${SURFACE_TEXTURE_UNIFORMS_GLSL}
+  ${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 
   uniform float uAO;
   uniform float uNormalStrength;
@@ -111,12 +115,6 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
     vec3 nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
     vec3 n = normalize(vec3(nGeo.x * uNormalStrength, 1.0, nGeo.z * uNormalStrength));
 
-    if (uBakeMode == 1) {
-      // Tangent space normal map (R: x, G: z, B: y)
-      vec3 tangentNormal = vec3(n.x, n.z, n.y);
-      gl_FragColor = vec4(tangentNormal * 0.5 + 0.5, 1.0);
-      return;
-    }
 
     float slope = 1.0 - nGeo.y;
     float hRel = hC - uSeaLevel;
@@ -128,7 +126,17 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
     tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
     // Match the live terrain shader: real-world satellite/topographic imagery
     // is the final albedo layer and shares the imported heightmap's geo region.
+    SurfaceTexResult surface=applySurfaceMaterials(tc.albedo,n,n,nGeo,vec3(xz.x,hC,xz.y),0.0,tc,cl,bw,slope,hRel,h01,detail,jitter);
+    tc.albedo = surface.albedo;
     tc.albedo = applyImportedImageryAlbedo(tc.albedo, xz);
+    n=surface.normal;
+    if(uBakeMode==1){
+      vec3 tangent=normalize(vec3(1.0,(hX-hC)/eps,0.0));
+      vec3 bitangent=normalize(cross(tangent,nGeo));
+      vec3 tangentNormal=normalize(vec3(dot(n,tangent),dot(n,bitangent),dot(n,nGeo)));
+      gl_FragColor=vec4(tangentNormal*0.5+0.5,1.0);return;
+    }
+    if(uBakeMode==4){gl_FragColor=vec4(surface.ao,surface.rough,0.0,1.0);return;}
 
     if (uBakeMode == 2) {
       if (uBakeLighting) {
@@ -261,6 +269,7 @@ export class TerrainExporter {
       vertexShader: BAKE_VERTEX,
       fragmentShader: buildTerrainBakeFragment(buildHeightGLSL(stackGLSL.body2d), stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL)
     });
+    installSurfaceMaterialBackend(bakeMat);
     quadMesh.material = bakeMat;
 
     // Region bake helpers. uCellOffset + uBoardSizeXZ select the world rectangle
@@ -379,7 +388,7 @@ export class TerrainExporter {
         onToast(`Baking height / geometry for tile ${cell.cx}, ${cell.cz} (${meshRes} × ${meshRes})...`);
         const { at } = await bakeHeightGrid(ctr.x, ctr.z, cellSize, cellSize, meshRes, meshRes);
 
-        let colorTex = null, normalTex = null;
+        let colorTex = null, normalTex = null, propertiesTex = null;
         if (bakeColor) {
           onToast(`Baking color for tile ${cell.cx}, ${cell.cz} (${texRes}px)...`);
           const cv = await bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes);
@@ -391,9 +400,10 @@ export class TerrainExporter {
           const nv = await bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes);
           normalTex = new THREE.CanvasTexture(nv);
         }
+        if(engineUniforms.uSurfaceArrayMode?.value>0.5) propertiesTex=new THREE.CanvasTexture(await bakeRegionCanvas(4,ctr.x,ctr.z,cellSize,cellSize,texRes));
         const terrainMaterial = new THREE.MeshStandardMaterial({
           name: multi ? `Terrain_Material_${cell.cx}_${cell.cz}` : 'Terrain_Material',
-          map: colorTex, normalMap: normalTex, roughness: 0.85, metalness: 0.05,
+          map: colorTex, normalMap: normalTex, roughnessMap: propertiesTex, metalnessMap: propertiesTex, aoMap: propertiesTex, roughness: propertiesTex ? 1 : 0.85, metalness: propertiesTex ? 1 : 0.05,
         });
 
         // surface grid for this cell
@@ -522,6 +532,7 @@ export class TerrainExporter {
     // GLB already embeds crisp per-cell textures; these are an overview of the
     // whole assembly (== the single cell when there is one tile).
     let colorCanvas = null, normalCanvas = null;
+    const propertiesCanvas=engineUniforms.uSurfaceArrayMode?.value>0.5 ? await bakeRegionCanvas(4,unionCenter.x,unionCenter.z,unionSpanX,unionSpanZ,texRes) : null;
     if (bakeColor) {
       onToast('Baking overview color map...');
       colorCanvas = await bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
@@ -565,9 +576,10 @@ export class TerrainExporter {
           mergedColor.colorSpace = THREE.SRGBColorSpace;
         }
         if (normalCanvas) mergedNormal = new THREE.CanvasTexture(normalCanvas);
+        const mergedProperties=propertiesCanvas?new THREE.CanvasTexture(propertiesCanvas):null;
         const mergedMaterial = new THREE.MeshStandardMaterial({
-          name: 'Terrain_Material', map: mergedColor, normalMap: mergedNormal,
-          roughness: 0.85, metalness: 0.05,
+          name: 'Terrain_Material', map: mergedColor, normalMap: mergedNormal, roughnessMap: mergedProperties, metalnessMap: mergedProperties, aoMap: mergedProperties,
+          roughness: mergedProperties ? 1 : 0.85, metalness: mergedProperties ? 1 : 0.05,
         });
         surfaceMeshes.forEach((mesh) => {
           exportGroup.remove(mesh);
@@ -734,6 +746,7 @@ export class TerrainExporter {
     if (colorCanvas) {
       zipFiles[pathFor('textures/terrain_color.png')] = await canvasToUint8Array(colorCanvas);
     }
+    if (propertiesCanvas) zipFiles[pathFor('textures/terrain_orm.png')] = await canvasToUint8Array(propertiesCanvas);
     if (normalCanvas) {
       zipFiles[pathFor('textures/terrain_normal.png')] = await canvasToUint8Array(normalCanvas);
     }
@@ -781,6 +794,7 @@ export class TerrainExporter {
           materials.forEach((material) => {
             if (material.map) material.map.dispose();
             if (material.normalMap) material.normalMap.dispose();
+            if (material.roughnessMap) material.roughnessMap.dispose();
             material.dispose();
           });
         }

@@ -1,3 +1,4 @@
+import SurfaceBranchPreview from '../ui/SurfaceBranchPreview.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background, BackgroundVariant, ConnectionMode, Controls, Handle, NodeResizer, Position, ReactFlow, useUpdateNodeInternals,
@@ -225,6 +226,7 @@ const nodeTypes = { terrainNode: TerrainNode, terrainGroup: TerrainGroup };
 
 function InspectorField({ field, value, onChange }) {
   const help = field.help ? <small className="node-inspector-field-help">{field.help}</small> : null;
+  if (field.type === 'text') return <label className="node-inspector-field"><span>{field.label}</span><input value={value||''} onChange={e=>onChange(e.target.value,!!field.structural)}/></label>;
   if (field.type === 'boolean') {
     return (
       <div className="node-inspector-field-wrap">
@@ -307,7 +309,7 @@ function InspectorField({ field, value, onChange }) {
 }
 
 function NodeInspector({
-  node, group, graphState, onRename, onParam, onDelete, onReset, onInsertAfter,
+  node, group, graphState, graph, onRename, onParam, onDelete, onReset, onInsertAfter,
   onGroupPatch, onUngroup, onHeaderPointerDown,
 }) {
   const [propertyQuery, setPropertyQuery] = useState('');
@@ -426,6 +428,7 @@ function NodeInspector({
             {!visibleSections.length && normalizedPropertyQuery ? (
               <div className="node-inspector-no-results"><Search size={20} /><strong>No matching settings</strong><span>Try a parameter name such as “seed”, “talus”, or “scale”.</span></div>
             ) : null}
+            {node.type==='surfacePreview' && <SurfaceBranchPreview graph={graph} nodeId={node.id} />}
             {!definition.permanent ? (
               <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} /> Delete node</button>
             ) : null}
@@ -1018,7 +1021,7 @@ export default function NodeWorkspace({
         }}>
           <div className="node-inspector-resizer" onPointerDown={beginInspectorResize} />
           <NodeInspector
-            node={selectedNode} group={selectedGroup} graphState={graphState}
+            node={selectedNode} group={selectedGroup} graphState={graphState} graph={graphRef.current}
             onHeaderPointerDown={(event) => beginDockDrag('inspector', event)}
             onRename={(label) => commit(updateGraphNode(graphRef.current, selectedNode.id, { label }), { structural: false, history: true })}
             onParam={(key, value, structural) => commit(updateGraphNodeParams(graphRef.current, selectedNode.id, { [key]: value }), { structural, history: true })}

@@ -1,3 +1,4 @@
+import SurfaceLayerPanel from './SurfaceLayerPanel.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
@@ -566,7 +567,8 @@ export default function ManualTerrainPanel({
                       : 'Fade painted materials back to the original manual terrain surface.'}
                 </p>
               </section>
-              {state.texturePaint.tool === 'paint' && state.texturePaint.mode === 'surface' ? (
+              {state.texturePaint.mode === 'surface' && <SurfaceLayerPanel state={state.texturePaint} onSetting={onTexturePaintSetting} />}
+              {state.texturePaint.tool === 'paint' && state.texturePaint.mode === 'surface' && !state.texturePaint.layers?.length ? (
                 <section className="manual-inspector-section">
                   <h3>Material</h3>
                   <div className="manual-material-grid" role="listbox" aria-label="Terrain material">

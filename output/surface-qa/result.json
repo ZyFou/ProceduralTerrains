@@ -1,0 +1,28 @@
+{
+  "renderer": "WebKit WebGL",
+  "samplers": 16,
+  "arrayLayers": 2048,
+  "ms": 162419,
+  "budget": {
+    "resolution": 512,
+    "contributions": 2,
+    "budgetBytes": 100663296,
+    "bytes": 2796203,
+    "reduced": false
+  },
+  "terrain": {
+    "programs": 1,
+    "errors": []
+  },
+  "paint": {
+    "errors": [],
+    "weight": 0.45098039215686275
+  },
+  "planet": {
+    "errors": []
+  },
+  "baking": {
+    "errors": []
+  },
+  "errors": []
+}

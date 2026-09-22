@@ -1,3 +1,5 @@
+import { resolveSurfaceReference } from './terrain/surface/SurfaceDocument.js';
+import { compileSurfaceGraph } from './terrain/surface/SurfaceGraph.js';
 import * as THREE from 'three';
 
 function createEngineTimer() {
@@ -901,8 +903,15 @@ export class Engine {
       ),
       gpuTier: this.gpuTier,
       onChange: (state, meta = {}) => {
+        state.texturePaint.localAssets=Object.values(this.params.surfaceDocument?.assets||{});
         this.manualTerrainState = state;
         if (meta.surfaceChanged) {
+          if(this.manualTerrain?.surfaceField?.layersField) {
+            this.params.surfaceTextureSource=SURFACE_TEXTURE_SOURCE.PBR;this.params.surfaceTextureMode=true;
+            const signature=JSON.stringify(state.texturePaint.layers?.map(l=>[l.id,l.materialInstanceId]));
+            if(signature!==this._paintMaterialSignature){this._paintMaterialSignature=signature;void this.buildAndSetSurfaceAtlas(SURFACE_TEXTURE_SOURCE.PBR).catch(error=>{this._paintMaterialSignature=null;this.cb.onToast?.(error.message);});}
+            this._applySurfaceSettings();
+          }
           this._needsRender = true;
           this.minimap.requestRedraw();
           // Blank Manual documents use an exact no-atlas specialization. A
@@ -2499,7 +2508,7 @@ export class Engine {
       return;
     }
 
-    if (key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
+    if (key === 'surfaceDocument' || key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
       this._applySurfaceSettings();
       void this._ensureTerrainShaderVariantAsync();
       return;
@@ -3372,9 +3381,20 @@ export class Engine {
       return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
 
+    if (compiled.program.surface) {
+      this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.PBR;
+      this.params.surfaceTextureMode = true;
+      if(this._surfaceAtlas?.backend==='array' && compiled.program.surface.assets.every(id=>this._surfaceAtlas.slots[id]!=null)) {
+        const surface=compileSurfaceGraph(nextGraph,this.params.surfaceDocument,this._surfaceAtlas.slots);
+        this.uniforms.uSurfaceGraphCode.value=surface.body;
+        this.uniforms.uSurfaceGraphParams.value=Array.from({length:128},(_,i)=>new THREE.Vector4(...(surface.values[i]||[0,0,0,0])));
+        this._needsRender=true;
+      } else void this.buildAndSetSurfaceAtlas(SURFACE_TEXTURE_SOURCE.PBR).catch(error=>this.cb.onToast?.(error.message));
+      this._applySurfaceSettings();
+    } else if (this.uniforms.uSurfaceGraphCode) this.uniforms.uSurfaceGraphCode.value = '';
     const liveOctaves = this.terrainMaterial?.defines?.OCTAVES;
     const needsCompile = this._liveHeightSig !== compiled.program.sig
-      || (this.projectMode !== 'nodes' && this.terrainMaterial?.userData?.minimalFragment)
+      || ((this.projectMode !== 'nodes' || compiled.program.surface) && this.terrainMaterial?.userData?.minimalFragment)
       || liveOctaves !== Math.round(this.params.octaves);
     let ready = Promise.resolve({ swapped: false, error: null });
     if (this.worldMode === 'studio' && this.generationSource === 'graph') {
@@ -3637,7 +3657,7 @@ export class Engine {
       ? this._infiniteTerrainMat
       : this.terrainMaterial;
     const octavesChanged = liveTerrainMaterial?.defines?.OCTAVES !== oct;
-    const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
+    const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes' && !program.surface;
     const terrainVariant = this._targetTerrainVariant();
     const liveTerrainVariant = this.terrainMaterial?.userData?.terrainVariant ?? null;
     const qualityVariants = ['base', 'detail', 'surface', 'full'];
@@ -4528,6 +4548,23 @@ export class Engine {
   _installSurfaceAtlas(atlas) {
     const u = this.uniforms;
     if (!u?.uSurfDiffuse || !atlas) return false;
+    if (u.uSurfaceArrayMode) u.uSurfaceArrayMode.value = atlas.backend === 'array' ? 1 : 0;
+    if (u.uSurfaceGraphCode) u.uSurfaceGraphCode.value = atlas.graph?.body || '';
+    if (atlas.graph) u.uSurfaceGraphParams.value = Array.from({length:128},(_,i)=>new THREE.Vector4(...(atlas.graph.values[i]||[0,0,0,0])));
+    if (atlas.backend === 'array') {
+      u.uSurfaceContributions.value=atlas.budget.contributions;
+      if(atlas.paint) {
+        u.uSurfacePaintMap.value=Array.from({length:32},(_,slot)=>{
+          const layer=atlas.paint.layers.find(l=>l.slot===slot);if(!layer)return new THREE.Vector4(-1,-1,0,1);
+          const items=resolveSurfaceReference(layer.materialInstanceId,atlas.document);
+          return new THREE.Vector4(atlas.slots[items[0].assetId],items[1]?atlas.slots[items[1].assetId]:-1,items[0].wetness||0,items[0].scale||1);
+        });
+        u.uSurfacePaintTint.value=Array.from({length:32},(_,slot)=>{const layer=atlas.paint.layers.find(l=>l.slot===slot);return new THREE.Vector3(...(layer?resolveSurfaceReference(layer.materialInstanceId,atlas.document)[0].tint:[1,1,1]));});
+      }
+      u.uSurfaceRoleMap.value = atlas.mapping;
+      u.uSurfaceRoleTint.value = atlas.tints;
+      u.uSurfaceAssetSize.value = [...atlas.sizes, ...new Array(Math.max(0,64-atlas.sizes.length)).fill(2)];
+    }
     u.uSurfDiffuse.value = atlas.diffuse;
     u.uSurfProps.value = atlas.props;
     u.uSurfPresent.value = atlas.present.map((v) => (v ? 1.0 : 0.0));
@@ -11959,8 +11996,10 @@ export class Engine {
   getTargetTerrainVariant() { return this._targetTerrainVariant(); }
 
   async buildAndSetSurfaceAtlas(source) {
+    const revision=(this._surfaceBuildRevision||0)+1;this._surfaceBuildRevision=revision;
     const { buildActiveSurfaceAtlas } = await import('./terrain/surface/applyTerrainSurface.js');
-    const atlas = await buildActiveSurfaceAtlas({ source });
+    const atlas = await buildActiveSurfaceAtlas({ source, document: this.params.surfaceDocument, graph: this.terrainGraph, paint: this.manualTerrain?.surfaceField?.layersField });
+    if(revision!==this._surfaceBuildRevision){atlas.diffuse.dispose();atlas.props.dispose();throw new Error("Surface build superseded");}
     this.setSurfaceAtlas(atlas, source);
     return {
       anyPresent: !!atlas.anyPresent,

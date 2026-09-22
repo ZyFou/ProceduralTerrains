@@ -79,7 +79,7 @@ export async function buildAndInstallSurfaceAtlas(engine, source, customMaps, {
 } = {}) {
   if (!isCurrent()) throw surfaceAtlasSuperseded();
   const build = buildAtlas || (await import('./applyTerrainSurface.js')).buildActiveSurfaceAtlas;
-  const atlas = await build({ source, customMaps });
+  const atlas = await build({ source, customMaps, document: engine.params?.surfaceDocument, graph: engine.terrainGraph, paint: engine.manualTerrain?.surfaceField?.layersField });
   if (!isCurrent()) {
     atlas.diffuse?.dispose();
     atlas.props?.dispose();

@@ -13,12 +13,15 @@
     "desktop:package": "node tools/verify-desktop-release.cjs && npm run build && electron-forge package --platform=win32 --arch=x64",
     "desktop:icon": "node tools/create-electron-icon.cjs",
     "dev:api": "npm --prefix api run dev",
-    "build": "vite build",
+    "build": "node tools/materials.mjs verify && vite build && node tools/materials.mjs verify --root=dist/textures/terrain/pbr",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "npm --prefix api test",
-    "migrate:api": "npm --prefix api run migrate"
+    "migrate:api": "npm --prefix api run migrate",
+    "materials:fetch": "node tools/materials.mjs fetch",
+    "materials:build": "node tools/materials.mjs build",
+    "materials:verify": "node tools/materials.mjs verify"
   },
   "config": {
     "forge": "./forge.config.cjs"
@@ -40,7 +43,9 @@
     "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
     "electron": "^44.0.0",
+    "playwright": "^1.63.0",
     "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.4",
     "vite": "^5.4.11",
     "vitest": "^3.2.6",
     "wait-on": "^9.1.0"

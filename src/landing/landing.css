@@ -1836,7 +1836,7 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 }
 @keyframes landing-preview-spin { to { transform: rotate(360deg); } }
 .landing-credits-backdrop { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; padding: 18px; background: rgba(0, 0, 0, .68); }
-.landing-credits-dialog { display: grid; gap: 16px; width: min(360px, 100%); padding: 20px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel); box-shadow: 0 24px 80px rgba(0,0,0,.6); }
+.landing-credits-dialog { max-height: 85vh; overflow-y: auto; display: grid; gap: 16px; width: min(360px, 100%); padding: 20px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel); box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 .landing-credits-dialog span { color: var(--accent); font: 600 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .landing-credits-dialog h2 { margin: 5px 0 0; color: var(--text-bright); font-size: 18px; }
 .landing-credits-dialog p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }

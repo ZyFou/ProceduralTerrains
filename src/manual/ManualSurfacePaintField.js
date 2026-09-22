@@ -1,3 +1,4 @@
+import { SurfacePaintLayers } from './SurfacePaintLayers.js';
 import * as THREE from 'three';
 
 const CHANNEL_COUNT = 7;
@@ -50,6 +51,7 @@ function makeTexture(data, resolution) {
 
 export class ManualSurfacePaintField {
   constructor({ getBounds, gpuTier = 'high', resolution }) {
+    this.layersField = null;
     this.getBounds = getBounds;
     this.targetResolution = resolution || resolutionForTier(gpuTier);
     this.resolution = 1;
@@ -69,6 +71,12 @@ export class ManualSurfacePaintField {
     this._scratchAverage = new Float32Array(CHANNEL_COUNT);
     this._scratchSample = new Float32Array(CHANNEL_COUNT);
     this._syncBounds();
+  }
+
+  enableLayers() {
+    if(!this.layersField) this.layersField = this.isEmpty() ? new SurfacePaintLayers({origin:this.origin,span:this.span}) : SurfacePaintLayers.migrate(this);
+    if(this._boundUniforms) this.layersField.bind(this._boundUniforms);
+    return this.layersField;
   }
 
   ensureAllocated() {
@@ -179,6 +187,7 @@ export class ManualSurfacePaintField {
   }
 
   syncBounds() {
+    if(this.layersField)return false;
     return this._syncBounds();
   }
 
@@ -188,6 +197,8 @@ export class ManualSurfacePaintField {
     this._aliasPaintTextures = aliasPaintTextures === true;
     this._bindTexturesToUniforms();
     this._applyBoundsToUniforms();
+    if(this.layersField)this.layersField.bind(uniforms);
+    else if(uniforms.uSurfacePaintEnabled) uniforms.uSurfacePaintEnabled.value=0;
   }
 
   worldToPixel(x, z) {
@@ -283,6 +294,7 @@ export class ManualSurfacePaintField {
   }
 
   flushUploads() {
+    if(this.layersField)return this.layersField.flushUploads();
     if (this._uploadAPending) this.textureA.needsUpdate = true;
     if (this._uploadBPending) this.textureB.needsUpdate = true;
     const flushed = this._uploadAPending || this._uploadBPending;
@@ -404,6 +416,7 @@ export class ManualSurfacePaintField {
   }
 
   clear() {
+    if(this.layersField){this.layersField.clear();return;}
     this.weightsA.fill(0);
     this.weightsB.fill(0);
     this.textureA.needsUpdate = true;
@@ -412,12 +425,14 @@ export class ManualSurfacePaintField {
   }
 
   isEmpty() {
+    if(this.layersField)return this.layersField.isEmpty();
     for (const value of this.weightsA) if (value !== 0) return false;
     for (const value of this.weightsB) if (value !== 0) return false;
     return true;
   }
 
   serialize() {
+    if(this.layersField)return this.layersField.serialize();
     if (this.isEmpty()) return null;
     return {
       version: 1,
@@ -430,6 +445,8 @@ export class ManualSurfacePaintField {
   }
 
   load(input) {
+    this.layersField?.dispose();this.layersField=null;
+    if(input?.version===2){this.layersField=SurfacePaintLayers.load(input);if(this._boundUniforms)this.layersField.bind(this._boundUniforms);return true;}
     this.clear();
     if (input?.version !== 1) return false;
     const sourceA = base64ToUint8(input.weightsA);
@@ -464,6 +481,7 @@ export class ManualSurfacePaintField {
   }
 
   dispose() {
+    this.layersField?.dispose();
     this.textureA.dispose();
     this.textureB.dispose();
   }

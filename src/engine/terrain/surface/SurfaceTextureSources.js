@@ -1,5 +1,6 @@
 export const SURFACE_TEXTURE_SOURCE = Object.freeze({
   PROCEDURAL: 'procedural',
+  PBR: 'pbrLibrary',
   DEFAULT: 'defaultTextures',
   CUSTOM: 'customTextures',
   BUILT_IN: 'builtInTextures',
@@ -12,6 +13,7 @@ export function isSurfaceTextureSource(value) {
 }
 
 export function normalizeSurfaceTextureSource(params = {}) {
+  if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR) return SURFACE_TEXTURE_SOURCE.PBR;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PROCEDURAL) return SURFACE_TEXTURE_SOURCE.PROCEDURAL;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.CUSTOM) return SURFACE_TEXTURE_SOURCE.CUSTOM;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.BUILT_IN) return SURFACE_TEXTURE_SOURCE.BUILT_IN;

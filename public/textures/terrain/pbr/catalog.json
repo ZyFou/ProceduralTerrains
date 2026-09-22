@@ -1,0 +1,2773 @@
+{
+  "version": 1,
+  "packVersion": "1.0.0",
+  "assets": [
+    {
+      "id": "polyhaven:aerial_grass_rock",
+      "sourceId": "aerial_grass_rock",
+      "provider": "polyhaven",
+      "name": "Rocky grassland",
+      "scaleClass": "meso",
+      "distribution": "core",
+      "category": "Grass",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        15,
+        15
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/aerial_grass_rock",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_grass_rock/aerial_grass_rock_diff_2k.jpg",
+          "sha256": "1a2ddfa4652adbe00447b940c40019d46f4b88245bc1b341cdf622c2110b7bc5"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_grass_rock/aerial_grass_rock_nor_gl_2k.jpg",
+          "sha256": "c6aa14b042ce243f93a6ca807f46a085711c23ad316b104578e92df7770ee285"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/aerial_grass_rock/aerial_grass_rock_disp_2k.png",
+          "sha256": "4588acc4bdc3091758d6f08b0aaaaf82908f307d1609cbbc8c3a5e549c35583b"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_grass_rock/aerial_grass_rock_ao_2k.jpg",
+          "sha256": "2eb11d2282c78126dff97697ae87a35ac5c1e2b7a3aa0b1c67473a0ae0621d03"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "aerial_grass_rock/512.pbr",
+          "bytes": 2223921,
+          "sha256": "8d09ee26295d6f310aeb915e3de2911b0bd658ded3a08d2c9684ba92a9673f7a",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "aerial_grass_rock/1024.pbr",
+          "bytes": 9002365,
+          "sha256": "165faf9b4e044b3764b26f6317e3a94e408f58f16287aaca6e978e51af5a1d88",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "aerial_grass_rock/2048.pbr",
+          "bytes": 36164074,
+          "sha256": "b883e5f379578199abc1e80a0f092adfe6ce1a8810fda5263322b48a27eda712",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "aerial_grass_rock/thumbnail.webp",
+        "bytes": 3864,
+        "sha256": "f8401210cce9ba9cb4448d5f4a096e7a66144bc69133428ca6b813506db27141"
+      },
+      "heightSource": {
+        "path": "aerial_grass_rock/height-source.png",
+        "bytes": 7364831,
+        "sha256": "4588acc4bdc3091758d6f08b0aaaaf82908f307d1609cbbc8c3a5e549c35583b"
+      },
+      "files": [
+        {
+          "path": "aerial_grass_rock/512.pbr",
+          "bytes": 2223921,
+          "sha256": "8d09ee26295d6f310aeb915e3de2911b0bd658ded3a08d2c9684ba92a9673f7a",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_grass_rock/1024.pbr",
+          "bytes": 9002365,
+          "sha256": "165faf9b4e044b3764b26f6317e3a94e408f58f16287aaca6e978e51af5a1d88",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_grass_rock/2048.pbr",
+          "bytes": 36164074,
+          "sha256": "b883e5f379578199abc1e80a0f092adfe6ce1a8810fda5263322b48a27eda712",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_grass_rock/thumbnail.webp",
+          "bytes": 3864,
+          "sha256": "f8401210cce9ba9cb4448d5f4a096e7a66144bc69133428ca6b813506db27141"
+        },
+        {
+          "path": "aerial_grass_rock/height-source.png",
+          "bytes": 7364831,
+          "sha256": "4588acc4bdc3091758d6f08b0aaaaf82908f307d1609cbbc8c3a5e549c35583b"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:rock_boulder_dry",
+      "sourceId": "rock_boulder_dry",
+      "provider": "polyhaven",
+      "name": "Dry pale rock",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        1.7999999523162842,
+        1.8000001907348633
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/rock_boulder_dry",
+      "authors": [
+        "Dimitrios Savva",
+        "Rico Cilliers"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_dry/rock_boulder_dry_diff_2k.jpg",
+          "sha256": "c66de7f7b48ef1ba542c17af780787ca6d43da2160a46ff3544dd9fcdf65ca30"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_dry/rock_boulder_dry_nor_gl_2k.jpg",
+          "sha256": "72a3c96d563fc17ac36c568802e106222e6480512d98e07318e1f431cea33dd6"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/rock_boulder_dry/rock_boulder_dry_disp_2k.png",
+          "sha256": "e07b06123bda2156f2a0fef79b0edb77280295135cb5063e7794998ff3e69a90"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_dry/rock_boulder_dry_ao_2k.jpg",
+          "sha256": "cc27725b9bd4b3482823ced876ea5a4ff4cef8485a8193f6f071b56a3a2bb14d"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "rock_boulder_dry/512.pbr",
+          "bytes": 2103562,
+          "sha256": "dba023ed362689330293382407c1d94c057c9518027cd58a365c5085ab188782",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "rock_boulder_dry/1024.pbr",
+          "bytes": 8399453,
+          "sha256": "102e2ac3ccbc3b131b68bc1f3f4be933cdd981278597796b9e5edd68b4bc1fba",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "rock_boulder_dry/2048.pbr",
+          "bytes": 32999224,
+          "sha256": "a3f137b90956aa91f1783b175ca2b5098fd0ec1d0709bed016c354d73c80ee6b",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "rock_boulder_dry/thumbnail.webp",
+        "bytes": 5974,
+        "sha256": "047f7c8f62088e862bb28b509f70d8581468f6402ec69a0fdef97a9f18a93c80"
+      },
+      "heightSource": {
+        "path": "rock_boulder_dry/height-source.png",
+        "bytes": 8088495,
+        "sha256": "e07b06123bda2156f2a0fef79b0edb77280295135cb5063e7794998ff3e69a90"
+      },
+      "files": [
+        {
+          "path": "rock_boulder_dry/512.pbr",
+          "bytes": 2103562,
+          "sha256": "dba023ed362689330293382407c1d94c057c9518027cd58a365c5085ab188782",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_dry/1024.pbr",
+          "bytes": 8399453,
+          "sha256": "102e2ac3ccbc3b131b68bc1f3f4be933cdd981278597796b9e5edd68b4bc1fba",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_dry/2048.pbr",
+          "bytes": 32999224,
+          "sha256": "a3f137b90956aa91f1783b175ca2b5098fd0ec1d0709bed016c354d73c80ee6b",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_dry/thumbnail.webp",
+          "bytes": 5974,
+          "sha256": "047f7c8f62088e862bb28b509f70d8581468f6402ec69a0fdef97a9f18a93c80"
+        },
+        {
+          "path": "rock_boulder_dry/height-source.png",
+          "bytes": 8088495,
+          "sha256": "e07b06123bda2156f2a0fef79b0edb77280295135cb5063e7794998ff3e69a90"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:brown_mud",
+      "sourceId": "brown_mud",
+      "provider": "polyhaven",
+      "name": "Brown soil",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Earth",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        1.299996018409729,
+        1.299996018409729
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/brown_mud",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud/brown_mud_diff_2k.jpg",
+          "sha256": "726a0f5222fdf8b2bcdbec56fee8ea55150c217eab35a893ad5831f28cee3a5f"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud/brown_mud_nor_gl_2k.jpg",
+          "sha256": "a3df5f6f7493a1762626c6d0d47872d969744a49931de50fe79f71a5eae8f857"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/brown_mud/brown_mud_disp_2k.png",
+          "sha256": "c75285ef351f683c35f419c3ed9fe5460f71f01719935baafc877ddac2ac9b93"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud/brown_mud_ao_2k.jpg",
+          "sha256": "a4a261f00bb6b2fd7816cf4762c3e614d624830c0ff19e28f8bdcdea45ae7db6"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "brown_mud/512.pbr",
+          "bytes": 2104980,
+          "sha256": "f6f8b3241b3f3c3145bb223ff6d03edca03d6b82542bf809aa71a0c2fda3d66d",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "brown_mud/1024.pbr",
+          "bytes": 8533439,
+          "sha256": "4f3e713e24eb6f36736605b84806d7a2325d2b585db64ffda206afc693cdb960",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "brown_mud/2048.pbr",
+          "bytes": 33631507,
+          "sha256": "1775a2923863175949b5ea83db319bc592fdf60d32b534db9a228f1570b5a56e",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "brown_mud/thumbnail.webp",
+        "bytes": 3736,
+        "sha256": "970f51f807370a8f04408bd2d65792eead6484fbb0a13c595a6d4a3de93ddd4e"
+      },
+      "heightSource": {
+        "path": "brown_mud/height-source.png",
+        "bytes": 2002655,
+        "sha256": "c75285ef351f683c35f419c3ed9fe5460f71f01719935baafc877ddac2ac9b93"
+      },
+      "files": [
+        {
+          "path": "brown_mud/512.pbr",
+          "bytes": 2104980,
+          "sha256": "f6f8b3241b3f3c3145bb223ff6d03edca03d6b82542bf809aa71a0c2fda3d66d",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud/1024.pbr",
+          "bytes": 8533439,
+          "sha256": "4f3e713e24eb6f36736605b84806d7a2325d2b585db64ffda206afc693cdb960",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud/2048.pbr",
+          "bytes": 33631507,
+          "sha256": "1775a2923863175949b5ea83db319bc592fdf60d32b534db9a228f1570b5a56e",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud/thumbnail.webp",
+          "bytes": 3736,
+          "sha256": "970f51f807370a8f04408bd2d65792eead6484fbb0a13c595a6d4a3de93ddd4e"
+        },
+        {
+          "path": "brown_mud/height-source.png",
+          "bytes": 2002655,
+          "sha256": "c75285ef351f683c35f419c3ed9fe5460f71f01719935baafc877ddac2ac9b93"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:forest_ground_04",
+      "sourceId": "forest_ground_04",
+      "provider": "polyhaven",
+      "name": "Forest ground",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Forest",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        3.1500000953674316,
+        3.1500000953674316
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/forest_ground_04",
+      "authors": [
+        "Rob Tuytel",
+        "Rico Cilliers"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_ground_04/forest_ground_04_diff_2k.jpg",
+          "sha256": "24b8aaf4c8547305d80b0e029ec365219ab1b90748d4ca5651bdc9e75bfde5e6"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_ground_04/forest_ground_04_nor_gl_2k.jpg",
+          "sha256": "b37ac799ed410976541e0011c246fca254e74eaa3f096ae7a7d74178db5a6d9b"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/forest_ground_04/forest_ground_04_disp_2k.png",
+          "sha256": "013c03f6f0cb1b6c7fbcf1ce950bc09e93285dad0c1d953714a36b8dc1c93c3b"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_ground_04/forest_ground_04_ao_2k.jpg",
+          "sha256": "414b0f05ad49b969fe0173b3c0a44eb9ae9bfa13d263697878853423155087d5"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "forest_ground_04/512.pbr",
+          "bytes": 2174888,
+          "sha256": "eeebf8c4f617bb4167741eecefcd43fe3891a2f3e7b832c4124478cf4ea6e260",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "forest_ground_04/1024.pbr",
+          "bytes": 8934644,
+          "sha256": "afd4f14f4ab4559e7908d8ebe3023245d70375dcd96cc8c7d4d2ece04329c131",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "forest_ground_04/2048.pbr",
+          "bytes": 35863244,
+          "sha256": "30ade0a9cdeda5f7cb76fcb97e364748b89ac7b28d2e2cf8cf3df070f6c914c9",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "forest_ground_04/thumbnail.webp",
+        "bytes": 5292,
+        "sha256": "2bca59faebbd39878414350343c5c3cfd90d737fd9915338c823adf26c3a50cc"
+      },
+      "heightSource": {
+        "path": "forest_ground_04/height-source.png",
+        "bytes": 5851483,
+        "sha256": "013c03f6f0cb1b6c7fbcf1ce950bc09e93285dad0c1d953714a36b8dc1c93c3b"
+      },
+      "files": [
+        {
+          "path": "forest_ground_04/512.pbr",
+          "bytes": 2174888,
+          "sha256": "eeebf8c4f617bb4167741eecefcd43fe3891a2f3e7b832c4124478cf4ea6e260",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_ground_04/1024.pbr",
+          "bytes": 8934644,
+          "sha256": "afd4f14f4ab4559e7908d8ebe3023245d70375dcd96cc8c7d4d2ece04329c131",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_ground_04/2048.pbr",
+          "bytes": 35863244,
+          "sha256": "30ade0a9cdeda5f7cb76fcb97e364748b89ac7b28d2e2cf8cf3df070f6c914c9",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_ground_04/thumbnail.webp",
+          "bytes": 5292,
+          "sha256": "2bca59faebbd39878414350343c5c3cfd90d737fd9915338c823adf26c3a50cc"
+        },
+        {
+          "path": "forest_ground_04/height-source.png",
+          "bytes": 5851483,
+          "sha256": "013c03f6f0cb1b6c7fbcf1ce950bc09e93285dad0c1d953714a36b8dc1c93c3b"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:forest_leaves_02",
+      "sourceId": "forest_leaves_02",
+      "provider": "polyhaven",
+      "name": "Forest litter",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Forest",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        3.0009725093841553,
+        3.0009801387786865
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/forest_leaves_02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_leaves_02/forest_leaves_02_diffuse_2k.jpg",
+          "sha256": "9c38b2b151a0415457a6914966422cfca5a546c94674442e5395e0b1e908a196"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_leaves_02/forest_leaves_02_nor_gl_2k.jpg",
+          "sha256": "af0346114834c347a8d6a138f6ea16a97b0bec8d6e4db32c24f1c7e482163235"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/forest_leaves_02/forest_leaves_02_disp_2k.png",
+          "sha256": "97a110abde191c2cf1dd30cf93c169c9e4395792568a4a7dd3757571f5a704bd"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_leaves_02/forest_leaves_02_ao_2k.jpg",
+          "sha256": "515e0e6dfc4ebf34d90def7455531cf99dfddef52870d45b8d2c08886b0f0312"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "forest_leaves_02/512.pbr",
+          "bytes": 2400706,
+          "sha256": "71081b67f84c3cc53bf4618e0e79437a0dff17331e59264ec7b2adcec9dc3cd7",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "forest_leaves_02/1024.pbr",
+          "bytes": 9745596,
+          "sha256": "dd146969533347f34ca6f5648b6030277b05a698c761a1f19e2e04fbbb8622c6",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "forest_leaves_02/2048.pbr",
+          "bytes": 39280218,
+          "sha256": "ed155db40684d40945f9c51f5e248b4eb5949c802f165b585b43108325339470",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "forest_leaves_02/thumbnail.webp",
+        "bytes": 8314,
+        "sha256": "ce5aa19373409bf49626f7e932fed6269d50adbdb05a3447ab8913d6a742055b"
+      },
+      "heightSource": {
+        "path": "forest_leaves_02/height-source.png",
+        "bytes": 6503840,
+        "sha256": "97a110abde191c2cf1dd30cf93c169c9e4395792568a4a7dd3757571f5a704bd"
+      },
+      "files": [
+        {
+          "path": "forest_leaves_02/512.pbr",
+          "bytes": 2400706,
+          "sha256": "71081b67f84c3cc53bf4618e0e79437a0dff17331e59264ec7b2adcec9dc3cd7",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_leaves_02/1024.pbr",
+          "bytes": 9745596,
+          "sha256": "dd146969533347f34ca6f5648b6030277b05a698c761a1f19e2e04fbbb8622c6",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_leaves_02/2048.pbr",
+          "bytes": 39280218,
+          "sha256": "ed155db40684d40945f9c51f5e248b4eb5949c802f165b585b43108325339470",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "forest_leaves_02/thumbnail.webp",
+          "bytes": 8314,
+          "sha256": "ce5aa19373409bf49626f7e932fed6269d50adbdb05a3447ab8913d6a742055b"
+        },
+        {
+          "path": "forest_leaves_02/height-source.png",
+          "bytes": 6503840,
+          "sha256": "97a110abde191c2cf1dd30cf93c169c9e4395792568a4a7dd3757571f5a704bd"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:mossy_rock",
+      "sourceId": "mossy_rock",
+      "provider": "polyhaven",
+      "name": "Mossy rock",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        3,
+        3
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/mossy_rock",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/mossy_rock/mossy_rock_diff_2k.jpg",
+          "sha256": "98ecbd1d19953433f5909b79958992b1da2b45addbee772d1d4c27287f368499"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/mossy_rock/mossy_rock_nor_gl_2k.jpg",
+          "sha256": "78c05b52eb78617fcce4fde7a9ac4872a9725fb2d13aff33248cbdb9c6330563"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/mossy_rock/mossy_rock_disp_2k.png",
+          "sha256": "3ee19ec26fa8ecf27b1fc961902e0656321d37f3d66a5c4fd809303db858ff7c"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/mossy_rock/mossy_rock_ao_2k.jpg",
+          "sha256": "7ced8b235f6e1c8dc537aa55fdb1990189fe0a30ea70edfa954f61043347053e"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "mossy_rock/512.pbr",
+          "bytes": 2205764,
+          "sha256": "2074b0990eda1d0bf47a55f3442a2f27ba3034cca714a8f65335589ecb344667",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "mossy_rock/1024.pbr",
+          "bytes": 8905705,
+          "sha256": "581f173b4436110d340dfb825b4578e75f332d43d807c58da584c1dae4bd4795",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "mossy_rock/2048.pbr",
+          "bytes": 35664556,
+          "sha256": "5cdd131e116d7210cea71896199f308c94e8b3cdf3829c9e4af4e5997521e027",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "mossy_rock/thumbnail.webp",
+        "bytes": 8054,
+        "sha256": "b3e42c78b6fb60dd885732d6b2ff82055f3ae017f486d0a5112158f4e7ce9bf8"
+      },
+      "heightSource": {
+        "path": "mossy_rock/height-source.png",
+        "bytes": 6906485,
+        "sha256": "3ee19ec26fa8ecf27b1fc961902e0656321d37f3d66a5c4fd809303db858ff7c"
+      },
+      "files": [
+        {
+          "path": "mossy_rock/512.pbr",
+          "bytes": 2205764,
+          "sha256": "2074b0990eda1d0bf47a55f3442a2f27ba3034cca714a8f65335589ecb344667",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "mossy_rock/1024.pbr",
+          "bytes": 8905705,
+          "sha256": "581f173b4436110d340dfb825b4578e75f332d43d807c58da584c1dae4bd4795",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "mossy_rock/2048.pbr",
+          "bytes": 35664556,
+          "sha256": "5cdd131e116d7210cea71896199f308c94e8b3cdf3829c9e4af4e5997521e027",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "mossy_rock/thumbnail.webp",
+          "bytes": 8054,
+          "sha256": "b3e42c78b6fb60dd885732d6b2ff82055f3ae017f486d0a5112158f4e7ce9bf8"
+        },
+        {
+          "path": "mossy_rock/height-source.png",
+          "bytes": 6906485,
+          "sha256": "3ee19ec26fa8ecf27b1fc961902e0656321d37f3d66a5c4fd809303db858ff7c"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:brown_mud_dry",
+      "sourceId": "brown_mud_dry",
+      "provider": "polyhaven",
+      "name": "Dry granular soil",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Earth",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        1.299996018409729,
+        1.299996018409729
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/brown_mud_dry",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_dry/brown_mud_dry_diff_2k.jpg",
+          "sha256": "5f567f61a7e139101441a1209e9c174a4f92dce489b28bb168f6bfd0ca07e411"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_dry/brown_mud_dry_nor_gl_2k.jpg",
+          "sha256": "b2cc46b8497f1c4a1e9cd51883175b1ae1c4eb8862c553573efb41ca0a4088bc"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/brown_mud_dry/brown_mud_dry_disp_2k.png",
+          "sha256": "c882cc0da52d76a968158fff376d6685eeeaf1afe38d14a1f3949adb6d01fa56"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_dry/brown_mud_dry_ao_2k.jpg",
+          "sha256": "288b72bd1b791de9c18470e449daf881804421c9455f761317648cb79aa3e274"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "brown_mud_dry/512.pbr",
+          "bytes": 2349926,
+          "sha256": "1d4a8fd67f6de49205a6e7f8e5d7f787960fc2c0c37361afd3bf75b739cbddb0",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "brown_mud_dry/1024.pbr",
+          "bytes": 9571853,
+          "sha256": "d42c87049527554ecb0dcc954da667c042e5cc67ecc37e69d43685841b0096f4",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "brown_mud_dry/2048.pbr",
+          "bytes": 38703100,
+          "sha256": "52367d266ba7acb6f0ed27def8168f7fa7f6b0af42375a34292cf480e546731c",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "brown_mud_dry/thumbnail.webp",
+        "bytes": 7944,
+        "sha256": "b2fc8f9530bdfc06d5a0a1dd48d4e10705a522706e74bd33ba827578d5882419"
+      },
+      "heightSource": {
+        "path": "brown_mud_dry/height-source.png",
+        "bytes": 8152283,
+        "sha256": "c882cc0da52d76a968158fff376d6685eeeaf1afe38d14a1f3949adb6d01fa56"
+      },
+      "files": [
+        {
+          "path": "brown_mud_dry/512.pbr",
+          "bytes": 2349926,
+          "sha256": "1d4a8fd67f6de49205a6e7f8e5d7f787960fc2c0c37361afd3bf75b739cbddb0",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_dry/1024.pbr",
+          "bytes": 9571853,
+          "sha256": "d42c87049527554ecb0dcc954da667c042e5cc67ecc37e69d43685841b0096f4",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_dry/2048.pbr",
+          "bytes": 38703100,
+          "sha256": "52367d266ba7acb6f0ed27def8168f7fa7f6b0af42375a34292cf480e546731c",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_dry/thumbnail.webp",
+          "bytes": 7944,
+          "sha256": "b2fc8f9530bdfc06d5a0a1dd48d4e10705a522706e74bd33ba827578d5882419"
+        },
+        {
+          "path": "brown_mud_dry/height-source.png",
+          "bytes": 8152283,
+          "sha256": "c882cc0da52d76a968158fff376d6685eeeaf1afe38d14a1f3949adb6d01fa56"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:brown_mud_leaves_01",
+      "sourceId": "brown_mud_leaves_01",
+      "provider": "polyhaven",
+      "name": "Soil with leaves",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Earth",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        1.2999998331069946,
+        1.2999998331069946
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/brown_mud_leaves_01",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_leaves_01/brown_mud_leaves_01_diff_2k.jpg",
+          "sha256": "29c997d77f56e4ea16d3e998a306be0c17fddb28ab4822657c7cd8249040ffda"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_leaves_01/brown_mud_leaves_01_nor_gl_2k.jpg",
+          "sha256": "b6ec386e00d9d2a1c3a1da6a98a67066b0dfaa88ddb779341df29700cf081bdf"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/brown_mud_leaves_01/brown_mud_leaves_01_disp_2k.png",
+          "sha256": "a6d41eee4c01717b7b0b71e6fbd9a46b903312ee440c3ada3d3c013cafc65263"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_leaves_01/brown_mud_leaves_01_ao_2k.jpg",
+          "sha256": "76c342dc7b5ee7dc5f2246e24147f16afcaa2c0b31599da4c385404416e16eb8"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "brown_mud_leaves_01/512.pbr",
+          "bytes": 2285469,
+          "sha256": "43bf530362a1177e867a056e4a81cf1e1d86fe54fafc2e3c396a0570d0568b81",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "brown_mud_leaves_01/1024.pbr",
+          "bytes": 9280646,
+          "sha256": "8041623d3c76117df1c26c8f31189ae914fd22327f2964b23b46176e75a27102",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "brown_mud_leaves_01/2048.pbr",
+          "bytes": 37401658,
+          "sha256": "d6695bdcd1b14b8eb8566b37241552abda16dfb3ddeadad569167adb6920b3b0",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "brown_mud_leaves_01/thumbnail.webp",
+        "bytes": 6940,
+        "sha256": "81746d4eee6e83427c09b2a33adbe7640d9da06b0c2df604e300f434dc1f94ab"
+      },
+      "heightSource": {
+        "path": "brown_mud_leaves_01/height-source.png",
+        "bytes": 6888729,
+        "sha256": "a6d41eee4c01717b7b0b71e6fbd9a46b903312ee440c3ada3d3c013cafc65263"
+      },
+      "files": [
+        {
+          "path": "brown_mud_leaves_01/512.pbr",
+          "bytes": 2285469,
+          "sha256": "43bf530362a1177e867a056e4a81cf1e1d86fe54fafc2e3c396a0570d0568b81",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_leaves_01/1024.pbr",
+          "bytes": 9280646,
+          "sha256": "8041623d3c76117df1c26c8f31189ae914fd22327f2964b23b46176e75a27102",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_leaves_01/2048.pbr",
+          "bytes": 37401658,
+          "sha256": "d6695bdcd1b14b8eb8566b37241552abda16dfb3ddeadad569167adb6920b3b0",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "brown_mud_leaves_01/thumbnail.webp",
+          "bytes": 6940,
+          "sha256": "81746d4eee6e83427c09b2a33adbe7640d9da06b0c2df604e300f434dc1f94ab"
+        },
+        {
+          "path": "brown_mud_leaves_01/height-source.png",
+          "bytes": 6888729,
+          "sha256": "a6d41eee4c01717b7b0b71e6fbd9a46b903312ee440c3ada3d3c013cafc65263"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:sand_03",
+      "sourceId": "sand_03",
+      "provider": "polyhaven",
+      "name": "Coastal sand",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Sand",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2,
+        2
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/sand_03",
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_03/sand_03_diff_2k.jpg",
+          "sha256": "538453033d28a64c671b89389a6ee904184af18d365adb5a15d5ea9e1eb5705b"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_03/sand_03_nor_gl_2k.jpg",
+          "sha256": "ce870ef363010e0b96faa47f3fac47982cdbb40e3a59c0fe23fa64f587f54c7f"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/sand_03/sand_03_disp_2k.png",
+          "sha256": "1e706101f1e9e527ec2001a1236ffd64483829c4a99b6b0852ba01ddce1f8a85"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_03/sand_03_ao_2k.jpg",
+          "sha256": "c9de7d0fc60f1a0f1e1b8b603520ae4539c6d63a397f1cdfb93fa9e4178bf0ae"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "sand_03/512.pbr",
+          "bytes": 1906588,
+          "sha256": "e9841764a590dcff8d1e2e4475bc6e6cb589362cc4fe8a336d1ee43cba012a0a",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "sand_03/1024.pbr",
+          "bytes": 7979760,
+          "sha256": "04b4e1de6b4f756ceb7312e9fab60180dcda7c018db3bf19ff06f4904d89335d",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "sand_03/2048.pbr",
+          "bytes": 31989177,
+          "sha256": "5d0f123752a187f9dafb6089d4ab36b2d7682fe6706ce27a0d5345cfaa4f3e85",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "sand_03/thumbnail.webp",
+        "bytes": 260,
+        "sha256": "557c9f57a43ed2d8f8bb3ffacae3807c869b0fd892bcf747feff5c72af8e10f7"
+      },
+      "heightSource": {
+        "path": "sand_03/height-source.png",
+        "bytes": 6224292,
+        "sha256": "1e706101f1e9e527ec2001a1236ffd64483829c4a99b6b0852ba01ddce1f8a85"
+      },
+      "files": [
+        {
+          "path": "sand_03/512.pbr",
+          "bytes": 1906588,
+          "sha256": "e9841764a590dcff8d1e2e4475bc6e6cb589362cc4fe8a336d1ee43cba012a0a",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_03/1024.pbr",
+          "bytes": 7979760,
+          "sha256": "04b4e1de6b4f756ceb7312e9fab60180dcda7c018db3bf19ff06f4904d89335d",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_03/2048.pbr",
+          "bytes": 31989177,
+          "sha256": "5d0f123752a187f9dafb6089d4ab36b2d7682fe6706ce27a0d5345cfaa4f3e85",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_03/thumbnail.webp",
+          "bytes": 260,
+          "sha256": "557c9f57a43ed2d8f8bb3ffacae3807c869b0fd892bcf747feff5c72af8e10f7"
+        },
+        {
+          "path": "sand_03/height-source.png",
+          "bytes": 6224292,
+          "sha256": "1e706101f1e9e527ec2001a1236ffd64483829c4a99b6b0852ba01ddce1f8a85"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:sand_02",
+      "sourceId": "sand_02",
+      "provider": "polyhaven",
+      "name": "Marked sand",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Paths",
+      "origin": "photogrammetry",
+      "naturalFill": false,
+      "physicalSize": [
+        2.140000104904175,
+        2.140000104904175
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/sand_02",
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_02/sand_02_diff_2k.jpg",
+          "sha256": "8d19fa2a0bdec258e9d6a84afcb7ea866506e6b461d75e65792d0865c0043b88"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_02/sand_02_nor_gl_2k.jpg",
+          "sha256": "5c9d6190fa352c6a2f6183a4283148655d4f300804573891bae50ad8acec332e"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/sand_02/sand_02_disp_2k.png",
+          "sha256": "098cc7c7e5e35e25c9aef25f3a4bd4d221bf31b662502bec0e9a2d76b202d020"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sand_02/sand_02_ao_2k.jpg",
+          "sha256": "646d0992d7742e61958bfd3aaaaa38b1bbcf85b60f4bbd7710a6c3c75eff8b7f"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "sand_02/512.pbr",
+          "bytes": 2013992,
+          "sha256": "62c5728039f047a07ef8d86fbc032a492bd11063e8a924ab81d9e100ad30b374",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "sand_02/1024.pbr",
+          "bytes": 8436556,
+          "sha256": "fba0954f652ff614f5dbba360e2353e926495a6818323056088d87b3612a3dfa",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "sand_02/2048.pbr",
+          "bytes": 34634235,
+          "sha256": "5e8aebd198100f1a2023d9c49f885216114bf0eaf7605529f38fbbebe3b0ad40",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "sand_02/thumbnail.webp",
+        "bytes": 926,
+        "sha256": "28fa490ef6f08c5346d4b6b2614ba0fe688ed463bc3b530579b9c25562433ffc"
+      },
+      "heightSource": {
+        "path": "sand_02/height-source.png",
+        "bytes": 6697934,
+        "sha256": "098cc7c7e5e35e25c9aef25f3a4bd4d221bf31b662502bec0e9a2d76b202d020"
+      },
+      "files": [
+        {
+          "path": "sand_02/512.pbr",
+          "bytes": 2013992,
+          "sha256": "62c5728039f047a07ef8d86fbc032a492bd11063e8a924ab81d9e100ad30b374",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_02/1024.pbr",
+          "bytes": 8436556,
+          "sha256": "fba0954f652ff614f5dbba360e2353e926495a6818323056088d87b3612a3dfa",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_02/2048.pbr",
+          "bytes": 34634235,
+          "sha256": "5e8aebd198100f1a2023d9c49f885216114bf0eaf7605529f38fbbebe3b0ad40",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sand_02/thumbnail.webp",
+          "bytes": 926,
+          "sha256": "28fa490ef6f08c5346d4b6b2614ba0fe688ed463bc3b530579b9c25562433ffc"
+        },
+        {
+          "path": "sand_02/height-source.png",
+          "bytes": 6697934,
+          "sha256": "098cc7c7e5e35e25c9aef25f3a4bd4d221bf31b662502bec0e9a2d76b202d020"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:sandstone_cracks",
+      "sourceId": "sandstone_cracks",
+      "provider": "polyhaven",
+      "name": "Cracked sandstone",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2,
+        2
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/sandstone_cracks",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sandstone_cracks/sandstone_cracks_diff_2k.jpg",
+          "sha256": "6d3f99604c85a818277150db784ac66e67a4d91ddc255dabf61b3e956564090d"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sandstone_cracks/sandstone_cracks_nor_gl_2k.jpg",
+          "sha256": "904e852268e1fb1bd5c0d035382f6a0e64c98dceea784fe957b1983d98b0231a"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/sandstone_cracks/sandstone_cracks_disp_2k.png",
+          "sha256": "de23ba7a4e038741ef82fe1eaf2d4cded5c5fd857159c6c914c4014405c575e5"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/sandstone_cracks/sandstone_cracks_ao_2k.jpg",
+          "sha256": "a58ec86af4beb8c0e6ae1572a02fda97e3f23b768c8da47b0ae6a368de22ddd9"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "sandstone_cracks/512.pbr",
+          "bytes": 2235728,
+          "sha256": "341a7ccb10b37399676d740d0721ea53db8cee43cd6fb447cff5bfa8872b6f62",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "sandstone_cracks/1024.pbr",
+          "bytes": 9214017,
+          "sha256": "3731cd771e8139ea2177af9e59e319b9f351910b1624bab5c2a18ac4bac0fc39",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "sandstone_cracks/2048.pbr",
+          "bytes": 37113098,
+          "sha256": "9cc9f0bfffd462516aad4220c0586d6adc2fbebda1499a0043148d7cb92f3195",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "sandstone_cracks/thumbnail.webp",
+        "bytes": 3352,
+        "sha256": "18fcd87eab4807af6af80c600409c915410f44912d60b6288ae274e3ee45553d"
+      },
+      "heightSource": {
+        "path": "sandstone_cracks/height-source.png",
+        "bytes": 7644915,
+        "sha256": "de23ba7a4e038741ef82fe1eaf2d4cded5c5fd857159c6c914c4014405c575e5"
+      },
+      "files": [
+        {
+          "path": "sandstone_cracks/512.pbr",
+          "bytes": 2235728,
+          "sha256": "341a7ccb10b37399676d740d0721ea53db8cee43cd6fb447cff5bfa8872b6f62",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sandstone_cracks/1024.pbr",
+          "bytes": 9214017,
+          "sha256": "3731cd771e8139ea2177af9e59e319b9f351910b1624bab5c2a18ac4bac0fc39",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sandstone_cracks/2048.pbr",
+          "bytes": 37113098,
+          "sha256": "9cc9f0bfffd462516aad4220c0586d6adc2fbebda1499a0043148d7cb92f3195",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "sandstone_cracks/thumbnail.webp",
+          "bytes": 3352,
+          "sha256": "18fcd87eab4807af6af80c600409c915410f44912d60b6288ae274e3ee45553d"
+        },
+        {
+          "path": "sandstone_cracks/height-source.png",
+          "bytes": 7644915,
+          "sha256": "de23ba7a4e038741ef82fe1eaf2d4cded5c5fd857159c6c914c4014405c575e5"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:rock_face",
+      "sourceId": "rock_face",
+      "provider": "polyhaven",
+      "name": "Brown-red rock face",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2.380000114440918,
+        2.380000114440918
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/rock_face",
+      "authors": [
+        "Greg Zaal",
+        "Dario Barresi"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_face/rock_face_diff_2k.jpg",
+          "sha256": "b989c832327538a9e546cca359417acb9a657d041f300407e8398daaf743f5bc"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_face/rock_face_nor_gl_2k.jpg",
+          "sha256": "352b87db2502d54487b0ed8abdfb621fae2abf7d360a281b419f567346178cf0"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/rock_face/rock_face_disp_2k.png",
+          "sha256": "4fbb611e61097fd95cfb87d16768a555c346c5410b8484dab438ac5084837a13"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_face/rock_face_ao_2k.jpg",
+          "sha256": "a1307b27bb712faa3569ec6bfbd74e867c30f66a815df3fc88f86b6158551d5d"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "rock_face/512.pbr",
+          "bytes": 2126086,
+          "sha256": "f01b550494072063f145367046516f06b426cd15663d398e68003ba7ca3416ef",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "rock_face/1024.pbr",
+          "bytes": 8568763,
+          "sha256": "20d0cad48d1387540cec8d5d1ef01f48e2e27397ed5f1652da5a8c86e2131127",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "rock_face/2048.pbr",
+          "bytes": 33444825,
+          "sha256": "99e94654654f8dc53a1b1081df74791d9fe9c17b17b3f24dd831551701b32f0c",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "rock_face/thumbnail.webp",
+        "bytes": 1950,
+        "sha256": "d5b8f27feb439c85d1eac360b2d5b4f91e61f019eeebd893ea3920e64ee1cdfd"
+      },
+      "heightSource": {
+        "path": "rock_face/height-source.png",
+        "bytes": 6175378,
+        "sha256": "4fbb611e61097fd95cfb87d16768a555c346c5410b8484dab438ac5084837a13"
+      },
+      "files": [
+        {
+          "path": "rock_face/512.pbr",
+          "bytes": 2126086,
+          "sha256": "f01b550494072063f145367046516f06b426cd15663d398e68003ba7ca3416ef",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_face/1024.pbr",
+          "bytes": 8568763,
+          "sha256": "20d0cad48d1387540cec8d5d1ef01f48e2e27397ed5f1652da5a8c86e2131127",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_face/2048.pbr",
+          "bytes": 33444825,
+          "sha256": "99e94654654f8dc53a1b1081df74791d9fe9c17b17b3f24dd831551701b32f0c",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_face/thumbnail.webp",
+          "bytes": 1950,
+          "sha256": "d5b8f27feb439c85d1eac360b2d5b4f91e61f019eeebd893ea3920e64ee1cdfd"
+        },
+        {
+          "path": "rock_face/height-source.png",
+          "bytes": 6175378,
+          "sha256": "4fbb611e61097fd95cfb87d16768a555c346c5410b8484dab438ac5084837a13"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:river_small_rocks",
+      "sourceId": "river_small_rocks",
+      "provider": "polyhaven",
+      "name": "River gravel",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Banks",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2.9000000953674316,
+        2.9000003337860107
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/river_small_rocks",
+      "authors": [
+        "Rob Tuytel",
+        "Rico Cilliers"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/river_small_rocks/river_small_rocks_diff_2k.jpg",
+          "sha256": "656a20860f5960cc0f442dd425bfe4607052ab1749efdde35d60c5df9639beac"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/river_small_rocks/river_small_rocks_nor_gl_2k.jpg",
+          "sha256": "4468fc6354767fd959b74e4cb7095d061e533268189c2336e03cb0be1bddc250"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/river_small_rocks/river_small_rocks_disp_2k.png",
+          "sha256": "32216ca0d31a15489cb166afff2756ff90c6cac77bb6af0c30bfdebbe2c676bc"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/river_small_rocks/river_small_rocks_ao_2k.jpg",
+          "sha256": "38e555e168e15eae5416ff279e00f6ab43658bf1d7504b1b9e446bc33edbae36"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "river_small_rocks/512.pbr",
+          "bytes": 2253557,
+          "sha256": "073326b8f9bb78af5c2f95c1da69ccf4797941ed1623a34a77ebe0079343fdb5",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "river_small_rocks/1024.pbr",
+          "bytes": 9105950,
+          "sha256": "06c7ef4ee353d31b5d96d921071b3ea27c581979b1ffc848151b60ec36c8a958",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "river_small_rocks/2048.pbr",
+          "bytes": 35965549,
+          "sha256": "64d0d2e4b53b7b177e8938b053dfbe564224899f3b2baace326f43bf6d59f470",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "river_small_rocks/thumbnail.webp",
+        "bytes": 5448,
+        "sha256": "9549a53d50ea49267d5665810003ce7fd16975bc397734506679b3c0722f62e8"
+      },
+      "heightSource": {
+        "path": "river_small_rocks/height-source.png",
+        "bytes": 7757746,
+        "sha256": "32216ca0d31a15489cb166afff2756ff90c6cac77bb6af0c30bfdebbe2c676bc"
+      },
+      "files": [
+        {
+          "path": "river_small_rocks/512.pbr",
+          "bytes": 2253557,
+          "sha256": "073326b8f9bb78af5c2f95c1da69ccf4797941ed1623a34a77ebe0079343fdb5",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "river_small_rocks/1024.pbr",
+          "bytes": 9105950,
+          "sha256": "06c7ef4ee353d31b5d96d921071b3ea27c581979b1ffc848151b60ec36c8a958",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "river_small_rocks/2048.pbr",
+          "bytes": 35965549,
+          "sha256": "64d0d2e4b53b7b177e8938b053dfbe564224899f3b2baace326f43bf6d59f470",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "river_small_rocks/thumbnail.webp",
+          "bytes": 5448,
+          "sha256": "9549a53d50ea49267d5665810003ce7fd16975bc397734506679b3c0722f62e8"
+        },
+        {
+          "path": "river_small_rocks/height-source.png",
+          "bytes": 7757746,
+          "sha256": "32216ca0d31a15489cb166afff2756ff90c6cac77bb6af0c30bfdebbe2c676bc"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:aerial_rocks_02",
+      "sourceId": "aerial_rocks_02",
+      "provider": "polyhaven",
+      "name": "Aerial rock massif",
+      "scaleClass": "macro",
+      "distribution": "extended",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        50,
+        50
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/aerial_rocks_02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_rocks_02/aerial_rocks_02_diff_2k.jpg",
+          "sha256": "f759d2471cb6a4b3b37d0a5a249adbad1d4d48d67825f37622a603dac8d9bb22"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_rocks_02/aerial_rocks_02_nor_gl_2k.jpg",
+          "sha256": "e7ad2a65b446ef70c3eb8b32267bee74d91d9759ed52c349c38e34cfd62d079e"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/aerial_rocks_02/aerial_rocks_02_disp_2k.png",
+          "sha256": "3f080f5bec4b092ad4a7a6324c727010905c0f10b900a36bdeab4b2ef741147c"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_rocks_02/aerial_rocks_02_ao_2k.jpg",
+          "sha256": "c5c2f5f4158e2f49e8b751361f9e868417c6ac27700297970ab5a9b628bec7f2"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "aerial_rocks_02/512.pbr",
+          "bytes": 2395530,
+          "sha256": "8f7d12b5196f1a7b9867ad60e29316d892d9b7d589bbc36b318e9ac875cff6cd",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "aerial_rocks_02/1024.pbr",
+          "bytes": 9594912,
+          "sha256": "ea0b09006d7c62f7c5f806c8632bfecddd5ee0c48aca9fb455a93a6c1c9ed90a",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "aerial_rocks_02/2048.pbr",
+          "bytes": 38155454,
+          "sha256": "d48d6944efd736ee139134bdd1cfe10e8af79b0d9bf71488d7c4418c3c54da68",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "aerial_rocks_02/thumbnail.webp",
+        "bytes": 7262,
+        "sha256": "3deaa8f6fe57004a480407cdfe16613e66a72e18bbfac5b50aac42b9123ecdce"
+      },
+      "heightSource": {
+        "path": "aerial_rocks_02/height-source.png",
+        "bytes": 6549767,
+        "sha256": "3f080f5bec4b092ad4a7a6324c727010905c0f10b900a36bdeab4b2ef741147c"
+      },
+      "files": [
+        {
+          "path": "aerial_rocks_02/512.pbr",
+          "bytes": 2395530,
+          "sha256": "8f7d12b5196f1a7b9867ad60e29316d892d9b7d589bbc36b318e9ac875cff6cd",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_rocks_02/1024.pbr",
+          "bytes": 9594912,
+          "sha256": "ea0b09006d7c62f7c5f806c8632bfecddd5ee0c48aca9fb455a93a6c1c9ed90a",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_rocks_02/2048.pbr",
+          "bytes": 38155454,
+          "sha256": "d48d6944efd736ee139134bdd1cfe10e8af79b0d9bf71488d7c4418c3c54da68",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "aerial_rocks_02/thumbnail.webp",
+          "bytes": 7262,
+          "sha256": "3deaa8f6fe57004a480407cdfe16613e66a72e18bbfac5b50aac42b9123ecdce"
+        },
+        {
+          "path": "aerial_rocks_02/height-source.png",
+          "bytes": 6549767,
+          "sha256": "3f080f5bec4b092ad4a7a6324c727010905c0f10b900a36bdeab4b2ef741147c"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:rock_boulder_cracked",
+      "sourceId": "rock_boulder_cracked",
+      "provider": "polyhaven",
+      "name": "Cracked orange rock",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Rock",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        1.3899999856948853,
+        1.3900001049041748
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/rock_boulder_cracked",
+      "authors": [
+        "Dario Barresi",
+        "Dimitrios Savva"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_cracked/rock_boulder_cracked_diff_2k.jpg",
+          "sha256": "d7010ebf5157dc707f4bb555c74f589e1b794a308c186f6de2271f3ad0ff0da4"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_cracked/rock_boulder_cracked_nor_gl_2k.jpg",
+          "sha256": "03a9815ebb58cc9ab5a59ab333f1bc50fa2539571aa6868bfb30d76b21601b30"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/rock_boulder_cracked/rock_boulder_cracked_disp_2k.png",
+          "sha256": "57d1a87355a85a5171e5e9d2f14013c03ee89878863b70bd8b380fad1c1fca2d"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_cracked/rock_boulder_cracked_ao_2k.jpg",
+          "sha256": "b54912b313b8798d14b31bbbe5aa95f69458eee2e529333faf44aef18f979754"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "rock_boulder_cracked/512.pbr",
+          "bytes": 2319974,
+          "sha256": "e3c2be607d8a11c7e83ce0a10ff89feba334ee5fee7887f169cbc73b495306c0",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "rock_boulder_cracked/1024.pbr",
+          "bytes": 9294379,
+          "sha256": "7d90cd5865d167043a71a9e289e59bb6f5a4fb1e37a1a64156a73c74064f8942",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "rock_boulder_cracked/2048.pbr",
+          "bytes": 36836938,
+          "sha256": "f84c7798686aa082a1489e16b89c124fae8984e47062aaa00a1eaffb9ec99cfe",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "rock_boulder_cracked/thumbnail.webp",
+        "bytes": 6264,
+        "sha256": "0c563bd5401ac20a9ae9e293f7667e5c348031b548c51dfc47d1a09669a90af2"
+      },
+      "heightSource": {
+        "path": "rock_boulder_cracked/height-source.png",
+        "bytes": 5691525,
+        "sha256": "57d1a87355a85a5171e5e9d2f14013c03ee89878863b70bd8b380fad1c1fca2d"
+      },
+      "files": [
+        {
+          "path": "rock_boulder_cracked/512.pbr",
+          "bytes": 2319974,
+          "sha256": "e3c2be607d8a11c7e83ce0a10ff89feba334ee5fee7887f169cbc73b495306c0",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_cracked/1024.pbr",
+          "bytes": 9294379,
+          "sha256": "7d90cd5865d167043a71a9e289e59bb6f5a4fb1e37a1a64156a73c74064f8942",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_cracked/2048.pbr",
+          "bytes": 36836938,
+          "sha256": "f84c7798686aa082a1489e16b89c124fae8984e47062aaa00a1eaffb9ec99cfe",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rock_boulder_cracked/thumbnail.webp",
+          "bytes": 6264,
+          "sha256": "0c563bd5401ac20a9ae9e293f7667e5c348031b548c51dfc47d1a09669a90af2"
+        },
+        {
+          "path": "rock_boulder_cracked/height-source.png",
+          "bytes": 5691525,
+          "sha256": "57d1a87355a85a5171e5e9d2f14013c03ee89878863b70bd8b380fad1c1fca2d"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:rocky_terrain_02",
+      "sourceId": "rocky_terrain_02",
+      "provider": "polyhaven",
+      "name": "Rocky grass terrain",
+      "scaleClass": "macro",
+      "distribution": "extended",
+      "category": "Grass",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        90,
+        90
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/rocky_terrain_02",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rocky_terrain_02/rocky_terrain_02_diff_2k.jpg",
+          "sha256": "9b042fe0618ffbc3650592456d7d8d265ba9a1cb5ce802f5f1d86b7ee79508a1"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rocky_terrain_02/rocky_terrain_02_nor_gl_2k.jpg",
+          "sha256": "556ed903180a9431b253fc1c334c769dc4615c5c0f4ef1cedf20533ae8409ce8"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/rocky_terrain_02/rocky_terrain_02_disp_2k.png",
+          "sha256": "abd8f0947846cde37cb28039bf3dff159492c576fd3dada88e14746c7fc27250"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rocky_terrain_02/rocky_terrain_02_ao_2k.jpg",
+          "sha256": "30a581b6d3f11db1f5f4f5bd3cbe89695d94042455311bb44a54f6691743a648"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "rocky_terrain_02/512.pbr",
+          "bytes": 2005883,
+          "sha256": "206f5f13a8b95b436022a5cd3e9db8d458a0e87088180a97d499fe5775a375a6",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "rocky_terrain_02/1024.pbr",
+          "bytes": 8138556,
+          "sha256": "82233073b4fedda7d82804f19442c07908d4130dcae88047ba71fbc818bb06fc",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "rocky_terrain_02/2048.pbr",
+          "bytes": 32260278,
+          "sha256": "00cd444cd3961a251073155f8e07cdfbf0c39db1ba4d6126a162ed8e0628cf79",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "rocky_terrain_02/thumbnail.webp",
+        "bytes": 2150,
+        "sha256": "ccd7a0e5d8f9f27897b828fc533cd0fffd31bb72a3b4e3a0245fd5cf47dec69e"
+      },
+      "heightSource": {
+        "path": "rocky_terrain_02/height-source.png",
+        "bytes": 6048098,
+        "sha256": "abd8f0947846cde37cb28039bf3dff159492c576fd3dada88e14746c7fc27250"
+      },
+      "files": [
+        {
+          "path": "rocky_terrain_02/512.pbr",
+          "bytes": 2005883,
+          "sha256": "206f5f13a8b95b436022a5cd3e9db8d458a0e87088180a97d499fe5775a375a6",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rocky_terrain_02/1024.pbr",
+          "bytes": 8138556,
+          "sha256": "82233073b4fedda7d82804f19442c07908d4130dcae88047ba71fbc818bb06fc",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rocky_terrain_02/2048.pbr",
+          "bytes": 32260278,
+          "sha256": "00cd444cd3961a251073155f8e07cdfbf0c39db1ba4d6126a162ed8e0628cf79",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "rocky_terrain_02/thumbnail.webp",
+          "bytes": 2150,
+          "sha256": "ccd7a0e5d8f9f27897b828fc533cd0fffd31bb72a3b4e3a0245fd5cf47dec69e"
+        },
+        {
+          "path": "rocky_terrain_02/height-source.png",
+          "bytes": 6048098,
+          "sha256": "abd8f0947846cde37cb28039bf3dff159492c576fd3dada88e14746c7fc27250"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:snow_02",
+      "sourceId": "snow_02",
+      "provider": "polyhaven",
+      "name": "Fresh snow",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Snow",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2,
+        2
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/snow_02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_02/snow_02_diff_2k.jpg",
+          "sha256": "d185c2853c7e674161789db4eed1c5708d85e4f6e3dcb5698209568adf02aa98"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_02/snow_02_nor_gl_2k.jpg",
+          "sha256": "288539ee33387e91035be4dc8d10da574bf6a95c8374d33b6b1dc465c6949e8f"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/snow_02/snow_02_disp_2k.png",
+          "sha256": "f2b979bc78989333ebfffb2063ba9ca72edc3ffc929f6a6d94ba39d80eb0358a"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_02/snow_02_ao_2k.jpg",
+          "sha256": "3bb1a13af0ce8d5b8a0cc80e1d5b4f36a36b0d612b65b3dc16ebc4b7ea36f4cb"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "snow_02/512.pbr",
+          "bytes": 1649976,
+          "sha256": "f425dc57754a04aa9661a4a43733bb2103d1824574357b93762416dbe66286ba",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "snow_02/1024.pbr",
+          "bytes": 6636971,
+          "sha256": "75ec6f790c48ec24b3502419db3151e0297357595932671f72042437f1b86666",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "snow_02/2048.pbr",
+          "bytes": 26540898,
+          "sha256": "350b30dc38afb6d01f11d568ee723552cc91786bc3fe3275da60e72dca3ff30a",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "snow_02/thumbnail.webp",
+        "bytes": 1106,
+        "sha256": "69a6d74977df6587dc3223512556de92b1418e41b6706ae192389497cd28e592"
+      },
+      "heightSource": {
+        "path": "snow_02/height-source.png",
+        "bytes": 7218660,
+        "sha256": "f2b979bc78989333ebfffb2063ba9ca72edc3ffc929f6a6d94ba39d80eb0358a"
+      },
+      "files": [
+        {
+          "path": "snow_02/512.pbr",
+          "bytes": 1649976,
+          "sha256": "f425dc57754a04aa9661a4a43733bb2103d1824574357b93762416dbe66286ba",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_02/1024.pbr",
+          "bytes": 6636971,
+          "sha256": "75ec6f790c48ec24b3502419db3151e0297357595932671f72042437f1b86666",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_02/2048.pbr",
+          "bytes": 26540898,
+          "sha256": "350b30dc38afb6d01f11d568ee723552cc91786bc3fe3275da60e72dca3ff30a",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_02/thumbnail.webp",
+          "bytes": 1106,
+          "sha256": "69a6d74977df6587dc3223512556de92b1418e41b6706ae192389497cd28e592"
+        },
+        {
+          "path": "snow_02/height-source.png",
+          "bytes": 7218660,
+          "sha256": "f2b979bc78989333ebfffb2063ba9ca72edc3ffc929f6a6d94ba39d80eb0358a"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:snow_01",
+      "sourceId": "snow_01",
+      "provider": "polyhaven",
+      "name": "Trodden snow",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Paths",
+      "origin": "photogrammetry",
+      "naturalFill": false,
+      "physicalSize": [
+        2,
+        2
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/snow_01",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_01/snow_01_diff_2k.jpg",
+          "sha256": "57bd6eb1f35fe9184dc6f2034c65921126e406986f5e6d853bf8628568dd86d5"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_01/snow_01_nor_gl_2k.jpg",
+          "sha256": "fdc0a004eafbad2f91a7843a06219df39913df7451b1085aa1b9c7c42a8832ef"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/snow_01/snow_01_disp_2k.png",
+          "sha256": "fc3dbf1f407fe471760a700b992319fd70689f0f67fbab77317bd02dc7a41468"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/snow_01/snow_01_ao_2k.jpg",
+          "sha256": "bb79e60ee14a3fcbac81befac8bddfb6520fd7523dcee66c3ca3184fe64c5077"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "snow_01/512.pbr",
+          "bytes": 2120670,
+          "sha256": "dcfc5e38b319ae1aa8efbbab0e8e6e2d989ebf54330ffc2edf562fdb771d18f5",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "snow_01/1024.pbr",
+          "bytes": 8344709,
+          "sha256": "0f3088e18f10a42dc15eccccc6c292eeba87373fb756cff23159d40739cb9fbd",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "snow_01/2048.pbr",
+          "bytes": 32661197,
+          "sha256": "7a22f620622af6c140f9636acab2c3ff270feb7a8fd87d07fcb106c86e83d0fe",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "snow_01/thumbnail.webp",
+        "bytes": 3378,
+        "sha256": "77412e24981cde4b0ddc3bfe0daa6a71d23b8596d01851e1ed5526eab3aed8db"
+      },
+      "heightSource": {
+        "path": "snow_01/height-source.png",
+        "bytes": 7753226,
+        "sha256": "fc3dbf1f407fe471760a700b992319fd70689f0f67fbab77317bd02dc7a41468"
+      },
+      "files": [
+        {
+          "path": "snow_01/512.pbr",
+          "bytes": 2120670,
+          "sha256": "dcfc5e38b319ae1aa8efbbab0e8e6e2d989ebf54330ffc2edf562fdb771d18f5",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_01/1024.pbr",
+          "bytes": 8344709,
+          "sha256": "0f3088e18f10a42dc15eccccc6c292eeba87373fb756cff23159d40739cb9fbd",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_01/2048.pbr",
+          "bytes": 32661197,
+          "sha256": "7a22f620622af6c140f9636acab2c3ff270feb7a8fd87d07fcb106c86e83d0fe",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "snow_01/thumbnail.webp",
+          "bytes": 3378,
+          "sha256": "77412e24981cde4b0ddc3bfe0daa6a71d23b8596d01851e1ed5526eab3aed8db"
+        },
+        {
+          "path": "snow_01/height-source.png",
+          "bytes": 7753226,
+          "sha256": "fc3dbf1f407fe471760a700b992319fd70689f0f67fbab77317bd02dc7a41468"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:grass_path_2",
+      "sourceId": "grass_path_2",
+      "provider": "polyhaven",
+      "name": "Grass path",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Paths",
+      "origin": "photogrammetry",
+      "naturalFill": false,
+      "physicalSize": [
+        1,
+        1
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/grass_path_2",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/grass_path_2/grass_path_2_diff_2k.jpg",
+          "sha256": "e6b353085d0fc0062832e70cfdf1b77f8b886a1fbb303541479e4f99a3b3ee79"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/grass_path_2/grass_path_2_nor_gl_2k.jpg",
+          "sha256": "e25c3e4574021fafb3737c56a2b7373c84f1f0b9bce99b94c2b565b8cd7fd55e"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/grass_path_2/grass_path_2_disp_2k.png",
+          "sha256": "73960229b75046f05fc746340f4d5293f76ee5df17ba702dd41b1278d63354f1"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/grass_path_2/grass_path_2_ao_2k.jpg",
+          "sha256": "cbbafab428de4d73c02b7a45da52ef12ede624feb1eb9610726f1eb3dbba9b7e"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "grass_path_2/512.pbr",
+          "bytes": 2263982,
+          "sha256": "aa0ff76918d4a39282d3eccc3238d1f350777b5de25b6c3bdac032d32cdb22fb",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "grass_path_2/1024.pbr",
+          "bytes": 9148822,
+          "sha256": "fa07782fa0ad21a4a937c747c27a594ebbdf37413d2fc9d7b75decc87d843185",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "grass_path_2/2048.pbr",
+          "bytes": 36396079,
+          "sha256": "62076b0b0bbbf68082a591e6fd5f9387de5aef0bcb644ca9beb5ae0c42357786",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "grass_path_2/thumbnail.webp",
+        "bytes": 7296,
+        "sha256": "6871367339423c15ea3914d2de0dd504f886341ed7c935e5027bfacff61c51cd"
+      },
+      "heightSource": {
+        "path": "grass_path_2/height-source.png",
+        "bytes": 6754060,
+        "sha256": "73960229b75046f05fc746340f4d5293f76ee5df17ba702dd41b1278d63354f1"
+      },
+      "files": [
+        {
+          "path": "grass_path_2/512.pbr",
+          "bytes": 2263982,
+          "sha256": "aa0ff76918d4a39282d3eccc3238d1f350777b5de25b6c3bdac032d32cdb22fb",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "grass_path_2/1024.pbr",
+          "bytes": 9148822,
+          "sha256": "fa07782fa0ad21a4a937c747c27a594ebbdf37413d2fc9d7b75decc87d843185",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "grass_path_2/2048.pbr",
+          "bytes": 36396079,
+          "sha256": "62076b0b0bbbf68082a591e6fd5f9387de5aef0bcb644ca9beb5ae0c42357786",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "grass_path_2/thumbnail.webp",
+          "bytes": 7296,
+          "sha256": "6871367339423c15ea3914d2de0dd504f886341ed7c935e5027bfacff61c51cd"
+        },
+        {
+          "path": "grass_path_2/height-source.png",
+          "bytes": 6754060,
+          "sha256": "73960229b75046f05fc746340f4d5293f76ee5df17ba702dd41b1278d63354f1"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "ambientcg:Ground037",
+      "sourceId": "Ground037",
+      "provider": "ambientcg",
+      "name": "Mossy ground",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Grass",
+      "origin": "photogrammetry",
+      "naturalFill": true,
+      "physicalSize": [
+        2.1,
+        2.1
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://ambientcg.com/a/Ground037",
+      "authors": [
+        "Lennart Demes"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://ambientcg.com/get?file=Ground037_2K-PNG.zip",
+          "sha256": "d8422045bc369dc1f113bfe3ee9a91faebeb65f074259770bc9bfd96357bfa85"
+        },
+        "normal": {
+          "sourceUrl": "https://ambientcg.com/get?file=Ground037_2K-PNG.zip",
+          "sha256": "50d0027364638eecf4c5b4f4c42bfe2a191b4a3affc6309403df0aa4f6a21e8b"
+        },
+        "roughness": {
+          "sourceUrl": "https://ambientcg.com/get?file=Ground037_2K-PNG.zip",
+          "sha256": "2b627a44ef1321d464f0eb6a0728617f97ab996be68bd9f7dd3bbb9e84c8b037"
+        },
+        "height": {
+          "sourceUrl": "https://ambientcg.com/get?file=Ground037_2K-PNG.zip",
+          "sha256": "4b2bb93973390c7be7a32b774a3c03726860bf753006ff0b177854bb64c9b395"
+        },
+        "ao": {
+          "sourceUrl": "https://ambientcg.com/get?file=Ground037_2K-PNG.zip",
+          "sha256": "9fd7b6f6a73c2b4615d9e78f30373f78c2c2aea8be676d3c3cf2d852f3d8e597"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "Ground037/512.pbr",
+          "bytes": 2335634,
+          "sha256": "e104a3cda064afeaccf4940e12067f0ba7b5ab4ded6e45244f1917e03e033e94",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "Ground037/1024.pbr",
+          "bytes": 9722749,
+          "sha256": "46ba59ba71366c5db32e5864c010c41478d552c6902b1535850189ec6835fdee",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "Ground037/2048.pbr",
+          "bytes": 40044307,
+          "sha256": "24bb0cf5c85a192f61bed5853d42fbf8e64ddab0be856214183674f9b9bf92e2",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "Ground037/thumbnail.webp",
+        "bytes": 5690,
+        "sha256": "21e02fe86ee2bd1f41692627b15e88697e23adeeaf740100183b8cfa89a052fb"
+      },
+      "heightSource": {
+        "path": "Ground037/height-source.png",
+        "bytes": 6670586,
+        "sha256": "4b2bb93973390c7be7a32b774a3c03726860bf753006ff0b177854bb64c9b395"
+      },
+      "files": [
+        {
+          "path": "Ground037/512.pbr",
+          "bytes": 2335634,
+          "sha256": "e104a3cda064afeaccf4940e12067f0ba7b5ab4ded6e45244f1917e03e033e94",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Ground037/1024.pbr",
+          "bytes": 9722749,
+          "sha256": "46ba59ba71366c5db32e5864c010c41478d552c6902b1535850189ec6835fdee",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Ground037/2048.pbr",
+          "bytes": 40044307,
+          "sha256": "24bb0cf5c85a192f61bed5853d42fbf8e64ddab0be856214183674f9b9bf92e2",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Ground037/thumbnail.webp",
+          "bytes": 5690,
+          "sha256": "21e02fe86ee2bd1f41692627b15e88697e23adeeaf740100183b8cfa89a052fb"
+        },
+        {
+          "path": "Ground037/height-source.png",
+          "bytes": 6670586,
+          "sha256": "4b2bb93973390c7be7a32b774a3c03726860bf753006ff0b177854bb64c9b395"
+        }
+      ],
+      "missingOptional": [],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "ambientcg:Grass004",
+      "sourceId": "Grass004",
+      "provider": "ambientcg",
+      "name": "Short grass",
+      "scaleClass": "detail",
+      "distribution": "core",
+      "category": "Grass",
+      "origin": "procedural",
+      "naturalFill": true,
+      "physicalSize": [
+        1.4,
+        1.4
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://ambientcg.com/a/Grass004",
+      "authors": [
+        "Lennart Demes"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://ambientcg.com/get?file=Grass004_2K-PNG.zip",
+          "sha256": "7f0d9b3f8049410f072c689aabd0e8552d1b229fecd7e761794d80cb99570494"
+        },
+        "normal": {
+          "sourceUrl": "https://ambientcg.com/get?file=Grass004_2K-PNG.zip",
+          "sha256": "eced620e7a8ff851951d7972169c19fd2a4cedfc6ed094691236cbbeb27e9e4b"
+        },
+        "roughness": {
+          "sourceUrl": "https://ambientcg.com/get?file=Grass004_2K-PNG.zip",
+          "sha256": "d91960613326bd4c36eee6347c7e778405a76ee4a645c00bea6658aaf9ff95dc"
+        },
+        "height": {
+          "sourceUrl": "https://ambientcg.com/get?file=Grass004_2K-PNG.zip",
+          "sha256": "9b9e3fc59effe22d563ab9f122b85c73108c520cb0d10d479b00ef7611015ccc"
+        },
+        "ao": {
+          "sourceUrl": "https://ambientcg.com/get?file=Grass004_2K-PNG.zip",
+          "sha256": "a871074b75eb965b254e23786f56a56e3bcbb21a423d577ead874975e51ed3a5"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "Grass004/512.pbr",
+          "bytes": 2523858,
+          "sha256": "4d88ad38192257be00482480e7c0d5e32aa198d146ec8a3dee2b69a10ec85705",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "Grass004/1024.pbr",
+          "bytes": 10352830,
+          "sha256": "ba81aa3d3d4657f08e5e29f8985e6e3b151e54bd71833cf6c085b928a661d4b4",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "Grass004/2048.pbr",
+          "bytes": 41867164,
+          "sha256": "76596a27a6fbd6ecffa4c1ba88cd85b1e47a649992937c3dc4fabe8a99bb2736",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "Grass004/thumbnail.webp",
+        "bytes": 7366,
+        "sha256": "5dbbbd30fc9e6d96739bd9bcb9afc37260e31d84bfad418b8464b6efbb381ed5"
+      },
+      "heightSource": {
+        "path": "Grass004/height-source.png",
+        "bytes": 7893113,
+        "sha256": "9b9e3fc59effe22d563ab9f122b85c73108c520cb0d10d479b00ef7611015ccc"
+      },
+      "files": [
+        {
+          "path": "Grass004/512.pbr",
+          "bytes": 2523858,
+          "sha256": "4d88ad38192257be00482480e7c0d5e32aa198d146ec8a3dee2b69a10ec85705",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Grass004/1024.pbr",
+          "bytes": 10352830,
+          "sha256": "ba81aa3d3d4657f08e5e29f8985e6e3b151e54bd71833cf6c085b928a661d4b4",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Grass004/2048.pbr",
+          "bytes": 41867164,
+          "sha256": "76596a27a6fbd6ecffa4c1ba88cd85b1e47a649992937c3dc4fabe8a99bb2736",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "Grass004/thumbnail.webp",
+          "bytes": 7366,
+          "sha256": "5dbbbd30fc9e6d96739bd9bcb9afc37260e31d84bfad418b8464b6efbb381ed5"
+        },
+        {
+          "path": "Grass004/height-source.png",
+          "bytes": 7893113,
+          "sha256": "9b9e3fc59effe22d563ab9f122b85c73108c520cb0d10d479b00ef7611015ccc"
+        }
+      ],
+      "missingOptional": [],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    },
+    {
+      "id": "polyhaven:red_sand",
+      "sourceId": "red_sand",
+      "provider": "polyhaven",
+      "name": "Marked red sand",
+      "scaleClass": "detail",
+      "distribution": "extended",
+      "category": "Paths",
+      "origin": "photogrammetry",
+      "naturalFill": false,
+      "physicalSize": [
+        2.999999523162842,
+        2.999999523162842
+      ],
+      "license": "CC0-1.0",
+      "sourceUrl": "https://polyhaven.com/a/red_sand",
+      "authors": [
+        "Rohit Seervi"
+      ],
+      "maps": {
+        "albedo": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/red_sand/red_sand_diff_2k.jpg",
+          "sha256": "edc4db33e3edbb7b2d1dfad6c9f6337046fe11b75e8943c0fec38b86d14280a4"
+        },
+        "normal": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/red_sand/red_sand_nor_gl_2k.jpg",
+          "sha256": "45ce515b4f96833d4182b349ab1114a9f50b6a273ebae021fd1eb7a0fa5c5311"
+        },
+        "height": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/red_sand/red_sand_disp_2k.png",
+          "sha256": "766f59c6341508a1ba2522257de778ab4045073f866767a3b70a4a61749d8f16"
+        },
+        "ao": {
+          "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/red_sand/red_sand_ao_2k.jpg",
+          "sha256": "a9f7c58944249d3399a0bc3a671f137efa854d83ee94d777c649703818962334"
+        }
+      },
+      "normalConvention": "GL",
+      "resolutions": {
+        "512": {
+          "path": "red_sand/512.pbr",
+          "bytes": 1782131,
+          "sha256": "4d873b0557f21ef7137eb0f52ca1569061f7e84706e1f8346669d94fcdc540ad",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "1024": {
+          "path": "red_sand/1024.pbr",
+          "bytes": 7408450,
+          "sha256": "9011972e19c36825764c5396724394e9bc882a4ed6d7b76c9a021496bc3bffae",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        "2048": {
+          "path": "red_sand/2048.pbr",
+          "bytes": 29707292,
+          "sha256": "c643b4359f575ded0c74632ad541f157733a9f9899d1b287d5a04116afa28bdc",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        }
+      },
+      "thumbnail": {
+        "path": "red_sand/thumbnail.webp",
+        "bytes": 192,
+        "sha256": "0ad7963f09b56fdf2d04cca4574278aa951c483dcf941a8ef565170c8ed0f32e"
+      },
+      "heightSource": {
+        "path": "red_sand/height-source.png",
+        "bytes": 6890810,
+        "sha256": "766f59c6341508a1ba2522257de778ab4045073f866767a3b70a4a61749d8f16"
+      },
+      "files": [
+        {
+          "path": "red_sand/512.pbr",
+          "bytes": 1782131,
+          "sha256": "4d873b0557f21ef7137eb0f52ca1569061f7e84706e1f8346669d94fcdc540ad",
+          "resolution": 512,
+          "levels": 10,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "red_sand/1024.pbr",
+          "bytes": 7408450,
+          "sha256": "9011972e19c36825764c5396724394e9bc882a4ed6d7b76c9a021496bc3bffae",
+          "resolution": 1024,
+          "levels": 11,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "red_sand/2048.pbr",
+          "bytes": 29707292,
+          "sha256": "c643b4359f575ded0c74632ad541f157733a9f9899d1b287d5a04116afa28bdc",
+          "resolution": 2048,
+          "levels": 12,
+          "encoding": "deflate-rgba8-mips-v1"
+        },
+        {
+          "path": "red_sand/thumbnail.webp",
+          "bytes": 192,
+          "sha256": "0ad7963f09b56fdf2d04cca4574278aa951c483dcf941a8ef565170c8ed0f32e"
+        },
+        {
+          "path": "red_sand/height-source.png",
+          "bytes": 6890810,
+          "sha256": "766f59c6341508a1ba2522257de778ab4045073f866767a3b70a4a61749d8f16"
+        }
+      ],
+      "missingOptional": [
+        "roughness"
+      ],
+      "transformations": [
+        "2K normalization",
+        "linear-light color mipmaps",
+        "renormalized normal mipmaps",
+        "RGBA8 color/height and normal/roughness/AO packing"
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "id": "pt:dry-grass",
+      "name": "Dry sparse grass",
+      "assets": [
+        "ambientcg:Grass004",
+        "polyhaven:brown_mud_dry"
+      ],
+      "tint": [
+        1.12,
+        0.94,
+        0.68
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:tundra-ground",
+      "name": "Mineral tundra",
+      "assets": [
+        "polyhaven:aerial_grass_rock",
+        "polyhaven:mossy_rock"
+      ],
+      "tint": [
+        1,
+        1,
+        1
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:jungle-floor",
+      "name": "Damp tropical floor",
+      "assets": [
+        "ambientcg:Ground037",
+        "polyhaven:forest_leaves_02"
+      ],
+      "tint": [
+        0.85,
+        0.94,
+        0.8
+      ],
+      "wetness": 0.25,
+      "derived": true
+    },
+    {
+      "id": "pt:wet-mud",
+      "name": "Wet mud",
+      "assets": [
+        "polyhaven:brown_mud",
+        "polyhaven:brown_mud_leaves_01"
+      ],
+      "tint": [
+        0.7,
+        0.7,
+        0.7
+      ],
+      "wetness": 0.45,
+      "derived": true
+    },
+    {
+      "id": "pt:canyon-red-stone",
+      "name": "Red canyon sandstone",
+      "assets": [
+        "polyhaven:sandstone_cracks"
+      ],
+      "tint": [
+        1.1,
+        0.52,
+        0.32
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:volcanic-dark-rock",
+      "name": "Stylized volcanic rock",
+      "assets": [
+        "polyhaven:rock_boulder_cracked"
+      ],
+      "tint": [
+        0.23,
+        0.24,
+        0.26
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:alien-mineral",
+      "name": "Alien mineral",
+      "assets": [
+        "polyhaven:rock_boulder_dry"
+      ],
+      "tint": [
+        0.62,
+        0.38,
+        0.88
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:dune-sand",
+      "name": "Dune sand",
+      "assets": [
+        "polyhaven:sand_03"
+      ],
+      "tint": [
+        1.1,
+        0.94,
+        0.7
+      ],
+      "wetness": 0,
+      "derived": true
+    }
+  ]
+}

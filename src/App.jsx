@@ -1,3 +1,5 @@
+import { captureSurfaceProject, restoreSurfaceProject } from './engine/terrain/surface/SurfaceLibrary.js';
+import { encodePortableProject, decodePortableProject } from './project/PortableProject.js';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createEngineProxy } from './engine/EngineProxy.js';
 import { DEFAULT_PARAMS } from './engine/presets.js';
@@ -678,16 +680,18 @@ export default function App() {
     const project = normalizeProject({
       id: current?.id,
       metadata: { ...current?.metadata, name },
-      terrain: await eng.createProjectPayload(),
+      terrain: await captureSurfaceProject(await eng.createProjectPayload()),
       exportHistory: current?.exportHistory ?? [],
     });
     const projectDocument = createEditableProjectDocument(project);
+    const portableBytes = await encodePortableProject(project);
     try {
       const result = await saveDesktopDocument({
         path: desktopDocumentRef.current.path,
         forceSaveAs,
         suggestedName: suggestedProjectFilename(name),
         content: JSON.stringify(projectDocument, null, 2),
+        data: portableBytes,
       });
       if (!result || result.canceled) return null;
       const saved = await projectStore.save(project);
@@ -733,7 +737,7 @@ export default function App() {
           name,
           thumbnail,
         },
-        terrain: await eng.createProjectPayload(),
+        terrain: await captureSurfaceProject(await eng.createProjectPayload()),
         exportHistory: current?.exportHistory ?? [],
       });
       const saved = await projectStore.save(project);
@@ -772,6 +776,7 @@ export default function App() {
         histTimerRef.current = null;
       }
       try {
+        await restoreSurfaceProject(terrain);
         const targetWorldMode = terrain.editorMode === 'nodes'
           || terrain.editorMode === 'manual'
           || terrain.realWorldSource
@@ -875,7 +880,7 @@ export default function App() {
           ...(activeProjectRef.current || {}),
           metadata: { ...(activeProjectRef.current?.metadata || {}), name: sourceName },
         },
-        await eng.createProjectPayload(),
+        await captureSurfaceProject(await eng.createProjectPayload()),
         sourceMode,
       );
       createdProject = await projectStore.save(createdProject);
@@ -918,7 +923,7 @@ export default function App() {
   const importTerrainIntoManual = useCallback(async (sourceProject) => {
     const eng = engineRef.current;
     if (!eng || projectMode !== 'manual' || !sourceProject) return false;
-    const currentPayload = await eng.createProjectPayload();
+    const currentPayload = await captureSurfaceProject(await eng.createProjectPayload());
     const currentProject = normalizeProject({
       ...(activeProjectRef.current || {}),
       id: activeProjectRef.current?.id,
@@ -980,11 +985,11 @@ export default function App() {
   const loadProjectFile = useCallback((file) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      try { loadProjectJSON(JSON.parse(reader.result)); }
-      catch { loadProjectJSON(null); }
+    reader.onload = async () => {
+      try { await loadProjectJSON(await decodePortableProject(reader.result)); }
+      catch (error) { showToast(error.message, 'error'); }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }, [loadProjectJSON]);
 
   const loadDesktopProjectDocument = useCallback(async (payload) => {
@@ -994,7 +999,7 @@ export default function App() {
       return false;
     }
     try {
-      const project = readEditableProjectDocument(payload.document, { legacy: !!payload.legacy });
+      const project = payload.data ? await decodePortableProject(payload.data) : readEditableProjectDocument(payload.document, { legacy: !!payload.legacy });
       await loadProjectJSON(project);
       setDesktopDocument({ path: payload.legacy ? null : payload.path, dirty: false });
       window.document.title = `${project.metadata.name} — Procedural Terrains`;
@@ -1124,13 +1129,11 @@ export default function App() {
     const project = normalizeProject({
       id: current?.id,
       metadata: { ...current?.metadata, name },
-      terrain: await eng.createProjectPayload(),
+      terrain: await captureSurfaceProject(await eng.createProjectPayload()),
       exportHistory: current?.exportHistory ?? [],
     });
-    const desktop = isDesktopApp();
-    const payload = desktop ? createEditableProjectDocument(project) : project;
-    const filename = desktop ? suggestedProjectFilename(name) : `${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'terrain'}.json`;
-    const result = await saveBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), filename);
+    const bytes = await encodePortableProject(project);
+    const result = await saveBlob(new Blob([bytes], { type: 'application/octet-stream' }), suggestedProjectFilename(name));
     if (!result?.canceled) showToast(`Downloaded ${name}`, 'success');
   }, [showToast]);
 
@@ -2332,10 +2335,10 @@ export default function App() {
     // user activates surface paint or loads authored surface data.
     if (eng.projectMode === 'manual'
         && eng._targetTerrainVariant?.() === 'manual-empty') return;
-    applySurfaceTextures({ source }).catch((err) => {
+    applySurfaceTextures({ source, force: source === SURFACE_TEXTURE_SOURCE.PBR }).catch((err) => {
       console.warn('Could not bake terrain surface textures', err);
     });
-  }, [params.surfaceTextureSource, params.surfaceTextureMode, applySurfaceTextures]);
+  }, [params.surfaceTextureSource, params.surfaceTextureMode, params.surfaceDocument, applySurfaceTextures]);
 
   const handleResetPanel = useCallback((id) => {
     if (id === 'terrain') resetSurfaceLibraryState();

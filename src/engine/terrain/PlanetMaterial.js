@@ -1,3 +1,4 @@
+import { installSurfaceMaterialBackend } from './surface/SurfaceArrayGLSL.js';
 import * as THREE from 'three';
 import {
   COMMON_UNIFORMS_GLSL,
@@ -396,7 +397,7 @@ export function createPlanetMaterial(uniforms, octaves = 7, stackGLSL = DEFAULT_
     side: THREE.DoubleSide,
   });
   mat.userData.minimalFragment = minimal;
-  return mat;
+  return installSurfaceMaterialBackend(mat);
 }
 
 // Upgrade a live minimal-fragment planet material to the full shader source in

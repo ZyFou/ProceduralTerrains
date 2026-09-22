@@ -147,6 +147,42 @@ export function setActiveVariant(materialId, variant) {
 // Session-only custom file overrides (object URLs from a local file picker — these
 // can't survive a reload, so they're kept in memory only, not localStorage).
 const overrides = new Map();
+const importRefs = new Map();
+const pendingImports = new Set();
+
+export async function setOverrideBlob(materialId, variant, slot, blob, name = '') {
+  const { putSurfaceBlob } = await import('../../../project/SurfaceAssetStore.js');
+  const ref = await putSurfaceBlob(blob);
+  setOverrideUrl(materialId, variant, slot, URL.createObjectURL(blob));
+  importRefs.set(overrideKey(materialId, variant, slot), { ...ref, materialId, variant, slot, name });
+}
+
+export async function captureSurfaceProject(terrain) {
+  await Promise.all([...pendingImports]);
+  // Migrate still-live uploads made through the compatibility API.
+  for (const [key,url] of overrides) {
+    if(importRefs.has(key)) continue;
+    const blob=await (await fetch(url)).blob();
+    const { putSurfaceBlob }=await import('../../../project/SurfaceAssetStore.js');
+    const ref=await putSurfaceBlob(blob);
+    importRefs.set(key,{...ref,key});
+  }
+  return { ...terrain, surfaceImports: Object.fromEntries(importRefs) };
+}
+
+export async function restoreSurfaceProject(terrain) {
+  const { getSurfaceBlob } = await import('../../../project/SurfaceAssetStore.js');
+  const restored=[];
+  for(const [key,ref] of Object.entries(terrain.surfaceImports||{})) {
+    const blob=await getSurfaceBlob(ref.hash);
+    if(!blob)throw new Error(`Missing local texture ${ref.name||key}. Reopen its portable project or reimport the file.`);
+    restored.push([key,ref,blob]);
+  }
+  for(const url of overrides.values())URL.revokeObjectURL(url);
+  overrides.clear();importRefs.clear();
+  for(const [key,ref,blob] of restored){overrides.set(key,URL.createObjectURL(blob));importRefs.set(key,ref);}
+  notifySurfaceLibraryChanged();
+}
 
 function overrideKey(materialId, variant, slot) {
   return `${materialId}:${variant}:${slot}`;
@@ -158,6 +194,7 @@ export function getOverrideUrl(materialId, variant, slot) {
 
 export function setOverrideUrl(materialId, variant, slot, url) {
   const key = overrideKey(materialId, variant, slot);
+  importRefs.delete(key);
   const prev = overrides.get(key);
   if (prev) URL.revokeObjectURL(prev);
   overrides.set(key, url);
@@ -166,6 +203,7 @@ export function setOverrideUrl(materialId, variant, slot, url) {
 
 export function clearOverrideUrl(materialId, variant, slot) {
   const key = overrideKey(materialId, variant, slot);
+  importRefs.delete(key);
   const prev = overrides.get(key);
   if (prev) URL.revokeObjectURL(prev);
   overrides.delete(key);
@@ -197,6 +235,7 @@ export function resetMaterialSurfaceState(materialId) {
     if (!prefixes.some((prefix) => key.startsWith(prefix))) continue;
     URL.revokeObjectURL(url);
     overrides.delete(key);
+    importRefs.delete(key);
   }
   notifySurfaceLibraryChanged();
 }
@@ -209,6 +248,7 @@ export function resetSurfaceLibraryState() {
   }
   for (const url of overrides.values()) URL.revokeObjectURL(url);
   overrides.clear();
+  importRefs.clear();
   notifySurfaceLibraryChanged();
 }
 

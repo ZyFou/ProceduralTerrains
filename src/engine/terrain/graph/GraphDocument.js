@@ -4,7 +4,7 @@ import {
 } from './GraphRegistry.js';
 import { getTerrainGradientPreset } from './TerrainGradientPresets.js';
 
-export const GRAPH_DOCUMENT_VERSION = 3;
+export const GRAPH_DOCUMENT_VERSION = 4;
 export const TERRAIN_OUTPUT_ID = 'terrain-output';
 export const DEFAULT_GRAPH_VIEW = Object.freeze({ x: 0, y: 0, zoom: 1 });
 export const GRAPH_MODES = Object.freeze(['noise', 'terrain']);
@@ -24,7 +24,7 @@ export function makeGraphNode(type, position = { x: 0, y: 0 }, overrides = {}) {
   if (!definition) throw new GraphValidationError('unknown-node', `Unknown terrain node type “${type}”.`);
   const id = overrides.id || (type === 'terrainOutput' ? TERRAIN_OUTPUT_ID : uid('node'));
   return {
-    id, type,
+    ...overrides, id, type,
     label: overrides.label || definition.label,
     position: { x: Number(position.x) || 0, y: Number(position.y) || 0 },
     params: { ...nodeDefaults(type), ...(overrides.params || {}) },
@@ -76,7 +76,7 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
           : { ...nodeDefaults(node.type), ...(node.params || {}) },
       })
       : {
-        id: node.id, type: node.type, label: node.label || `Unknown: ${node.type}`,
+        ...node, id: node.id, type: node.type, label: node.label || `Unknown: ${node.type}`,
         position: { x: Number(node.position?.x) || 0, y: Number(node.position?.y) || 0 },
         params: clone(node.params || {}),
       });
@@ -95,6 +95,7 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
       const sourceDef = getGraphNodeDefinition(sourceNode?.type);
       const targetDef = getGraphNodeDefinition(targetNode?.type);
       const requestedType = edge.type || null;
+      if (edge.sourceHandle && edge.targetHandle) return { ...edge, target }; 
       const sourcePort = sourceDef?.outputs.find((port) => port.id === edge.sourceHandle)
         || sourceDef?.outputs.find((port) => !requestedType || port.type === requestedType)
         || sourceDef?.outputs[0];
@@ -127,7 +128,7 @@ export function migrateGraphDocument(raw, fallbackStack = defaultLegacyStack()) 
     })
     .filter((group) => group.nodeIds.length > 0);
   const inferredMode = raw.mode ?? (Number(raw.version) < 2 ? 'noise' : 'terrain');
-  return { version: GRAPH_DOCUMENT_VERSION, mode: graphMode(inferredMode), nodes: normalizedNodes, edges, groups };
+  return { ...raw, version: GRAPH_DOCUMENT_VERSION, mode: graphMode(inferredMode), nodes: normalizedNodes, edges, groups };
 }
 
 export function findOutputNode(graph) { return graph.nodes.find((node) => node.type === 'terrainOutput') || null; }
