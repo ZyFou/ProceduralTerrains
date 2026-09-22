@@ -26,7 +26,7 @@ const LOADING_STAGE_LABELS = {
 
 export default function LoadingOverlay({ task }) {
   if (!task) return null;
-  const iconProgress = task.progress == null ? 0.15 : Math.max(0, Math.min(1, task.progress));
+  const iconProgress = task.progress == null ? (task.id === 'export' ? 0 : 0.15) : Math.max(0, Math.min(1, task.progress));
   const stepLabel = LOADING_STAGE_LABELS[task.stage] ?? task.stage ?? 'Working';
 
   return (
@@ -51,6 +51,11 @@ export default function LoadingOverlay({ task }) {
           <span className="landing-boot-progress-step">{stepLabel}</span>
           <span className="loading-activity-spinner" aria-hidden="true" />
         </div>
+        {task.id === 'export' && <div className="export-loading-detail">
+          <strong>{task.label}</strong>
+          <p>{task.detail}</p>
+          <LoadingBar progress={task.progress} />
+        </div>}
       </div>
     </div>
   );

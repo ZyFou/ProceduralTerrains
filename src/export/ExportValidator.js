@@ -1,3 +1,5 @@
+import { estimateExport, largeExportMessage } from './ExportDiagnostics.js';
+
 const MAX_TEXTURE_RESOLUTION = 4096;
 const MAX_MESH_RESOLUTION = 1024;
 const UNITY_HEIGHTFIELD_RESOLUTIONS = [513, 1025, 2049, 4097];
@@ -41,6 +43,8 @@ export function validateExport(options = {}, context = {}) {
   if (options.exportWater && !options.exportWaterMask) add('warning', 'Water is included without a water mask.');
   else if (options.exportWaterMask) add('success', 'Water mask available.');
   if (options.exportSplat) add('success', 'Biome splat map available.');
+  const estimate = estimateExport(options, context);
+  if (estimate.large) add('warning', largeExportMessage(estimate));
   return checks;
 }
 

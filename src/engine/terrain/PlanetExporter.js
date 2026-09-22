@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { readRenderTargetPixelsAsync } from '../render/RendererReadback.js';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { readRenderTargetPixelsAsync, withExportRenderTarget } from '../render/RendererReadback.js';
+import { serializeGlb, canvasPngBytes } from '../../export/ExportEncoding.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { zipSync } from 'fflate';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './terrainGLSL.js';
@@ -124,10 +124,7 @@ async function rtToCanvas(renderer, rt, w, h) {
 }
 
 async function canvasToPng(canvas) {
-  const blob = typeof canvas.convertToBlob === 'function'
-    ? await canvas.convertToBlob({ type: 'image/png' })
-    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  return new Uint8Array(await blob.arrayBuffer());
+  return canvasPngBytes(canvas);
 }
 
 export class PlanetExporter {
@@ -223,11 +220,10 @@ export class PlanetExporter {
         bakeUniforms.uFaceU.value.copy(U);
         bakeUniforms.uFaceV.value.copy(V);
         const rt = new THREE.WebGLRenderTarget(texRes, texRes);
-        renderer.setRenderTarget(rt);
-        renderer.render(quadScene, quadCam);
-        const canvas = await rtToCanvas(renderer, rt, texRes, texRes);
-        renderer.setRenderTarget(null);
-        rt.dispose();
+        const canvas = await withExportRenderTarget(renderer, rt, () => {
+          renderer.render(quadScene, quadCam);
+          return rtToCanvas(renderer, rt, texRes, texRes);
+        });
         map = new THREE.CanvasTexture(canvas);
         map.colorSpace = THREE.SRGBColorSpace;
         map._canvas = canvas;   // keep for zip export
@@ -264,43 +260,39 @@ export class PlanetExporter {
     const zipFiles = {};
 
     let model = null;
-    if (format === 'glb') {
-      model = await new Promise((resolve) => {
-        new GLTFExporter().parse(
-          group,
-          (res) => resolve(new Uint8Array(res)),
-          (err) => { console.error(err); resolve(null); },
-          { binary: true }
-        );
-      });
-      if (model) zipFiles['planet.glb'] = model;
-    } else {
-      const objText = new OBJExporter().parse(group);
-      zipFiles['planet.obj'] = new TextEncoder().encode(objText);
-      // OBJ can't embed textures — write the baked face maps alongside
-      let fi = 0;
-      for (const child of group.children) {
-        if (child.material?.map?._canvas) {
-          zipFiles[`textures/${child.name}.png`] = await canvasToPng(child.material.map._canvas);
+    try {
+      if (format === 'glb') {
+        model = await serializeGlb(group);
+        if (model) zipFiles['planet.glb'] = model;
+      } else {
+        const objText = new OBJExporter().parse(group);
+        zipFiles['planet.obj'] = new TextEncoder().encode(objText);
+        // OBJ can't embed textures — write the baked face maps alongside
+        let fi = 0;
+        for (const child of group.children) {
+          if (child.material?.map?._canvas) {
+            zipFiles[`textures/${child.name}.png`] = await canvasToPng(child.material.map._canvas);
+          }
+          fi++;
         }
-        fi++;
       }
-    }
 
-    if (exportPreset) {
-      zipFiles['planet_preset.json'] = new TextEncoder().encode(
-        JSON.stringify({ app: 'terrain-studio', mode: 'planet', version: 1, params }, null, 2)
-      );
-    }
-
-    // cleanup
-    group.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry.dispose();
-        if (o.material.map) o.material.map.dispose();
-        o.material.dispose();
+      if (exportPreset) {
+        zipFiles['planet_preset.json'] = new TextEncoder().encode(
+          JSON.stringify({ app: 'terrain-studio', mode: 'planet', version: 1, params }, null, 2)
+        );
       }
-    });
+
+    } finally {
+      // Release model resources even when GLB/PNG serialization fails.
+      group.traverse((o) => {
+        if (o.isMesh) {
+          o.geometry.dispose();
+          if (o.material.map) o.material.map.dispose();
+          o.material.dispose();
+        }
+      });
+    }
 
     // Water masks (and any other caller-supplied files) ride along in the same zip.
     if (options.extraZipFiles) Object.assign(zipFiles, options.extraZipFiles);
@@ -308,7 +300,9 @@ export class PlanetExporter {
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing planet package (ZIP)…');
       const zipped = zipSync(zipFiles);
-      await saveBlob(new Blob([zipped], { type: 'application/zip' }), `planet_export-${params.seed}.zip`);
+      onToast(`Saving planet package (${(zipped.byteLength / 1e6).toFixed(1)} MB)...`);
+      const saved = await saveBlob(new Blob([zipped], { type: 'application/zip' }), `planet_export-${params.seed}.zip`);
+      if (saved?.canceled) throw new Error('Export save was canceled');
     }
 
     onToast('Planet export complete!');

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
-import { FaGithub, FaXTwitter } from 'react-icons/fa6';
+import { FaDiscord, FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
 import { projectStore, projectSyncStore, normalizeProject } from '../project/ProjectStore.js';
@@ -102,7 +102,15 @@ const relTime = (value) => {
 
 export default function Landing({ exiting, bootReady, bootError, bootProgress, onRetryBoot, onLaunch }) {
   const { user, status: authStatus, logout } = useAuth();
-  const { showPrompt } = usePopup();
+  const { showPrompt, showPopup } = usePopup();
+  const copyDiscordUsername = async () => {
+    try {
+      await navigator.clipboard.writeText('zyfou');
+      showPopup('Discord username copied: zyfou', { type: 'success' });
+    } catch {
+      showPopup('Could not copy. Discord username: zyfou', { type: 'error' });
+    }
+  };
   const [projects, setProjects] = useState([]);
   const [cloudProjects, setCloudProjects] = useState([]);
   const [syncBindings, setSyncBindings] = useState([]);
@@ -633,6 +641,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               <a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer" aria-label="Open X profile" title="X"><FaXTwitter size={15} /></a>
               <a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer" aria-label="Open portfolio" title="Portfolio"><Globe2 size={16} /></a>
               <a href="mailto:zyfodexe@gmail.com" aria-label="Email zyfodexe@gmail.com" title="Email zyfodexe@gmail.com"><Mail size={16} /></a>
+              <button type="button" onClick={copyDiscordUsername} aria-label="Copy Discord username: zyfou" title="Copy Discord username: zyfou"><FaDiscord size={17} aria-hidden="true" /></button>
             </div>
             <div className="lp-footer-meta">
               <span>© {new Date().getFullYear()} {APP_NAME}.</span>

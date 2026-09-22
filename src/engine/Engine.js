@@ -131,6 +131,7 @@ import { TerrainAnalysisManager } from '../creator/analysis/TerrainAnalysisManag
 import { ProjectHistoryManager } from '../creator/history/ProjectHistoryManager.js';
 import { createProductionFiles } from '../export/ExportPresetManager.js';
 import { hasExportErrors, validateExport } from '../export/ExportValidator.js';
+import { exportError } from '../export/ExportDiagnostics.js';
 import {
   BootPipelineCancelledError,
   FinalFrameBootPipeline,
@@ -11737,14 +11738,25 @@ export class Engine {
     this.cb.onStatus('Preparing export...', true);
     this._exporting = true;
     const _exportTask = this.profiler.registerLoadingTask({
-      name: `Export GLB (${this.worldMode})`, details: 'preparing mesh',
+      name: `Export ${(options.format || 'glb').toUpperCase()} (${this.worldMode})`, details: 'preparing mesh',
     });
+    let exportFailure = null;
+    const previousTarget = this.renderer.getRenderTarget();
     const onMsg = (msg) => {
+      if (this._contextLost) throw new Error('Graphics context lost during export. Reduce export resolution or tile count and wait for graphics recovery before retrying.');
       this.cb.onStatus(msg, true);
       this.cb.onToast(msg);
       this.profiler.updateLoadingTask(_exportTask, null, msg);
     };
     try {
+      onMsg('Checking export graphics limits...');
+      const maxTexture = this.renderer.capabilities?.maxTextureSize;
+      const requiredResolution = Math.max(
+        options.includeMesh !== false ? (Number(options.meshRes) || 256) + 1 : 0,
+        options.bakeColor || options.bakeNormal || options.exportHeightmap ? Number(options.texRes) || 1024 : 0,
+        options.heightmapVertexGrid ? Number(options.heightRes) || 0 : 0,
+      );
+      if (maxTexture && requiredResolution > maxTexture) throw new Error(`Export needs a ${requiredResolution}px render target, but this GPU supports ${maxTexture}px. Reduce export resolution.`);
       // Water masks are folded into the single export zip (not downloaded
       // separately) via extraZipFiles, so the user gets one .zip with everything.
       const exportOptions = { ...options };
@@ -11762,6 +11774,7 @@ export class Engine {
       let tileWaterMaskFiles = null;
       if (options.exportWaterMask || options.exportDepthMap || options.exportShorelineMask
         || options.exportFoamMask || options.exportWaterMetadata) {
+        onMsg('Generating water masks...');
         const maskOptions = { ...exportOptions, maskRes: exportOptions.maskRes ?? exportOptions.meshRes ?? '512' };
         const separateTiles = this.worldMode === 'studio'
           && this.tileAssemblyShape === 'square'
@@ -11770,6 +11783,7 @@ export class Engine {
         if (separateTiles) {
           tileWaterMaskFiles = {};
           for (const tile of this.tiles) {
+            onMsg(`Generating water masks for tile ${tile.cx}, ${tile.cz}...`);
             tileWaterMaskFiles[`${tile.cx},${tile.cz}`] = await this.waterSystem.exportMasks({
               ...maskOptions,
               maskSize: this.cellSize,
@@ -11788,6 +11802,7 @@ export class Engine {
         }
       }
       if (options.exportSplineMasks && this.splineManager?.baker) {
+        onMsg('Generating spline masks...');
         Object.assign(extraZipFiles, await this._splineMaskZipFiles());
       }
       if (this.worldMode === 'planet') {
@@ -11803,13 +11818,15 @@ export class Engine {
       }
       return true;
     } catch (e) {
-      console.error(e);
-      this.cb.onToast('Export failed: ' + e.message);
-      this.profiler.failLoadingTask(_exportTask, e);
-      return false;
+      exportFailure = exportError(e);
+      console.error('[terrain-export] failed', exportFailure);
+      this.cb.onToast('Export failed: ' + exportFailure.message);
+      this.profiler.failLoadingTask(_exportTask, exportFailure);
+      throw exportFailure;
     } finally {
       this._exporting = false;
-      this.profiler.finishLoadingTask(_exportTask);
+      this.renderer.setRenderTarget(previousTarget);
+      if (!exportFailure) this.profiler.finishLoadingTask(_exportTask);
       this.cb.onStatus('Ready', false);
     }
   }

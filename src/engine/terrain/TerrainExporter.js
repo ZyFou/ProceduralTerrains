@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { readRenderTargetPixelsAsync } from '../render/RendererReadback.js';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { readRenderTargetPixelsAsync, withExportRenderTarget } from '../render/RendererReadback.js';
+import { serializeGlb, canvasPngBytes } from '../../export/ExportEncoding.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { zipSync } from 'fflate';
@@ -179,10 +179,7 @@ async function rtToCanvas(renderer, rt, w, h) {
 }
 
 async function canvasToUint8Array(canvas) {
-  const blob = typeof canvas.convertToBlob === 'function'
-    ? await canvas.convertToBlob({ type: 'image/png' })
-    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  return new Uint8Array(await blob.arrayBuffer());
+  return canvasPngBytes(canvas);
 }
 
 export class TerrainExporter {
@@ -283,12 +280,11 @@ export class TerrainExporter {
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = 0;
       bakeUniforms.uHeightVertexGrid.value = 0;
-      renderer.setRenderTarget(rt);
-      renderer.render(quadScene, quadCam);
       const px = new Uint8Array(wpx * hpx * 4);
-      await readRenderTargetPixelsAsync(renderer, rt, 0, 0, wpx, hpx, px);
-      renderer.setRenderTarget(null);
-      rt.dispose();
+      await withExportRenderTarget(renderer, rt, async () => {
+        renderer.render(quadScene, quadCam);
+        await readRenderTargetPixelsAsync(renderer, rt, 0, 0, wpx, hpx, px);
+      });
       const at = (i, j) => {
         const idx = (j * wpx + i) * 4;
         const h01 = (px[idx] * 65536 + px[idx + 1] * 256 + px[idx + 2]) / 16777215;
@@ -301,12 +297,10 @@ export class TerrainExporter {
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = mode;
       bakeUniforms.uHeightVertexGrid.value = 0;
-      renderer.setRenderTarget(rt);
-      renderer.render(quadScene, quadCam);
-      const c = await rtToCanvas(renderer, rt, res, res);
-      renderer.setRenderTarget(null);
-      rt.dispose();
-      return c;
+      return withExportRenderTarget(renderer, rt, () => {
+        renderer.render(quadScene, quadCam);
+        return rtToCanvas(renderer, rt, res, res);
+      });
     };
     const renderHeightPixels = async (ox, oz, sx, sz, resolution, vertexGrid = false) => {
       const visualRT = new THREE.WebGLRenderTarget(resolution, resolution, {
@@ -316,12 +310,11 @@ export class TerrainExporter {
       setRegion(ox, oz, sx, sz);
       bakeUniforms.uBakeMode.value = 0;
       bakeUniforms.uHeightVertexGrid.value = vertexGrid ? resolution : 0;
-      renderer.setRenderTarget(visualRT);
-      renderer.render(quadScene, quadCam);
       const pixels = new Uint8Array(resolution * resolution * 4);
-      await readRenderTargetPixelsAsync(renderer, visualRT, 0, 0, resolution, resolution, pixels);
-      renderer.setRenderTarget(null);
-      visualRT.dispose();
+      await withExportRenderTarget(renderer, visualRT, async () => {
+        renderer.render(quadScene, quadCam);
+        await readRenderTargetPixelsAsync(renderer, visualRT, 0, 0, resolution, resolution, pixels);
+      });
       return pixels;
     };
 
@@ -383,15 +376,18 @@ export class TerrainExporter {
 
       for (const cell of tiles) {
         const ctr = cellCenter(cell.cx, cell.cz);
+        onToast(`Baking height / geometry for tile ${cell.cx}, ${cell.cz} (${meshRes} × ${meshRes})...`);
         const { at } = await bakeHeightGrid(ctr.x, ctr.z, cellSize, cellSize, meshRes, meshRes);
 
         let colorTex = null, normalTex = null;
         if (bakeColor) {
+          onToast(`Baking color for tile ${cell.cx}, ${cell.cz} (${texRes}px)...`);
           const cv = await bakeRegionCanvas(2, ctr.x, ctr.z, cellSize, cellSize, texRes);
           colorTex = new THREE.CanvasTexture(cv);
           colorTex.colorSpace = THREE.SRGBColorSpace;
         }
         if (bakeNormal) {
+          onToast(`Baking normals for tile ${cell.cx}, ${cell.cz} (${texRes}px)...`);
           const nv = await bakeRegionCanvas(1, ctr.x, ctr.z, cellSize, cellSize, texRes);
           normalTex = new THREE.CanvasTexture(nv);
         }
@@ -526,8 +522,14 @@ export class TerrainExporter {
     // GLB already embeds crisp per-cell textures; these are an overview of the
     // whole assembly (== the single cell when there is one tile).
     let colorCanvas = null, normalCanvas = null;
-    if (bakeColor) colorCanvas = await bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
-    if (bakeNormal) normalCanvas = await bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    if (bakeColor) {
+      onToast('Baking overview color map...');
+      colorCanvas = await bakeRegionCanvas(2, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    }
+    if (bakeNormal) {
+      onToast('Baking overview normal map...');
+      normalCanvas = await bakeRegionCanvas(1, unionCenter.x, unionCenter.z, unionSpanX, unionSpanZ, texRes);
+    }
 
     // A multi-tile whole-terrain export has exactly one surface object. Re-map
     // every cell to the union texture before merging so boundary vertices share
@@ -746,72 +748,59 @@ export class TerrainExporter {
     // GLTF / GLB Export
     let exportedModel = null;
     let exportedCollision = null;
-    const serializeModel = (model) => new Promise((resolve) => {
-      if (format === 'glb') {
-        new GLTFExporter().parse(
-          model,
-          (result) => resolve(new Uint8Array(result)),
-          (err) => { console.error(err); resolve(null); },
-          { binary: true, animations: [] },
-        );
-      } else {
-        resolve(new TextEncoder().encode(new OBJExporter().parse(model)));
-      }
-    });
-    const serializeCollision = (model) => new Promise((resolve) => {
-      new GLTFExporter().parse(
-        model,
-        (result) => resolve(new Uint8Array(result)),
-        (err) => { console.error(err); resolve(null); },
-        { binary: true, animations: [] },
-      );
-    });
+    const serializeModel = (model) => format === 'glb'
+      ? serializeGlb(model) : new TextEncoder().encode(new OBJExporter().parse(model));
+    const serializeCollision = serializeGlb;
 
-    if (includeMesh && separateTileExport) {
+    try {
+      if (includeMesh && separateTileExport) {
+        for (const tile of tilePackages) {
+          onToast(`Packaging tile ${tile.cell.cx}, ${tile.cell.cz}...`);
+          tile.model = await serializeModel(tile.group);
+        }
+      } else if (includeMesh) {
+        onToast(`Packaging primary ${format.toUpperCase()}...`);
+        exportedModel = await serializeModel(exportGroup);
+      }
+
+      if (separateTileExport && exportCollision) {
+        for (const tile of tilePackages) {
+          if (tile.collisionModel) tile.collision = await serializeCollision(tile.collisionModel);
+        }
+      } else if (exportCollision && collisionModel) {
+        onToast('Packaging collision mesh...');
+        exportedCollision = await serializeCollision(collisionModel);
+      }
+
+    } finally {
+      // Cleanup exported geometry, including after a serialization failure.
+      exportGroup.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.geometry.dispose();
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materials.forEach((material) => {
+            if (material.map) material.map.dispose();
+            if (material.normalMap) material.normalMap.dispose();
+            material.dispose();
+          });
+        }
+      });
+
+      if (collisionModel) {
+        collisionModel.geometry.dispose();
+        collisionModel.material.dispose();
+      }
       for (const tile of tilePackages) {
-        onToast(`Packaging tile ${tile.cell.cx}, ${tile.cell.cz}...`);
-        tile.model = await serializeModel(tile.group);
+        if (tile.water) {
+          tile.water.geometry.dispose();
+          tile.water.material.dispose();
+        }
+        if (tile.collisionModel) {
+          tile.collisionModel.geometry.dispose();
+          tile.collisionModel.material.dispose();
+        }
       }
-    } else if (includeMesh) {
-      onToast(`Packaging primary ${format.toUpperCase()}...`);
-      exportedModel = await serializeModel(exportGroup);
-    }
 
-    if (separateTileExport && exportCollision) {
-      for (const tile of tilePackages) {
-        if (tile.collisionModel) tile.collision = await serializeCollision(tile.collisionModel);
-      }
-    } else if (exportCollision && collisionModel) {
-      onToast('Packaging collision mesh...');
-      exportedCollision = await serializeCollision(collisionModel);
-    }
-
-    // Cleanup exported geometry
-    exportGroup.traverse((obj) => {
-      if (obj.isMesh) {
-        obj.geometry.dispose();
-        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-        materials.forEach((material) => {
-          if (material.map) material.map.dispose();
-          if (material.normalMap) material.normalMap.dispose();
-          material.dispose();
-        });
-      }
-    });
-
-    if (collisionModel) {
-      collisionModel.geometry.dispose();
-      collisionModel.material.dispose();
-    }
-    for (const tile of tilePackages) {
-      if (tile.water) {
-        tile.water.geometry.dispose();
-        tile.water.material.dispose();
-      }
-      if (tile.collisionModel) {
-        tile.collisionModel.geometry.dispose();
-        tile.collisionModel.material.dispose();
-      }
     }
 
     // Download helpers
@@ -873,7 +862,9 @@ export class TerrainExporter {
     if (Object.keys(zipFiles).length > 0) {
       onToast('Compressing export package (ZIP)...');
       const zipped = zipSync(zipFiles);
-      await saveBlob(new Blob([zipped], { type: 'application/zip' }), `${options.exportPresetId && options.exportPresetId !== 'custom' ? `${options.exportPresetId}_` : ''}terrain_export-${engineParams.seed}.zip`);
+      onToast(`Saving export package (${(zipped.byteLength / 1e6).toFixed(1)} MB)...`);
+      const saved = await saveBlob(new Blob([zipped], { type: 'application/zip' }), `${options.exportPresetId && options.exportPresetId !== 'custom' ? `${options.exportPresetId}_` : ''}terrain_export-${engineParams.seed}.zip`);
+      if (saved?.canceled) throw new Error('Export save was canceled');
     }
 
     onToast('Export completed successfully!');
