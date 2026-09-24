@@ -17,7 +17,7 @@ async function download(url, file, expected) {
   try { const bytes=await fs.readFile(file); if(!expected || hash(bytes,'md5')===expected) return bytes; } catch {}
   for(let attempt=0;attempt<4;attempt++) {
     try {
-      const response=await fetch(url,{headers:{'User-Agent':'ProceduralTerrains/1.8.4 materials-preparation'},signal:AbortSignal.timeout(120000)});
+      const response=await fetch(url,{headers:{'User-Agent':'ProceduralTerrains/1.9.0 materials-preparation'},signal:AbortSignal.timeout(120000)});
       if(!response.ok) throw new Error(`HTTP ${response.status}`);
       const bytes=Buffer.from(await response.arrayBuffer());
       if(expected && hash(bytes,'md5')!==expected) throw new Error('provider checksum mismatch');
