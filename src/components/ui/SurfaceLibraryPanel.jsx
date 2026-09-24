@@ -409,7 +409,7 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 const SURFACE_MODE_SLIDERS = [
-  slider('surfaceTextureScale', 'Scale', 0.25, 4, 0.05, { digits: 2, fallback: 1 }),
+  slider('surfaceTextureScale', 'Scale', 0.25, 20, 0.05, { digits: 2, fallback: 1 }),
   slider('surfaceTextureBreakup', 'Break Tiling', 0, 1, 0.02, { digits: 2, fallback: 0.5 }),
   slider('surfaceTextureBlend', 'Blend Textures', 0, 1, 0.02, { digits: 2, fallback: 0.35 }),
   slider('surfaceTexturePaletteInfluence', 'Palette Influence', 0, 1, 0.02, { digits: 2, fallback: 0.6 }),
@@ -453,7 +453,17 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
           </div>
           {status?.error && <p className="section-hint warning" role="alert">{status.error} Use Bake Custom Materials to retry.</p>}
           <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads are stored locally and included in portable project exports.</p>
-          {SURFACE_MODE_SLIDERS.filter((def) => source !== SURFACE_TEXTURE_SOURCE.PBR || def.key !== 'surfaceTexturePaletteInfluence').map((def) => (
+          {source === SURFACE_TEXTURE_SOURCE.CUSTOM && (
+            <ToggleRow
+              label="Original Texture Colors"
+              value={params.surfaceTextureRawColor !== false}
+              onChange={(v) => onParam('surfaceTextureRawColor', v)}
+              settingId="surface.surfaceTextureRawColor"
+              info="Keep uploaded albedo unchanged. Turn off to intentionally recolor it with the biome palette."
+            />
+          )}
+          {SURFACE_MODE_SLIDERS.filter((def) => def.key !== 'surfaceTexturePaletteInfluence'
+            || (source === SURFACE_TEXTURE_SOURCE.CUSTOM && params.surfaceTextureRawColor === false)).map((def) => (
             <SliderCtl
               key={def.key}
               def={def}

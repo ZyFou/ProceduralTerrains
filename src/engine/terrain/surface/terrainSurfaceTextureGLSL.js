@@ -266,6 +266,10 @@ SurfRoleWeights surfMaterialWeights(
   float slope, float hRel, float h01, float detail, float jitter
 ) {
   SurfRoleWeights w;
+  // Fine procedural color grain was changing materials every few metres in
+  // both texture backends. Material selection uses the broad terrain signals.
+  float roleDetail = 0.5;
+  float roleJitter = 0.0;
   w.sand = 0.0;
   w.dune = 0.0;
   w.dryGrass = 0.0;
@@ -281,15 +285,15 @@ SurfRoleWeights surfMaterialWeights(
   w.snow = 0.0;
 
   float tempEff = clamp(cl.temp - h01 * 0.55, 0.0, 1.0);
-  float jt = jitter * 0.06;
+  float jt = roleJitter * 0.06;
   float veg = vegetationDensity(cl, h01, slope);
   float snow = clamp(tc.snow, 0.0, 1.0);
   float shore = 1.0 - smoothstep(tc.sandBand * 0.4, max(tc.sandBand, 0.3), max(hRel, 0.0));
   float beach = shore * (1.0 - bw.wetland * 0.85);
   float desert = clamp(bw.desert * 0.95 + beach * 0.25, 0.0, 1.0);
 
-  float highBlend = smoothstep(0.30, 0.62, h01 + jitter * 0.08) * (1.0 - bw.desert * 0.7);
-  float slopeRock = smoothstep(0.42, 0.72, slope + jitter * 0.06);
+  float highBlend = smoothstep(0.30, 0.62, h01 + roleJitter * 0.08) * (1.0 - bw.desert * 0.7);
+  float slopeRock = smoothstep(0.42, 0.72, slope + roleJitter * 0.06);
   float canyon = bw.canyon * smoothstep(1.0, 6.0, hRel);
   float rockTake = clamp(max(max(slopeRock, highBlend), canyon), 0.0, 1.0) * (1.0 - snow);
   float lowland = clamp((1.0 - snow) * (1.0 - rockTake * 0.82), 0.0, 1.0);
@@ -304,7 +308,7 @@ SurfRoleWeights surfMaterialWeights(
   float moistLow = smoothstep(0.18, 0.42, cl.moist);
   float moistMid = smoothstep(0.30, 0.62, cl.moist);
   float moistHigh = smoothstep(0.55, 0.78, cl.moist);
-  float forestBias = veg * moistMid * (0.5 + 0.5 * smoothstep(0.35, 0.65, detail));
+  float forestBias = veg * moistMid * (0.5 + 0.5 * smoothstep(0.35, 0.65, roleDetail));
 
   w.sand = sandW;
   w.dune = duneW;
@@ -317,13 +321,13 @@ SurfRoleWeights surfMaterialWeights(
 
   // A wrapped fract introduced a visible material seam at every stratum.
   // The periodic signal keeps the layered geology without discontinuities.
-  float redMix = smoothstep(-0.65, 0.65, sin((h01 * 14.0 + detail * 0.15) * 6.2831853));
+  float redMix = smoothstep(-0.65, 0.65, sin((h01 * 14.0 + roleDetail * 0.15) * 6.2831853));
   float redTotal = canyon * (1.0 - snow);
   float neutralRock = clamp(rockTake - redTotal * 0.65, 0.0, 1.0);
   w.redRock = redTotal * (1.0 - redMix);
   w.redRock2 = redTotal * redMix;
-  w.rock = neutralRock * (1.0 - smoothstep(0.35, 0.78, detail));
-  w.rockHi = max(highBlend * (1.0 - snow), neutralRock * smoothstep(0.30, 0.80, detail));
+  w.rock = neutralRock * (1.0 - smoothstep(0.35, 0.78, roleDetail));
+  w.rockHi = max(highBlend * (1.0 - snow), neutralRock * smoothstep(0.30, 0.80, roleDetail));
   w.snow = snow;
   return w;
 }
@@ -496,6 +500,10 @@ SurfaceTexResult applySurfaceMaterials(
   }
 
   float k = amount * manualCoverage;
+  #ifdef SURFACE_ARRAYS
+  // An active PBR library uses its own albedo, not a blend with biome colors.
+  if (!manualMode) k = 1.0;
+  #endif
   res.albedo = mix(baseAlbedo, tex.albedo, k);
   vec3 normalBase = normalize(baseNormal);
   if (uSurfNormalAmt > 0.001) {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Engine } from '../src/engine/Engine.js';
+import { createTerrainUniforms } from '../src/engine/terrain/TerrainMaterial.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
 import { TERRAIN_OUTPUT_ID, addGraphNode, connectGraphNodes, createBlankGraph } from '../src/engine/terrain/graph/GraphDocument.js';
 import { defaultLegacyStack } from '../src/engine/terrain/noise/NoiseStack.js';
@@ -154,6 +155,19 @@ describe('atomic terrain height transitions', () => {
 
     expect(engine.uniforms.uSurfMode.value).toBe(0);
     expect(engine.uniforms.uManualBaseGenerated.value).toBe(0);
+  });
+
+  it('uses original custom texture colors unless palette recoloring is explicitly enabled', () => {
+    const engine = heightTransitionHarness();
+    engine.params = { surfaceTextureSource: 'customTextures', surfaceTexturePaletteInfluence: 0.7 };
+    engine.uniforms = createTerrainUniforms();
+
+    engine._applySurfaceSettings();
+    expect(engine.uniforms.uSurfPaletteInfluence.value).toBe(0);
+
+    engine.params.surfaceTextureRawColor = false;
+    engine._applySurfaceSettings();
+    expect(engine.uniforms.uSurfPaletteInfluence.value).toBe(0.7);
   });
 
   it('keeps a Nodes graph as the generation source of a hybrid Manual project', () => {

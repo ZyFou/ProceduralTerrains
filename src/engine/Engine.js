@@ -4526,7 +4526,8 @@ export class Engine {
     u.uSurfAmount.value = 1.0;
     u.uSurfTint.value = 0.0;
     if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
-    u.uSurfPaletteInfluence.value = flatManual ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
+    u.uSurfPaletteInfluence.value = flatManual || p.surfaceTextureRawColor !== false
+      ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
     u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
     if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
