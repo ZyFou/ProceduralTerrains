@@ -341,3 +341,32 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(boot.fragmentShader).toContain('return fallback;');
   });
 });
+
+
+describe('audit shader invariants', () => {
+  it.each(['base', 'full', 'hybrid', 'manual'])('preserves debug/export wall handling in %s', (variant) => {
+    const material = createTerrainMaterial(createTerrainUniforms(), 5, undefined, { variant });
+    materials.push(material);
+    const fragment = material.fragmentShader.slice(material.fragmentShader.lastIndexOf('void main()'));
+    expect(fragment.indexOf('tileOccupiedAt(xz) < 0.5) discard')).toBeLessThan(fragment.indexOf('if (vWall > 0.02'));
+    expect(fragment.indexOf('if (vWall > 0.02')).toBeLessThan(fragment.indexOf('Climate cl ='));
+    expect(fragment).toContain('vWall > 0.02 && uTileDebugView <= 0.5 && uColorMode <= 0.5');
+    expect(fragment).toContain('if (uTileDebugView > 0.5)');
+    expect(fragment).toContain('if (uColorMode > 0.5)');
+    expect(fragment).toContain('float hRel = vWorldPos.y - uSeaLevel;');
+  });
+
+  it('reuses only the exact Tile centre climate and leaves Manual/Infinite cache semantics intact', () => {
+    for (const [options, reuse] of [
+      [{ variant: 'full' }, true], [{ variant: 'hybrid' }, true],
+      [{ variant: 'manual' }, false], [{ worldMode: 'infinite' }, false],
+      [{ worldMode: 'shared' }, false],
+    ]) {
+      const material = createTerrainMaterial(createTerrainUniforms(), 5, undefined, options);
+      materials.push(material);
+      expect(material.fragmentShader.includes('hC = heightAtWithClimate(xz, cl);')).toBe(reuse);
+      expect(material.fragmentShader).toContain('hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));');
+      expect(material.fragmentShader).toContain('hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));');
+    }
+  });
+});

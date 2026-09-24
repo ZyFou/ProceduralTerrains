@@ -200,7 +200,9 @@ export class ManualTerrainModeManager {
     this.domElement.addEventListener('dragover', this._onDragOver);
     this.domElement.addEventListener('drop', this._onDrop);
     this.domElement.addEventListener('wheel', this._onWheel, { passive: false });
-    window.addEventListener('pointerup', this._onPointerUp);
+    window.addEventListener('pointerup', this._onPointerUp, true);
+    window.addEventListener('pointercancel', this._onPointerUp, true);
+    window.addEventListener('blur', this._onPointerUp);
     window.addEventListener('keydown', this._onKeyDown, true);
     this._syncUniforms();
   }
@@ -900,6 +902,11 @@ export class ManualTerrainModeManager {
   }
 
   _handlePointerMove(event) {
+    // A release outside the viewport (or intercepted by UI) must not leave
+    // the brush painting on hover when the pointer returns.
+    if ((this._sculpting || this._surfacePainting) && !(event.buttons & 1)) {
+      this._handlePointerUp();
+    }
     if (this.enabled && this.workspaceActive && this.texturePaint.enabled) {
       const point = this.picker.pickEvent(event, { quality: this._surfacePainting ? 'preview' : 'final' });
       this._updateSurfaceHit(point);
@@ -1190,7 +1197,9 @@ export class ManualTerrainModeManager {
     this.domElement.removeEventListener('dragover', this._onDragOver);
     this.domElement.removeEventListener('drop', this._onDrop);
     window.removeEventListener('keydown', this._onKeyDown, true);
-    window.removeEventListener('pointerup', this._onPointerUp);
+    window.removeEventListener('pointerup', this._onPointerUp, true);
+    window.removeEventListener('pointercancel', this._onPointerUp, true);
+    window.removeEventListener('blur', this._onPointerUp);
     this.domElement.removeEventListener('wheel', this._onWheel);
     this.transform.detach?.();
     this.transformHelper?.parent?.remove(this.transformHelper);

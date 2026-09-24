@@ -127,6 +127,13 @@ export class CloudLowResPass {
   setMeshLayer(mesh, lowRes) {
     if (!mesh) return;
     mesh.layers.set(lowRes ? CLOUD_LOWRES_LAYER : 0);
+    if (!lowRes && this.rt) {
+      this.rt.dispose();
+      this.rt = null;
+      this._didRender = false;
+      this._composite.uniforms.tCloud.value = null;
+      this._composite.uniforms.tSceneDepth.value = null;
+    }
   }
 
   _ensureRT(renderer, baseSize = null) {

@@ -71,9 +71,14 @@ float terrainDetailNoiseTri(vec3 worldPos, vec3 n, float scale) {
 }
 
 float terrainDetailNoise(vec3 worldPos, vec3 n, float scale) {
+  float triplanar = clamp(uTerrainTriplanar, 0.0, 1.0);
+  // At the endpoints the other projection contributes exactly zero. Preserve
+  // the original mix for intermediate values (including animated controls).
+  if (triplanar == 0.0) return terrainDetailNoise2D(worldPos.xz, scale);
+  if (triplanar == 1.0) return terrainDetailNoiseTri(worldPos, n, scale);
   float planar = terrainDetailNoise2D(worldPos.xz, scale);
   float tri = terrainDetailNoiseTri(worldPos, n, scale);
-  return mix(planar, tri, clamp(uTerrainTriplanar, 0.0, 1.0));
+  return mix(planar, tri, triplanar);
 }
 
 // Relief height for the normal pass — the broad fine band plus an optional
@@ -144,6 +149,18 @@ TerrainDetailResult applyTerrainDetailLayer(
 ) {
   TerrainDetailResult outD;
   float fade = terrainDetailFadeAt(worldPos);
+  float rockMask = max(tc.rockBlend, terrainRockMask(slope, jitter));
+  float shoreMask = terrainShoreMask(hRel);
+  // Outside the existing fade range, neither albedo nor normal detail can
+  // affect the image. The raw-grain debug view still needs its noise sample.
+  if (fade == 0.0 && !(uTerrainDetailDebug >= 4.5 && uTerrainDetailDebug < 5.5)) {
+    outD.albedo = tc.albedo;
+    outD.detail = 0.0;
+    outD.fade = fade;
+    outD.rockMask = rockMask;
+    outD.shoreMask = shoreMask;
+    return outD;
+  }
   float quality = terrainDetailQualityFactor();
   float scale = uTerrainDetailScale * mix(0.55, 1.25, quality);
 
@@ -160,8 +177,6 @@ TerrainDetailResult applyTerrainDetailLayer(
   float microSigned = ds.micro * 2.0 - 1.0;
   float macroSigned = ds.macro * 2.0 - 1.0;   // -1..1 large weathering patch field
 
-  float rockMask = max(tc.rockBlend, terrainRockMask(slope, jitter));
-  float shoreMask = terrainShoreMask(hRel);
   float desertGround = clamp(max(bw.desert, tc.sandBand > 0.0 ? 1.0 - smoothstep(tc.sandBand * 0.4, tc.sandBand, hRel) : 0.0), 0.0, 1.0);
   float wetGround = clamp(max(bw.wetland, shoreMask * 0.65), 0.0, 1.0);
   float vegGround = clamp((1.0 - desertGround) * (1.0 - bw.canyon) * (1.0 - tc.snow) * tc.flatness * smoothstep(0.20, 0.72, cl.moist), 0.0, 1.0);

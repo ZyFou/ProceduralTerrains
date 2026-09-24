@@ -66,6 +66,8 @@ describe('camera pipeline reuse', () => {
     expect(engine._renderSharedOpaqueOverlays(sourceTarget, target)).toEqual({
       triangles: 112,
       drawCalls: 9,
+      points: 0,
+      lines: 0,
     });
     expect(renderer.copyTextureToTexture).toHaveBeenNthCalledWith(
       1,

@@ -184,7 +184,7 @@ describe('engine lifecycle ownership', () => {
     material.dispose();
   });
 
-  it('skips underwater compositing when a material version or target changes', () => {
+  it('reuses the underwater composite across scene edits but gates changes to its own program', () => {
     const engine = Object.create(Engine.prototype);
     const scene = new THREE.Scene();
     const material = new THREE.MeshBasicMaterial();
@@ -209,21 +209,27 @@ describe('engine lifecycle ownership', () => {
       _warmUnderwaterShaders: vi.fn(async () => true),
       _underwaterWarmed: true,
     });
-    engine._underwaterWarmIdentity = engine._captureUnderwaterWarmIdentity(sourceA);
+    engine._underwaterWarmIdentity = engine._captureUnderwaterWarmIdentity();
 
     expect(engine._applyUnderwaterFromSharedTarget(sourceA)).toBe(underwaterTarget);
     expect(composite).toHaveBeenCalledTimes(1);
 
     material.needsUpdate = true;
+    expect(engine._applyUnderwaterFromSharedTarget(sourceB)).toBe(underwaterTarget);
+    expect(composite).toHaveBeenCalledTimes(2);
+    expect(engine._warmUnderwaterShaders).not.toHaveBeenCalled();
+
+    engine.underwater._material.needsUpdate = true;
     expect(engine._applyUnderwaterFromSharedTarget(sourceA)).toBe(sourceA);
-    expect(composite).toHaveBeenCalledTimes(1);
+    expect(composite).toHaveBeenCalledTimes(2);
     expect(engine._warmUnderwaterShaders).toHaveBeenCalledWith(sourceA);
 
     engine._underwaterWarmed = true;
-    engine._underwaterWarmIdentity = engine._captureUnderwaterWarmIdentity(sourceA);
+    engine._underwaterWarmIdentity = engine._captureUnderwaterWarmIdentity();
     engine._warmUnderwaterShaders.mockClear();
+    engine.underwater._rt = {}; // resized or recreated output target
     expect(engine._applyUnderwaterFromSharedTarget(sourceB)).toBe(sourceB);
-    expect(composite).toHaveBeenCalledTimes(1);
+    expect(composite).toHaveBeenCalledTimes(2);
     expect(engine._warmUnderwaterShaders).toHaveBeenCalledWith(sourceB);
 
     scene.children[0].geometry.dispose();
