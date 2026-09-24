@@ -12,6 +12,8 @@ The PBR renderer uses world anchored triplanar coordinates. Detail sampling chan
 
 Snow now blends continuously over the selected ground materials using its altitude and slope coverage. It does not enter the top-two ground-material ranking, which previously made snow appear abruptly when its weight overtook another material. The same transition applies to the custom texture atlas and the local PBR library; manual snow paint retains its authored coverage.
 
+For a reproducible snowline render in Edge, run `node tools/surface-browser-check.mjs --snow-preview` while the Vite development server is running on port 6064. The check uses a controlled height gradient and writes its screenshot and shader diagnostics to `output/surface-qa/`.
+
 The three PBR node examples are **PBR Alpine**, **PBR Canyon** and **PBR Jungle / Marsh**. Personal imports persist in IndexedDB and travel in portable `.ptrterrain` exports. Cloud sync refuses projects with local texture dependencies.
 
 For validation, run `node tools/surface-appearance-check.mjs` against a local Vite server on port 6064 to render snow, sand and a sloped rock sample. Run `node tools/surface-browser-check.mjs --quick` to compile the real terrain shader, or omit `--quick` to compile terrain, paint, planet and baking. Results are written under `output/surface-qa`. The automated browser checks use Edge/ANGLE on Windows; Safari and mobile WebGL 2 have not been tested here.

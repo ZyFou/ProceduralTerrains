@@ -26,10 +26,22 @@ try {
     const start=performance.now(),pack=await buildSurfaceResources({document:doc});
     const uniforms=createTerrainUniforms();
     if(preview)uniforms.uSeaLevel.value=-100;
-    if(snowPreview)uniforms.uSnowLine.value=0.45;
+    if(snowPreview){
+      uniforms.uSnowLine.value=0.45;
+      const pixels=new Uint8Array(256*256*4);
+      for(let y=0;y<256;y++)for(let x=0;x<256;x++){
+        const i=(y*256+x)*4;pixels[i]=128;pixels[i+1]=255;pixels[i+2]=128;
+        pixels[i+3]=Math.round(255*(0.2+0.5*x/255));
+      }
+      const height=new THREE.DataTexture(pixels,256,256,THREE.RGBAFormat);
+      height.minFilter=THREE.LinearFilter;height.magFilter=THREE.LinearFilter;height.needsUpdate=true;
+      uniforms.uTerrainHeightTex.value=height;uniforms.uUseTerrainHeightTex.value=1;
+      uniforms.uBakeOrigin.value.set(-250,-250);uniforms.uBakeSpan.value.set(500,500);
+    }
     uniforms.uSurfaceArrayMode.value=1;uniforms.uSurfMode.value=1;uniforms.uSurfBreakup.value=0.6;uniforms.uSurfDiffuse.value=pack.diffuse;uniforms.uSurfProps.value=pack.props;
     uniforms.uSurfaceRoleMap.value=pack.mapping;uniforms.uSurfaceRoleTint.value=pack.tints;uniforms.uSurfaceAssetSize.value=[...pack.sizes,...new Array(64-pack.sizes.length).fill(2)];
     const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(50,800/600,0.1,10000);camera.position.set(250,350,400);camera.lookAt(0,0,0);
+    if(snowPreview){camera.position.set(250,470,650);camera.lookAt(0,160,0);}
     const geo=new THREE.PlaneGeometry(500,500,32,32);geo.rotateX(-Math.PI/2);
     const material=createTerrainMaterial(uniforms,3,undefined,{variant:'full'}),mesh=new THREE.Mesh(geo,material);scene.add(mesh);
     syncSurfaceMaterialBackend(material);await renderer.compileAsync(scene,camera);renderer.render(scene,camera);
