@@ -7722,7 +7722,13 @@ input[type="color"].palette-color-input {
   gap: 8px;
   flex-wrap: wrap;
 }
-.surface-apply-row .action-btn { width: auto; }
+.surface-apply-row .action-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
 .surface-apply-status { font-size: 11px; }
 .surface-apply-status.ok { color: var(--success); }
 .surface-apply-status.pending { color: var(--warning); }
