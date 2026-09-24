@@ -10,6 +10,8 @@ The Surface Textures **Scale** control ranges from 0.1× to 5×. It multiplies t
 
 The PBR renderer uses world anchored triplanar coordinates. Detail sampling changes continuously to a fixed macro scale as its projected pixel footprint grows. Explicit texture gradients are taken before material and paint branches. Role blending uses symmetric weights, so switching the dominant role on a slope does not create a color jump. The source height, roughness, normal and AO maps share each patch transform. The imported snow AO is deliberately softened for terrain rendering, and scanned roughness controls the remaining specular response.
 
+Snow now blends continuously over the selected ground materials using its altitude and slope coverage. It does not enter the top-two ground-material ranking, which previously made snow appear abruptly when its weight overtook another material. The same transition applies to the custom texture atlas and the local PBR library; manual snow paint retains its authored coverage.
+
 The three PBR node examples are **PBR Alpine**, **PBR Canyon** and **PBR Jungle / Marsh**. Personal imports persist in IndexedDB and travel in portable `.ptrterrain` exports. Cloud sync refuses projects with local texture dependencies.
 
 For validation, run `node tools/surface-appearance-check.mjs` against a local Vite server on port 6064 to render snow, sand and a sloped rock sample. Run `node tools/surface-browser-check.mjs --quick` to compile the real terrain shader, or omit `--quick` to compile terrain, paint, planet and baking. Results are written under `output/surface-qa`. The automated browser checks use Edge/ANGLE on Windows; Safari and mobile WebGL 2 have not been tested here.

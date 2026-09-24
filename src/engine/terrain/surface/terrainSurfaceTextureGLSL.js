@@ -428,6 +428,7 @@ SurfaceTexResult applySurfaceMaterials(
   #endif
   bool useManualWeights = false;
   float manualCoverage = 0.0;
+  float manualWeightTotal = 0.0;
   SurfRoleWeights w;
   if (manualMode) {
     vec4 manualA = manualSurfaceWeightsAAt(wpos.xz);
@@ -445,12 +446,10 @@ SurfaceTexResult applySurfaceMaterials(
     w.rock = manualA.g;
     w.rockHi = 0.0;
     w.snow = manualA.a;
-    manualCoverage = clamp(
+    manualWeightTotal =
       manualA.r + manualA.g + manualA.b + manualA.a
-      + manualB.r + manualB.g + manualB.b,
-      0.0,
-      1.0
-    );
+      + manualB.r + manualB.g + manualB.b;
+    manualCoverage = clamp(manualWeightTotal, 0.0, 1.0);
     useManualWeights = manualCoverage >= 0.002;
   }
   if (!useManualWeights) {
@@ -479,24 +478,35 @@ SurfaceTexResult applySurfaceMaterials(
   surfCheckRole(9, w.redRock2, bestI, secondI, bestW, secondW);
   surfCheckRole(10, w.rock, bestI, secondI, bestW, secondW);
   surfCheckRole(11, w.rockHi, bestI, secondI, bestW, secondW);
-  surfCheckRole(12, w.snow, bestI, secondI, bestW, secondW);
+  // Snow must not compete for the top-two ground slots. That ranking made it
+  // jump into view at a substantial weight when it displaced the runner-up.
+  float snowCoverage = useManualWeights
+    ? clamp(w.snow / max(manualWeightTotal, 1e-4), 0.0, 1.0)
+    : clamp(w.snow, 0.0, 1.0);
+  if (bestW < 1e-4 && snowCoverage < 1e-4) return res;
 
-  if (bestW < 1e-4) return res;
-
-  SurfMaterialSample tex = surfSampleRole(bestI, wpos, triBlend, nGeo);
-  float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
-  if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
-    SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
-    // Weight both sides symmetrically: the old factor jumped from ~0.18 to
-    // ~0.82 when the strongest role changed on a slope.
-    #ifdef SURFACE_ARRAYS
-    float sharpness = useManualWeights ? 1.0 : mix(2.0, 1.0, roleBlend);
-    #else
-    float sharpness = useManualWeights ? 1.0 : mix(4.0, 1.0, roleBlend);
-    #endif
-    float aWeight = pow(bestW, sharpness), bWeight = pow(secondW, sharpness);
-    float kRole = bWeight / max(aWeight + bWeight, 1e-4);
-    tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
+  SurfMaterialSample tex;
+  if (bestW < 1e-4) {
+    tex = surfSampleRole(12, wpos, triBlend, nGeo);
+  } else {
+    tex = surfSampleRole(bestI, wpos, triBlend, nGeo);
+    float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
+    if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
+      SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
+      // Weight both sides symmetrically across ground-material transitions.
+      #ifdef SURFACE_ARRAYS
+      float sharpness = useManualWeights ? 1.0 : mix(2.0, 1.0, roleBlend);
+      #else
+      float sharpness = useManualWeights ? 1.0 : mix(4.0, 1.0, roleBlend);
+      #endif
+      float aWeight = pow(bestW, sharpness), bWeight = pow(secondW, sharpness);
+      float kRole = bWeight / max(aWeight + bWeight, 1e-4);
+      tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
+    }
+    if (snowCoverage > 1e-4) {
+      SurfMaterialSample snowTex = surfSampleRole(12, wpos, triBlend, nGeo);
+      tex = surfMixSamples(tex, snowTex, snowCoverage);
+    }
   }
 
   float k = amount * manualCoverage;
