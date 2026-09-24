@@ -25,6 +25,27 @@ function harness() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('surface upload queue', () => {
+  it('waits for GPU completion using zero-timeout polls before publishing progress', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback) => queueMicrotask(callback));
+    const { gl, renderer, atlas } = harness();
+    Object.assign(gl, { SYNC_GPU_COMMANDS_COMPLETE: 1, TIMEOUT_EXPIRED: 2,
+      fenceSync: vi.fn(() => ({})), clientWaitSync: vi.fn().mockReturnValueOnce(2).mockReturnValue(3),
+      deleteSync: vi.fn(), flush: vi.fn() });
+    const progress = vi.fn(() => expect(gl.deleteSync.mock.calls.length).toBe(gl.fenceSync.mock.calls.length));
+    await uploadSurfaceTextures(renderer, atlas, { onProgress: progress });
+    expect(progress).toHaveBeenCalled();
+    expect(gl.clientWaitSync.mock.calls.every(([, flags, timeout]) => flags === 0 && timeout === 0)).toBe(true);
+    expect(gl.deleteSync).toHaveBeenCalledTimes(gl.fenceSync.mock.calls.length);
+  });
+
+  it('yields when the time budget is spent even with byte budget remaining', async () => {
+    let frames = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback) => { frames++; queueMicrotask(callback); });
+    const { renderer, atlas, gl } = harness();
+    await uploadSurfaceTextures(renderer, atlas, { bytesPerTask: 8 * 1024 * 1024, msPerTask: 0 });
+    expect(gl.texSubImage3D).toHaveBeenCalledTimes(4);
+    expect(frames).toBe(6);
+  });
   it('uploads every array layer in bounded transfers before publication', async () => {
     let frames = 0;
     vi.stubGlobal('requestAnimationFrame', (callback) => { frames++; queueMicrotask(callback); });
@@ -33,7 +54,7 @@ describe('surface upload queue', () => {
 
     expect(renderer.initTexture).toHaveBeenCalledTimes(2);
     expect(gl.texSubImage3D).toHaveBeenCalledTimes(16);
-    expect(frames).toBe(16);
+    expect(frames).toBe(18); // allocations also yield instead of blocking together
     for (const call of gl.texSubImage3D.mock.calls) {
       expect(call.at(-1).byteLength).toBeLessThanOrEqual(256 * 1024);
     }

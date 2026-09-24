@@ -129,7 +129,15 @@ export async function buildAndInstallSurfaceAtlas(engine, source, customMaps, {
     atlas.props?.image?.close?.();
     throw surfaceAtlasSuperseded();
   }
-  engine.setSurfaceAtlas(atlas, source);
+  try {
+    await engine.setSurfaceAtlas(atlas, source);
+  } catch (error) {
+    atlas.diffuse?.dispose();
+    atlas.props?.dispose();
+    atlas.diffuse?.image?.close?.();
+    atlas.props?.image?.close?.();
+    throw error;
+  }
   return {
     anyPresent: !!atlas.anyPresent,
     bakedAt: atlas.bakedAt,

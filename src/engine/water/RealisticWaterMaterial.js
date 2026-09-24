@@ -669,8 +669,9 @@ void main() {
     sceneRefractionWeight
   ) * (1.0 - fres);
 
-  // fake caustics in shallow water (smoothed depth, coarse noise)
-  if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
+  // The refracted scene already contains caustics on the terrain. Keep this
+  // inexpensive fallback only where that scene sample is unavailable.
+  if (uCausticsQual > 0.05 && uWaterTier > 1.5 && sceneCaptureEnabled < 0.5) {
     float shallowMask = 1.0 - smoothstep(uShallowDist * 0.5, uDeepDist, visualDepth);
     float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
     float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));

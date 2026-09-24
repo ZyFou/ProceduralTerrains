@@ -162,6 +162,9 @@ describe('Realistic Water Surface V2', () => {
 
     expect(material.fragmentShader).not.toContain('float minDepthMask = smoothstep');
     expect(material.fragmentShader).toContain(
+      'uWaterTier > 1.5 && sceneCaptureEnabled < 0.5',
+    );
+    expect(material.fragmentShader).toContain(
       'float caust = pow(max(c1 * c2, 0.0), 2.2) * shallowMask;',
     );
     applyRealisticWaterUniforms(material, {

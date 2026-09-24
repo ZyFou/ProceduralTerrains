@@ -18,6 +18,17 @@ afterEach(() => {
 });
 
 describe('shared Tile and Infinite terrain program', () => {
+  it('uses one procedural normal sampling call in Studio without changing noise octave loops', () => {
+    const uniforms = createTerrainUniforms();
+    for (const worldMode of ['studio', 'shared', 'infinite']) {
+      const material = createTerrainMaterial(uniforms, 7, undefined, { worldMode });
+      materials.push(material);
+      expect(material.fragmentShader.includes('sampleIndex < uTerrainNormalSampleCount'))
+        .toBe(worldMode === 'studio');
+      expect(material.fragmentShader).toContain('i < OCTAVES');
+    }
+    expect(uniforms.uTerrainNormalSampleCount.value).toBe(3);
+  });
   it('keeps each detail-readiness pair on the same compiled program', () => {
     const uniforms = createTerrainUniforms();
     const pairs = [

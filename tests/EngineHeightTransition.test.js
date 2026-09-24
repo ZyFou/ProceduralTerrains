@@ -481,10 +481,13 @@ describe('atomic terrain height transitions', () => {
     expect(engine._compiling).toBe(0);
     expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
 
+    const prepareCache = vi.spyOn(engine, '_prepareHeightCacheProgram');
+
     // The superseded load may finish later, but no longer owns a render gate
     // and may never overwrite the already-committed Nodes terrain.
     compiles[0]({ ready: true });
     expect((await first).swapped).toBe(false);
+    expect(prepareCache).not.toHaveBeenCalled();
     expect(engine._compiling).toBe(0);
     expect(engine._applyUniforms).toHaveBeenCalledTimes(1);
     expect(engine.terrainMaterial.defines.OCTAVES).toBe(6);
