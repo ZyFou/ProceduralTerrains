@@ -7299,6 +7299,92 @@ input[type="color"].palette-color-input {
 .surface-role-group {
   margin-top: 10px;
 }
+.surface-pack {
+  min-width: 0;
+}
+.surface-pack > .section-hint {
+  margin: 0 0 12px;
+}
+.surface-pack-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  margin: 0 0 11px;
+}
+.surface-pack-label,
+.surface-pack-role > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.surface-pack-picker { margin: 0; }
+.surface-pack-picker .file-picker-btn { min-height: 32px; }
+.surface-pack-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.surface-pack select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--bg-control);
+  color: var(--text-main);
+  color-scheme: dark;
+  font: 11px var(--font);
+  cursor: var(--cursor-pointer);
+}
+.surface-pack select:hover { border-color: var(--border-strong); }
+.surface-pack select:focus-visible { border-color: var(--border-active); }
+.surface-pack select option { background: var(--bg-panel-soft); color: var(--text-main); }
+.surface-pack-heading {
+  margin: 14px 0 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+.surface-pack-role {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 7px;
+}
+.surface-pack-role > span { overflow: hidden; text-overflow: ellipsis; }
+.surface-pack-gallery { margin-top: 13px; }
+.surface-pack-gallery summary {
+  padding: 8px 0;
+  color: var(--text-main);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: var(--cursor-pointer);
+}
+.surface-pack-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 6px;
+}
+.surface-pack-gallery figure {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-main);
+  font-size: 11px;
+}
+.surface-pack-gallery img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-sm); }
+.surface-pack-gallery figcaption { padding-top: 4px; overflow-wrap: anywhere; }
+.surface-pack-gallery small { display: block; color: var(--text-muted); font-size: 10px; }
 .surface-role-group-title {
   margin: 10px 0 6px;
   color: var(--text-muted);
