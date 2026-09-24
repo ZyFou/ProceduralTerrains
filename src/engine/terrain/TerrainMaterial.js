@@ -237,7 +237,7 @@ float terrainCloudShadow(vec3 worldPos) {
 }
 `;
 
-const TERRAIN_DETAIL_STUB_GLSL = /* glsl */ `
+export const TERRAIN_DETAIL_STUB_GLSL = /* glsl */ `
 uniform float uTerrainDetailDebug;
 uniform float uTerrainDetailNormalStrength;
 uniform float uTerrainDetailScale;
@@ -269,6 +269,7 @@ TerrainDetailResult applyTerrainDetailLayer(
 `;
 
 const SURFACE_TEXTURE_STUB_GLSL = /* glsl */ `
+uniform float uSurfReveal;
 struct SurfaceTexResult {
   vec3 albedo;
   vec3 normal;
@@ -293,6 +294,15 @@ SurfaceTexResult applySurfaceMaterials(
 `;
 
 function resolveTerrainVariant(variant = 'full') {
+  if (variant === 'manual-empty-base' || variant === 'manual-base') {
+    return { name: variant, detail: true, surface: false, manual: true, manualSurface: false };
+  }
+  if (variant === 'manual-surface') {
+    return { name: 'manual-surface', detail: true, surface: true, manual: true, manualSurface: true };
+  }
+  if (variant === 'hybrid-base') {
+    return { name: 'hybrid-base', detail: true, surface: false, manual: false, manualSurface: false, tileOnly: true };
+  }
   if (variant === 'manual-empty') {
     // With zero Manual paint coverage the atlas graph is a provable no-op.
     // Preserve the exact terrain/detail result and defer that large graph until
@@ -303,15 +313,32 @@ function resolveTerrainVariant(variant = 'full') {
     return { name: 'manual', detail: true, surface: true, manual: true, manualSurface: true };
   }
   if (variant === 'hybrid-surface') {
-    return { name: 'hybrid-surface', detail: false, surface: true, manual: false, manualSurface: true, tileOnly: true };
+    return { name: 'hybrid-surface', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
   if (variant === 'hybrid') {
     return { name: 'hybrid', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
-  if (variant === 'base') return { name: 'base', detail: false, surface: false, manualSurface: false };
+  if (variant === 'base') return { name: 'base', detail: true, surface: false, manualSurface: false };
   if (variant === 'detail') return { name: 'detail', detail: true, surface: false, manualSurface: false };
-  if (variant === 'surface') return { name: 'surface', detail: false, surface: true, manualSurface: false };
+  if (variant === 'surface') return { name: 'surface', detail: true, surface: true, manualSurface: false };
   return { name: 'full', detail: true, surface: true, manual: false, manualSurface: false };
+}
+
+// Detail is a uniform-gated, page-backed part of every prepared terrain
+// program. A page becoming ready must not start another large ANGLE compile.
+// These pairs have identical GLSL and defines; only their readiness label
+// differs. Surface/PBR source changes still require a distinct program.
+export function terrainShaderFamily(variant) {
+  const families = {
+    base: 'base', detail: 'base',
+    surface: 'surface', full: 'surface',
+    'manual-empty-base': 'manual-empty', 'manual-base': 'manual-empty',
+    'manual-empty': 'manual-empty',
+    'manual-surface': 'manual-surface', manual: 'manual-surface',
+    'hybrid-base': 'hybrid-base',
+    'hybrid-surface': 'hybrid-surface', hybrid: 'hybrid-surface',
+  };
+  return families[variant] ?? variant;
 }
 
 const resolveTerrainWorldMode = (worldMode) => (
@@ -459,7 +486,13 @@ const buildFragment = (
 precision highp float;
 
 ${commonUniformsGLSL}
-${features.manual ? '' : IMPORTED_IMAGERY_ALBEDO_GLSL}
+${features.manual ? '' : features.manualSurface && features.tileOnly ? /* glsl */ `
+#ifdef SURFACE_ARRAYS
+vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) { return baseAlbedo; }
+#else
+${IMPORTED_IMAGERY_ALBEDO_GLSL}
+#endif
+` : IMPORTED_IMAGERY_ALBEDO_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
@@ -721,6 +754,20 @@ ${features.manual ? /* glsl */ `
   hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
   hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
   nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+` : worldMode === 'infinite' ? /* glsl */ `
+  hC = terrainCachedHeightAt(xz);
+  float normalDistance = length(cameraPosition - vWorldPos);
+  bool farInfiniteNormal = vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0);
+  if (farInfiniteNormal) {
+    hX = hC;
+    hZ = hC;
+    nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+    if (nGeo.y < 0.0) nGeo = -nGeo;
+  } else {
+    hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
+    hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
+    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  }
 ` : /* glsl */ `
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
     // Stable packed bake: the centre fetch contains the exact finite-difference
@@ -857,6 +904,11 @@ ${features.manual ? '' : /* glsl */ `
   SurfaceTexResult surf = applySurfaceMaterials(
     td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, cl, bw, slope, hRel, h01, detail, jitter
   );
+  surf.albedo = mix(td.albedo, surf.albedo, uSurfReveal);
+  surf.normal = normalize(mix(n, surf.normal, uSurfReveal));
+  surf.ao = mix(1.0, surf.ao, uSurfReveal);
+  surf.rough = mix(0.8, surf.rough, uSurfReveal);
+  surf.amount *= uSurfReveal;
   td.albedo = surf.albedo;
   n = surf.normal;
 
@@ -1278,6 +1330,10 @@ export function createTerrainUniforms() {
     uNoiseDebug:     { value: 0.0 },
     uTileDebugView:  { value: 0.0 },
     uTerrainDetailQuality: { value: 3.0 },
+    uDetailPageArray: { value: null },
+    uDetailPageCoords: { value: Array.from({ length: 16 }, () => new THREE.Vector3(1e9, 1e9, 0)) },
+    uDetailPageBasis: { value: 0 },
+    uDetailGlobalBlend: { value: 0 },
     uTerrainDetailScale: { value: 0.16 },
     uTerrainDetailStrength: { value: 0.72 },
     uTerrainDetailNormalStrength: { value: 0.42 },
@@ -1341,11 +1397,13 @@ export function createTerrainUniforms() {
     uSurfProps:      { value: surfFallbackTexture() },
     uSurfMode:       { value: 0.0 },
     uSurfAmount:     { value: 1.0 },
+    uSurfReveal:     { value: 0.0 },
     uSurfTint:       { value: 0.0 },
     uSurfPaletteInfluence: { value: 0.6 },
     uSurfScale:      { value: 1.0 },
     uSurfBreakup:    { value: 0.0 },
     uSurfBlend:      { value: 0.0 },
+    uSurfTransition: { value: 0.5 },
     uSurfNormalAmt:  { value: 1.0 },
     uSurfRoughAmt:   { value: 1.0 },
     uSurfAOAmt:      { value: 1.0 },
@@ -1379,7 +1437,10 @@ export function createTerrainMaterial(
     : buildHeightGLSL(stackGLSL.body2d);
   const material = new THREE.ShaderMaterial({
     uniforms,
-    defines: { OCTAVES: octaves },
+    defines: {
+      OCTAVES: octaves,
+      ...(terrainShaderFamily(variant) === 'surface' ? { STANDARD_PBR_DETAIL: 1 } : {}),
+    },
     vertexShader: buildVertex(h, variant, worldMode),
     fragmentShader: buildFragment(
       h,
@@ -1454,6 +1515,9 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   mat.userData.terrainVariant = variant;
   mat.userData.terrainWorldMode = worldMode;
   mat.userData.heightProgramSig = stackGLSL.sig;
+  mat.defines ||= {};
+  if (terrainShaderFamily(variant) === 'surface') mat.defines.STANDARD_PBR_DETAIL = 1;
+  else delete mat.defines.STANDARD_PBR_DETAIL;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;
   mat.needsUpdate = true;

@@ -242,6 +242,11 @@ void main() {
   SurfaceTexResult surf = applySurfaceMaterials(
     td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, cl, bw, slope, hRel, h01, detail, jitter
   );
+  surf.albedo = mix(td.albedo, surf.albedo, uSurfReveal);
+  surf.normal = normalize(mix(n, surf.normal, uSurfReveal));
+  surf.ao = mix(1.0, surf.ao, uSurfReveal);
+  surf.rough = mix(0.8, surf.rough, uSurfReveal);
+  surf.amount *= uSurfReveal;
   td.albedo = surf.albedo;
   n = surf.normal;
 

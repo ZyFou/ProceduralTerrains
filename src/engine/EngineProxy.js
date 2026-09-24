@@ -155,13 +155,8 @@ export class WorkerEngineTransport {
 
   async _buildSurfaceAtlas(source, signal) {
     const revision = ++this.surfaceAtlasRevision;
-    const { captureSurfaceAtlasMapRefs, captureSurfaceAtlasMaps, surfaceAtlasSuperseded } = await import('./terrain/surface/SurfaceAtlasBridge.js');
-    let maps;
-    try {
-      maps = await captureSurfaceAtlasMapRefs(source, { signal });
-    } catch {
-      maps = await captureSurfaceAtlasMaps(source, { signal });
-    }
+    const { captureSurfaceAtlasMaps, surfaceAtlasSuperseded } = await import('./terrain/surface/SurfaceAtlasBridge.js');
+    const maps = await captureSurfaceAtlasMaps(source, { signal });
     if (signal?.aborted) throw Object.assign(new Error('Engine command cancelled'), { code: 'ENGINE_COMMAND_CANCELLED' });
     if (revision !== this.surfaceAtlasRevision) throw surfaceAtlasSuperseded();
     return this._request('invoke', ['buildAndSetSurfaceAtlas', [source, maps, revision]], [], signal);

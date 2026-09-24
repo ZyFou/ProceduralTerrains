@@ -142,6 +142,7 @@ export default function App() {
   const minimapBaseRef = useRef(null);
   const minimapOverlayRef = useRef(null);
   const engineRef = useRef(null);
+  const surfaceApplyFlightRef = useRef(null);
   const activeProjectRef = useRef(null);
   const projectNameRef = useRef('Untitled terrain');
   const liveMetricsRef = useRef(null);
@@ -2299,31 +2300,42 @@ export default function App() {
     };
   }, [settingsTarget, showToolPanels, effectivePanel]);
 
-  const applySurfaceTextures = useCallback(async ({ source, force = false } = {}) => {
+  const applySurfaceTextures = useCallback(({ source, force = false } = {}) => {
     const eng = engineRef.current;
-    if (!eng) return { anyPresent: false };
+    if (!eng) return Promise.resolve({ anyPresent: false });
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source ?? eng.params?.surfaceTextureSource, surfaceTextureMode: eng.params?.surfaceTextureMode });
-    if (!sourceUsesTextureAtlas(surfaceTextureSource)) return { anyPresent: false, source: surfaceTextureSource };
-    if (!force && await eng.installCachedSurfaceAtlas?.(surfaceTextureSource)) {
-      const cached = await eng.getCachedSurfaceAtlas?.(surfaceTextureSource);
+    if (!sourceUsesTextureAtlas(surfaceTextureSource)) return Promise.resolve({ anyPresent: false, source: surfaceTextureSource });
+    const key = JSON.stringify([surfaceTextureSource, eng.params?.surfaceDocument]);
+    const flight = surfaceApplyFlightRef.current;
+    if (!force && flight?.engine === eng && flight.key === key) return flight.promise;
+    const promise = (async () => {
+      if (!force && await eng.installCachedSurfaceAtlas?.(surfaceTextureSource)) {
+        const cached = await eng.getCachedSurfaceAtlas?.(surfaceTextureSource);
+        return {
+          anyPresent: !!cached?.anyPresent,
+          bakedAt: cached?.bakedAt,
+          coverage: cached?.coverage,
+          layers: cached?.layers,
+          source: surfaceTextureSource,
+          cached: true,
+        };
+      }
+      const atlas = await eng.buildAndSetSurfaceAtlas(surfaceTextureSource);
       return {
-        anyPresent: !!cached?.anyPresent,
-        bakedAt: cached?.bakedAt,
-        coverage: cached?.coverage,
-        layers: cached?.layers,
+        anyPresent: atlas.anyPresent,
+        bakedAt: atlas.bakedAt,
+        coverage: atlas.coverage,
+        layers: atlas.layers,
         source: surfaceTextureSource,
-        cached: true,
+        cached: false,
       };
-    }
-    const atlas = await eng.buildAndSetSurfaceAtlas(surfaceTextureSource);
-    return {
-      anyPresent: atlas.anyPresent,
-      bakedAt: atlas.bakedAt,
-      coverage: atlas.coverage,
-      layers: atlas.layers,
-      source: surfaceTextureSource,
-      cached: false,
-    };
+    })();
+    const currentFlight = { engine: eng, key, promise: null };
+    currentFlight.promise = promise.finally(() => {
+      if (surfaceApplyFlightRef.current === currentFlight) surfaceApplyFlightRef.current = null;
+    });
+    surfaceApplyFlightRef.current = currentFlight;
+    return currentFlight.promise;
   }, []);
 
   useEffect(() => {
@@ -2334,8 +2346,8 @@ export default function App() {
     // zero), so defer both atlas construction and its shader graph until the
     // user activates surface paint or loads authored surface data.
     if (eng.projectMode === 'manual'
-        && eng._targetTerrainVariant?.() === 'manual-empty') return;
-    applySurfaceTextures({ source, force: source === SURFACE_TEXTURE_SOURCE.PBR }).catch((err) => {
+        && ['manual-empty', 'manual-empty-base'].includes(eng._targetTerrainVariant?.())) return;
+    applySurfaceTextures({ source }).catch((err) => {
       console.warn('Could not bake terrain surface textures', err);
     });
   }, [params.surfaceTextureSource, params.surfaceTextureMode, params.surfaceDocument, applySurfaceTextures]);

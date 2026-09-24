@@ -7,6 +7,23 @@ import { createSurfaceDocument, collectSurfaceAssets, resolveSurfaceReference, s
 
 export const SURFACE_PACK_URL='/textures/terrain/pbr/';
 let catalogPromise;
+const preparedChains = new Map();
+const MAX_PREPARED_CHAINS = 8;
+function cachedChain(key, prepare) {
+  if (preparedChains.has(key)) {
+    const chain = preparedChains.get(key);
+    preparedChains.delete(key);
+    preparedChains.set(key, chain);
+    return chain;
+  }
+  const chain = Promise.resolve().then(prepare).catch((error) => {
+    preparedChains.delete(key);
+    throw error;
+  });
+  preparedChains.set(key, chain);
+  while (preparedChains.size > MAX_PREPARED_CHAINS) preparedChains.delete(preparedChains.keys().next().value);
+  return chain;
+}
 export function loadSurfaceCatalog() {
   return catalogPromise ||= fetch(`${SURFACE_PACK_URL}catalog.json`).then(r=>{if(!r.ok)throw new Error(`Material pack unavailable (${r.status})`);return r.json();}).catch(e=>{catalogPromise=null;throw e;});
 }
@@ -41,22 +58,28 @@ export async function buildSurfaceResources({document:input,signal,references,ex
     signal?.throwIfAborted();const asset=catalog.assets.find(a=>a.id===id);
     if(id.startsWith('legacy:')) {
       const name=id.slice(7),base=`/textures/terrain/${name}/base/${name}`;
-      chains.push(await prepareSurfaceMaps({albedo:base+'_diffuse.jpg',normal:base+'_normal_dx.jpg',roughness:base+'_roughness.jpg',ao:base+'_ao.jpg'},budget.resolution,{normalConvention:'DX'}));continue;
+      chains.push(await cachedChain(`${id}:${budget.resolution}`, () =>
+        prepareSurfaceMaps({albedo:base+'_diffuse.jpg',normal:base+'_normal_dx.jpg',roughness:base+'_roughness.jpg',ao:base+'_ao.jpg'},budget.resolution,{normalConvention:'DX'})));continue;
     }
     if(id.startsWith('user:')) {
       const local=document.assets[id];if(!local)throw new Error(`Missing local material ${id}`);
-      const {getSurfaceBlob}=await import('../../../project/SurfaceAssetStore.js');const urls={};
-      try {for(const [slot,ref] of Object.entries(local.maps)){const blob=await getSurfaceBlob(ref.hash);if(!blob)throw new Error(`Missing local map ${local.name}: ${slot}`);urls[slot]=URL.createObjectURL(blob);}chains.push(await prepareSurfaceMaps(urls,budget.resolution,{normalConvention:local.normalConvention}));}
-      finally{Object.values(urls).forEach(url=>URL.revokeObjectURL(url));}continue;
+      const contentKey=JSON.stringify([budget.resolution,local.normalConvention,Object.entries(local.maps).map(([slot,ref])=>[slot,ref.hash]).sort()]);
+      chains.push(await cachedChain(`user:${contentKey}`, async () => {
+        const {getSurfaceBlob}=await import('../../../project/SurfaceAssetStore.js');const urls={};
+        try {for(const [slot,ref] of Object.entries(local.maps)){const blob=await getSurfaceBlob(ref.hash);if(!blob)throw new Error(`Missing local map ${local.name}: ${slot}`);urls[slot]=URL.createObjectURL(blob);}return await prepareSurfaceMaps(urls,budget.resolution,{normalConvention:local.normalConvention});}
+        finally{Object.values(urls).forEach(url=>URL.revokeObjectURL(url));}
+      }));continue;
     }
     if(!asset)throw new Error(`Material files unavailable: ${id}`);
     const file=asset.resolutions[budget.resolution];
-    const response=await fetch(`${SURFACE_PACK_URL}${file.path}`,{signal});
-    if(!response.ok)throw new Error(`${asset.name}: HTTP ${response.status}`);
-    const bytes=new Uint8Array(await response.arrayBuffer());
-    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
-    if(digest!==file.sha256)throw new Error(`${asset.name}: pack hash mismatch`);
-    chains.push(decodeSurfaceMipChain(bytes,budget.resolution));
+    chains.push(await cachedChain(`${file.sha256}:${budget.resolution}`, async () => {
+      const response=await fetch(`${SURFACE_PACK_URL}${file.path}`,{signal});
+      if(!response.ok)throw new Error(`${asset.name}: HTTP ${response.status}`);
+      const bytes=new Uint8Array(await response.arrayBuffer());
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+      if(digest!==file.sha256)throw new Error(`${asset.name}: pack hash mismatch`);
+      return decodeSurfaceMipChain(bytes,budget.resolution);
+    }));
   }
   signal?.throwIfAborted();
   const diffuse=createMipArray(chains,'color',THREE.SRGBColorSpace);let props;

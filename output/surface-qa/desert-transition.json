@@ -1,7 +1,7 @@
 {
   "renderer": "WebKit WebGL",
   "samplers": 16,
-  "ms": 36944,
+  "ms": 30550,
   "terrain": {
     "programs": 1,
     "errors": []

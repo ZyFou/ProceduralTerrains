@@ -63,19 +63,20 @@ describe('performance phase 3', () => {
     expect(uniforms.uUseInfiniteFieldCache.value).toBe(0);
   });
 
-  it('compiles only the terrain features selected by the shader variant', () => {
+  it('shares the page-backed detail program while keeping surface samplers separate', () => {
     const uniforms = createTerrainUniforms();
     const base = createTerrainMaterial(uniforms, 5, undefined, { variant: 'base' });
     const detail = createTerrainMaterial(uniforms, 5, undefined, { variant: 'detail' });
     const surface = createTerrainMaterial(uniforms, 5, undefined, { variant: 'surface' });
 
     expect(base.userData.terrainVariant).toBe('base');
-    expect(base.fragmentShader).not.toContain('uniform float uTerrainDetailFar');
+    expect(base.fragmentShader).toContain('uniform float uTerrainDetailFar');
     expect(base.fragmentShader).not.toContain('uniform sampler2D uSurfDiffuse');
     expect(detail.fragmentShader).toContain('uniform float uTerrainDetailFar');
     expect(detail.fragmentShader).not.toContain('uniform sampler2D uSurfDiffuse');
-    expect(surface.fragmentShader).not.toContain('uniform float uTerrainDetailFar');
+    expect(surface.fragmentShader).toContain('uniform float uTerrainDetailFar');
     expect(surface.fragmentShader).toContain('uniform sampler2D uSurfDiffuse');
+    expect(base.fragmentShader).toBe(detail.fragmentShader);
     expect(base.fragmentShader).toContain('dFdx(vWorldPos)');
 
     base.dispose();

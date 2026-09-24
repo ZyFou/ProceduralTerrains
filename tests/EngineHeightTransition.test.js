@@ -50,6 +50,19 @@ function heightTransitionHarness() {
 }
 
 describe('atomic terrain height transitions', () => {
+  it('publishes a ready detail page without compiling another terrain program', async () => {
+    const engine = heightTransitionHarness();
+    engine.terrainMaterial.userData = { terrainVariant: 'base', minimalFragment: false };
+    engine._targetTerrainVariant = vi.fn(() => 'detail');
+    engine._compileMaterialVariants = vi.fn();
+    engine._completeBootIfQualityReady = vi.fn();
+
+    expect(await engine._ensureTerrainShaderVariantAsync()).toBe(true);
+    expect(engine.terrainMaterial.userData.terrainVariant).toBe('detail');
+    expect(engine._compileMaterialVariants).not.toHaveBeenCalled();
+    expect(engine._needsRender).toBe(true);
+  });
+
   it('coalesces rapid structural Noise Layer edits before GPU submission', async () => {
     vi.useFakeTimers();
     try {
@@ -87,7 +100,7 @@ describe('atomic terrain height transitions', () => {
     engine.params.surfaceTextureAmount = 1;
     engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
 
-    expect(engine._targetTerrainVariant()).toBe('manual');
+    expect(engine._targetTerrainVariant()).toBe('manual-empty-base');
   });
 
   it('uses the no-atlas specialization while a Manual surface is empty', () => {
@@ -98,9 +111,9 @@ describe('atomic terrain height transitions', () => {
       surfaceField: { isEmpty: () => true },
     };
 
-    expect(engine._targetTerrainVariant()).toBe('manual-empty');
+    expect(engine._targetTerrainVariant()).toBe('manual-empty-base');
     engine._manualSurfaceShaderRequested = true;
-    expect(engine._targetTerrainVariant()).toBe('manual');
+    expect(engine._targetTerrainVariant()).toBe('manual-empty-base');
   });
 
   it('aborts a stale shader job cleanly after engine disposal', async () => {
@@ -124,7 +137,7 @@ describe('atomic terrain height transitions', () => {
 
     expect(engine._manualHasGeneratedBase()).toBe(true);
     expect(engine._generationSourceForProject()).toBe('classic');
-    expect(engine._targetTerrainVariant()).toBe('hybrid');
+    expect(engine._targetTerrainVariant()).toBe('hybrid-base');
   });
 
   it('keeps a hybrid generated base in procedural surface mode until Manual paint covers it', () => {
@@ -183,6 +196,25 @@ describe('atomic terrain height transitions', () => {
     engine._applySurfaceSettings();
     expect(engine.params.surfaceTextureScale).toBe(0.1);
     expect(engine.uniforms.uSurfScale.value).toBe(0.1);
+  });
+
+  it('updates transition width independently from texture blending', () => {
+    const engine = heightTransitionHarness();
+    engine.params = {
+      surfaceTextureSource: 'pbrLibrary',
+      surfaceTextureBlend: 1,
+      surfaceTextureTransition: 0,
+    };
+    engine.uniforms = createTerrainUniforms();
+
+    engine._applySurfaceSettings();
+    expect(engine.uniforms.uSurfBlend.value).toBe(1);
+    expect(engine.uniforms.uSurfTransition.value).toBe(0);
+
+    engine.params.surfaceTextureTransition = 1;
+    engine._applySurfaceSettings();
+    expect(engine.uniforms.uSurfBlend.value).toBe(1);
+    expect(engine.uniforms.uSurfTransition.value).toBe(1);
   });
 
   it('keeps a Nodes graph as the generation source of a hybrid Manual project', () => {
@@ -272,6 +304,7 @@ describe('atomic terrain height transitions', () => {
       surfaceTextureAmount: 0,
     };
     engine.perf = { terrainDetailQuality: 3, terrainDetailOpacity: 1 };
+    engine._detailPageCache = { hasReadyPage: true };
     engine._stackGLSL = program;
     engine.terrainMaterial.defines.OCTAVES = 6;
     engine.terrainMaterial.userData = {
@@ -323,9 +356,9 @@ describe('atomic terrain height transitions', () => {
       terrainDirtyOnSwap: true,
     });
 
-    expect(result).toMatchObject({ cached: true, qualityPending: true, error: null });
+    expect(result).toMatchObject({ cached: true, qualityPending: false, error: null });
     expect(engine._compileMaterialVariants).not.toHaveBeenCalled();
-    expect(engine._scheduleTerrainQualityUpgrade).toHaveBeenCalledTimes(1);
+    expect(engine._scheduleTerrainQualityUpgrade).not.toHaveBeenCalled();
     expect(engine._markTerrainFieldDirty).toHaveBeenCalledTimes(1);
     expect(engine._compiling).toBe(0);
   });

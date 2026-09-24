@@ -78,11 +78,55 @@ export async function buildAndInstallSurfaceAtlas(engine, source, customMaps, {
   buildAtlas,
 } = {}) {
   if (!isCurrent()) throw surfaceAtlasSuperseded();
-  const build = buildAtlas || (await import('./applyTerrainSurface.js')).buildActiveSurfaceAtlas;
-  const atlas = await build({ source, customMaps, document: engine.params?.surfaceDocument, graph: engine.terrainGraph, paint: engine.manualTerrain?.surfaceField?.layersField });
-  if (!isCurrent()) {
+  const buildKey = engine._surfaceBuildKey?.(source);
+  const current = () => isCurrent() && !engine._contextLost
+    && (!buildKey || engine._surfaceBuildKey?.(source) === buildKey);
+  if (!buildAtlas) {
+    const { cancelSurfacePreparations } = await import('./SurfacePreparationClient.js');
+    cancelSurfacePreparations();
+  }
+  const build = buildAtlas || (await import('./SurfacePreparationClient.js')).prepareSurfaceInBackground;
+  const layersField = engine.manualTerrain?.surfaceField?.layersField;
+  engine._bgWorkStart?.('surface-preparation', 'Preparing terrain materials…');
+  let atlas;
+  try {
+    atlas = await build({
+      source, customMaps, document: engine.params?.surfaceDocument,
+      graph: engine.terrainGraph, paint: layersField ? { layers: layersField.layers } : null,
+    });
+  } catch (error) {
+    if (error.code !== 'SURFACE_ATLAS_SUPERSEDED') {
+      engine.cb?.onStatus?.('Terrain materials could not be prepared; base terrain remains available', false);
+    }
+    throw error;
+  } finally {
+    engine._bgWorkEnd?.('surface-preparation');
+  }
+  if (!current()) {
     atlas.diffuse?.dispose();
     atlas.props?.dispose();
+    atlas.diffuse?.image?.close?.();
+    atlas.props?.image?.close?.();
+    throw surfaceAtlasSuperseded();
+  }
+  try {
+    const { uploadSurfaceTextures } = await import('./SurfaceUploadQueue.js');
+    engine._surfaceUploadActive = true;
+    await uploadSurfaceTextures(engine.renderer, atlas, { isCurrent: current });
+  } catch (error) {
+    atlas.diffuse?.dispose();
+    atlas.props?.dispose();
+    atlas.diffuse?.image?.close?.();
+    atlas.props?.image?.close?.();
+    throw error;
+  } finally {
+    engine._surfaceUploadActive = false;
+  }
+  if (!current()) {
+    atlas.diffuse?.dispose();
+    atlas.props?.dispose();
+    atlas.diffuse?.image?.close?.();
+    atlas.props?.image?.close?.();
     throw surfaceAtlasSuperseded();
   }
   engine.setSurfaceAtlas(atlas, source);

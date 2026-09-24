@@ -14,7 +14,7 @@ function createEngineTimer() {
   }
   return new THREE.Clock();
 }
-import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource, rebuildTerrainPreviewShaderSource } from './terrain/TerrainMaterial.js';
+import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource, rebuildTerrainPreviewShaderSource, terrainShaderFamily } from './terrain/TerrainMaterial.js';
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
@@ -148,6 +148,7 @@ import {
 import { PreparedModeBundle, SharedResourceRegistry } from './mode/PreparedModeBundle.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 import { GpuWorkScheduler } from './render/GpuWorkScheduler.js';
+import { DetailPageCache } from './terrain/detail/DetailPageCache.js';
 import { GpuResourceLedger, rendererAdmission } from './render/GpuResourceLedger.js';
 import { materialProgramDescriptor, programHealthError, validatePrograms } from './render/ProgramHealthGate.js';
 import {
@@ -564,6 +565,19 @@ export class Engine {
         phase: this._bootPipeline?.state || this._modeTransitionCoordinator?.state || 'runtime',
       });
       this._gpuWorkScheduler?.cancelPending?.();
+      this._detailPageCache?.invalidate?.();
+      this._surfaceBuildRevision = (this._surfaceBuildRevision || 0) + 1;
+      this._surfaceReveal = 0;
+      if (this.uniforms?.uSurfReveal) this.uniforms.uSurfReveal.value = 0;
+      if (this._surfaceAtlas) this._surfaceAtlas.cacheKey = null;
+      for (const [source, cached] of Object.entries(this._surfaceAtlasCache || {})) {
+        if (cached !== this._surfaceAtlas) {
+          this._disposeSurfaceAtlas(cached);
+          delete this._surfaceAtlasCache[source];
+        }
+      }
+      import('./terrain/surface/SurfacePreparationClient.js')
+        .then(({ cancelSurfacePreparations }) => cancelSurfacePreparations());
       console.warn('[graphics] context lost; aborting boot generation');
       if (this._modeTransitionRequest) {
         const request = this._modeTransitionRequest;
@@ -582,6 +596,25 @@ export class Engine {
     };
     this._onContextRestored = () => {
       this._contextLost = false;
+      this._detailPageCache?.onContextRestored?.();
+      const atlas = this._surfaceAtlas;
+      if (atlas) {
+        const revision = this._surfaceBuildRevision;
+        import('./terrain/surface/SurfaceUploadQueue.js').then(({ uploadSurfaceTextures }) =>
+          uploadSurfaceTextures(this.renderer, atlas, {
+            isCurrent: () => !this._disposed && !this._contextLost
+              && revision === this._surfaceBuildRevision && this._surfaceAtlas === atlas,
+          }),
+        ).then(() => {
+          atlas.cacheKey = this._surfaceBuildKey(atlas.source);
+          this._installSurfaceAtlas(atlas);
+          this._scheduleTerrainVariantRetry(null, 0);
+        }).catch((error) => {
+          if (error.code !== 'SURFACE_ATLAS_SUPERSEDED') {
+            this.cb.onStatus?.('Terrain materials could not be restored; base terrain remains available', false);
+          }
+        });
+      }
       this._needsRender = true;
       console.info('[graphics] context restored');
       if (this._modeTransitionRequest?.contextLost) {
@@ -601,6 +634,21 @@ export class Engine {
     this._gpuResourceLedger = new GpuResourceLedger({ tier: this.gpuTier });
     this.destructionField = new DestructionField({ resolution: destructionResolutionForTier(this.gpuTier) });
     this._initScene(minimapBase, minimapOverlay);
+    this._detailPageCache = new DetailPageCache({
+      renderer: this.renderer,
+      uniforms: this.uniforms,
+      onReady: (first) => {
+        this._needsRender = true;
+        if (first && !this._bootPending && !this._modeTransitionCoordinator?.active) {
+          this._terrainVariantRetryCount = 0;
+          this._scheduleTerrainVariantRetry(null, 0);
+        }
+      },
+      onError: (error) => {
+        console.warn('Terrain detail preparation failed', error);
+        this.cb.onStatus?.('Terrain detail is unavailable; base terrain remains interactive', false);
+      },
+    });
     this._initControls();
     this._initTileInteraction();
     this._initPaintMode();
@@ -4524,6 +4572,10 @@ export class Engine {
       && p.surfaceTextureMode === true
       && (p.surfaceTextureAmount ?? 1) > 0.001 ? 1.0 : 0.0;
     u.uSurfAmount.value = 1.0;
+    if (this._surfaceAtlas?.source !== surfaceTextureSource) {
+      this._surfaceReveal = 0;
+      if (u.uSurfReveal) u.uSurfReveal.value = 0;
+    }
     u.uSurfTint.value = 0.0;
     if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
     u.uSurfPaletteInfluence.value = flatManual || p.surfaceTextureRawColor !== false
@@ -4536,6 +4588,8 @@ export class Engine {
     u.uSurfBreakup.value = flatManual ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
     if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };
     u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
+    if (!u.uSurfTransition) u.uSurfTransition = { value: 0.5 };
+    u.uSurfTransition.value = Math.min(1, Math.max(0, p.surfaceTextureTransition ?? 0.5));
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
     u.uSurfRoughAmt.value = 1.0;
     u.uSurfAOAmt.value = surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR ? 0.55 : 1.0;
@@ -4546,6 +4600,17 @@ export class Engine {
   _disposeSurfaceAtlas(atlas) {
     atlas?.diffuse?.dispose?.();
     atlas?.props?.dispose?.();
+    atlas?.diffuse?.image?.close?.();
+    atlas?.props?.image?.close?.();
+  }
+
+  _surfaceBuildKey(source) {
+    return JSON.stringify({
+      source,
+      document: this.params.surfaceDocument,
+      graph: this.terrainGraph,
+      paintLayers: this.manualTerrain?.surfaceField?.layersField?.layers || [],
+    });
   }
 
   _installSurfaceAtlas(atlas) {
@@ -4577,6 +4642,8 @@ export class Engine {
     }
     u.uSurfTile.value = atlas.tile.slice();
     this._surfaceAtlas = atlas;
+    this._surfaceReveal = 0;
+    u.uSurfReveal.value = 0;
     this._needsRender = true;
     return true;
   }
@@ -4590,21 +4657,28 @@ export class Engine {
     const previous = this._surfaceAtlasCache[surfaceTextureSource];
     if (previous && previous !== atlas) this._disposeSurfaceAtlas(previous);
     atlas.source = surfaceTextureSource;
+    atlas.cacheKey = this._surfaceBuildKey(surfaceTextureSource);
     this._surfaceAtlasCache[surfaceTextureSource] = atlas;
-    return this._installSurfaceAtlas(atlas);
+    if (normalizeSurfaceTextureSource(this.params) !== surfaceTextureSource) return true;
+    const installed = this._installSurfaceAtlas(atlas);
+    if (installed && !this._bootPending && !this._modeTransitionCoordinator?.active) {
+      this._terrainVariantRetryCount = 0;
+      this._scheduleTerrainVariantRetry(null, 0);
+    }
+    return installed;
   }
 
   installCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
     const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
-    if (!atlas) return false;
+    if (!atlas || atlas.cacheKey !== this._surfaceBuildKey(surfaceTextureSource)) return false;
     return this._installSurfaceAtlas(atlas);
   }
 
   getCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
     const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
-    if (!atlas) return null;
+    if (!atlas || atlas.cacheKey !== this._surfaceBuildKey(surfaceTextureSource)) return null;
     return {
       anyPresent: !!atlas.anyPresent,
       bakedAt: atlas.bakedAt,
@@ -10298,19 +10372,30 @@ export class Engine {
 
   /** Water quality uniforms — per water material, never shared with terrain. */
   _targetTerrainVariant() {
+    const detailReady = this._detailPageCache?.hasReadyPage === true;
+    const source = normalizeSurfaceTextureSource(this.params || {});
+    const surfaceReady = this._surfaceAtlas?.source === source
+      && this._surfaceAtlas?.cacheKey === this._surfaceBuildKey(source);
     if (this.projectMode === 'manual' && !this._manualHasGeneratedBase()) {
       const surfaceHasData = !this.manualTerrain?.surfaceField?.isEmpty?.();
-      return this._manualSurfaceShaderRequested || surfaceHasData ? 'manual' : 'manual-empty';
+      if (!this._manualSurfaceShaderRequested && !surfaceHasData) {
+        return detailReady ? 'manual-empty' : 'manual-empty-base';
+      }
+      if (!surfaceReady) return detailReady ? 'manual-empty' : 'manual-empty-base';
+      return detailReady ? 'manual' : 'manual-surface';
     }
     const hybridManual = this.projectMode === 'manual' && this._manualHasGeneratedBase();
     const surfaceEnabled = this.projectMode === 'manual'
       || (this.params?.surfaceTextureMode === true
         && (this.params?.surfaceTextureAmount ?? 1) > 0.001);
     const detailEnabled = (this.perf?.terrainDetailQuality ?? 3) > 0
-      && (this.perf?.terrainDetailOpacity ?? 1) > 0.001;
-    if (hybridManual) return detailEnabled ? 'hybrid' : 'hybrid-surface';
-    if (surfaceEnabled && detailEnabled) return 'full';
-    if (surfaceEnabled) return 'surface';
+      && (this.perf?.terrainDetailOpacity ?? 1) > 0.001 && detailReady;
+    if (hybridManual) {
+      if (!surfaceReady) return 'hybrid-base';
+      return detailEnabled ? 'hybrid' : 'hybrid-surface';
+    }
+    if (surfaceEnabled && surfaceReady && detailEnabled) return 'full';
+    if (surfaceEnabled && surfaceReady) return 'surface';
     if (detailEnabled) return 'detail';
     return 'base';
   }
@@ -10328,6 +10413,15 @@ export class Engine {
     if (!live || live.userData?.minimalFragment) return false;
     const variant = this._targetTerrainVariant();
     if (live.userData?.terrainVariant === variant) return true;
+    if (terrainShaderFamily(live.userData?.terrainVariant) === terrainShaderFamily(variant)) {
+      // The page-backed detail branch is already in the live program. Its
+      // readiness changes uniforms only; compiling the same large shader a
+      // second time can block the GPU and freeze camera input for seconds.
+      live.userData.terrainVariant = variant;
+      this._needsRender = true;
+      this._completeBootIfQualityReady();
+      return true;
+    }
 
     const token = (this._terrainVariantToken || 0) + 1;
     this._terrainVariantToken = token;
@@ -12000,9 +12094,45 @@ export class Engine {
 
   async buildAndSetSurfaceAtlas(source) {
     const revision=(this._surfaceBuildRevision||0)+1;this._surfaceBuildRevision=revision;
-    const { buildActiveSurfaceAtlas } = await import('./terrain/surface/applyTerrainSurface.js');
-    const atlas = await buildActiveSurfaceAtlas({ source, document: this.params.surfaceDocument, graph: this.terrainGraph, paint: this.manualTerrain?.surfaceField?.layersField });
-    if(revision!==this._surfaceBuildRevision){atlas.diffuse.dispose();atlas.props.dispose();throw new Error("Surface build superseded");}
+    const buildKey = this._surfaceBuildKey(source);
+    const { prepareSurfaceInBackground, cancelSurfacePreparations } = await import('./terrain/surface/SurfacePreparationClient.js');
+    cancelSurfacePreparations();
+    this._bgWorkStart('surface-preparation', 'Preparing terrain materials…');
+    const layersField = this.manualTerrain?.surfaceField?.layersField;
+    let atlas;
+    try {
+      atlas = await prepareSurfaceInBackground({
+        source, document: this.params.surfaceDocument, graph: this.terrainGraph,
+        paint: layersField ? { layers: layersField.layers } : null,
+      });
+    } catch (error) {
+      if (error.code !== 'SURFACE_ATLAS_SUPERSEDED') {
+        this.cb.onStatus?.('Terrain materials could not be prepared; base terrain remains available', false);
+      }
+      throw error;
+    } finally {
+      this._bgWorkEnd('surface-preparation');
+    }
+    if(revision!==this._surfaceBuildRevision || buildKey !== this._surfaceBuildKey(source)){
+      this._disposeSurfaceAtlas(atlas);throw new Error('Surface build superseded');
+    }
+    try {
+      const { uploadSurfaceTextures } = await import('./terrain/surface/SurfaceUploadQueue.js');
+      this._surfaceUploadActive = true;
+      await uploadSurfaceTextures(this.renderer, atlas, {
+        isCurrent: () => !this._disposed && !this._contextLost
+          && revision === this._surfaceBuildRevision && buildKey === this._surfaceBuildKey(source),
+      });
+    } catch (error) {
+      this._disposeSurfaceAtlas(atlas);
+      throw error;
+    } finally {
+      this._surfaceUploadActive = false;
+    }
+    if (revision !== this._surfaceBuildRevision || buildKey !== this._surfaceBuildKey(source)) {
+      this._disposeSurfaceAtlas(atlas);
+      throw new Error('Surface build superseded');
+    }
     this.setSurfaceAtlas(atlas, source);
     return {
       anyPresent: !!atlas.anyPresent,
@@ -12087,6 +12217,35 @@ export class Engine {
     }
     this.uniforms.uTime.value += dt;
     this._tickDayNightCycle(dt, now);
+
+    if ((this.perf?.terrainDetailQuality ?? 0) > 0) {
+      const seed = this.uniforms.uSeedOffset.value;
+      const scale = (this.perf.terrainDetailScale ?? 0.16)
+        * (0.55 + 0.70 * Math.min(1, (this.perf.terrainDetailQuality ?? 3) / 3));
+      const variant = this.worldMode === 'planet'
+        ? (this._planetMatMinimal ? '' : 'planet-detail')
+        : this.terrainMaterial?.userData?.terrainVariant;
+      const detailMaterial = this.worldMode === 'infinite'
+        ? this._infiniteTerrainMat : this.terrainMaterial;
+      const active = variant === 'planet-detail'
+        || (this.worldMode !== 'planet' && !!detailMaterial
+          && !detailMaterial.userData?.minimalFragment);
+      this._detailPageCache?.update({
+        camera: this.camera, mode: this.worldMode, generation: this._terrainGen,
+        scale, seedX: seed.x, seedY: seed.y, active,
+        allowUpload: !this._surfaceUploadActive && !this._compiling && !this._contextLost, dt,
+      });
+    }
+    if (this._surfaceAtlas?.source === normalizeSurfaceTextureSource(this.params)) {
+      const variant = this.worldMode === 'planet'
+        ? (this._planetMatMinimal ? '' : 'planet-surface')
+        : this.terrainMaterial?.userData?.terrainVariant;
+      if (['surface', 'full', 'manual', 'manual-surface', 'hybrid', 'hybrid-surface', 'planet-surface'].includes(variant)) {
+        this._surfaceReveal = Math.min(1, (this._surfaceReveal || 0) + Math.max(0, dt) / 0.25);
+        this.uniforms.uSurfReveal.value = this._surfaceReveal;
+        if (this._surfaceReveal < 1) this._needsRender = true;
+      }
+    }
 
 
     this._processTerrainBuildQueue(now);
@@ -12919,6 +13078,8 @@ export class Engine {
     this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
+    this._detailPageCache?.dispose?.();
+    this._detailPageCache = null;
     this._bootPipeline?.dispose?.();
     this._bootPipeline = null;
     this._modeTransitionCoordinator?.dispose?.();

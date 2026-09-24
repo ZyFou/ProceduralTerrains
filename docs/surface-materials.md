@@ -8,11 +8,15 @@ In the editor, select **Local PBR Library**, then choose a preset or assign indi
 
 The Surface Textures **Scale** control ranges from 0.1× to 5×. It multiplies texture repeat frequency. Material selection follows broad climate, height, shoreline and slope signals; fine procedural color noise does not choose materials. Custom Materials now default to **Original Texture Colors**, including existing projects that lack the new setting. Turn it off only when palette recoloring is wanted. The Local PBR Library always uses the source albedo.
 
+**Blend Textures** controls how strongly neighboring ground materials mix. **Transition Width** (0–1, default 0.5) separately widens the slope, altitude, canyon, desert and shoreline masks that bring those materials together. It also fades the second material out and back in when its identity changes, removing the dune-to-rock jump without another texture sample. Set it to 0 for nearly the earlier mask widths or increase it to soften abrupt desert rock/sand boundaries. Both controls apply to the custom atlas and local PBR library without changing terrain geometry.
+
 The PBR renderer uses world anchored triplanar coordinates. Detail sampling changes continuously to a fixed macro scale as its projected pixel footprint grows. Explicit texture gradients are taken before material and paint branches. Role blending uses symmetric weights, so switching the dominant role on a slope does not create a color jump. The source height, roughness, normal and AO maps share each patch transform. The imported snow AO is deliberately softened for terrain rendering, and scanned roughness controls the remaining specular response.
 
 Snow now blends continuously over the selected ground materials using its altitude and slope coverage. It does not enter the top-two ground-material ranking, which previously made snow appear abruptly when its weight overtook another material. The same transition applies to the custom texture atlas and the local PBR library; manual snow paint retains its authored coverage.
 
 For a reproducible snowline render in Edge, run `node tools/surface-browser-check.mjs --snow-preview` while the Vite development server is running on port 6064. The check uses a controlled height gradient and writes its screenshot and shader diagnostics to `output/surface-qa/`.
+
+For the desert transition, run `node tools/surface-browser-check.mjs --desert-preview`. It renders the same slope gradient with **Blend Textures** at 1 and saves **Transition Width** 0 and 1 images for comparison.
 
 The three PBR node examples are **PBR Alpine**, **PBR Canyon** and **PBR Jungle / Marsh**. Personal imports persist in IndexedDB and travel in portable `.ptrterrain` exports. Cloud sync refuses projects with local texture dependencies.
 

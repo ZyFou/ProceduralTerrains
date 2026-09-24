@@ -62,6 +62,7 @@ export const DEFAULT_PARAMS = {
   surfaceTextureScale: 1.0,      // custom texture tiling multiplier
   surfaceTextureBreakup: 0.5,    // stochastic transforms / variant mixing that break visible tiling
   surfaceTextureBlend: 0.35,     // blend neighboring terrain materials at transitions
+  surfaceTextureTransition: 0.5, // width of terrain-driven material boundaries
   surfaceTextureRawColor: true, // keep uploaded albedo free of terrain palette recoloring
   surfaceTexturePaletteInfluence: 0.6, // optional palette recoloring when raw color is disabled
   surfaceTextureNormal: 1.0,     // texture normal-relief strength
