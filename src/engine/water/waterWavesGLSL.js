@@ -150,6 +150,24 @@ vec3 waterCinematicDisplacement(vec2 xz, float t, out float crest) {
 `;
 
 export const WATER_WAVES_GLSL = /* glsl */ `
+// Slope variance removed by footprint filtering in waterDirectionalNormal().
+// waterFilteredRoughness() folds it back into GGX roughness (LEAN-style), so
+// sub-pixel ripples become broad glitter instead of moire bands.
+float waterNormalLostVariance = 0.0;
+
+// 1 while a wave band's wavenumber (rad / world unit) is resolvable at this
+// pixel footprint, fading to 0 well before the Nyquist limit.
+float waterBandFilter(float wavenumber, float footprint) {
+  return 1.0 - smoothstep(0.45, 1.6, wavenumber * footprint);
+}
+
+float waterFilteredRoughness(float roughness, float normalStrength) {
+  float alpha = roughness * roughness;
+  float alpha2 = alpha * alpha
+    + 2.0 * waterNormalLostVariance * normalStrength * normalStrength;
+  return clamp(sqrt(sqrt(alpha2)), roughness, 1.0);
+}
+
 vec2 waterRotateDirection(vec2 direction, float radians) {
   float c = cos(radians);
   float s = sin(radians);
@@ -159,13 +177,64 @@ vec2 waterRotateDirection(vec2 direction, float radians) {
   );
 }
 
+// One wave train of the iterative ocean spectrum. Sharp exp(sin) crests,
+// deep-water dispersion (short waves travel slower), a wind-aligned spread
+// that widens for small waves, and a drag on the sample point so finer
+// chop rides and bunches on the longer waves. Bands below the pixel
+// footprint fade out and hand their slope variance to the roughness.
+void waterSpectrumBand(
+  inout vec2 p,
+  inout vec2 slope,
+  inout float lost,
+  vec2 primary,
+  float k,
+  float kBase,
+  float band,
+  float index,
+  float t,
+  float speed,
+  float footprint,
+  float fineDetail,
+  float mediumWeight,
+  float largePatchA,
+  float largePatchB,
+  float mediumPatchA,
+  float mediumPatchB,
+  float smallPatch,
+  float regionalShift
+) {
+  float odd = step(0.5, fract(index * 0.5));
+  // Golden-ratio direction sequence around the wind, never repeating.
+  float spread = mix(0.45, 1.55, band);
+  float angle = (fract(index * 0.6180340 + 0.137) * 2.0 - 1.0) * spread;
+  vec2 dir = waterRotateDirection(primary, angle);
+
+  float energy = mix(uLargeWaveStr, mediumWeight, smoothstep(0.0, 0.45, band));
+  energy = mix(energy, uSmallWaveStr, smoothstep(0.45, 1.0, band));
+  float patchA = mix(largePatchA, mediumPatchA, smoothstep(0.0, 0.5, band));
+  float patchB = mix(largePatchB, mediumPatchB, smoothstep(0.0, 0.5, band));
+  float regional = mix(mix(patchA, patchB, odd), smallPatch, smoothstep(0.5, 1.0, band));
+  // Finest chop follows the quality/detail knobs and distance fade.
+  float amp = 0.085 * energy * regional
+    * mix(1.0, fineDetail, smoothstep(0.55, 1.0, band));
+
+  float f = waterBandFilter(k, footprint);
+  float omega = 3.1 * speed * sqrt(k / kBase);
+  float phase = dot(dir, p) * k
+    + t * omega
+    + index * 1.9173
+    + regionalShift * (0.6 + band);
+  float wave = exp(sin(phase) - 1.0);
+  float dWave = wave * cos(phase);
+  slope += dir * dWave * amp * f;
+  // E[(exp(sin - 1) cos)^2] ~= 0.09
+  lost += amp * amp * 0.09 * (1.0 - f * f);
+  p -= dir * dWave * 0.42 / k;
+}
+
 vec3 waterDirectionalNormal(vec2 xz, float t, float cameraDistance, float roughness) {
   vec2 primary = normalize(uWaveDir);
-  vec2 primaryB = waterRotateDirection(primary, 0.6108652);  // 35 degrees
-  vec2 mediumA = waterRotateDirection(primary, 0.9250245);   // 53 degrees
   vec2 mediumB = waterRotateDirection(primary, 1.3089969);   // 75 degrees
-  vec2 smallA = waterRotateDirection(primary, -0.8203047);   // -47 degrees
-  vec2 smallB = waterRotateDirection(primary, 2.1467550);    // 123 degrees
   float scale = max(uWaveScale, 0.2);
   float speed = uWaveSpeed;
 
@@ -244,70 +313,39 @@ vec3 waterDirectionalNormal(vec2 xz, float t, float cameraDistance, float roughn
     )
   );
 
-  float bend = sin(
-    dot(waveXZ, mediumA) * legacyDomainScale * 1.37
-    - t * speed * 0.65
-    + macroC * 0.34
-  );
-  float largePhaseA = dot(waveXZ, primary) * legacyDomainScale
-    * ${WATER_WAVE_SCALE_COMPATIBILITY.largeMultiplier}
-    + t * speed * 3.1
-    + bend * 0.62
-    + macroB * 0.48
-    + (regionalB - 0.5) * 0.86;
-  float largePhaseB = dot(waveXZ, primaryB) * legacyDomainScale * 4.15
-    - t * speed * 2.6
-    - bend * 0.38
-    - macroA * 0.42
-    - (regionalA - 0.5) * 0.74;
-  float mediumPhaseA = dot(waveXZ, mediumA) * legacyDomainScale * 6.1
-    + t * speed * 4.3
-    + sin(largePhaseB * 0.41) * 0.28
-    + macroC * 0.55
-    + (regionalA - regionalB) * 0.46;
-  float mediumPhaseB = dot(waveXZ, mediumB) * legacyDomainScale
-    * ${WATER_WAVE_SCALE_COMPATIBILITY.mediumMultiplier}
-    - t * speed * 3.7
-    - sin(largePhaseA * 0.37) * 0.24
-    - macroB * 0.38
-    + (regionalA + regionalB - 1.0) * 0.39;
-  float smallPhaseA = dot(waveXZ, smallA) * legacyDomainScale * 9.6
-    + t * speed * 5.6
-    + macroA * 0.29;
-  float smallPhaseB = dot(waveXZ, smallB) * legacyDomainScale
-    * ${WATER_WAVE_SCALE_COMPATIBILITY.tertiaryMultiplier.toFixed(1)}
-    - t * speed * 6.8
-    - macroC * 0.33;
-
-  float mediumWeight = mix(uLargeWaveStr, uSmallWaveStr, 0.65);
-  vec2 slope = primary * cos(largePhaseA) * 0.060
-    * uLargeWaveStr * largePatchA;
-  slope += primaryB * cos(largePhaseB) * 0.050
-    * uLargeWaveStr * largePatchB;
-  slope += mediumA * cos(mediumPhaseA) * 0.045
-    * mediumWeight * mediumPatchA;
-  slope += mediumB * cos(mediumPhaseB) * 0.035
-    * mediumWeight * mediumPatchB;
-  slope += smallA * cos(smallPhaseA) * 0.025
-    * uSmallWaveStr * smallPatch;
-  slope += smallB * cos(smallPhaseB) * 0.018
-    * uSmallWaveStr * smallPatch;
-
+  // Ocean spectrum: 12 wave trains from the legacy ~18-unit swell down to
+  // ~1-unit capillary chop (x1.3 wavenumber per band).
+  // Each train has a sharp exp(sin) crest profile, deep-water dispersion
+  // (short waves travel slower) and a wind-aligned spread that widens for
+  // small waves. Each band also drags the sample point for the next one, so
+  // short chop rides and bunches on the longer waves instead of forming a
+  // uniform grid. Bands below the pixel footprint are faded and their slope
+  // variance handed to waterFilteredRoughness().
+  float footprint = max(length(fwidth(xz)), 0.0001);
   float microFade = 1.0 - smoothstep(320.0, 1900.0, cameraDistance);
   microFade *= 1.0 - clamp(roughness, 0.0, 1.0) * 0.55;
-  if (uWaterQuality > 0.5 && microFade > 0.001) {
-    vec2 microXZ = xz + macroWarp * 0.35;
-    vec2 microP = microXZ * (legacyDomainScale * 2.6)
-      + primary * t * speed * 0.75
-      - mediumA * t * speed * 0.35;
-    float epsilon = 0.18;
-    float center = vnoise(microP);
-    float dx = vnoise(microP + vec2(epsilon, 0.0)) - center;
-    float dz = vnoise(microP + vec2(0.0, epsilon)) - center;
-    slope += vec2(dx, dz) * (0.20 / epsilon)
-      * uSmallWaveStr * uWaterDetail * uMicroWaveDetail
-      * smallPatch * microFade;
-  }
+  float detail = uWaterDetail * uMicroWaveDetail * step(0.5, uWaterQuality);
+  float mediumWeight = mix(uLargeWaveStr, uSmallWaveStr, 0.65);
+  float kBase = legacyDomainScale
+    * ${WATER_WAVE_SCALE_COMPATIBILITY.largeMultiplier};
+  vec2 p = waveXZ;
+  vec2 slope = vec2(0.0);
+  float lost = 0.0;
+  // Straight-line band calls, no loop: ANGLE/FXC on Windows stalls for
+  // minutes unrolling loops with loop-carried transcendental state.
+  waterSpectrumBand(p, slope, lost, primary, kBase * 1.00000, kBase, 0.0000, 0.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 1.30000, kBase, 0.0909, 1.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 1.69000, kBase, 0.1818, 2.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 2.19700, kBase, 0.2727, 3.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 2.85610, kBase, 0.3636, 4.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 3.71293, kBase, 0.4545, 5.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 4.82681, kBase, 0.5455, 6.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 6.27485, kBase, 0.6364, 7.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 8.15731, kBase, 0.7273, 8.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 10.60450, kBase, 0.8182, 9.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 13.78585, kBase, 0.9091, 10.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterSpectrumBand(p, slope, lost, primary, kBase * 17.92160, kBase, 1.0000, 11.0, t, speed, footprint, detail * microFade, mediumWeight, largePatchA, largePatchB, mediumPatchA, mediumPatchB, smallPatch, regionalA - regionalB);
+  waterNormalLostVariance = lost;
 
   float strength = uNormalIntensity * uWaveStrength * uWaveComplexity;
   return normalize(vec3(-slope.x * strength, 1.0, -slope.y * strength));

@@ -78,6 +78,7 @@ const SETTINGS_INDEX = [
   { panelId: 'water', settingId: 'water.waterEnabled', label: 'Water Enabled', keywords: 'water ocean enable disable' },
   { panelId: 'water', settingId: 'water.seaLevel', label: 'Sea Level', keywords: 'water ocean sea level height coast' },
   { panelId: 'water', settingId: 'water.waterMode', label: 'Water Mode', keywords: 'water legacy realistic volumetric cinematic quality cartoon tropical ocean lake', aliases: 'cartoon toon' },
+  { panelId: 'water', sectionLabel: 'Water Colors', settingId: 'water.waterNaturalColor', label: 'Natural Water Color', keywords: 'water color realistic blue turquoise natural clear ocean lagoon biome tint' },
   { panelId: 'water', settingId: 'water.waterAnim', label: 'Water Animation', keywords: 'water waves ocean motion' },
   { panelId: 'water', sectionLabel: 'Shoreline', settingId: 'water.waterFoamWidth', label: 'Shore Distance', keywords: 'water shore shoreline coast distance width foam band' },
   { panelId: 'water', settingId: 'water.waterDebugView', label: 'Water Debug View', keywords: 'water debug depth foam shoreline mask' },

@@ -92,7 +92,10 @@ describe('Realistic Water Surface V2', () => {
       'texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz))',
     );
     expect(material.fragmentShader).toContain(
-      'vec3 waterBiomeColorMultiplier(vec2 xz)',
+      'vec4 waterBiomeWeights(vec2 xz, out float canyon, out float strength)',
+    );
+    expect(material.fragmentShader).toContain(
+      'shallowColor = mix(shallowColor, naturalShallow, naturalColor)',
     );
     expect(material.fragmentShader).toContain(
       'shallowColor *= biomeColorMultiplier',
@@ -104,6 +107,10 @@ describe('Realistic Water Surface V2', () => {
     }, 'realistic');
     expect(material.uniforms.uBiomeColorEnabled.value).toBe(1);
     expect(material.uniforms.uBiomeColorStrength.value).toBe(0.85);
+    expect(material.uniforms.uWaterNaturalColor.value).toBe(0.7);
+
+    applyRealisticWaterUniforms(material, { waterNaturalColor: 0 }, 'realistic');
+    expect(material.uniforms.uWaterNaturalColor.value).toBe(0);
 
     applyRealisticWaterUniforms(material, {
       waterBiomeColorEnabled: false,
@@ -213,8 +220,10 @@ describe('Realistic Water Surface V2', () => {
     expect(spacing.medium).toBeCloseTo(7.72, 1);
     expect(doubleScale.large).toBeCloseTo(spacing.large * 0.5, 5);
     expect(doubleScale.medium).toBeCloseTo(spacing.medium * 0.5, 5);
-    expect(WATER_WAVES_GLSL).toContain('* 13.0');
-    expect(WATER_WAVES_GLSL).not.toMatch(/\*\s+13\s*$/m);
+    // The spectrum starts at the legacy large-wave wavenumber.
+    expect(WATER_WAVES_GLSL).toContain(
+      `* ${WATER_WAVE_SCALE_COMPATIBILITY.largeMultiplier};`,
+    );
   });
 
   it('breaks up large-scale repetition without changing local wavelengths', () => {
@@ -222,6 +231,11 @@ describe('Realistic Water Surface V2', () => {
     expect(WATER_WAVES_GLSL).toContain('float regionalA');
     expect(WATER_WAVES_GLSL).toContain('float regionalB');
     expect(WATER_WAVES_GLSL).toContain('vec2 waveXZ = xz + macroWarp');
+    expect(WATER_WAVES_GLSL).toContain('void waterSpectrumBand(');
+    // ANGLE/FXC stalls on loops with loop-carried transcendental state.
+    expect(WATER_WAVES_GLSL).not.toMatch(/\bfor \(|\bbreak;/);
+    expect(WATER_WAVES_GLSL).toContain('exp(sin(phase) - 1.0)');
+    expect(WATER_WAVES_GLSL).toContain('waterBandFilter(k, footprint)');
     expect(WATER_WAVES_GLSL).toContain('float largePatchA');
     expect(WATER_WAVES_GLSL).toContain('float largePatchB');
     expect(WATER_WAVES_GLSL).toContain('float mediumPatchA');
