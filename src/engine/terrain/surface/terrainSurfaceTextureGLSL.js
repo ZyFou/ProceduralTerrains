@@ -1,3 +1,4 @@
+import { SURFACE_ARRAY_UNIFORMS, SURFACE_ARRAY_FUNCTIONS } from './SurfaceArrayGLSL.js';
 import {
   SURFACE_TEXTURE_LAYERS,
   SURFACE_TEXTURE_ROLE_COUNT,
@@ -24,15 +25,16 @@ export {
 // from dynamic uniform-array indexing and nested dynamic variant branches.
 
 export const SURFACE_TEXTURE_UNIFORMS_GLSL = /* glsl */ `
-uniform sampler2D uSurfDiffuse;
-uniform sampler2D uSurfProps; // RG normal XY, B roughness, A ambient occlusion
+${SURFACE_ARRAY_UNIFORMS}
 uniform float uSurfMode;        // 0 = procedural colours, 1 = custom texture atlas
 uniform float uSurfAmount;      // master blend of textures over colour (0..1)
+uniform float uSurfReveal;      // fades prepared textures in after GPU upload
 uniform float uSurfTint;        // legacy, unused by the palette-role path
 uniform float uSurfPaletteInfluence; // 0 = raw texture, 1 = palette role recolour
 uniform float uSurfScale;       // global texture repeat multiplier
 uniform float uSurfBreakup;     // stochastic per-tile transform
 uniform float uSurfBlend;       // 0 = dominant role, 1 = blend with next strongest role
+uniform float uSurfTransition;  // 0 = historical mask widths, 1 = broad material transitions
 uniform float uSurfNormalAmt;   // strength of texture normal relief
 uniform float uSurfRoughAmt;    // how much sampled roughness drives the sheen
 uniform float uSurfAOAmt;       // how much sampled AO darkens crevices
@@ -64,7 +66,10 @@ struct SurfMaterialSample {
   float ao;
   float rough;
   float missing;
+  float height;
 };
+
+${SURFACE_ARRAY_FUNCTIONS}
 
 struct SurfRoleWeights {
   float sand;
@@ -158,6 +163,7 @@ vec2 surfRandomizedUV(vec2 uv, float roleFi, float salt) {
   return cell + p;
 }
 
+#ifndef SURFACE_ARRAYS
 vec3 surfTriRole(sampler2D atlas, int roleIndex, vec3 wp, vec3 blend, float tile) {
   float inv = surfTileInv(tile);
   float roleFi = float(roleIndex);
@@ -203,6 +209,7 @@ vec2 surfTriPropertiesRole(int roleIndex, vec3 wp, vec3 blend, float tile) {
   return cx * blend.x + cy * blend.y + cz * blend.z;
 }
 
+#endif
 vec3 surfPaletteForRole(int roleIndex) {
   if (roleIndex == 0) return applyPalettePost(uColSand);
   if (roleIndex == 1) return applyPalettePost(uColDune);
@@ -226,10 +233,14 @@ SurfMaterialSample surfMixSamples(SurfMaterialSample a, SurfMaterialSample b, fl
   outS.rough = mix(a.rough, b.rough, k);
   outS.ao = mix(a.ao, b.ao, k);
   outS.missing = mix(a.missing, b.missing, k);
+  outS.height = mix(a.height, b.height, k);
   return outS;
 }
 
 SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo) {
+  #ifdef SURFACE_ARRAYS
+  return pbrRole(roleIndex,wp,blend,nGeo);
+  #else
   SurfMaterialSample s;
   float tile = surfTileForRole(roleIndex);
   s.albedo = surfTriRole(uSurfDiffuse, roleIndex, wp, blend, tile);
@@ -240,6 +251,7 @@ SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo)
   vec2 properties = surfTriPropertiesRole(roleIndex, wp, blend, tile);
   s.rough = properties.x;
   s.ao = properties.y;
+  s.height = 0.5;
   s.missing = 1.0 - step(0.5, surfRoleReady(roleIndex));
 
   float tintAmt = clamp(uSurfPaletteInfluence, 0.0, 1.0) * (1.0 - step(0.5, s.missing));
@@ -248,6 +260,7 @@ SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo)
   vec3 tinted = palette * mix(0.48, 1.55, lum);
   s.albedo = mix(s.albedo, max(tinted, vec3(0.0)), tintAmt);
   return s;
+  #endif
 }
 
 SurfRoleWeights surfMaterialWeights(
@@ -255,6 +268,10 @@ SurfRoleWeights surfMaterialWeights(
   float slope, float hRel, float h01, float detail, float jitter
 ) {
   SurfRoleWeights w;
+  // Fine procedural color grain was changing materials every few metres in
+  // both texture backends. Material selection uses the broad terrain signals.
+  float roleDetail = 0.5;
+  float roleJitter = 0.0;
   w.sand = 0.0;
   w.dune = 0.0;
   w.dryGrass = 0.0;
@@ -270,16 +287,22 @@ SurfRoleWeights surfMaterialWeights(
   w.snow = 0.0;
 
   float tempEff = clamp(cl.temp - h01 * 0.55, 0.0, 1.0);
-  float jt = jitter * 0.06;
+  float transition = clamp(uSurfTransition, 0.0, 1.0);
+  float jt = roleJitter * 0.06;
   float veg = vegetationDensity(cl, h01, slope);
   float snow = clamp(tc.snow, 0.0, 1.0);
-  float shore = 1.0 - smoothstep(tc.sandBand * 0.4, max(tc.sandBand, 0.3), max(hRel, 0.0));
+  float shore = 1.0 - smoothstep(
+    tc.sandBand * mix(0.4, 0.12, transition),
+    max(tc.sandBand * mix(1.0, 1.5, transition), 0.3),
+    max(hRel, 0.0)
+  );
   float beach = shore * (1.0 - bw.wetland * 0.85);
-  float desert = clamp(bw.desert * 0.95 + beach * 0.25, 0.0, 1.0);
+  float desert = clamp(pow(clamp(bw.desert, 0.0, 1.0), 1.0 - transition * 0.45) * 0.95 + beach * 0.25, 0.0, 1.0);
 
-  float highBlend = smoothstep(0.30, 0.62, h01 + jitter * 0.08) * (1.0 - bw.desert * 0.7);
-  float slopeRock = smoothstep(0.42, 0.72, slope + jitter * 0.06);
-  float canyon = bw.canyon * smoothstep(1.0, 6.0, hRel);
+  float highBlend = smoothstep(0.30 - transition * 0.16, 0.62 + transition * 0.16, h01 + roleJitter * 0.08) * (1.0 - bw.desert * 0.7);
+  float slopeRock = smoothstep(0.42 - transition * 0.24, 0.72 + transition * 0.18, slope + roleJitter * 0.06);
+  float canyon = pow(clamp(bw.canyon, 0.0, 1.0), 1.0 - transition * 0.45)
+    * smoothstep(1.0 - transition, 6.0 + transition * 8.0, hRel);
   float rockTake = clamp(max(max(slopeRock, highBlend), canyon), 0.0, 1.0) * (1.0 - snow);
   float lowland = clamp((1.0 - snow) * (1.0 - rockTake * 0.82), 0.0, 1.0);
 
@@ -293,7 +316,7 @@ SurfRoleWeights surfMaterialWeights(
   float moistLow = smoothstep(0.18, 0.42, cl.moist);
   float moistMid = smoothstep(0.30, 0.62, cl.moist);
   float moistHigh = smoothstep(0.55, 0.78, cl.moist);
-  float forestBias = veg * moistMid * (0.5 + 0.5 * smoothstep(0.35, 0.65, detail));
+  float forestBias = veg * moistMid * (0.5 + 0.5 * smoothstep(0.35, 0.65, roleDetail));
 
   w.sand = sandW;
   w.dune = duneW;
@@ -304,44 +327,96 @@ SurfRoleWeights surfMaterialWeights(
   w.grass = vegBase * moistLow * (1.0 - forestBias * 0.55) * (1.0 - cold * 0.35);
   w.dryGrass = vegBase * (1.0 - moistLow * 0.72) * (1.0 - cold * 0.25);
 
-  float band = fract(h01 * 14.0 + detail * 0.15);
-  float redMix = smoothstep(0.25, 0.75, band);
+  // A wrapped fract introduced a visible material seam at every stratum.
+  // The periodic signal keeps the layered geology without discontinuities.
+  float redMix = smoothstep(-0.65, 0.65, sin((h01 * 14.0 + roleDetail * 0.15) * 6.2831853));
   float redTotal = canyon * (1.0 - snow);
   float neutralRock = clamp(rockTake - redTotal * 0.65, 0.0, 1.0);
   w.redRock = redTotal * (1.0 - redMix);
   w.redRock2 = redTotal * redMix;
-  w.rock = neutralRock * (1.0 - smoothstep(0.35, 0.78, detail));
-  w.rockHi = max(highBlend * (1.0 - snow), neutralRock * smoothstep(0.30, 0.80, detail));
+  w.rock = neutralRock * (1.0 - smoothstep(0.35, 0.78, roleDetail));
+  w.rockHi = max(highBlend * (1.0 - snow), neutralRock * smoothstep(0.30, 0.80, roleDetail));
   w.snow = snow;
   return w;
 }
 
-void surfCheckRole(int roleIndex, float weight, inout int bestI, inout int secondI, inout float bestW, inout float secondW) {
+void surfCheckRole(int roleIndex, float weight, inout int bestI, inout int secondI,
+  inout float bestW, inout float secondW, inout float thirdW) {
   float wi = max(weight, 0.0);
   if (wi > bestW) {
+    thirdW = secondW;
     secondW = bestW;
     secondI = bestI;
     bestW = wi;
     bestI = roleIndex;
   } else if (wi > secondW) {
+    thirdW = secondW;
     secondW = wi;
     secondI = roleIndex;
+  } else if (wi > thirdW) {
+    thirdW = wi;
   }
 }
+
+#ifdef SURFACE_ARRAYS
+SurfMaterialSample pbrHeightMix(SurfMaterialSample a,SurfMaterialSample b,float k,float contrast){
+  if(k<=0.0)return a;if(k>=1.0)return b;
+  float h=max(a.height+1.0-k,b.height+k)-max(contrast,0.001);
+  float wa=max(0.0,a.height+1.0-k-h)*(1.0-k),wb=max(0.0,b.height+k-h)*k;
+  return surfMixSamples(a,b,wb/max(wa+wb,0.0001));
+}
+
+void pbrApplyPaint(inout SurfaceTexResult result,vec3 wp,vec3 ng,vec3 blend) {
+#ifdef SURFACE_PAINT_LAYERS
+  if(uSurfacePaintEnabled<0.5)return;
+  float weights[SURFACE_CONTRIBUTIONS];int slots[SURFACE_CONTRIBUTIONS];for(int i=0;i<SURFACE_CONTRIBUTIONS;i++){weights[i]=0.0;slots[i]=0;}
+  float total=0.0;
+  for(int i=0;i<32;i++){
+    float w=pbrPaintWeight(wp.xz,i)*uSurfacePaintOpacity[i];if(uSurfacePaintMap[i].x<0.0)w=0.0;total+=w;
+    int candidate=i;for(int j=0;j<SURFACE_CONTRIBUTIONS;j++){if(w>weights[j]){float oldW=weights[j];int oldI=slots[j];weights[j]=w;slots[j]=candidate;w=oldW;candidate=oldI;}}
+  }
+  if(total<0.0001)return;
+  vec3 color=vec3(0),normal=vec3(0);float rough=0.0,ao=0.0,kept=0.0;
+  for(int j=0;j<SURFACE_CONTRIBUTIONS;j++){
+    float w=weights[j];if(w<0.0001)continue;
+    int slot=slots[j];vec4 mapping=uSurfacePaintMap[slot];
+    SurfMaterialSample paintSample=pbrAsset(int(mapping.x),wp,blend,ng,mapping.w);
+    if(mapping.y>=0.0)paintSample=surfMixSamples(paintSample,pbrAsset(int(mapping.y),wp,blend,ng,mapping.w),smoothstep(0.3,0.7,vnoise(wp.xz*0.05)));
+    color+=paintSample.albedo*uSurfacePaintTint[slot]*(1.0-mapping.z*0.35)*w;normal+=paintSample.normal*w;
+    rough+=paintSample.rough*(1.0-mapping.z)*w;ao+=paintSample.ao*w;kept+=w;
+  }
+  float coverage=min(total,1.0);kept=max(kept,0.0001);
+  result.albedo=mix(result.albedo,color/kept,coverage);result.normal=normalize(mix(result.normal,normalize(normal),coverage));
+  result.rough=mix(result.rough,rough/kept,coverage);result.ao=mix(result.ao,mix(1.0,ao/kept,uSurfAOAmt),coverage);result.amount=max(result.amount,coverage);
+#endif
+}
+/*SURFACE_GRAPH_BEGIN*/
+/*SURFACE_GRAPH_END*/
+#endif
 
 SurfaceTexResult applySurfaceMaterials(
   vec3 baseAlbedo, vec3 n, vec3 baseNormal, vec3 nGeo, vec3 wpos, float dist,
   TerrainColorResult tc, Climate cl, BiomeWeights bw, float slope, float hRel, float h01,
   float detail, float jitter
 ) {
+  #ifdef SURFACE_ARRAYS
+  // Take derivatives before role, graph, or paint branches diverge per pixel.
+  pbrWorldDx=dFdx(wpos);
+  pbrWorldDy=dFdy(wpos);
+  #endif
   SurfaceTexResult res;
   res.albedo = baseAlbedo;
   res.normal = n;
   res.ao = 1.0;
   res.rough = 0.8;
   res.amount = 0.0;
+  if (uSurfReveal < 0.002) return res;
 
+  #ifdef SURFACE_ARRAYS
+  float fade = 1.0;
+  #else
   float fade = 1.0 - smoothstep(uSurfNear, uSurfFar, dist);
+  #endif
   float baseAmount = uSurfMode * uSurfAmount * fade;
   float amount = uManualSurfaceMode > 0.5 ? fade : baseAmount;
   if (amount < 0.002) return res;
@@ -354,9 +429,19 @@ SurfaceTexResult applySurfaceMaterials(
     triBlend = vec3(0.0, 1.0, 0.0);
   }
 
+  #if defined(SURFACE_ARRAYS) && defined(SURFACE_GRAPH_ACTIVE)
+  SurfMaterialSample graphSample=evaluateSurfaceGraph(wpos,nGeo,triBlend,cl,bw,slope,h01);
+  res.albedo=graphSample.albedo;res.normal=graphSample.normal;res.ao=mix(1.0,graphSample.ao,uSurfAOAmt);res.rough=graphSample.rough;res.amount=1.0;
+  pbrApplyPaint(res,wpos,nGeo,triBlend);
+  return res;
+  #endif
   bool manualMode = uManualSurfaceMode > 0.5;
+  #ifdef SURFACE_ARRAYS
+  manualMode=manualMode && uSurfacePaintEnabled<0.5;
+  #endif
   bool useManualWeights = false;
   float manualCoverage = 0.0;
+  float manualWeightTotal = 0.0;
   SurfRoleWeights w;
   if (manualMode) {
     vec4 manualA = manualSurfaceWeightsAAt(wpos.xz);
@@ -374,12 +459,10 @@ SurfaceTexResult applySurfaceMaterials(
     w.rock = manualA.g;
     w.rockHi = 0.0;
     w.snow = manualA.a;
-    manualCoverage = clamp(
+    manualWeightTotal =
       manualA.r + manualA.g + manualA.b + manualA.a
-      + manualB.r + manualB.g + manualB.b,
-      0.0,
-      1.0
-    );
+      + manualB.r + manualB.g + manualB.b;
+    manualCoverage = clamp(manualWeightTotal, 0.0, 1.0);
     useManualWeights = manualCoverage >= 0.002;
   }
   if (!useManualWeights) {
@@ -396,31 +479,57 @@ SurfaceTexResult applySurfaceMaterials(
   int secondI = 0;
   float bestW = 0.0;
   float secondW = 0.0;
-  surfCheckRole(0, w.sand, bestI, secondI, bestW, secondW);
-  surfCheckRole(1, w.dune, bestI, secondI, bestW, secondW);
-  surfCheckRole(2, w.dryGrass, bestI, secondI, bestW, secondW);
-  surfCheckRole(3, w.grass, bestI, secondI, bestW, secondW);
-  surfCheckRole(4, w.forest, bestI, secondI, bestW, secondW);
-  surfCheckRole(5, w.jungle, bestI, secondI, bestW, secondW);
-  surfCheckRole(6, w.swamp, bestI, secondI, bestW, secondW);
-  surfCheckRole(7, w.tundra, bestI, secondI, bestW, secondW);
-  surfCheckRole(8, w.redRock, bestI, secondI, bestW, secondW);
-  surfCheckRole(9, w.redRock2, bestI, secondI, bestW, secondW);
-  surfCheckRole(10, w.rock, bestI, secondI, bestW, secondW);
-  surfCheckRole(11, w.rockHi, bestI, secondI, bestW, secondW);
-  surfCheckRole(12, w.snow, bestI, secondI, bestW, secondW);
+  float thirdW = 0.0;
+  surfCheckRole(0, w.sand, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(1, w.dune, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(2, w.dryGrass, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(3, w.grass, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(4, w.forest, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(5, w.jungle, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(6, w.swamp, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(7, w.tundra, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(8, w.redRock, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(9, w.redRock2, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(10, w.rock, bestI, secondI, bestW, secondW, thirdW);
+  surfCheckRole(11, w.rockHi, bestI, secondI, bestW, secondW, thirdW);
+  float snowCoverage = useManualWeights
+    ? clamp(w.snow / max(manualWeightTotal, 1e-4), 0.0, 1.0)
+    : clamp(w.snow, 0.0, 1.0);
+  if (bestW < 1e-4 && snowCoverage < 1e-4) return res;
 
-  if (bestW < 1e-4) return res;
-
-  SurfMaterialSample tex = surfSampleRole(bestI, wpos, triBlend, nGeo);
+  SurfMaterialSample tex = surfSampleRole(bestW < 1e-4 ? 12 : bestI, wpos, triBlend, nGeo);
   float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
-  if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
+  if (bestW >= 1e-4 && roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
     SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
-    float kRole = (useManualWeights ? 1.0 : roleBlend) * secondW / max(bestW + secondW, 1e-4);
+    #ifdef SURFACE_ARRAYS
+    float sharpness = useManualWeights ? 1.0 : mix(2.0, 1.0, roleBlend);
+    #else
+    float sharpness = useManualWeights ? 1.0 : mix(4.0, 1.0, roleBlend);
+    #endif
+    float aWeight = pow(bestW, sharpness), bWeight = pow(secondW, sharpness);
+    float kRole = bWeight / max(aWeight + bWeight, 1e-4);
+    // The runner-up used to switch from dune to rock at a nonzero weight.
+    // Taper it to zero as it approaches the third candidate, then fade the
+    // new runner-up back in. Keep the mix symmetric when the two leaders tie.
+    // No third texture fetch is needed.
+    if (!useManualWeights) {
+      float gap = max(secondW - thirdW, 0.0) / max(bestW, 1e-4);
+      float width = mix(0.015, 0.35, clamp(uSurfTransition, 0.0, 1.0));
+      float dominance = smoothstep(0.02, 0.18, (bestW - secondW) / max(bestW, 1e-4));
+      kRole *= mix(1.0, smoothstep(0.0, width, gap), dominance);
+    }
     tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
+  }
+  if (bestW >= 1e-4 && snowCoverage > 1e-4) {
+    SurfMaterialSample snowTex = surfSampleRole(12, wpos, triBlend, nGeo);
+    tex = surfMixSamples(tex, snowTex, snowCoverage);
   }
 
   float k = amount * manualCoverage;
+  #ifdef SURFACE_ARRAYS
+  // An active PBR library uses its own albedo, not a blend with biome colors.
+  if (!manualMode) k = 1.0;
+  #endif
   res.albedo = mix(baseAlbedo, tex.albedo, k);
   vec3 normalBase = normalize(baseNormal);
   if (uSurfNormalAmt > 0.001) {
@@ -432,6 +541,9 @@ SurfaceTexResult applySurfaceMaterials(
   res.ao = mix(1.0, tex.ao, k * uSurfAOAmt);
   res.rough = mix(0.8, tex.rough, clamp(k * uSurfRoughAmt, 0.0, 1.0));
   res.amount = k;
+  #ifdef SURFACE_ARRAYS
+  pbrApplyPaint(res,wpos,nGeo,triBlend);
+  #endif
   return res;
 }
 `;

@@ -561,6 +561,7 @@ describe('water startup shaders', () => {
       projectMode: 'procedural',
       params: { waterEnabled: true },
       perf: { terrainDetailQuality: 3, terrainDetailOpacity: 1 },
+      _detailPageCache: { hasReadyPage: true },
       uniforms: {
         uUseTerrainHeightTex: { value: 0 },
         uUseTerrainBiomeTex: { value: 0 },

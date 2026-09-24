@@ -1,3 +1,4 @@
+import { SURFACE_NODE_DEFINITIONS } from '../surface/SurfaceGraph.js';
 import { BLEND_LABELS } from '../noise/blendModes.js';
 import { activeLayers } from '../noise/NoiseStack.js';
 import { getNoiseType } from '../noise/noiseTypes.js';
@@ -493,7 +494,7 @@ const definitions = [
   {
     id: 'terrainOutput', label: 'Terrain Output', category: 'Output', color: 'output',
     description: 'Connect height and optional surface color here. Unconnected height stays flat; unconnected color uses the project palette.',
-    executionKind: 'analytical', inputs: [input('height', 'Height', false), colorInput('color', 'Color', false)], outputs: [],
+    executionKind: 'analytical', inputs: [input('height', 'Height', false), colorInput('color', 'Color', false), input('surface', 'Surface', false, 'surface')], outputs: [],
     inspector: [
       { key: 'normalize', label: 'Normalize Output', type: 'boolean', default: false },
       number('outMin', 'Output Min', -4, 4, 0.01, 0),
@@ -505,6 +506,7 @@ const definitions = [
   },
 ];
 
+definitions.push(...SURFACE_NODE_DEFINITIONS);
 const registry = new Map(definitions.map((definition) => [definition.id, Object.freeze(definition)]));
 
 export function getGraphNodeDefinition(type) { return registry.get(type) || null; }

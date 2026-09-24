@@ -1,9 +1,11 @@
+import { SURFACE_TEXTURE_UNIFORMS_GLSL, SURFACE_TEXTURE_FUNCTIONS_GLSL } from './surface/terrainSurfaceTextureGLSL.js';
+import { installSurfaceMaterialBackend } from './surface/SurfaceArrayGLSL.js';
 import * as THREE from 'three';
 import { readRenderTargetPixelsAsync, withExportRenderTarget } from '../render/RendererReadback.js';
 import { serializeGlb, canvasPngBytes } from '../../export/ExportEncoding.js';
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 import { zipSync } from 'fflate';
-import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, NOISE_GLSL, MANUAL_SURFACE_WEIGHTS_GLSL } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
   PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, buildPlanetHeightGLSL,
@@ -52,6 +54,9 @@ const buildBakeFragment = (planetHeightGLSL) => /* glsl */ `
   ${planetHeightGLSL}
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+  ${SURFACE_TEXTURE_UNIFORMS_GLSL}
+  ${MANUAL_SURFACE_WEIGHTS_GLSL}
+  ${SURFACE_TEXTURE_FUNCTIONS_GLSL}
 
   uniform vec3 uFaceOrigin, uFaceU, uFaceV;
   uniform float uNormalStrength, uAO;
@@ -91,6 +96,8 @@ const buildBakeFragment = (planetHeightGLSL) => /* glsl */ `
     float microN = vnoiseTri(colP*0.9, colBlend);
     TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, microN);
 
+    SurfaceTexResult surface=applySurfaceMaterials(tc.albedo,n,n,nGeo,pC,0.0,tc,cl,bw,slope,hRel,h01,detail,jitter);
+    tc.albedo=surface.albedo;n=surface.normal;
     vec3 col = tc.albedo;
     if (uBakeLighting) {
       float concave = clamp(((hA+hB)*0.5 - hC) / (uHeightScale*0.02 + 1.0), 0.0, 1.0);
@@ -167,6 +174,7 @@ export class PlanetExporter {
       vertexShader: BAKE_VERTEX,
       fragmentShader: buildBakeFragment(buildPlanetHeightGLSL(stackGLSL.body3d)),
     });
+    installSurfaceMaterialBackend(bakeMat);
     quadMesh.material = bakeMat;
 
     const group = new THREE.Group();

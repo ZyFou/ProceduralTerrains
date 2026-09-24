@@ -3,7 +3,7 @@ import { normalizeManualTerrainDocument } from '../manual/ManualShapeCatalog.js'
 const DB_NAME = 'procedural-terrains-projects';
 const STORE_NAME = 'projects';
 const SYNC_STORE_NAME = 'project-sync';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const FALLBACK_KEY = 'procedural-terrains-projects-v1';
 const SYNC_FALLBACK_KEY = 'procedural-terrains-project-sync-v1';
 const now = () => new Date().toISOString();
@@ -19,12 +19,13 @@ function emitSyncChange() {
   window.dispatchEvent(new Event('terrain-project-sync:changed'));
 }
 
-function openDatabase() {
-  if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB is unavailable'));
+export function openProjectDatabase() {
+  if (!('indexedDB' in globalThis)) return Promise.reject(new Error('IndexedDB is unavailable'));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
+      if (!database.objectStoreNames.contains('surface-files')) database.createObjectStore('surface-files', { keyPath: 'hash' });
       if (!database.objectStoreNames.contains(STORE_NAME)) database.createObjectStore(STORE_NAME, { keyPath: 'id' });
       if (!database.objectStoreNames.contains(SYNC_STORE_NAME)) database.createObjectStore(SYNC_STORE_NAME, { keyPath: 'localProjectId' });
     };
@@ -34,7 +35,7 @@ function openDatabase() {
 }
 
 async function withStore(storeName, mode, action) {
-  const db = await openDatabase();
+  const db = await openProjectDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
     const request = action(tx.objectStore(storeName));
@@ -129,9 +130,11 @@ export function normalizeProject(input = {}) {
   const fallbackCommunityIcon = COMMUNITY_ICON_BY_MODE[editorMode] ?? COMMUNITY_ICON_BY_MODE.procedural;
   const communityIcon = COMMUNITY_ICONS.has(metadata.communityIcon) ? metadata.communityIcon : fallbackCommunityIcon;
   return {
-    schemaVersion: 2,
+    ...input,
+    schemaVersion: 3,
     id: input.id ?? id(),
     metadata: {
+      ...metadata,
       name: String(metadata.name ?? input.name ?? 'Untitled terrain').trim() || 'Untitled terrain',
       author: String(metadata.author ?? ''),
       description: String(metadata.description ?? ''),

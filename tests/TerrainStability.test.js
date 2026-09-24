@@ -258,6 +258,7 @@ describe('terrain state stability', () => {
         terrainDetailQuality: 3,
         terrainDetailOpacity: 1,
       },
+      _detailPageCache: { hasReadyPage: true },
       uniforms,
       terrainMaterial: live,
       _terrainVariantToken: 0,
@@ -267,6 +268,7 @@ describe('terrain state stability', () => {
       _bgWork: new Map(),
       cb: {},
       _activeHeightProgram: vi.fn(() => currentProgram),
+      _targetTerrainVariant: vi.fn(() => 'surface'),
       _compileMaterialVariants: vi.fn(() => compileResult),
       _scheduleTerrainVariantRetry: vi.fn(),
     });

@@ -379,6 +379,20 @@ export default function WaterPanelInner({
         >
           {selectedRealistic && (
             <>
+              <SliderCtl
+                def={{
+                  key: 'waterNaturalColor',
+                  label: 'Natural Water Color',
+                  min: 0,
+                  max: 1,
+                  step: 0.05,
+                  digits: 2,
+                  info: 'Blends the palette water colors toward realistic clear water: turquoise shallows and ocean-blue depths. With Biome Color Variation on, each biome gets its own water (lagoon, desert aqua, murky wetland, glacial melt). 0 keeps the palette colors only.',
+                }}
+                value={val(params, 'waterNaturalColor')}
+                onChange={(v) => onParam('waterNaturalColor', v)}
+                settingId="water.waterNaturalColor"
+              />
               <ToggleRow
                 label="Biome Color Variation"
                 value={val(params, 'waterBiomeColorEnabled')}

@@ -21,6 +21,10 @@ function serializeProject(project, errors) {
     errors.project = 'Provide a valid terrain project.';
     return null;
   }
+  if (Object.keys((project.terrain || project).surfaceImports || {}).length || Object.values((project.terrain || project).params?.surfaceDocument?.assets || {}).some(a=>a.provider==='user')) {
+    errors.project = 'Personal textures are local only. Export a portable .ptrterrain file instead.';
+    return null;
+  }
   const serialized = JSON.stringify(project);
   if (Buffer.byteLength(serialized, 'utf8') > MAX_PROJECT_BYTES) {
     errors.project = 'Projects must be 8 MB or smaller.';

@@ -31,7 +31,10 @@ describe('Nodes project templates', () => {
     expect(reachableNodeIds(graph).size).toBe(graph.nodes.length);
     expect(graphCapacity(graph)).toBeLessThanOrEqual(12);
     expect(graphColorCapacity(graph)).toBeLessThanOrEqual(8);
-    if (templateId !== 'nodes-blank') {
+    if (templateId.startsWith('nodes-pbr-')) {
+      expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'surface')?.type).toBe('surface');
+      expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')).toBeNull();
+    } else if (templateId !== 'nodes-blank') {
       expect(inputEdge(graph, TERRAIN_OUTPUT_ID, 'color')?.type).toBe('analytic-color');
       expect(compiled.program.colorBody).toContain('applyTerrainGraphColor');
     }

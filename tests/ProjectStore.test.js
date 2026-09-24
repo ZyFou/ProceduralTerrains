@@ -9,7 +9,7 @@ import {
 describe('project document migration', () => {
   it('wraps legacy terrain JSON in a versioned project document', () => {
     const project = normalizeProject({ params: { seed: 42, chunkCount: 16, chunkSize: 128 } });
-    expect(project.schemaVersion).toBe(2);
+    expect(project.schemaVersion).toBe(3);
     expect(project.metadata.name).toBe('Untitled terrain');
     expect(project.terrain.params.seed).toBe(42);
     expect(project.terrain.editorMode).toBe('procedural');

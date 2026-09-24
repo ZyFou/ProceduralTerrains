@@ -1,3 +1,5 @@
+import { resolveSurfaceReference } from './terrain/surface/SurfaceDocument.js';
+import { compileSurfaceGraph } from './terrain/surface/SurfaceGraph.js';
 import * as THREE from 'three';
 
 function createEngineTimer() {
@@ -12,7 +14,9 @@ function createEngineTimer() {
   }
   return new THREE.Clock();
 }
-import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource, rebuildTerrainPreviewShaderSource } from './terrain/TerrainMaterial.js';
+import { createTerrainUniforms, createTerrainMaterial, createInfiniteTerrainMaterial, createBootTerrainMaterial, rebuildTerrainShaderSource, rebuildTerrainPreviewShaderSource, terrainShaderFamily } from './terrain/TerrainMaterial.js';
+import { syncSurfaceMaterialBackend } from './terrain/surface/SurfaceArrayGLSL.js';
+import { GpuFramePacer } from './render/GpuFramePacer.js';
 import { createWaterMaterial, createInfiniteWaterMaterial, rebuildWaterShaderSource } from './terrain/WaterMaterial.js';
 import { TerrainBoard } from './terrain/TerrainBoard.js';
 import { InfiniteWorld } from './terrain/InfiniteWorld.js';
@@ -146,6 +150,7 @@ import {
 import { PreparedModeBundle, SharedResourceRegistry } from './mode/PreparedModeBundle.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 import { GpuWorkScheduler } from './render/GpuWorkScheduler.js';
+import { DetailPageCache } from './terrain/detail/DetailPageCache.js';
 import { GpuResourceLedger, rendererAdmission } from './render/GpuResourceLedger.js';
 import { materialProgramDescriptor, programHealthError, validatePrograms } from './render/ProgramHealthGate.js';
 import {
@@ -562,6 +567,19 @@ export class Engine {
         phase: this._bootPipeline?.state || this._modeTransitionCoordinator?.state || 'runtime',
       });
       this._gpuWorkScheduler?.cancelPending?.();
+      this._detailPageCache?.invalidate?.();
+      this._surfaceBuildRevision = (this._surfaceBuildRevision || 0) + 1;
+      this._surfaceReveal = 0;
+      if (this.uniforms?.uSurfReveal) this.uniforms.uSurfReveal.value = 0;
+      if (this._surfaceAtlas) this._surfaceAtlas.cacheKey = null;
+      for (const [source, cached] of Object.entries(this._surfaceAtlasCache || {})) {
+        if (cached !== this._surfaceAtlas) {
+          this._disposeSurfaceAtlas(cached);
+          delete this._surfaceAtlasCache[source];
+        }
+      }
+      import('./terrain/surface/SurfacePreparationClient.js')
+        .then(({ cancelSurfacePreparations }) => cancelSurfacePreparations());
       console.warn('[graphics] context lost; aborting boot generation');
       if (this._modeTransitionRequest) {
         const request = this._modeTransitionRequest;
@@ -579,7 +597,27 @@ export class Engine {
       this.cb.onStatus('Graphics context lost — retry when the device recovers', false);
     };
     this._onContextRestored = () => {
+      this._gpuFramePacer?.dispose();
       this._contextLost = false;
+      this._detailPageCache?.onContextRestored?.();
+      const atlas = this._surfaceAtlas;
+      if (atlas) {
+        const revision = this._surfaceBuildRevision;
+        import('./terrain/surface/SurfaceUploadQueue.js').then(({ uploadSurfaceTextures }) =>
+          uploadSurfaceTextures(this.renderer, atlas, {
+            isCurrent: () => !this._disposed && !this._contextLost
+              && revision === this._surfaceBuildRevision && this._surfaceAtlas === atlas,
+          }),
+        ).then(async () => {
+          atlas.cacheKey = this._surfaceBuildKey(atlas.source);
+          await this._installSurfaceAtlas(atlas);
+          this._scheduleTerrainVariantRetry(null, 0);
+        }).catch((error) => {
+          if (error.code !== 'SURFACE_ATLAS_SUPERSEDED') {
+            this.cb.onStatus?.('Terrain materials could not be restored; base terrain remains available', false);
+          }
+        });
+      }
       this._needsRender = true;
       console.info('[graphics] context restored');
       if (this._modeTransitionRequest?.contextLost) {
@@ -599,6 +637,21 @@ export class Engine {
     this._gpuResourceLedger = new GpuResourceLedger({ tier: this.gpuTier });
     this.destructionField = new DestructionField({ resolution: destructionResolutionForTier(this.gpuTier) });
     this._initScene(minimapBase, minimapOverlay);
+    this._detailPageCache = new DetailPageCache({
+      renderer: this.renderer,
+      uniforms: this.uniforms,
+      onReady: (first) => {
+        this._needsRender = true;
+        if (first && !this._bootPending && !this._modeTransitionCoordinator?.active) {
+          this._terrainVariantRetryCount = 0;
+          this._scheduleTerrainVariantRetry(null, 0);
+        }
+      },
+      onError: (error) => {
+        console.warn('Terrain detail preparation failed', error);
+        this.cb.onStatus?.('Terrain detail is unavailable; base terrain remains interactive', false);
+      },
+    });
     this._initControls();
     this._initTileInteraction();
     this._initPaintMode();
@@ -901,8 +954,15 @@ export class Engine {
       ),
       gpuTier: this.gpuTier,
       onChange: (state, meta = {}) => {
+        state.texturePaint.localAssets=Object.values(this.params.surfaceDocument?.assets||{});
         this.manualTerrainState = state;
         if (meta.surfaceChanged) {
+          if(this.manualTerrain?.surfaceField?.layersField) {
+            this.params.surfaceTextureSource=SURFACE_TEXTURE_SOURCE.PBR;this.params.surfaceTextureMode=true;
+            const signature=JSON.stringify(state.texturePaint.layers?.map(l=>[l.id,l.materialInstanceId]));
+            if(signature!==this._paintMaterialSignature){this._paintMaterialSignature=signature;void this.buildAndSetSurfaceAtlas(SURFACE_TEXTURE_SOURCE.PBR).catch(error=>{this._paintMaterialSignature=null;this.cb.onToast?.(error.message);});}
+            this._applySurfaceSettings();
+          }
           this._needsRender = true;
           this.minimap.requestRedraw();
           // Blank Manual documents use an exact no-atlas specialization. A
@@ -2499,7 +2559,7 @@ export class Engine {
       return;
     }
 
-    if (key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
+    if (key === 'surfaceDocument' || key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
       this._applySurfaceSettings();
       void this._ensureTerrainShaderVariantAsync();
       return;
@@ -3372,9 +3432,20 @@ export class Engine {
       return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
 
+    if (compiled.program.surface) {
+      this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.PBR;
+      this.params.surfaceTextureMode = true;
+      if(this._surfaceAtlas?.backend==='array' && compiled.program.surface.assets.every(id=>this._surfaceAtlas.slots[id]!=null)) {
+        const surface=compileSurfaceGraph(nextGraph,this.params.surfaceDocument,this._surfaceAtlas.slots);
+        this.uniforms.uSurfaceGraphCode.value=surface.body;
+        this.uniforms.uSurfaceGraphParams.value=Array.from({length:128},(_,i)=>new THREE.Vector4(...(surface.values[i]||[0,0,0,0])));
+        this._needsRender=true;
+      } else void this.buildAndSetSurfaceAtlas(SURFACE_TEXTURE_SOURCE.PBR).catch(error=>this.cb.onToast?.(error.message));
+      this._applySurfaceSettings();
+    } else if (this.uniforms.uSurfaceGraphCode) this.uniforms.uSurfaceGraphCode.value = '';
     const liveOctaves = this.terrainMaterial?.defines?.OCTAVES;
     const needsCompile = this._liveHeightSig !== compiled.program.sig
-      || (this.projectMode !== 'nodes' && this.terrainMaterial?.userData?.minimalFragment)
+      || ((this.projectMode !== 'nodes' || compiled.program.surface) && this.terrainMaterial?.userData?.minimalFragment)
       || liveOctaves !== Math.round(this.params.octaves);
     let ready = Promise.resolve({ swapped: false, error: null });
     if (this.worldMode === 'studio' && this.generationSource === 'graph') {
@@ -3637,7 +3708,7 @@ export class Engine {
       ? this._infiniteTerrainMat
       : this.terrainMaterial;
     const octavesChanged = liveTerrainMaterial?.defines?.OCTAVES !== oct;
-    const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes';
+    const nodePreviewMaterial = this.worldMode === 'studio' && this.projectMode === 'nodes' && !program.surface;
     const terrainVariant = this._targetTerrainVariant();
     const liveTerrainVariant = this.terrainMaterial?.userData?.terrainVariant ?? null;
     const qualityVariants = ['base', 'detail', 'surface', 'full'];
@@ -3748,12 +3819,14 @@ export class Engine {
           );
           emitProgress({ id: 'noise-stack', label, done: 1, total: warm.length });
           let auxiliaryResult = { ready: true, timedOut: false, pendingCount: 0 };
-          if (terrainResult?.ready === true && warm.length > 1) {
+          if (terrainResult?.ready === true && warm.length > 1
+              && token === this._octToken && !this._disposed) {
             auxiliaryResult = await this._compileMaterialVariants(warm.slice(1), {
               canvasOnly: true,
               stagger: false,
               timeoutMs: 120000,
               renderTarget,
+              isCurrent: () => token === this._octToken && this.worldMode === modeAtStart,
               onProgress: (done) => emitProgress({
                 id: 'noise-stack', label, done: 1 + done, total: warm.length,
               }),
@@ -3767,12 +3840,16 @@ export class Engine {
           compileResult = await this._compileMaterialVariants(warm, {
             canvasOnly: true,
             stagger: nodePreviewMaterial,
+            isCurrent: () => token === this._octToken && this.worldMode === modeAtStart,
             timeoutMs: 120000,
             renderTarget,
             onProgress: (done, total) => emitProgress({
               id: 'noise-stack', label, done, total,
             }),
           });
+        }
+        if (token !== this._octToken || this._disposed) {
+          return { swapped: false, error: null, stale: true };
         }
         if (compileResult?.ready !== true) {
           compileError = new Error('Terrain shader did not become ready');
@@ -4504,18 +4581,27 @@ export class Engine {
       && p.surfaceTextureMode === true
       && (p.surfaceTextureAmount ?? 1) > 0.001 ? 1.0 : 0.0;
     u.uSurfAmount.value = 1.0;
+    if (this._surfaceAtlas?.source !== surfaceTextureSource) {
+      this._surfaceReveal = 0;
+      if (u.uSurfReveal) u.uSurfReveal.value = 0;
+    }
     u.uSurfTint.value = 0.0;
     if (!u.uSurfPaletteInfluence) u.uSurfPaletteInfluence = { value: 0.6 };
-    u.uSurfPaletteInfluence.value = flatManual ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
+    u.uSurfPaletteInfluence.value = flatManual || p.surfaceTextureRawColor !== false
+      ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
-    u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
+    p.surfaceTextureScale = Number.isFinite(p.surfaceTextureScale)
+      ? Math.min(5, Math.max(0.1, p.surfaceTextureScale)) : 1.0;
+    u.uSurfScale.value = p.surfaceTextureScale;
     if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
     u.uSurfBreakup.value = flatManual ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
     if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };
     u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
+    if (!u.uSurfTransition) u.uSurfTransition = { value: 0.5 };
+    u.uSurfTransition.value = Math.min(1, Math.max(0, p.surfaceTextureTransition ?? 0.5));
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
     u.uSurfRoughAmt.value = 1.0;
-    u.uSurfAOAmt.value = 1.0;
+    u.uSurfAOAmt.value = surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR ? 0.55 : 1.0;
     u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
     this._needsRender = true;
   }
@@ -4523,11 +4609,38 @@ export class Engine {
   _disposeSurfaceAtlas(atlas) {
     atlas?.diffuse?.dispose?.();
     atlas?.props?.dispose?.();
+    atlas?.diffuse?.image?.close?.();
+    atlas?.props?.image?.close?.();
   }
 
-  _installSurfaceAtlas(atlas) {
-    const u = this.uniforms;
+  _surfaceBuildKey(source) {
+    return JSON.stringify({
+      source,
+      document: this.params.surfaceDocument,
+      graph: this.terrainGraph,
+      paintLayers: this.manualTerrain?.surfaceField?.layersField?.layers || [],
+    });
+  }
+
+  _writeSurfaceAtlasUniforms(atlas, u = this.uniforms) {
     if (!u?.uSurfDiffuse || !atlas) return false;
+    if (u.uSurfaceArrayMode) u.uSurfaceArrayMode.value = atlas.backend === 'array' ? 1 : 0;
+    if (u.uSurfaceGraphCode) u.uSurfaceGraphCode.value = atlas.graph?.body || '';
+    if (atlas.graph) u.uSurfaceGraphParams.value = Array.from({length:128},(_,i)=>new THREE.Vector4(...(atlas.graph.values[i]||[0,0,0,0])));
+    if (atlas.backend === 'array') {
+      u.uSurfaceContributions.value=atlas.budget.contributions;
+      if(atlas.paint) {
+        u.uSurfacePaintMap.value=Array.from({length:32},(_,slot)=>{
+          const layer=atlas.paint.layers.find(l=>l.slot===slot);if(!layer)return new THREE.Vector4(-1,-1,0,1);
+          const items=resolveSurfaceReference(layer.materialInstanceId,atlas.document);
+          return new THREE.Vector4(atlas.slots[items[0].assetId],items[1]?atlas.slots[items[1].assetId]:-1,items[0].wetness||0,items[0].scale||1);
+        });
+        u.uSurfacePaintTint.value=Array.from({length:32},(_,slot)=>{const layer=atlas.paint.layers.find(l=>l.slot===slot);return new THREE.Vector3(...(layer?resolveSurfaceReference(layer.materialInstanceId,atlas.document)[0].tint:[1,1,1]));});
+      }
+      u.uSurfaceRoleMap.value = atlas.mapping;
+      u.uSurfaceRoleTint.value = atlas.tints;
+      u.uSurfaceAssetSize.value = [...atlas.sizes, ...new Array(Math.max(0,64-atlas.sizes.length)).fill(2)];
+    }
     u.uSurfDiffuse.value = atlas.diffuse;
     u.uSurfProps.value = atlas.props;
     u.uSurfPresent.value = atlas.present.map((v) => (v ? 1.0 : 0.0));
@@ -4536,35 +4649,129 @@ export class Engine {
         .map((v) => (v ? 1.0 : 0.0));
     }
     u.uSurfTile.value = atlas.tile.slice();
-    this._surfaceAtlas = atlas;
-    this._needsRender = true;
+    u.uSurfReveal.value = 0;
     return true;
+  }
+
+  async _installSurfaceAtlas(atlas) {
+    if (!atlas || !this.uniforms?.uSurfDiffuse) return false;
+    const serial = this._surfaceInstallSerial = (this._surfaceInstallSerial || 0) + 1;
+    const mode = this.worldMode;
+    const source = normalizeSurfaceTextureSource(this.params);
+    const buildKey = this._surfaceBuildKey(source);
+    const current = () => !this._disposed && !this._contextLost
+      && serial === this._surfaceInstallSerial && this.worldMode === mode
+      && source === normalizeSurfaceTextureSource(this.params)
+      && buildKey === this._surfaceBuildKey(source);
+    const stale = () => Object.assign(new Error('Surface installation superseded'), {
+      code: 'SURFACE_ATLAS_SUPERSEDED',
+    });
+    const warm = [];
+    this._bgWorkStart('surface-shader', 'Preparing terrain material shader…');
+    try {
+      // Atlas values include shader defines and sampler types. Keep them private
+      // until the exact program has linked; onBeforeRender must never discover
+      // an unprepared backend on the visible terrain.
+      const uniforms = Object.fromEntries(Object.entries(this.uniforms)
+        .map(([key, uniform]) => [key, { ...uniform }]));
+      this._writeSurfaceAtlasUniforms(atlas, uniforms);
+      const octaves = Math.round(this.params.octaves);
+      const program = this._activeHeightProgram(mode);
+      const variant = this._targetTerrainVariant(atlas);
+      let live;
+      if (mode === 'planet') {
+        const { createPlanetMaterial } = await import('./terrain/PlanetMaterial.js');
+        live = this.planetWorld?.materials?.filter(Boolean) || [];
+        for (const material of live) {
+          warm.push(createPlanetMaterial(uniforms, octaves, program, {
+            minimal: material.userData?.minimalFragment === true,
+          }));
+        }
+      } else {
+        live = [mode === 'infinite' ? this._infiniteTerrainMat : this.terrainMaterial].filter(Boolean);
+        if (live.length) warm.push(createTerrainMaterial(uniforms, octaves, program, { variant, worldMode: mode }));
+      }
+      const snapshot = this._resolveCameraCompileTarget();
+      const stillCurrent = () => current()
+        && Math.round(this.params.octaves) === octaves
+        && this._activeHeightProgram(mode)?.sig === program?.sig
+        && (mode === 'planet'
+          ? live.every((material) => this.planetWorld?.materials?.includes(material))
+          : live[0] === (mode === 'infinite' ? this._infiniteTerrainMat : this.terrainMaterial))
+        && this._sameCameraCompileTarget(snapshot, this._resolveCameraCompileTarget());
+      if (!stillCurrent()) throw stale();
+      const sources = live.map((material) => {
+        let source = null;
+        this.scene?.traverse?.((object) => {
+          if (!source && object.material === material && object.geometry && this._isRenderable(object)) source = object;
+        });
+        return source;
+      });
+      let result;
+      if (mode === 'infinite' && warm.length) {
+        const geometry = this.infiniteWorld?.batches?.meshes?.find(Boolean)?.geometry;
+        if (!geometry) throw stale();
+        result = await this._compileInstancedMaterialVariant(warm[0], geometry, snapshot.renderTarget);
+      } else {
+        result = await this._compileMaterialVariants(warm, {
+          canvasOnly: true, renderTarget: snapshot.renderTarget,
+          timeoutMs: 120000, isCurrent: stillCurrent, sources,
+        });
+      }
+      if (!stillCurrent()) throw stale();
+      if (!result?.ready) throw result?.error || new Error('Terrain material shader did not become ready');
+      // No await between publishing the atlas and the warmed sources/defines.
+      this._writeSurfaceAtlasUniforms(atlas);
+      live.forEach((material, index) => {
+        const prepared = warm[index];
+        material.vertexShader = prepared.vertexShader;
+        material.fragmentShader = prepared.fragmentShader;
+        material.defines = { ...prepared.defines };
+        Object.assign(material.userData, prepared.userData);
+        syncSurfaceMaterialBackend(material);
+        material.needsUpdate = true;
+      });
+      this._surfaceAtlas = atlas;
+      this._surfaceReveal = 0;
+      this._needsRender = true;
+      return true;
+    } finally {
+      if (serial === this._surfaceInstallSerial) this._bgWorkEnd('surface-shader');
+      this._queueWarmMaterials(warm);
+    }
   }
 
   // Install freshly-built atlas textures (from SurfaceTextureAtlas.buildSurfaceAtlas).
   // Atlases are cached by source so switching Default <-> Custom doesn't rebuild
   // or dispose the source that is currently inactive.
-  setSurfaceAtlas(atlas, source = this.params.surfaceTextureSource) {
+  async setSurfaceAtlas(atlas, source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
     if (!this._surfaceAtlasCache) this._surfaceAtlasCache = {};
     const previous = this._surfaceAtlasCache[surfaceTextureSource];
-    if (previous && previous !== atlas) this._disposeSurfaceAtlas(previous);
     atlas.source = surfaceTextureSource;
+    atlas.cacheKey = this._surfaceBuildKey(surfaceTextureSource);
+    const installed = normalizeSurfaceTextureSource(this.params) !== surfaceTextureSource
+      ? true : await this._installSurfaceAtlas(atlas);
     this._surfaceAtlasCache[surfaceTextureSource] = atlas;
-    return this._installSurfaceAtlas(atlas);
+    if (previous && previous !== atlas && previous !== this._surfaceAtlas) this._disposeSurfaceAtlas(previous);
+    if (installed && !this._bootPending && !this._modeTransitionCoordinator?.active) {
+      this._terrainVariantRetryCount = 0;
+      this._scheduleTerrainVariantRetry(null, 0);
+    }
+    return installed;
   }
 
   installCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
     const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
-    if (!atlas) return false;
+    if (!atlas || atlas.cacheKey !== this._surfaceBuildKey(surfaceTextureSource)) return false;
     return this._installSurfaceAtlas(atlas);
   }
 
   getCachedSurfaceAtlas(source = this.params.surfaceTextureSource) {
     const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: source });
     const atlas = this._surfaceAtlasCache?.[surfaceTextureSource];
-    if (!atlas) return null;
+    if (!atlas || atlas.cacheKey !== this._surfaceBuildKey(surfaceTextureSource)) return null;
     return {
       anyPresent: !!atlas.anyPresent,
       bakedAt: atlas.bakedAt,
@@ -5161,13 +5368,14 @@ export class Engine {
     camera = this.camera,
     targetScene = this.scene,
     logCompile = true,
+    isCurrent = () => true,
   } = {}) {
     // Capture the renderer for the whole operation. Vite HMR and explicit
     // disposal can replace/null `this.renderer` while the driver is linking a
     // shader asynchronously. Never let a completed stale job dereference the
     // next renderer (or null) after that hand-off.
     const renderer = this.renderer;
-    if (this._disposed || !renderer) {
+    if (this._disposed || !renderer || !isCurrent()) {
       return {
         ready: false,
         timedOut: false,
@@ -5211,6 +5419,7 @@ export class Engine {
           camera,
           targetScene,
           logCompile,
+          isCurrent,
         }));
         done += passesPerMaterial;
         await yieldTask();
@@ -5240,42 +5449,42 @@ export class Engine {
       }
       probe.castShadow = Boolean(source?.castShadow);
       probe.receiveShadow = Boolean(source?.receiveShadow);
+      probe.frustumCulled = false;
       group.add(probe);
     }
 
     const waitOpts = timeoutMs != null ? { timeoutMs } : undefined;
     const compileStartedAt = performance.now();
-    const previousTarget = renderer.getRenderTarget();
     let pending;
     let rendererCompileMs = 0;
-    try {
-      renderer.setRenderTarget(renderTarget);
-      const compileKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
-        + `:target:${renderTarget ? `${renderTarget.width}x${renderTarget.height}:${renderTarget.samples || 0}` : 'canvas'}`;
-      pending = this._gpuWorkScheduler
-        ? await this._gpuWorkScheduler.schedule(
-            compileKey,
-            () => {
-              const startedAt = performance.now();
-              const value = renderer.compile(group, camera, targetScene);
-              rendererCompileMs = performance.now() - startedAt;
-              return value;
-            },
-          )
-        : (() => {
-            const startedAt = performance.now();
-            const value = renderer.compile(group, camera, targetScene);
-            rendererCompileMs = performance.now() - startedAt;
-            return value;
-          })();
-    } finally {
-      renderer.setRenderTarget(previousTarget);
+    const submit = (target) => {
+      if (this._disposed || this.renderer !== renderer || !isCurrent()) return null;
+      // The scheduler yields before submitting. Never hold renderer state across
+      // that yield: a live frame or another compile can change it in the meantime.
+      const previousTarget = renderer.getRenderTarget();
+      const startedAt = performance.now();
+      try {
+        renderer.setRenderTarget(target);
+        return renderer.compile(group, camera, targetScene);
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+        rendererCompileMs += performance.now() - startedAt;
+      }
+    };
+    const compileKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
+      + `:target:${renderTarget ? `${renderTarget.width}x${renderTarget.height}:${renderTarget.samples || 0}` : 'canvas'}`;
+    pending = this._gpuWorkScheduler
+      ? await this._gpuWorkScheduler.schedule(compileKey, () => submit(renderTarget))
+      : submit(renderTarget);
+    if (!pending) {
+      return { ready: false, aborted: true, timedOut: false, pendingCount: 0,
+        materialCount: list.length, waitMs: 0, syncCompileMs: 0, asyncWaitMs: 0 };
     }
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
     const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
     const asyncWaitMs = performance.now() - waitStartedAt;
-    if (this._disposed || this.renderer !== renderer || canvasResult?.aborted) {
+    if (this._disposed || this.renderer !== renderer || canvasResult?.aborted || !isCurrent()) {
       return {
         ...canvasResult,
         ready: false,
@@ -5314,6 +5523,7 @@ export class Engine {
         + ` materials=${list.length}`
         + ` sync=${syncCompileMs.toFixed(0)}ms`
         + ` async=${asyncWaitMs.toFixed(0)}ms`
+        + ` validation=${validationMs.toFixed(0)}ms`
         + ` ready=${canvasResult.ready}`
         + ` pending=${canvasResult.pendingCount}`
         + ` parallel=${parallelCompile}`
@@ -5343,18 +5553,17 @@ export class Engine {
     }
 
     this.underwater._ensureTarget(renderer);
-    renderer.setRenderTarget(this.underwater._rt);
     const rtCompileStartedAt = performance.now();
     const rtKey = `material:${list.map((material) => `${material.id}:${material.version}`).join(',')}`
       + `:target:${this.underwater._rt.width}x${this.underwater._rt.height}:${this.underwater._rt.samples || 0}`;
     const pendingRt = this._gpuWorkScheduler
       ? await this._gpuWorkScheduler.schedule(
           rtKey,
-          () => renderer.compile(group, camera, targetScene),
+          () => submit(this.underwater._rt),
         )
-      : renderer.compile(group, camera, targetScene);
+      : submit(this.underwater._rt);
     const rtSyncCompileMs = performance.now() - rtCompileStartedAt;
-    renderer.setRenderTarget(null);
+    if (!pendingRt) return { ready: false, aborted: true, pendingCount: 0 };
     const rtWaitStartedAt = performance.now();
     const rtResult = await this._waitForMaterialsReady(pendingRt, waitOpts);
     const rtAsyncWaitMs = performance.now() - rtWaitStartedAt;
@@ -5407,12 +5616,27 @@ export class Engine {
         if (renderTarget?.texture?.colorSpace) options.colorSpace = renderTarget.texture.colorSpace;
         const target = new THREE.WebGLRenderTarget(1, 1, options);
         const previous = renderer.getRenderTarget();
+        const pacer = new GpuFramePacer(gl);
         try {
-          renderer.setRenderTarget(target);
-          renderer.clear();
-          renderer.render(group, camera);
+          try {
+            renderer.setRenderTarget(target);
+            renderer.clear();
+            renderer.render(group, camera);
+            pacer.submitted();
+          } finally {
+            renderer.setRenderTarget(previous);
+          }
+          // getError after the canary can otherwise synchronously wait on the
+          // driver's first-draw pipeline setup, even after the shader linked.
+          const startedAt = performance.now();
+          while (!pacer.ready()) {
+            if (this._disposed || this.renderer !== renderer || performance.now() - startedAt > 120000) {
+              throw new Error('Shader validation draw did not finish');
+            }
+            await yieldFrame();
+          }
         } finally {
-          renderer.setRenderTarget(previous);
+          pacer.dispose();
           target.dispose();
         }
       },
@@ -10257,20 +10481,31 @@ export class Engine {
   }
 
   /** Water quality uniforms — per water material, never shared with terrain. */
-  _targetTerrainVariant() {
+  _targetTerrainVariant(atlas = this._surfaceAtlas) {
+    const detailReady = this._detailPageCache?.hasReadyPage === true;
+    const source = normalizeSurfaceTextureSource(this.params || {});
+    const surfaceReady = atlas?.source === source
+      && atlas?.cacheKey === this._surfaceBuildKey(source);
     if (this.projectMode === 'manual' && !this._manualHasGeneratedBase()) {
       const surfaceHasData = !this.manualTerrain?.surfaceField?.isEmpty?.();
-      return this._manualSurfaceShaderRequested || surfaceHasData ? 'manual' : 'manual-empty';
+      if (!this._manualSurfaceShaderRequested && !surfaceHasData) {
+        return detailReady ? 'manual-empty' : 'manual-empty-base';
+      }
+      if (!surfaceReady) return detailReady ? 'manual-empty' : 'manual-empty-base';
+      return detailReady ? 'manual' : 'manual-surface';
     }
     const hybridManual = this.projectMode === 'manual' && this._manualHasGeneratedBase();
     const surfaceEnabled = this.projectMode === 'manual'
       || (this.params?.surfaceTextureMode === true
         && (this.params?.surfaceTextureAmount ?? 1) > 0.001);
     const detailEnabled = (this.perf?.terrainDetailQuality ?? 3) > 0
-      && (this.perf?.terrainDetailOpacity ?? 1) > 0.001;
-    if (hybridManual) return detailEnabled ? 'hybrid' : 'hybrid-surface';
-    if (surfaceEnabled && detailEnabled) return 'full';
-    if (surfaceEnabled) return 'surface';
+      && (this.perf?.terrainDetailOpacity ?? 1) > 0.001 && detailReady;
+    if (hybridManual) {
+      if (!surfaceReady) return 'hybrid-base';
+      return detailEnabled ? 'hybrid' : 'hybrid-surface';
+    }
+    if (surfaceEnabled && surfaceReady && detailEnabled) return 'full';
+    if (surfaceEnabled && surfaceReady) return 'surface';
     if (detailEnabled) return 'detail';
     return 'base';
   }
@@ -10288,6 +10523,15 @@ export class Engine {
     if (!live || live.userData?.minimalFragment) return false;
     const variant = this._targetTerrainVariant();
     if (live.userData?.terrainVariant === variant) return true;
+    if (terrainShaderFamily(live.userData?.terrainVariant) === terrainShaderFamily(variant)) {
+      // The page-backed detail branch is already in the live program. Its
+      // readiness changes uniforms only; compiling the same large shader a
+      // second time can block the GPU and freeze camera input for seconds.
+      live.userData.terrainVariant = variant;
+      this._needsRender = true;
+      this._completeBootIfQualityReady();
+      return true;
+    }
 
     const token = (this._terrainVariantToken || 0) + 1;
     this._terrainVariantToken = token;
@@ -11959,9 +12203,52 @@ export class Engine {
   getTargetTerrainVariant() { return this._targetTerrainVariant(); }
 
   async buildAndSetSurfaceAtlas(source) {
-    const { buildActiveSurfaceAtlas } = await import('./terrain/surface/applyTerrainSurface.js');
-    const atlas = await buildActiveSurfaceAtlas({ source });
-    this.setSurfaceAtlas(atlas, source);
+    const revision=(this._surfaceBuildRevision||0)+1;this._surfaceBuildRevision=revision;
+    const buildKey = this._surfaceBuildKey(source);
+    const { prepareSurfaceInBackground, cancelSurfacePreparations } = await import('./terrain/surface/SurfacePreparationClient.js');
+    cancelSurfacePreparations();
+    this._bgWorkStart('surface-preparation', 'Preparing terrain materials…');
+    const layersField = this.manualTerrain?.surfaceField?.layersField;
+    let atlas;
+    try {
+      atlas = await prepareSurfaceInBackground({
+        source, document: this.params.surfaceDocument, graph: this.terrainGraph,
+        paint: layersField ? { layers: layersField.layers } : null,
+      });
+    } catch (error) {
+      if (error.code !== 'SURFACE_ATLAS_SUPERSEDED') {
+        this.cb.onStatus?.('Terrain materials could not be prepared; base terrain remains available', false);
+      }
+      throw error;
+    } finally {
+      this._bgWorkEnd('surface-preparation');
+    }
+    if(revision!==this._surfaceBuildRevision || buildKey !== this._surfaceBuildKey(source)){
+      this._disposeSurfaceAtlas(atlas);throw new Error('Surface build superseded');
+    }
+    try {
+      const { uploadSurfaceTextures } = await import('./terrain/surface/SurfaceUploadQueue.js');
+      this._surfaceUploadActive = true;
+      await uploadSurfaceTextures(this.renderer, atlas, {
+        isCurrent: () => !this._disposed && !this._contextLost
+          && revision === this._surfaceBuildRevision && buildKey === this._surfaceBuildKey(source),
+      });
+    } catch (error) {
+      this._disposeSurfaceAtlas(atlas);
+      throw error;
+    } finally {
+      this._surfaceUploadActive = false;
+    }
+    if (revision !== this._surfaceBuildRevision || buildKey !== this._surfaceBuildKey(source)) {
+      this._disposeSurfaceAtlas(atlas);
+      throw new Error('Surface build superseded');
+    }
+    try {
+      await this.setSurfaceAtlas(atlas, source);
+    } catch (error) {
+      this._disposeSurfaceAtlas(atlas);
+      throw error;
+    }
     return {
       anyPresent: !!atlas.anyPresent,
       bakedAt: atlas.bakedAt,
@@ -12013,7 +12300,15 @@ export class Engine {
     // freeze the app (the rAF callback stops being scheduled). Guard the whole
     // frame so a single bad frame degrades to a logged warning and recovers.
     try {
+      const frameStarted = performance.now();
+      const renderSerial = this._mainRenderSerial;
       this._tickBody();
+      if (this._mainRenderSerial !== renderSerial) this._gpuFramePacer?.submitted();
+      const frameMs = performance.now() - frameStarted;
+      if (frameMs > 1000 && frameStarted - (this._lastFrameStallLog || 0) > 5000) {
+        this._lastFrameStallLog = frameStarted;
+        console.warn(`[frame stall] ${frameMs.toFixed(0)}ms mode=${this.worldMode}`);
+      }
     } catch (e) {
       if (!this._tickErrorLogged) {
         console.error('Render tick error (recovering)', e);
@@ -12043,8 +12338,53 @@ export class Engine {
       this.profiler.endFrame();
       return;
     }
+    this._gpuFramePacer ||= new GpuFramePacer(this.renderer?.getContext?.());
+    if (!this._gpuFramePacer.ready()) {
+      // Never stack full-screen terrain draws behind a slow close-up frame.
+      // Camera input still advances; the next available draw uses its latest pose.
+      if (this.fpsControls) {
+        this.fpsControls.update(dt);
+        this.player?.update(dt);
+      } else if (this.worldMode === 'planet' && this.player) this.player.update(dt);
+      else if (this.planetControls) this.planetControls.update(dt);
+      else this.controls?.update(dt);
+      this._needsRender = true;
+      this.profiler.setMetric('gpuBackpressure', true);
+      this.profiler.endFrame();
+      return;
+    }
+    this.profiler.setMetric('gpuBackpressure', false);
     this.uniforms.uTime.value += dt;
     this._tickDayNightCycle(dt, now);
+
+    if ((this.perf?.terrainDetailQuality ?? 0) > 0) {
+      const seed = this.uniforms.uSeedOffset.value;
+      const scale = (this.perf.terrainDetailScale ?? 0.16)
+        * (0.55 + 0.70 * Math.min(1, (this.perf.terrainDetailQuality ?? 3) / 3));
+      const variant = this.worldMode === 'planet'
+        ? (this._planetMatMinimal ? '' : 'planet-detail')
+        : this.terrainMaterial?.userData?.terrainVariant;
+      const detailMaterial = this.worldMode === 'infinite'
+        ? this._infiniteTerrainMat : this.terrainMaterial;
+      const active = variant === 'planet-detail'
+        || (this.worldMode !== 'planet' && !!detailMaterial
+          && !detailMaterial.userData?.minimalFragment);
+      this._detailPageCache?.update({
+        camera: this.camera, mode: this.worldMode, generation: this._terrainGen,
+        scale, seedX: seed.x, seedY: seed.y, active,
+        allowUpload: !this._surfaceUploadActive && !this._compiling && !this._contextLost, dt,
+      });
+    }
+    if (this._surfaceAtlas?.source === normalizeSurfaceTextureSource(this.params)) {
+      const variant = this.worldMode === 'planet'
+        ? (this._planetMatMinimal ? '' : 'planet-surface')
+        : this.terrainMaterial?.userData?.terrainVariant;
+      if (['surface', 'full', 'manual', 'manual-surface', 'hybrid', 'hybrid-surface', 'planet-surface'].includes(variant)) {
+        this._surfaceReveal = Math.min(1, (this._surfaceReveal || 0) + Math.max(0, dt) / 0.25);
+        this.uniforms.uSurfReveal.value = this._surfaceReveal;
+        if (this._surfaceReveal < 1) this._needsRender = true;
+      }
+    }
 
 
     this._processTerrainBuildQueue(now);
@@ -12865,6 +13205,7 @@ export class Engine {
   }
 
   dispose() {
+    this._gpuFramePacer?.dispose();
     for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
     this.erosionField?.dispose();
     this.explodeTool?.dispose?.();
@@ -12877,6 +13218,8 @@ export class Engine {
     this._erosionWorker = null;
     if (this._disposed) return;
     this._disposed = true;
+    this._detailPageCache?.dispose?.();
+    this._detailPageCache = null;
     this._bootPipeline?.dispose?.();
     this._bootPipeline = null;
     this._modeTransitionCoordinator?.dispose?.();

@@ -4,6 +4,7 @@ import {
   createInfiniteTerrainMaterial,
   createTerrainMaterial,
   createTerrainUniforms,
+  terrainShaderFamily,
 } from '../src/engine/terrain/TerrainMaterial.js';
 import { createPlanetMaterial } from '../src/engine/terrain/PlanetMaterial.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
@@ -17,6 +18,38 @@ afterEach(() => {
 });
 
 describe('shared Tile and Infinite terrain program', () => {
+  it('uses one procedural normal sampling call in Studio without changing noise octave loops', () => {
+    const uniforms = createTerrainUniforms();
+    for (const worldMode of ['studio', 'shared', 'infinite']) {
+      const material = createTerrainMaterial(uniforms, 7, undefined, { worldMode });
+      materials.push(material);
+      expect(material.fragmentShader.includes('sampleIndex < uTerrainNormalSampleCount'))
+        .toBe(worldMode === 'studio');
+      expect(material.fragmentShader).toContain('i < OCTAVES');
+    }
+    expect(uniforms.uTerrainNormalSampleCount.value).toBe(3);
+  });
+  it('keeps each detail-readiness pair on the same compiled program', () => {
+    const uniforms = createTerrainUniforms();
+    const pairs = [
+      ['base', 'detail'],
+      ['surface', 'full'],
+      ['manual-empty-base', 'manual-empty'],
+      ['manual-surface', 'manual'],
+      ['hybrid-surface', 'hybrid'],
+    ];
+    for (const [unready, ready] of pairs) {
+      const before = createTerrainMaterial(uniforms, 5, undefined, { variant: unready });
+      const after = createTerrainMaterial(uniforms, 5, undefined, { variant: ready });
+      materials.push(before, after);
+      expect(terrainShaderFamily(unready)).toBe(terrainShaderFamily(ready));
+      expect(before.vertexShader).toBe(after.vertexShader);
+      expect(before.fragmentShader).toBe(after.fragmentShader);
+      expect(before.defines).toEqual(after.defines);
+      expect(before.fragmentShader).toContain('uDetailPageArray');
+    }
+  });
+
   it('builds byte-identical full shader programs for both modes', () => {
     const uniforms = createTerrainUniforms();
     const tile = createTerrainMaterial(uniforms, 7, undefined, { worldMode: 'shared' });
@@ -238,7 +271,7 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');
-    expect(tile.fragmentShader).toContain('(useManualWeights ? 1.0 : roleBlend)');
+    expect(tile.fragmentShader).toContain('bWeight / max(aWeight + bWeight');
   });
 
   it('keeps the dedicated Manual Terrain shader below the 16 texture-unit limit', () => {

@@ -1,3 +1,4 @@
+import SurfacePackPanel from './SurfacePackPanel.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageUp, RefreshCw, RotateCcw } from 'lucide-react';
 import { unzipSync } from 'fflate';
@@ -11,7 +12,7 @@ import {
 } from '../../engine/terrain/surface/SurfaceTextureImport.js';
 import {
   loadMaterialsManifest, resolveCustomMapUrl,
-  setOverrideUrl, clearOverrideUrl, getOverrideUrl, MAP_SLOT_LABELS,
+  setOverrideBlob, setOverrideUrl, clearOverrideUrl, getOverrideUrl, MAP_SLOT_LABELS,
   resetMaterialSurfaceState, SURFACE_LIBRARY_CHANGE_EVENT, CUSTOM_SURFACE_VARIANT,
   getCustomVariantKey,
 } from '../../engine/terrain/surface/SurfaceLibrary.js';
@@ -49,9 +50,10 @@ function layerStatusClass(status) {
   return 'missing';
 }
 
-function coverageText(coverage) {
-  if (!coverage) return 'Custom atlas not baked';
-  return `${coverage.diffuseReady}/${coverage.total} custom roles ready`;
+function coverageText(coverage, source) {
+  const pbr = source === SURFACE_TEXTURE_SOURCE.PBR;
+  if (!coverage) return pbr ? 'PBR materials not loaded' : 'Custom atlas not baked';
+  return `${coverage.diffuseReady}/${coverage.total} ${pbr ? 'PBR' : 'custom'} roles ready`;
 }
 
 function previewUrlsFor(role, variantIndex) {
@@ -95,7 +97,7 @@ async function importDroppedTextures({ files, role, mapSlots, variantIndex }) {
   // Apply the complete import in one synchronous batch so the debounced bake
   // cannot capture half of a slowly decompressed multi-variant archive.
   for (const entry of plan.assignments) {
-    setOverrideUrl(role.id, getCustomVariantKey(entry.variantIndex), entry.slot, URL.createObjectURL(entry.blob));
+    await setOverrideBlob(role.id, getCustomVariantKey(entry.variantIndex), entry.slot, entry.blob, entry.name);
     matched.push(`V${entry.variantIndex + 1} ${MAP_SLOT_LABELS[entry.slot]} (${entry.name})`);
   }
   const skipped = [...warnings, ...unmatched, ...plan.unmatched];
@@ -114,10 +116,10 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
     setStatus(resolved ? 'custom' : 'missing');
   }, [resolved]);
 
-  const pick = (file) => {
+  const pick = async (file) => {
     if (!SURFACE_IMAGE_EXT_RE.test(file.name)) { setStatus('invalid'); return; }
-    const url = URL.createObjectURL(file);
-    setOverrideUrl(role.id, variantKey, slot, url);
+    try { await setOverrideBlob(role.id, variantKey, slot, file, file.name); }
+    catch (error) { setStatus(error.message); return; }
     onChanged();
   };
 
@@ -408,9 +410,12 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 const SURFACE_MODE_SLIDERS = [
-  slider('surfaceTextureScale', 'Scale', 0.25, 4, 0.05, { digits: 2, fallback: 1 }),
+  slider('surfaceTextureScale', 'Scale', 0.1, 5, 0.05, { digits: 2, fallback: 1 }),
   slider('surfaceTextureBreakup', 'Break Tiling', 0, 1, 0.02, { digits: 2, fallback: 0.5 }),
-  slider('surfaceTextureBlend', 'Blend Textures', 0, 1, 0.02, { digits: 2, fallback: 0.35 }),
+  slider('surfaceTextureBlend', 'Blend Textures', 0, 1, 0.02, { digits: 2, fallback: 0.35,
+    info: 'Controls how strongly neighboring ground materials mix where they overlap.' }),
+  slider('surfaceTextureTransition', 'Transition Width', 0, 1, 0.02, { digits: 2, fallback: 0.5,
+    info: 'Widens the sand, rock, canyon, shoreline and altitude transition zones. 0 keeps the previous narrow boundaries.' }),
   slider('surfaceTexturePaletteInfluence', 'Palette Influence', 0, 1, 0.02, { digits: 2, fallback: 0.6 }),
   slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2, fallback: 1 }),
 ];
@@ -433,6 +438,7 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
         options={[
           { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL, label: 'Procedural' },
           { value: SURFACE_TEXTURE_SOURCE.CUSTOM, label: 'Custom Materials' },
+          { value: SURFACE_TEXTURE_SOURCE.PBR, label: 'Local PBR Library' },
         ]}
         onChange={(value) => onParam('surfaceTextureSource', value)}
         settingId="surface.mode"
@@ -443,19 +449,31 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
           <div className="surface-apply-row">
             <button type="button" className="action-btn primary" onClick={() => onBake({ source, force: true })} disabled={applying}>
               <RefreshCw size={13} strokeWidth={1.8} aria-hidden />
-              {applying ? 'Baking...' : 'Bake Custom Materials'}
+              {applying ? 'Baking...' : source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials'}
             </button>
             <span className={`surface-apply-status ${coverageClass}`}>
-              {applying ? 'Building atlas' : status?.error ? 'Bake failed' : coverageText(coverage)}
+              {applying ? 'Building atlas' : status?.error ? 'Bake failed' : coverageText(coverage, source)}
             </span>
           </div>
-          {status?.error && <p className="section-hint warning" role="alert">{status.error} Use Bake Custom Materials to retry.</p>}
-          <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads last for this browser session.</p>
-          {SURFACE_MODE_SLIDERS.map((def) => (
+          {status?.error && <p className="section-hint warning" role="alert">{status.error} Use {source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials'} to retry.</p>}
+          <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads are stored locally and included in portable project exports.</p>
+          {source === SURFACE_TEXTURE_SOURCE.CUSTOM && (
+            <ToggleRow
+              label="Original Texture Colors"
+              value={params.surfaceTextureRawColor !== false}
+              onChange={(v) => onParam('surfaceTextureRawColor', v)}
+              settingId="surface.surfaceTextureRawColor"
+              info="Keep uploaded albedo unchanged. Turn off to intentionally recolor it with the biome palette."
+            />
+          )}
+          {SURFACE_MODE_SLIDERS.filter((def) => def.key !== 'surfaceTexturePaletteInfluence'
+            || (source === SURFACE_TEXTURE_SOURCE.CUSTOM && params.surfaceTextureRawColor === false)).map((def) => (
             <SliderCtl
               key={def.key}
               def={def}
-              value={params[def.key] ?? def.fallback ?? 1}
+              value={def.key === 'surfaceTextureScale'
+                ? Math.min(def.max, Math.max(def.min, params[def.key] ?? def.fallback ?? 1))
+                : (params[def.key] ?? def.fallback ?? 1)}
               onChange={(v) => onParam(def.key, v)}
               settingId={`surface.${def.key}`}
             />
@@ -484,6 +502,7 @@ export default function SurfaceLibraryPanel({ ctx }) {
   const [status, setStatus] = useState(null);
   const bakeTimerRef = useRef(null);
   const bakeRequestRef = useRef(0);
+  const supersededRetriesRef = useRef(0);
   const sourceRef = useRef(source);
   sourceRef.current = source;
 
@@ -511,11 +530,23 @@ export default function SurfaceLibraryPanel({ ctx }) {
     setStatus((cur) => ({ ...(cur || {}), source: requestedSource, building: true, error: null }));
     try {
       const res = await ctx.onApplySurfaceTextures({ source: requestedSource, force });
-      if (request === bakeRequestRef.current && sourceRef.current === requestedSource) setStatus(res);
+      if (request === bakeRequestRef.current && sourceRef.current === requestedSource) {
+        supersededRetriesRef.current = 0;
+        setStatus(res);
+      }
       return res;
     } catch (err) {
       if (request === bakeRequestRef.current && sourceRef.current === requestedSource) {
-        setStatus({ source: requestedSource, error: err.message || 'Could not bake custom materials.' });
+        if (err.code === 'SURFACE_ATLAS_SUPERSEDED' && supersededRetriesRef.current < 2) {
+          supersededRetriesRef.current += 1;
+          setStatus({ source: requestedSource, building: true, error: null });
+          bakeTimerRef.current = window.setTimeout(() => {
+            bakeTimerRef.current = null;
+            bake({ source: requestedSource });
+          }, 250);
+        } else {
+          setStatus({ source: requestedSource, error: err.message || 'Could not prepare terrain materials.' });
+        }
       }
       return null;
     } finally {
@@ -535,6 +566,7 @@ export default function SurfaceLibraryPanel({ ctx }) {
 
   useEffect(() => {
     setApplying(false);
+    supersededRetriesRef.current = 0;
     return () => {
       bakeRequestRef.current += 1;
       if (bakeTimerRef.current) window.clearTimeout(bakeTimerRef.current);
@@ -564,7 +596,8 @@ export default function SurfaceLibraryPanel({ ctx }) {
   return (
     <div className="surface-library">
       <SurfaceModeControls ctx={ctx} source={source} onBake={bake} applying={applying} status={status} />
-      {showMaterials && SURFACE_TEXTURE_ROLE_GROUPS.map((group) => (
+      {source === SURFACE_TEXTURE_SOURCE.PBR && <SurfacePackPanel ctx={ctx} />}
+      {showMaterials && source !== SURFACE_TEXTURE_SOURCE.PBR && SURFACE_TEXTURE_ROLE_GROUPS.map((group) => (
         <div key={group.id} className="surface-role-group">
           <div className="surface-role-group-title">{group.label}</div>
           {group.roles.map((role) => (

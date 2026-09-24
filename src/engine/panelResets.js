@@ -19,7 +19,7 @@ export const TERRAIN_RESET_KEYS = [
   'noiseScale', 'noiseStrength', 'terrainSmoothing', 'octaves', 'persistence', 'lacunarity', 'ridge', 'warp',
   'noisePreset', 'normalStrength', 'aoStrength', 'aoRidge',
   'surfaceTextureSource', 'surfaceTextureMode', 'surfaceTextureAmount', 'surfaceTextureTint', 'surfaceTextureScale',
-  'surfaceTextureBreakup', 'surfaceTextureBlend', 'surfaceTexturePaletteInfluence',
+  'surfaceTextureBreakup', 'surfaceTextureBlend', 'surfaceTextureTransition', 'surfaceTextureRawColor', 'surfaceTexturePaletteInfluence',
   'surfaceTextureNormal', 'surfaceTextureRough', 'surfaceTextureAO',
   'surfaceTextureTriplanar',
 ];

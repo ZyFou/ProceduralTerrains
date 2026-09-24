@@ -109,6 +109,9 @@ export const WATER_DEFAULT_PARAMS = {
   waterSpecularStrength: 1.0,
   waterBiomeColorEnabled: true,
   waterBiomeColorStrength: 0.55,
+  // Realistic modes: 0 = palette colours only, 1 = physically plausible clear
+  // water (turquoise shallows, ocean-blue depths) with per-biome variants.
+  waterNaturalColor: 0.7,
 
   // lighting — shared by Legacy, Realistic, Volumetric, Cinematic, and Planet.
   // Atmosphere Influence = 0 restores each shader's previous independent light.

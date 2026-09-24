@@ -153,6 +153,7 @@ uniform float uMicroWaveDetail;
 uniform float uSkyReflectionEnabled;
 uniform float uBiomeColorEnabled;
 uniform float uBiomeColorStrength;
+uniform float uWaterNaturalColor;
 
 // realistic water controls
 uniform float uWaterTier;          // 1=realistic, 2=volumetric, 3=cinematic
@@ -227,10 +228,10 @@ vec4 waterPaintedBiomeAt(vec2 xz) {
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
 }
 
-// Return a relative tint rather than an absolute color so custom palettes and
-// water presets remain authoritative. The broad climate fields and filtered
-// Studio bake make transitions gradual across biome borders.
-vec3 waterBiomeColorMultiplier(vec2 xz) {
+// Broad biome weights for the water above each point. The climate fields and
+// filtered Studio bake keep transitions gradual across biome borders.
+// x = desert, y = tropical, z = wetland, w = alpine; canyon comes from paint.
+vec4 waterBiomeWeights(vec2 xz, out float canyon, out float strength) {
   vec4 climate = waterBiomeClimateAt(xz);
   float borderJitter = (climate.a - 0.5) * 0.16;
   float hot = smoothstep(0.52, 0.76, climate.r + borderJitter);
@@ -240,30 +241,63 @@ vec3 waterBiomeColorMultiplier(vec2 xz) {
   float coastal = smoothstep(0.58, 0.30, climate.b);
   float inland = smoothstep(0.42, 0.72, climate.b);
 
-  float desert = hot * dry;
-  float tropical = hot * wet;
-  float wetland = wet * coastal * (1.0 - hot * 0.35);
-  float alpine = cold * inland;
-
   vec4 painted = waterPaintedBiomeAt(xz);
-  desert = max(desert, painted.r);
-  wetland = max(wetland, painted.b);
-  alpine = max(alpine, painted.a);
-  float canyon = painted.g;
-
-  vec3 tint = vec3(1.0);
-  tint = mix(tint, vec3(0.88, 1.07, 1.12), desert * 0.70);
-  tint = mix(tint, vec3(0.76, 1.12, 1.01), tropical * 0.78);
-  tint = mix(tint, vec3(0.72, 0.99, 0.76), wetland * 0.82);
-  tint = mix(tint, vec3(0.82, 0.94, 1.11), alpine * 0.72);
-  tint = mix(tint, vec3(0.94, 1.03, 0.92), canyon * 0.55);
+  vec4 weights = vec4(
+    max(hot * dry, painted.r),
+    hot * wet,
+    max(wet * coastal * (1.0 - hot * 0.35), painted.b),
+    max(cold * inland, painted.a)
+  );
+  canyon = painted.g;
 
   float paintedAvailable = max(max(painted.r, painted.g), max(painted.b, painted.a));
   float available = max(waterBiomeClimateAvailable(), paintedAvailable);
-  float strength = uBiomeColorEnabled
-    * uBiomeColorStrength
-    * clamp(available, 0.0, 1.0);
-  return mix(vec3(1.0), tint, clamp(strength, 0.0, 1.5));
+  strength = uBiomeColorEnabled * clamp(available, 0.0, 1.0);
+  return weights;
+}
+
+// Relative tint for the palette colours, so custom palettes and water presets
+// remain authoritative when Natural Water Color is lowered.
+vec3 waterBiomeColorMultiplier(vec4 weights, float canyon, float strength) {
+  vec3 tint = vec3(1.0);
+  tint = mix(tint, vec3(0.88, 1.07, 1.12), weights.x * 0.70);
+  tint = mix(tint, vec3(0.76, 1.12, 1.01), weights.y * 0.78);
+  tint = mix(tint, vec3(0.72, 0.99, 0.76), weights.z * 0.82);
+  tint = mix(tint, vec3(0.82, 0.94, 1.11), weights.w * 0.72);
+  tint = mix(tint, vec3(0.94, 1.03, 0.92), canyon * 0.55);
+  return mix(
+    vec3(1.0),
+    tint,
+    clamp(strength * uBiomeColorStrength, 0.0, 1.5)
+  );
+}
+
+// Physically plausible clear-water colours (linear). Shallow is sunlit sand
+// seen through a few metres of water; deep is the open-water body. Each biome
+// swaps in its own water: lagoon turquoise, clear desert aqua, murky wetland,
+// milky glacial melt and silty canyon rivers.
+void waterNaturalColors(
+  vec4 weights,
+  float canyon,
+  float strength,
+  out vec3 natShallow,
+  out vec3 natDeep
+) {
+  natShallow = vec3(0.018, 0.360, 0.430);
+  natDeep = vec3(0.004, 0.050, 0.170);
+  float amount = clamp(strength * uBiomeColorStrength / 0.55, 0.0, 1.0);
+  vec4 w = weights * amount;
+  float c = canyon * amount;
+  natShallow = mix(natShallow, vec3(0.010, 0.520, 0.500), w.y);
+  natDeep = mix(natDeep, vec3(0.002, 0.105, 0.215), w.y);
+  natShallow = mix(natShallow, vec3(0.030, 0.430, 0.540), w.x);
+  natDeep = mix(natDeep, vec3(0.003, 0.060, 0.230), w.x);
+  natShallow = mix(natShallow, vec3(0.085, 0.150, 0.055), w.z);
+  natDeep = mix(natDeep, vec3(0.018, 0.042, 0.022), w.z);
+  natShallow = mix(natShallow, vec3(0.110, 0.330, 0.380), w.w);
+  natDeep = mix(natDeep, vec3(0.022, 0.095, 0.140), w.w);
+  natShallow = mix(natShallow, vec3(0.120, 0.210, 0.150), c);
+  natDeep = mix(natDeep, vec3(0.026, 0.062, 0.058), c);
 }
 
 // Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
@@ -281,6 +315,13 @@ float slopeFromCenter(vec2 xz, float centerH) {
   float hx = terrainHeightAt(xz + vec2(e, 0.0));
   float hz = terrainHeightAt(xz + vec2(0.0, e));
   return length(vec2(hx - centerH, hz - centerH)) / e;
+}
+
+// Sine-free hash (stable at large world coordinates).
+float waterGlintHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
 }
 
 float waterLinearSceneDepth(float rawDepth) {
@@ -312,9 +353,18 @@ void main() {
 
   float camDist = length(cameraPosition - vWorldPos);
   float farWater = smoothstep(700.0, 2400.0, camDist);
-  float roughness = clamp(uRoughness + farWater * 0.18, 0.04, 1.0);
+  // The wave spectrum now resolves chop down to sub-unit scale, so the
+  // Roughness setting only needs to cover the unresolved micro-facets. A low
+  // base keeps the sun highlight broken into sharp glints on every wavelet.
+  float roughness = clamp(uRoughness * 0.5 + farWater * 0.08, 0.03, 1.0);
   float t = uTime * uWaterAnim * uAnimSpeed;
   vec3 n = waterDirectionalNormal(xz, t, camDist, roughness);
+  // Ripples too small for this pixel were filtered out of n; their slope
+  // variance widens the sun lobe and reflection blur instead.
+  roughness = waterFilteredRoughness(
+    roughness,
+    uNormalIntensity * uWaveStrength * uWaveComplexity
+  );
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   if (dot(n, viewDir) < 0.0) n = -n;
 
@@ -335,9 +385,28 @@ void main() {
     uColDeep,
     uPaletteSaturation
   ) * uPaletteTint;
-  vec3 biomeColorMultiplier = waterBiomeColorMultiplier(xz);
+  float biomeCanyon;
+  float biomeStrength;
+  vec4 biomeWeights = waterBiomeWeights(xz, biomeCanyon, biomeStrength);
+  vec3 biomeColorMultiplier = waterBiomeColorMultiplier(
+    biomeWeights,
+    biomeCanyon,
+    biomeStrength
+  );
   shallowColor *= biomeColorMultiplier;
   deepColor *= mix(vec3(1.0), biomeColorMultiplier, 0.68);
+  vec3 naturalShallow;
+  vec3 naturalDeep;
+  waterNaturalColors(
+    biomeWeights,
+    biomeCanyon,
+    biomeStrength,
+    naturalShallow,
+    naturalDeep
+  );
+  float naturalColor = clamp(uWaterNaturalColor, 0.0, 1.0);
+  shallowColor = mix(shallowColor, naturalShallow, naturalColor);
+  deepColor = mix(deepColor, naturalDeep, naturalColor);
   vec3 scatteringColor = mix(shallowColor, deepColor, clamp(dGrade, 0.0, 1.0));
 
   // Beer–Lambert absorption. Looking across the surface increases the path
@@ -349,6 +418,11 @@ void main() {
     uWaterOpacity,
     uDepthOpacityStr
   );
+  // Real water removes red within a few metres, then green; this is what
+  // turns sand turquoise. Murky biome water already absorbs via deepColor.
+  absorptionRGB += vec3(0.16, 0.03, 0.0)
+    * naturalColor
+    * max(uAbsorptionStr, 0.0);
   vec3 transmittance = waterBeerLambert(absorptionRGB, opticalDepth);
   float transmissionExponent = pow(
     0.45 / max(uRefractionStrength, 0.05),
@@ -359,6 +433,15 @@ void main() {
     vec3(clamp(transmissionExponent, 0.72, 1.45))
   );
   float volumeAlpha = waterVolumeOpacity(transmittance);
+  // Single-pass blending can only dim the floor behind the water uniformly.
+  // Let the least-transmitted channel through the blend and rebuild the
+  // chromatic remainder from the palette sand, so shallow floors pick up the
+  // water hue instead of showing through untinted.
+  float neutralPass = min(min(transmittance.r, transmittance.g), transmittance.b);
+  float chromaSplit = naturalColor * (1.0 - step(1.5, uWaterTier));
+  volumeAlpha = mix(volumeAlpha, 1.0 - neutralPass, chromaSplit);
+  vec3 chromaTransmission = max(transmittance - vec3(neutralPass), vec3(0.0))
+    * chromaSplit;
 
   // Schlick Fresnel now follows the animated wave normal.
   float fres = waterSchlickFresnel(n, viewDir, uFresnelStrength);
@@ -445,15 +528,26 @@ void main() {
     reflectedSkyBroad,
     reflectionBlur * 0.82
   );
-  vec3 horizonDirection = normalize(vec3(
-    reflectedDirection.x,
-    0.06,
-    reflectedDirection.z
-  ));
+  if (farWater > 0.001) {
+    vec3 horizonDirection = normalize(vec3(
+      reflectedDirection.x,
+      0.06,
+      reflectedDirection.z
+    ));
+    reflectedSky = mix(
+      reflectedSky,
+      evaluateProceduralSkyLinear(horizonDirection, 0.0, 0.0),
+      farWater * 0.42
+    );
+  }
+  // Facets tilted so their mirror ray points below the horizon see the next
+  // wave, not the pale below-horizon fog. Darken toward the water body so
+  // grazing views keep their colour instead of turning into white stripes.
+  float reflectionHorizon = smoothstep(-0.12, 0.05, reflectedDirection.y);
   reflectedSky = mix(
+    reflectedSky * mix(vec3(0.55), deepColor * 1.6 + 0.2, 0.5),
     reflectedSky,
-    evaluateProceduralSkyLinear(horizonDirection, 0.0, 0.0),
-    farWater * 0.42
+    reflectionHorizon
   );
   vec3 fallbackReflection = mix(
     uSkyFogColor,
@@ -525,10 +619,47 @@ void main() {
 
   // Roughness-aware GGX sunlight uses the current sky sun color/intensity.
   vec3 skySunDir = normalize(uSkySunDir);
-  float sunSpecular = min(
-    waterGgxSunSpecular(n, viewDir, skySunDir, roughness),
-    8.0
-  );
+  float sunSpecular = waterGgxSunSpecular(n, viewDir, skySunDir, roughness);
+  // Sun glitter: on real water individual micro-facets flash the sun, so the
+  // highlight is a scatter of sharp glints rather than one smooth blob. A
+  // sparse animated mask with mean ~1 redistributes a wider lobe into glints
+  // and fades back to the smooth lobe where glints would be sub-pixel.
+  // Glints are pinpoint sparkles: each cell holds at most one small, sharp
+  // facet at a random spot that twinkles on and off. Two cell sizes cover
+  // close-ups and the usual editor distance; each fades before it aliases.
+  float glintFootprint = length(fwidth(xz));
+  float fineGlints = waterBandFilter(6.0, glintFootprint);
+  float coarseGlints = waterBandFilter(1.1, glintFootprint)
+    * (1.0 - fineGlints);
+  float glitterVisible = fineGlints + coarseGlints;
+  if (glitterVisible > 0.001) {
+    float cellSize = mix(2.2, 0.45, fineGlints);
+    // Glints ride the wave slopes instead of sliding over them.
+    vec2 glintUv = (xz + n.xz * cellSize * 3.0) / cellSize;
+    vec2 glintCell = floor(glintUv);
+    vec2 glintLocal = fract(glintUv);
+    float glintSeed = waterGlintHash(glintCell);
+    float glintSeedB = waterGlintHash(glintCell + vec2(17.3, 41.9));
+    vec2 glintCenter = 0.25 + 0.5 * vec2(glintSeed, glintSeedB);
+    float twinkle = fract(glintSeed * 7.13 + t * (0.6 + glintSeedB * 0.9));
+    float alive = step(0.35, glintSeedB)
+      * smoothstep(0.0, 0.12, twinkle)
+      * smoothstep(0.55, 0.3, twinkle);
+    float glitterMask = alive
+      * (1.0 - smoothstep(0.06, 0.16, length(glintLocal - glintCenter)));
+    float wideLobe = waterGgxSunSpecular(
+      n,
+      viewDir,
+      skySunDir,
+      max(roughness, 0.3)
+    );
+    sunSpecular = mix(
+      sunSpecular,
+      sunSpecular * 0.45 + wideLobe * glitterMask * 40.0,
+      glitterVisible * clamp(uSpecularStrength, 0.0, 1.0)
+    );
+  }
+  sunSpecular = min(sunSpecular, 24.0);
   vec3 sunSpecularTerm = waterResolveSunLight(
     uSkySunColor * uSkyLightIntensity
   )
@@ -546,9 +677,27 @@ void main() {
     diff,
     vec3(0.62 + 0.38 * diff)
   );
-  vec3 bodyPremultiplied = scatteringColor
-    * (vec3(1.0) - transmittance)
-    * waterLight
+  // Forward subsurface scattering: sunlight transmitted through thin, steep
+  // wave faces toward the viewer gives backlit slopes their turquoise glow.
+  vec3 sunLightColor = waterResolveSunLight(
+    uSkySunColor * uSkyLightIntensity
+  );
+  float sunBehind = clamp(dot(-viewDir, skySunDir) * 0.5 + 0.5, 0.0, 1.0);
+  float waveThin = clamp((1.0 - n.y) * 14.0, 0.0, 1.0);
+  float sssAmount = (sunBehind * sunBehind * sunBehind * (0.35 + waveThin)
+      + waveThin * 0.18)
+    * (1.0 - abs(viewDir.y) * 0.6)
+    * smoothstep(-0.05, 0.25, skySunDir.y);
+  float scatterPeak = max(max(shallowColor.r, shallowColor.g), shallowColor.b);
+  vec3 scatterHue = shallowColor / max(scatterPeak, 0.0001);
+  vec3 subsurface = scatterHue * scatteringColor * sunLightColor
+    * sssAmount * 0.55;
+
+  vec3 bodyPremultiplied = (
+      (scatteringColor * waterLight + subsurface)
+        * (vec3(1.0) - transmittance)
+      + uColSand * waterLight * chromaTransmission
+    )
     * (1.0 - fres);
   vec3 premultipliedColor = bodyPremultiplied + reflectionTerm + sunSpecularTerm;
   float reflectionAlpha = clamp(fres * reflectionScale, 0.0, 0.98);
@@ -566,9 +715,8 @@ void main() {
     0.30
   );
   vec3 refractedVolume = refractedSceneLinear * sceneTransmittance
-    + scatteringColor
-      * (vec3(1.0) - transmittance)
-      * waterLight;
+    + (scatteringColor * waterLight + subsurface)
+      * (vec3(1.0) - transmittance);
   vec3 sceneComposite = refractedVolume * (1.0 - fres)
     + reflectionTerm
     + sunSpecularTerm;
@@ -669,8 +817,9 @@ void main() {
     sceneRefractionWeight
   ) * (1.0 - fres);
 
-  // fake caustics in shallow water (smoothed depth, coarse noise)
-  if (uCausticsQual > 0.05 && uWaterTier > 1.5) {
+  // The refracted scene already contains caustics on the terrain. Keep this
+  // inexpensive fallback only where that scene sample is unavailable.
+  if (uCausticsQual > 0.05 && uWaterTier > 1.5 && sceneCaptureEnabled < 0.5) {
     float shallowMask = 1.0 - smoothstep(uShallowDist * 0.5, uDeepDist, visualDepth);
     float c1 = vnoise(xz * 0.09 + vec2(t * 0.9, -t * 0.7));
     float c2 = vnoise(xz * 0.14 - vec2(t * 0.6, t * 0.5));
@@ -762,6 +911,7 @@ function realisticUniforms(sharedUniforms, environmentUniforms) {
     uSkyReflectionEnabled: { value: 1.0 },
     uBiomeColorEnabled: { value: 1.0 },
     uBiomeColorStrength: { value: 0.55 },
+    uWaterNaturalColor: { value: 0.7 },
     ...createWaterLightingUniforms(),
     uWaterAnim: { value: 1.0 },
     uWaterFadeStart: { value: 99999.0 },
@@ -881,6 +1031,7 @@ export function applyRealisticWaterUniforms(mat, params, mode) {
     params.waterBiomeColorEnabled !== false ? 1 : 0;
   u.uBiomeColorStrength.value =
     params.waterBiomeColorStrength ?? 0.55;
+  u.uWaterNaturalColor.value = params.waterNaturalColor ?? 0.7;
   u.uFresnelStrength.value = params.waterFresnelStrength ?? 1;
   u.uRefractionStrength.value = params.waterRefractionStrength ?? 0.45;
   u.uSpecularStrength.value = params.waterSpecularStrength ?? 1;

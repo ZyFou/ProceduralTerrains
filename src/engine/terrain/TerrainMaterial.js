@@ -1,3 +1,4 @@
+import { installSurfaceMaterialBackend } from './surface/SurfaceArrayGLSL.js';
 import * as THREE from 'three';
 import {
   COMMON_UNIFORMS_GLSL,
@@ -236,7 +237,7 @@ float terrainCloudShadow(vec3 worldPos) {
 }
 `;
 
-const TERRAIN_DETAIL_STUB_GLSL = /* glsl */ `
+export const TERRAIN_DETAIL_STUB_GLSL = /* glsl */ `
 uniform float uTerrainDetailDebug;
 uniform float uTerrainDetailNormalStrength;
 uniform float uTerrainDetailScale;
@@ -268,6 +269,7 @@ TerrainDetailResult applyTerrainDetailLayer(
 `;
 
 const SURFACE_TEXTURE_STUB_GLSL = /* glsl */ `
+uniform float uSurfReveal;
 struct SurfaceTexResult {
   vec3 albedo;
   vec3 normal;
@@ -292,6 +294,15 @@ SurfaceTexResult applySurfaceMaterials(
 `;
 
 function resolveTerrainVariant(variant = 'full') {
+  if (variant === 'manual-empty-base' || variant === 'manual-base') {
+    return { name: variant, detail: true, surface: false, manual: true, manualSurface: false };
+  }
+  if (variant === 'manual-surface') {
+    return { name: 'manual-surface', detail: true, surface: true, manual: true, manualSurface: true };
+  }
+  if (variant === 'hybrid-base') {
+    return { name: 'hybrid-base', detail: true, surface: false, manual: false, manualSurface: false, tileOnly: true };
+  }
   if (variant === 'manual-empty') {
     // With zero Manual paint coverage the atlas graph is a provable no-op.
     // Preserve the exact terrain/detail result and defer that large graph until
@@ -302,15 +313,32 @@ function resolveTerrainVariant(variant = 'full') {
     return { name: 'manual', detail: true, surface: true, manual: true, manualSurface: true };
   }
   if (variant === 'hybrid-surface') {
-    return { name: 'hybrid-surface', detail: false, surface: true, manual: false, manualSurface: true, tileOnly: true };
+    return { name: 'hybrid-surface', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
   if (variant === 'hybrid') {
     return { name: 'hybrid', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
-  if (variant === 'base') return { name: 'base', detail: false, surface: false, manualSurface: false };
+  if (variant === 'base') return { name: 'base', detail: true, surface: false, manualSurface: false };
   if (variant === 'detail') return { name: 'detail', detail: true, surface: false, manualSurface: false };
-  if (variant === 'surface') return { name: 'surface', detail: false, surface: true, manualSurface: false };
+  if (variant === 'surface') return { name: 'surface', detail: true, surface: true, manualSurface: false };
   return { name: 'full', detail: true, surface: true, manual: false, manualSurface: false };
+}
+
+// Detail is a uniform-gated, page-backed part of every prepared terrain
+// program. A page becoming ready must not start another large ANGLE compile.
+// These pairs have identical GLSL and defines; only their readiness label
+// differs. Surface/PBR source changes still require a distinct program.
+export function terrainShaderFamily(variant) {
+  const families = {
+    base: 'base', detail: 'base',
+    surface: 'surface', full: 'surface',
+    'manual-empty-base': 'manual-empty', 'manual-base': 'manual-empty',
+    'manual-empty': 'manual-empty',
+    'manual-surface': 'manual-surface', manual: 'manual-surface',
+    'hybrid-base': 'hybrid-base',
+    'hybrid-surface': 'hybrid-surface', hybrid: 'hybrid-surface',
+  };
+  return families[variant] ?? variant;
 }
 
 const resolveTerrainWorldMode = (worldMode) => (
@@ -458,7 +486,13 @@ const buildFragment = (
 precision highp float;
 
 ${commonUniformsGLSL}
-${features.manual ? '' : IMPORTED_IMAGERY_ALBEDO_GLSL}
+${features.manual ? '' : features.manualSurface && features.tileOnly ? /* glsl */ `
+#ifdef SURFACE_ARRAYS
+vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) { return baseAlbedo; }
+#else
+${IMPORTED_IMAGERY_ALBEDO_GLSL}
+#endif
+` : IMPORTED_IMAGERY_ALBEDO_GLSL}
 ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${heightGLSL}
@@ -479,6 +513,7 @@ uniform float uLodDebug;
 uniform float uMergeDebug;   // 1 = tint merged-group / macro-proxy meshes
 uniform float uColorMode;
 uniform float uEps;
+${worldMode === 'studio' && !features.manual ? 'uniform int uTerrainNormalSampleCount;' : ''}
 uniform vec3  uPlinthColor;
 uniform float uAnalysisEnabled;
 uniform float uAnalysisMode;
@@ -490,14 +525,13 @@ uniform float uAnalysisThresholdB;
 uniform float uAnalysisContourSpacing;
 uniform float uAnalysisContourStrength;
 
-// Underwater caustics — animated dappled light projected on submerged terrain.
-// Driven by the UnderwaterController: uCausticBlend ramps with camera submersion
-// so caustics only appear while diving (and fade in/out smoothly). World-XZ
-// projection keeps them seamless across chunks (Tile + Infinite).
+// Underwater caustics — focused sunlight projected on submerged terrain,
+// visible through the surface as well as when diving. World-XZ projection
+// keeps them seamless across chunks (Tile + Infinite).
 // Wave uniforms mirror the active water material so floor caustics drift with
 // the surface ripples (refraction through the wavy water plane).
 uniform float uCausticStrength;  // user strength (0 = off)
-uniform float uCausticBlend;     // camera-underwater activation 0..1
+uniform float uCausticBlend;     // projected caustic activation 0..1
 uniform float uCausticScale;     // user scale multiplier
 uniform float uCausticSpeed;     // user speed multiplier
 uniform vec3  uCausticColor;
@@ -538,35 +572,54 @@ vec3 mergeTierColor(float vlod) {
   else              return mix(vec3(0.95, 0.20, 0.20), vec3(0.95, 0.20, 0.95), t - 3.0);
 }
 
-// Real caustic network — thin, bright, animated light filaments (the classic
-// distorted-wave-interference caustic). Fixed 5-iteration loop (static bound →
-// safe for the D3D11/ANGLE shader compiler), so it unrolls without a hang.
-// Each 1×1 uv cell gets a unique hash rotation/scale/phase so the mod-TAU wrap
-// no longer produces an identical grid of tiles.
-float causticTile(vec2 uv, float t) {
-  vec2 id = floor(uv);
-  vec2 f = fract(uv) - 0.5;
-
-  float h0 = hash12(id);
-  float h1 = hash12(id + vec2(5.2, 1.7));
-  float ang = (h0 * 2.0 - 1.0) * 3.14159;
-  float cs = cos(ang);
-  float sn = sin(ang);
-  f = mat2(cs, -sn, sn, cs) * (f * (0.65 + h1 * 0.7));
-
-  vec2 p = mod((f + 0.5) * 6.28318, 6.28318) - 250.0;
-  float tLocal = t + (h0 + h1) * 6.0;
-  vec2 i = p;
-  float c = 1.0;
-  const float inten = 0.005;
-  for (int n = 0; n < 5; n++) {
-    float tt = tLocal * (1.0 - (3.5 / float(n + 1)));
-    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
-    c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
+// Moving Voronoi boundaries approximate the light focused between neighboring
+// wave lenses. The distance between the two closest sites produces connected
+// cells rather than isolated blobs or a repeating interference tile.
+float causticCellEdges(vec2 uv, float t, float defocus) {
+  vec2 cell = floor(uv);
+  vec2 f = fract(uv);
+  float nearest = 10.0;
+  float second = 10.0;
+  vec2 nearestDelta = vec2(0.0);
+  vec2 secondDelta = vec2(1.0);
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 offset = vec2(float(x), float(y));
+      vec2 id = cell + offset;
+      vec2 phase = 6.28318 * vec2(
+        hash12(id + vec2(17.3, 41.7)),
+        hash12(id + vec2(83.1, 13.9))
+      );
+      vec2 site = offset + 0.5 + 0.30 * sin(phase + t * vec2(0.61, 0.79));
+      vec2 delta = site - f;
+      float d = dot(delta, delta);
+      if (d < nearest) {
+        second = nearest;
+        secondDelta = nearestDelta;
+        nearest = d;
+        nearestDelta = delta;
+      } else if (d < second) {
+        second = d;
+        secondDelta = delta;
+      }
+    }
   }
-  c /= 5.0;
-  c = 1.17 - pow(c, 1.4);
-  return clamp(pow(abs(c), 8.0), 0.0, 1.0);
+  // Distance to the bisector avoids broad white blobs when two sites approach.
+  float edgeDistance = (second - nearest)
+    / max(2.0 * length(secondDelta - nearestDelta), 0.001);
+  float footprint = length(fwidth(uv)) * 0.45;
+  float coreWidth = mix(0.014, 0.032, defocus);
+  float haloWidth = mix(0.048, 0.080, defocus);
+  float coreFilter = sqrt(coreWidth * coreWidth + footprint * footprint);
+  float haloFilter = sqrt(haloWidth * haloWidth + footprint * footprint);
+  float core = exp2(-2.0 * edgeDistance * edgeDistance / (coreFilter * coreFilter))
+    * (0.014 / coreFilter);
+  float halo = exp2(-2.0 * edgeDistance * edgeDistance / (haloFilter * haloFilter))
+    * (0.048 / haloFilter);
+  // Preserve light energy as lines become subpixel, then fade unresolved cells.
+  // Widening a full-bright line with fwidth made distant water look milky.
+  float resolved = 1.0 - smoothstep(0.16, 0.48, footprint);
+  return (core * 0.82 + halo * 0.18) * resolved;
 }
 
 // Ripple height at the water surface — matches legacy or realistic water shaders.
@@ -598,28 +651,25 @@ vec2 causticSurfaceRefraction(vec2 xz, float t) {
   return vec2(-(rX - r0), -(rZ - r0)) * uCausticWaveStrength;
 }
 
-// causticTile is periodic within each cell, but cells are no longer identical.
-// Domain warp + two layers break residual tiling; surface refraction ties motion
-// to the live water ripples.
-float causticPattern(vec2 xz, float t, vec2 refr, float depthSpread) {
-  float s = 0.03 / max(uCausticScale, 0.05);
-  vec2 uv = xz * s;
-
-  // refract with the water surface — caustics slide as waves pass overhead
-  uv += refr * s * 2.8 * depthSpread;
-
+// Bend the cell boundaries with broad surface waves, then overlay a weaker,
+// smaller lens network. Both layers stay anchored in world space.
+float causticPattern(vec2 xz, float t, vec2 refr, float depthSpread, float defocus) {
+  // About eleven world units per cell at the default scale (formerly 33).
+  float s = 0.09 / max(uCausticScale, 0.05);
+  vec2 uv = (xz + refr * 2.8 * depthSpread) * s;
   vec2 warp = vec2(
-    fbm4(uv * 0.35 + refr * 0.12),
-    fbm4(uv * 0.35 + vec2(4.3, 2.1) + refr * 0.1)
+    vnoise(uv * 0.78 + vec2(t * 0.035, 7.1)),
+    vnoise(uv * 0.78 + vec2(4.3, 2.1 - t * 0.029))
   ) - 0.5;
-  uv += warp * 1.6;
-
-  vec2 a = uv;
-  vec2 b = ROT2 * (uv * 1.618) + vec2(4.7, 1.3);
-  float c = min(causticTile(a, t) + causticTile(b, t * 1.27), 1.0);
-
-  float vary = 0.45 + 0.9 * fbm4(uv * 0.25 + refr * 0.06);
-  return clamp(c * vary, 0.0, 1.0);
+  vec2 bent = uv + warp * 0.72;
+  float broad = causticCellEdges(bent, t * 0.68, defocus);
+  float fine = causticCellEdges(ROT2 * (bent * 1.57) + vec2(4.7, 1.3), t * 0.91, defocus);
+  float lightVariation = vnoise(uv * 0.23 + vec2(13.2, 6.8));
+  float filamentVariation = vnoise(bent * 2.1 + vec2(t * 0.08, -t * 0.05));
+  float focus = smoothstep(0.20, 0.78, filamentVariation);
+  float illumination = broad * (0.18 + 1.22 * focus) + fine * 0.16
+    + broad * fine * 0.24;
+  return clamp(illumination * (0.48 + 0.65 * lightVariation), 0.0, 1.0);
 }
 
 // Project caustics onto the submerged, upward-facing sea floor. World-XZ space
@@ -651,12 +701,13 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float visibleHeight, vec3 nGeo, vec
   float t = uTime * uCausticWaterAnim * uCausticAnimSpeed * uCausticSpeed;
   vec2 refr = causticSurfaceRefraction(xz, t);
   float depthSpread = 1.0 + below * 0.012;
-  float c = causticPattern(xz, t, refr, depthSpread);
+  float defocus = smoothstep(4.0, max(uCausticDepthFade * 0.65, 5.0), below);
+  float c = causticPattern(xz, t, refr, depthSpread, defocus);
 
-  // additive light, plus a touch of multiplicative brightening so the floor
-  // albedo shows through the bright filaments
-  vec3 add = uCausticColor * c * amt * depthFade * upFace * light * 2.4;
-  return col * (1.0 + c * amt * depthFade * upFace * light * 0.6) + add;
+  // Focused light reveals the floor's texture; a small scattered contribution
+  // keeps dark rock readable without painting opaque white lines over it.
+  float illumination = c * amt * depthFade * upFace * light;
+  return col + (col * 1.65 + vec3(0.12)) * uCausticColor * illumination;
 }
 
 vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, float rockMask, float shoreMask) {
@@ -720,6 +771,20 @@ ${features.manual ? /* glsl */ `
   hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
   hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
   nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+` : worldMode === 'infinite' ? /* glsl */ `
+  hC = terrainCachedHeightAt(xz);
+  float normalDistance = length(cameraPosition - vWorldPos);
+  bool farInfiniteNormal = vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0);
+  if (farInfiniteNormal) {
+    hX = hC;
+    hZ = hC;
+    nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+    if (nGeo.y < 0.0) nGeo = -nGeo;
+  } else {
+    hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
+    hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
+    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  }
 ` : /* glsl */ `
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
     // Stable packed bake: the centre fetch contains the exact finite-difference
@@ -735,6 +800,19 @@ ${features.manual ? /* glsl */ `
     hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).a * uHeightScale;
     nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
+${worldMode === 'studio' ? /* glsl */ `
+    // Keep one copy of the procedural field in the driver program. Three
+    // separate calls inline the entire noise/biome graph three times in ANGLE.
+    // This uniform is always 3; only the outer sampling loop is dynamic, while
+    // the noise octave loops retain their compiler-safe constant bounds.
+    vec3 samples = vec3(0.0);
+    for (int sampleIndex = 0; sampleIndex < uTerrainNormalSampleCount; sampleIndex++) {
+      vec2 offset = sampleIndex == 1 ? vec2(eps, 0.0) : sampleIndex == 2 ? vec2(0.0, eps) : vec2(0.0);
+      samples[sampleIndex] = terrainCachedHeightAt(xz + offset);
+    }
+    hC = samples.x; hX = samples.y; hZ = samples.z;
+    nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+` : /* glsl */ `
     hC = terrainCachedHeightAt(xz);
     float normalDistance = length(cameraPosition - vWorldPos);
     bool farInfiniteNormal = uInfiniteMode > 0.5
@@ -749,6 +827,7 @@ ${features.manual ? /* glsl */ `
       hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
       nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
     }
+`}
   }
 `}
 
@@ -856,6 +935,11 @@ ${features.manual ? '' : /* glsl */ `
   SurfaceTexResult surf = applySurfaceMaterials(
     td.albedo, n, surfaceBaseNormal, nGeo, vWorldPos, dist, tc, cl, bw, slope, hRel, h01, detail, jitter
   );
+  surf.albedo = mix(td.albedo, surf.albedo, uSurfReveal);
+  surf.normal = normalize(mix(n, surf.normal, uSurfReveal));
+  surf.ao = mix(1.0, surf.ao, uSurfReveal);
+  surf.rough = mix(0.8, surf.rough, uSurfReveal);
+  surf.amount *= uSurfReveal;
   td.albedo = surf.albedo;
   n = surf.normal;
 
@@ -878,20 +962,21 @@ ${features.manual ? '' : /* glsl */ `
   ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  float proceduralSheen = 1.0 - clamp(surf.amount, 0.0, 1.0);
   vec3 col = terrainLighting(
     td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-    viewDir
+    proceduralSheen, viewDir
   );
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
   if (surf.amount > 0.001) {
     float ssp = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 24.0);
-    col += ssp * (1.0 - surf.rough) * surf.amount * 0.15 * max(uSunDir.y, 0.0);
+    float gloss = 1.0 - clamp(surf.rough, 0.0, 1.0);
+    col += ssp * gloss * gloss * surf.amount * 0.08 * max(uSunDir.y, 0.0);
   }
 
-  // underwater caustics on the submerged sea floor (no-op when dry: the
-  // uCausticBlend uniform branch is warp-coherent, so above water costs nothing)
+  // Caustics illuminate submerged terrain; dry fragments return immediately.
   col = applyTerrainCaustics(col, xz, vWorldPos.y, nGeo, n);
 
   // Analysis is a lightweight branch in the existing terrain pass. It reads
@@ -1130,6 +1215,8 @@ export function createTerrainUniforms() {
     uMergeDebug:     { value: 0.0 },
     uColorMode:      { value: 0.0 },
     uEps:            { value: 0.6 },
+    // Internal compiler control, not an adjustable quality/sample setting.
+    uTerrainNormalSampleCount: { value: 3 },
     uSkirtDepth:     { value: 40 },
     uPlinthBaseY:    { value: -40 },
     uPlinthColor:    { value: new THREE.Color(0x14110d) },
@@ -1157,7 +1244,7 @@ export function createTerrainUniforms() {
     uTerrainCloudShadowEvolve: { value: 0.0 },
     // Underwater caustics (shared by every terrain material — studio/infinite
     // declare + use them; the planet material harmlessly ignores them). Default
-    // off; the engine raises uCausticBlend with camera submersion each frame.
+    // off; the engine enables uCausticBlend while water caustics are active.
     uCausticStrength: { value: 0.0 },
     uCausticBlend:    { value: 0.0 },
     uCausticScale:    { value: 1.0 },
@@ -1275,6 +1362,10 @@ export function createTerrainUniforms() {
     uNoiseDebug:     { value: 0.0 },
     uTileDebugView:  { value: 0.0 },
     uTerrainDetailQuality: { value: 3.0 },
+    uDetailPageArray: { value: null },
+    uDetailPageCoords: { value: Array.from({ length: 16 }, () => new THREE.Vector3(1e9, 1e9, 0)) },
+    uDetailPageBasis: { value: 0 },
+    uDetailGlobalBlend: { value: 0 },
     uTerrainDetailScale: { value: 0.16 },
     uTerrainDetailStrength: { value: 0.72 },
     uTerrainDetailNormalStrength: { value: 0.42 },
@@ -1321,15 +1412,30 @@ export function createTerrainUniforms() {
     // Atlas samplers stay null until the engine builds them; uSurfMode 0 keeps the
     // whole feature a no-op (procedural colours), so the shader is unchanged until
     // the user switches to texture mode.
+    uSurfaceArrayMode: { value: 0 },
+    uSurfaceGraphCode: { value: "" },
+    uSurfacePaintArray: { value: new THREE.DataArrayTexture(new Uint8Array(4),1,1,1) },
+    uSurfacePaintEnabled: { value: 0 },
+    uSurfaceContributions: { value: 4 },
+    uSurfacePaintRegion: { value: new THREE.Vector4(0,0,1,1) },
+    uSurfacePaintOpacity: { value: new Array(32).fill(0) },
+    uSurfacePaintMap: { value: Array.from({length:32},()=>new THREE.Vector4(-1,-1,0,1)) },
+    uSurfacePaintTint: { value: Array.from({length:32},()=>new THREE.Vector3(1,1,1)) },
+    uSurfaceGraphParams: { value: Array.from({length:128},()=>new THREE.Vector4()) },
+    uSurfaceRoleMap: { value: Array.from({length:13},()=>new THREE.Vector4(0,-1,0,1)) },
+    uSurfaceRoleTint: { value: Array.from({length:13},()=>new THREE.Vector3(1,1,1)) },
+    uSurfaceAssetSize: { value: new Array(64).fill(2) },
     uSurfDiffuse:    { value: surfFallbackTexture() },
     uSurfProps:      { value: surfFallbackTexture() },
     uSurfMode:       { value: 0.0 },
     uSurfAmount:     { value: 1.0 },
+    uSurfReveal:     { value: 0.0 },
     uSurfTint:       { value: 0.0 },
     uSurfPaletteInfluence: { value: 0.6 },
     uSurfScale:      { value: 1.0 },
     uSurfBreakup:    { value: 0.0 },
     uSurfBlend:      { value: 0.0 },
+    uSurfTransition: { value: 0.5 },
     uSurfNormalAmt:  { value: 1.0 },
     uSurfRoughAmt:   { value: 1.0 },
     uSurfAOAmt:      { value: 1.0 },
@@ -1363,7 +1469,10 @@ export function createTerrainMaterial(
     : buildHeightGLSL(stackGLSL.body2d);
   const material = new THREE.ShaderMaterial({
     uniforms,
-    defines: { OCTAVES: octaves },
+    defines: {
+      OCTAVES: octaves,
+      ...(terrainShaderFamily(variant) === 'surface' ? { STANDARD_PBR_DETAIL: 1 } : {}),
+    },
     vertexShader: buildVertex(h, variant, worldMode),
     fragmentShader: buildFragment(
       h,
@@ -1377,7 +1486,7 @@ export function createTerrainMaterial(
   material.userData.terrainVariant = variant;
   material.userData.terrainWorldMode = worldMode;
   material.userData.heightProgramSig = stackGLSL.sig;
-  return material;
+  return installSurfaceMaterialBackend(material);
 }
 
 export function createInfiniteTerrainMaterial(
@@ -1438,6 +1547,9 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
   mat.userData.terrainVariant = variant;
   mat.userData.terrainWorldMode = worldMode;
   mat.userData.heightProgramSig = stackGLSL.sig;
+  mat.defines ||= {};
+  if (terrainShaderFamily(variant) === 'surface') mat.defines.STANDARD_PBR_DETAIL = 1;
+  else delete mat.defines.STANDARD_PBR_DETAIL;
   mat.extensions ||= {};
   mat.extensions.derivatives = true;
   mat.needsUpdate = true;

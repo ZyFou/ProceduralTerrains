@@ -37,7 +37,11 @@ uniform float uPaintBoardSize;
 uniform float uPaintResolution;
 uniform float uPaintBaseMult; // scales ONLY the procedural base term in heightAt() (0 = Empty Terrain)
 uniform sampler2D uPaintHeightTexture;
+#ifdef SURFACE_PAINT_LAYERS
+uniform highp sampler2DArray uPaintBiomeTexture;
+#else
 uniform sampler2D uPaintBiomeTexture;
+#endif
 uniform sampler2D uPaintPropsTexture;
 uniform float uManualSurfaceMode;
 uniform float uManualBaseGenerated;
@@ -373,7 +377,11 @@ vec4 manualSurfaceWeightsAAt(vec2 xz) {
   // Manual Terrain's packed maps are bound to the existing paint biome/props
   // units while Manual mode is active. Reusing those units avoids adding a
   // second sampler pair to the terrain surface program.
+  #ifdef SURFACE_PAINT_LAYERS
+  return vec4(0.0);
+  #else
   return texture2D(uPaintBiomeTexture, uv);
+  #endif
 }
 
 vec4 manualSurfaceWeightsBAt(vec2 xz) {
@@ -682,16 +690,26 @@ vec4 paintBiomeAt(vec2 xz) {
   if (uPaintEnabled < 0.5) return vec4(0.0);
   vec2 uv = paintUvAt(xz);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
+  #ifdef SURFACE_PAINT_LAYERS
+  return vec4(0.0);
+  #else
   return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+  #endif
 }
 
 ${MANUAL_SURFACE_WEIGHTS_GLSL}
 
 float manualHeightOffsetAt(vec2 xz) {
+#if defined(SURFACE_ARRAYS) && defined(STANDARD_PBR_DETAIL)
+  // Standard terrain has no Manual height layer. Manual and hybrid projects
+  // use their own variants; omit this sampler in the 16-unit PBR/detail pass.
+  return 0.0;
+#else
   if (uManualEnabled < 0.5) return 0.0;
   vec2 uv = (xz - uManualOrigin) / max(uManualSpan, vec2(1.0));
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
   return texture2D(uManualHeightTexture, uv).r;
+#endif
 }
 
 vec2 splineUvAt(vec2 xz) { return (xz - uSplineOrigin) / max(uSplineSpan, vec2(1.0)); }

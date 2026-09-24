@@ -44,7 +44,7 @@ function graphForRegistryNode(type) {
 describe('terrain graph document', () => {
   it('starts in Terrain Graph mode and can switch sub-modes without changing the recipe', () => {
     const graph = createBlankGraph();
-    expect(graph).toMatchObject({ version: 3, mode: 'terrain', groups: [] });
+    expect(graph).toMatchObject({ version: 4, mode: 'terrain', groups: [] });
     const noise = setGraphMode(graph, 'noise');
     expect(noise.mode).toBe('noise');
     expect(noise.nodes).toEqual(graph.nodes);
@@ -222,13 +222,13 @@ describe('analytical terrain graph compiler', () => {
   });
 
   it('characterizes every registry entry as plain JSON with typed analytical ports', () => {
-    for (const definition of listGraphNodeDefinitions({ includeHidden: true })) {
+    for (const definition of listGraphNodeDefinitions({ includeHidden: true }).filter(d=>d.executionKind==='analytical')) {
       expect(getGraphNodeDefinition(definition.id)).toBe(definition);
       expect(structuredClone(nodeDefaults(definition.id))).toEqual(definition.defaults);
       expect(definition.executionKind).toBe('analytical');
       expect(definition.glslCompiler).toBeTypeOf('function');
       expect(definition.cpuEvaluator).toBeTypeOf('function');
-      expect([...definition.inputs, ...definition.outputs].every((port) => [ANALYTIC_HEIGHT, ANALYTIC_COLOR].includes(port.type))).toBe(true);
+      expect([...definition.inputs, ...definition.outputs].every((port) => [ANALYTIC_HEIGHT, ANALYTIC_COLOR, 'surface'].includes(port.type))).toBe(true);
       expect(JSON.parse(JSON.stringify(definition.defaults))).toEqual(definition.defaults);
     }
   });
@@ -498,7 +498,7 @@ describe('analytical terrain graph compiler', () => {
     expect(seedDomainOffset(0)).toBe(0);
   });
 
-  it.each(listGraphNodeDefinitions().map((definition) => [definition.id]))('compiles, packs, and evaluates the %s registry node', (type) => {
+  it.each(listGraphNodeDefinitions().filter(d=>d.executionKind==='analytical').map((definition) => [definition.id]))('compiles, packs, and evaluates the %s registry node', (type) => {
     const { graph } = graphForRegistryNode(type);
     const result = compileTerrainGraph(graph);
     expect(result.ok).toBe(true);
@@ -507,7 +507,7 @@ describe('analytical terrain graph compiler', () => {
     expect(Number.isFinite(result.program.evaluate2D(12.5, -7.25, ctx))).toBe(true);
   });
 
-  it.each(listGraphNodeDefinitions().filter((definition) => definition.structuralParams.length).map((definition) => [definition.id]))('changes the %s signature for its structural inspector parameter', (type) => {
+  it.each(listGraphNodeDefinitions().filter((definition) => definition.executionKind==='analytical' && definition.structuralParams.length).map((definition) => [definition.id]))('changes the %s signature for its structural inspector parameter', (type) => {
     const { graph, node } = graphForRegistryNode(type);
     const definition = getGraphNodeDefinition(type);
     const key = definition.structuralParams[0];

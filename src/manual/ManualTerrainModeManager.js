@@ -42,7 +42,7 @@ const SCULPT_CURSOR_COLORS = Object.freeze({
   terrace: 0xfb923c,
   erase: 0xf8fafc,
 });
-const SURFACE_TOOLS = new Set(['paint', 'blend', 'erase']);
+const SURFACE_TOOLS = new Set(['paint', 'blend', 'erase', 'eraseAll']);
 const TEXTURE_PAINT_MODES = new Set(['surface', 'props']);
 const PROP_PAINT_TYPES = new Set(['grass', 'flowers', 'rocks', 'trees']);
 const DEFAULT_SCULPT_STATE = Object.freeze({
@@ -248,6 +248,7 @@ export class ManualTerrainModeManager {
       },
       texturePaint: {
         ...this.texturePaint,
+        layers: this.surfaceField.layersField?.layers || [],
         revision: this.texturePaint.mode === 'props' ? this.propField.revision : this.surfaceField.revision,
         hasData: this.texturePaint.mode === 'props' ? !this.propField.isEmpty() : !this.surfaceField.isEmpty(),
         surfaceHasData: !this.surfaceField.isEmpty(),
@@ -439,6 +440,14 @@ export class ManualTerrainModeManager {
   }
 
   setTexturePaintSetting(key, value) {
+    if (key === 'addLayer') {
+      const layer=this.surfaceField.enableLayers().addLayer(value);
+      this.texturePaint.layerId=layer.id;
+      this._emit({documentChanged:true,surfaceChanged:true,label:'Added material layer'});return;
+    }
+    if(key==='layerId'){this.texturePaint.layerId=value;this._emit();return;}
+    if(key==='layerUpdate'){this.surfaceField.layersField?.updateLayer(value.id,value.patch);this._emit({documentChanged:true,surfaceChanged:true,label:'Updated material layer'});return;}
+    if(key==='undoSurface'||key==='redoSurface'){this.surfaceField.layersField?.[key==='undoSurface'?'undo':'redo']();this._emit({documentChanged:true,surfaceChanged:true});return;}
     if (key === 'mode') {
       this.texturePaint.mode = TEXTURE_PAINT_MODES.has(value) ? value : 'surface';
       if (this.texturePaint.mode === 'props' && this.texturePaint.tool === 'blend') this.texturePaint.tool = 'paint';
@@ -448,6 +457,7 @@ export class ManualTerrainModeManager {
       if (this.texturePaint.mode === 'props' && this.texturePaint.tool === 'blend') this.texturePaint.tool = 'paint';
     }
     else if (key === 'material') this.texturePaint.material = MANUAL_SURFACE_MATERIAL_IDS.has(value) ? value : 'grass';
+    else if (['minHeight','maxHeight','minSlope','maxSlope'].includes(key)) this.texturePaint[key]=Number(value);
     else if (key === 'propType') this.texturePaint.propType = PROP_PAINT_TYPES.has(value) ? value : 'grass';
     else if (key === 'brushSize') this.texturePaint.brushSize = Math.max(4, Math.min(900, Number(value) || 4));
     else if (key === 'strength') this.texturePaint.strength = Math.max(0.01, Math.min(1, Number(value) || 0.01));
@@ -862,6 +872,7 @@ export class ManualTerrainModeManager {
       const point = this.picker.pickEvent(event);
       if (!point) return;
       this._surfacePainting = true;
+      this.surfaceField.layersField?.beginStroke();
       this._lastSurfacePoint = null;
       this._lastSurfaceStampAt = 0;
       this._updateSurfaceHit(point);
@@ -940,6 +951,7 @@ export class ManualTerrainModeManager {
 
   _handlePointerUp() {
     if (this._surfacePainting) {
+      this.surfaceField.layersField?.endStroke();
       this._surfacePainting = false;
       this._lastSurfacePoint = null;
       this._lastSurfaceStampAt = 0;
@@ -1058,25 +1070,13 @@ export class ManualTerrainModeManager {
   }
 
   _stampSurface(point, force = false) {
-    if (!point) return;
-    const now = performance.now();
-    const minStampMs = this.texturePaint.mode === 'surface' && this.texturePaint.tool === 'blend' ? 32 : 16;
-    if (!force && now - this._lastSurfaceStampAt < minStampMs) return;
-    const current = point.clone();
-    const spacing = Math.max(2, this.texturePaint.brushSize * 0.18);
-    if (!force && this._lastSurfacePoint && this._lastSurfacePoint.distanceTo(current) < spacing) return;
-    if (!force && this._lastSurfacePoint) {
-      const start = this._lastSurfacePoint.clone();
-      const distance = start.distanceTo(current);
-      const steps = Math.min(48, Math.max(1, Math.floor(distance / spacing)));
-      for (let index = 1; index <= steps; index++) {
-        this._stampSurfaceAt(start.clone().lerp(current, index / steps));
-      }
-    } else {
-      this._stampSurfaceAt(current);
-    }
-    this._lastSurfacePoint = current;
-    this._lastSurfaceStampAt = now;
+    if(!point)return;
+    const spacing=Math.max(2,this.texturePaint.brushSize*0.18);
+    if(force||!this._lastSurfacePoint){this._stampSurfaceAt(point);this._lastSurfacePoint=point.clone();return;}
+    const start=this._lastSurfacePoint.clone(),distance=start.distanceTo(point);
+    const steps=Math.floor(distance/spacing);
+    for(let i=1;i<=steps;i++)this._stampSurfaceAt(start.clone().lerp(point,i*spacing/distance));
+    if(steps)this._lastSurfacePoint=start.clone().lerp(point,steps*spacing/distance);
   }
 
   _stampSurfaceAt(point) {
@@ -1090,6 +1090,10 @@ export class ManualTerrainModeManager {
         tool: this.texturePaint.tool,
         propType: this.texturePaint.propType,
       });
+      return;
+    }
+    if(this.surfaceField.layersField){
+      this.surfaceField.layersField.stamp({x:point.x,z:point.z,radius:this.texturePaint.brushSize,strength:this.texturePaint.strength,falloff:this.texturePaint.falloff,tool:this.texturePaint.tool,layerId:this.texturePaint.layerId||this.surfaceField.layersField.layers[0]?.id,filter:(x,z)=>{const h=this.getHeightAt(x,z);const dx=this.getHeightAt(x+1,z)-h,dz=this.getHeightAt(x,z+1)-h;const slope=1-1/Math.sqrt(1+dx*dx+dz*dz);return h<(this.texturePaint.minHeight??-Infinity)||h>(this.texturePaint.maxHeight??Infinity)||slope<(this.texturePaint.minSlope??0)||slope>(this.texturePaint.maxSlope??1)?0:1;}});
       return;
     }
     const material = getManualSurfaceMaterial(this.texturePaint.material);
