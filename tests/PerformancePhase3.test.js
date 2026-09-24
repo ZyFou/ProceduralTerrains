@@ -77,7 +77,7 @@ describe('performance phase 3', () => {
     expect(surface.fragmentShader).toContain('uniform float uTerrainDetailFar');
     expect(surface.fragmentShader).toContain('uniform sampler2D uSurfDiffuse');
     expect(base.fragmentShader).toBe(detail.fragmentShader);
-    expect(base.fragmentShader).toContain('dFdx(vWorldPos)');
+    expect(base.fragmentShader).toContain('sampleIndex < uTerrainNormalSampleCount');
 
     base.dispose();
     detail.dispose();
