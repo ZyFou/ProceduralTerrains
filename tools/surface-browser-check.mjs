@@ -1,12 +1,13 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
+const quick=process.argv.includes('--quick');
 const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-webgl','--ignore-gpu-blocklist']});
 try {
   const page=await browser.newPage({viewport:{width:800,height:600}}),errors=[];
   page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/@vite/client',route=>route.fulfill({body:'export const injectQuery=(url)=>url; export const createHotContext=()=>({on(){},accept(){},dispose(){}});',contentType:'text/javascript'}));
   await page.goto('http://127.0.0.1:6064/tools/surface-qa.html');
-  const result=await page.evaluate(async()=>{
+  const result=await page.evaluate(async(quick)=>{
     const THREE=await import('/node_modules/three/build/three.module.js');
     const {createTerrainUniforms,createTerrainMaterial}=await import('/src/engine/terrain/TerrainMaterial.js');
     const {createPlanetMaterial}=await import('/src/engine/terrain/PlanetMaterial.js');
@@ -14,7 +15,7 @@ try {
     const {createSurfaceDocument}=await import('/src/engine/terrain/surface/SurfaceDocument.js');
     const {syncSurfaceMaterialBackend}=await import('/src/engine/terrain/surface/SurfaceArrayGLSL.js');
     const {SurfacePaintLayers}=await import('/src/manual/SurfacePaintLayers.js');
-    const renderer=new THREE.WebGLRenderer({canvas:document.querySelector('canvas'),preserveDrawingBuffer:true});renderer.setSize(800,600);
+    const renderer=new THREE.WebGLRenderer({canvas:document.querySelector('canvas'),preserveDrawingBuffer:true});renderer.setSize(quick?128:800,quick?96:600);
     const gl=renderer.getContext(),logs=[];
     renderer.debug.onShaderError=(context,program,vs,fs)=>{logs.push(context.getProgramInfoLog(program),context.getShaderInfoLog(vs),context.getShaderInfoLog(fs));};
     const doc=createSurfaceDocument();doc.settings.profile='eco';for(const key of Object.keys(doc.roles))doc.roles[key]='polyhaven:brown_mud';
@@ -27,6 +28,7 @@ try {
     const material=createTerrainMaterial(uniforms,3,undefined,{variant:'full'}),mesh=new THREE.Mesh(geo,material);scene.add(mesh);
     syncSurfaceMaterialBackend(material);await renderer.compileAsync(scene,camera);renderer.render(scene,camera);
     const terrain={programs:renderer.info.programs.length,errors:logs.splice(0)};
+    if(quick)return {renderer:gl.getParameter(gl.RENDERER),samplers:gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),ms:Math.round(performance.now()-start),terrain};
     const paint=new SurfacePaintLayers({origin:{x:-250,z:-250},span:{x:500,z:500}});const layer=paint.addLayer('polyhaven:brown_mud');paint.stamp({x:0,z:0,radius:100,layerId:layer.id});paint.bind(uniforms);paint.flushUploads();
     uniforms.uSurfacePaintMap.value[layer.slot].set(0,-1,0,1);renderer.render(scene,camera);
     const paintResult={errors:logs.splice(0),weight:paint.sample(0,0,0)};
@@ -41,9 +43,9 @@ try {
     const baking={errors:logs.splice(0)};
     mesh.material=material;renderer.render(scene,camera);
     return {renderer:gl.getParameter(gl.RENDERER),samplers:gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),arrayLayers:gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS),ms:Math.round(performance.now()-start),budget:pack.budget,terrain,paint:paintResult,planet,baking};
-  });
-  await fs.mkdir('output/surface-qa',{recursive:true});await page.screenshot({path:'output/surface-qa/render.png'});
-  await fs.writeFile('output/surface-qa/result.json',JSON.stringify({...result,errors},null,2));
+  },quick);
+  await fs.mkdir('output/surface-qa',{recursive:true});if(!quick)await page.screenshot({path:'output/surface-qa/render.png'});
+  await fs.writeFile(`output/surface-qa/${quick?'quick-result':'result'}.json`,JSON.stringify({...result,errors},null,2));
   console.log(JSON.stringify({...result,errors},null,2));
   if(errors.length||Object.values(result).some(v=>v?.errors?.some(Boolean)))process.exitCode=1;
 }finally{await browser.close();}

@@ -315,8 +315,9 @@ SurfRoleWeights surfMaterialWeights(
   w.grass = vegBase * moistLow * (1.0 - forestBias * 0.55) * (1.0 - cold * 0.35);
   w.dryGrass = vegBase * (1.0 - moistLow * 0.72) * (1.0 - cold * 0.25);
 
-  float band = fract(h01 * 14.0 + detail * 0.15);
-  float redMix = smoothstep(0.25, 0.75, band);
+  // A wrapped fract introduced a visible material seam at every stratum.
+  // The periodic signal keeps the layered geology without discontinuities.
+  float redMix = smoothstep(-0.65, 0.65, sin((h01 * 14.0 + detail * 0.15) * 6.2831853));
   float redTotal = canyon * (1.0 - snow);
   float neutralRock = clamp(rockTake - redTotal * 0.65, 0.0, 1.0);
   w.redRock = redTotal * (1.0 - redMix);
@@ -370,7 +371,7 @@ void pbrApplyPaint(inout SurfaceTexResult result,vec3 wp,vec3 ng,vec3 blend) {
   }
   float coverage=min(total,1.0);kept=max(kept,0.0001);
   result.albedo=mix(result.albedo,color/kept,coverage);result.normal=normalize(mix(result.normal,normalize(normal),coverage));
-  result.rough=mix(result.rough,rough/kept,coverage);result.ao=mix(result.ao,ao/kept,coverage);result.amount=max(result.amount,coverage);
+  result.rough=mix(result.rough,rough/kept,coverage);result.ao=mix(result.ao,mix(1.0,ao/kept,uSurfAOAmt),coverage);result.amount=max(result.amount,coverage);
 #endif
 }
 /*SURFACE_GRAPH_BEGIN*/
@@ -382,6 +383,11 @@ SurfaceTexResult applySurfaceMaterials(
   TerrainColorResult tc, Climate cl, BiomeWeights bw, float slope, float hRel, float h01,
   float detail, float jitter
 ) {
+  #ifdef SURFACE_ARRAYS
+  // Take derivatives before role, graph, or paint branches diverge per pixel.
+  pbrWorldDx=dFdx(wpos);
+  pbrWorldDy=dFdy(wpos);
+  #endif
   SurfaceTexResult res;
   res.albedo = baseAlbedo;
   res.normal = n;
@@ -408,7 +414,7 @@ SurfaceTexResult applySurfaceMaterials(
 
   #if defined(SURFACE_ARRAYS) && defined(SURFACE_GRAPH_ACTIVE)
   SurfMaterialSample graphSample=evaluateSurfaceGraph(wpos,nGeo,triBlend,cl,bw,slope,h01);
-  res.albedo=graphSample.albedo;res.normal=graphSample.normal;res.ao=graphSample.ao;res.rough=graphSample.rough;res.amount=1.0;
+  res.albedo=graphSample.albedo;res.normal=graphSample.normal;res.ao=mix(1.0,graphSample.ao,uSurfAOAmt);res.rough=graphSample.rough;res.amount=1.0;
   pbrApplyPaint(res,wpos,nGeo,triBlend);
   return res;
   #endif
@@ -477,7 +483,15 @@ SurfaceTexResult applySurfaceMaterials(
   float roleBlend = clamp(uSurfBlend, 0.0, 1.0);
   if (roleBlend > 0.001 && secondW > 1e-4 && secondI != bestI) {
     SurfMaterialSample other = surfSampleRole(secondI, wpos, triBlend, nGeo);
-    float kRole = (useManualWeights ? 1.0 : roleBlend) * secondW / max(bestW + secondW, 1e-4);
+    // Weight both sides symmetrically: the old factor jumped from ~0.18 to
+    // ~0.82 when the strongest role changed on a slope.
+    #ifdef SURFACE_ARRAYS
+    float sharpness = useManualWeights ? 1.0 : mix(2.0, 1.0, roleBlend);
+    #else
+    float sharpness = useManualWeights ? 1.0 : mix(4.0, 1.0, roleBlend);
+    #endif
+    float aWeight = pow(bestW, sharpness), bWeight = pow(secondW, sharpness);
+    float kRole = bWeight / max(aWeight + bWeight, 1e-4);
     tex = surfMixSamples(tex, other, clamp(kRole, 0.0, 0.85));
   }
 

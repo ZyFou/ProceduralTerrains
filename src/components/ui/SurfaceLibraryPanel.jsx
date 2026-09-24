@@ -453,7 +453,7 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
           </div>
           {status?.error && <p className="section-hint warning" role="alert">{status.error} Use Bake Custom Materials to retry.</p>}
           <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads are stored locally and included in portable project exports.</p>
-          {SURFACE_MODE_SLIDERS.map((def) => (
+          {SURFACE_MODE_SLIDERS.filter((def) => source !== SURFACE_TEXTURE_SOURCE.PBR || def.key !== 'surfaceTexturePaletteInfluence').map((def) => (
             <SliderCtl
               key={def.key}
               def={def}

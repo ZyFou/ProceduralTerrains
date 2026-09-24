@@ -879,16 +879,18 @@ ${features.manual ? '' : /* glsl */ `
   ao = applyRidgeAccent(ao, (hC - (hX + hZ) * 0.5) / (eps * 0.9));
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  float proceduralSheen = 1.0 - clamp(surf.amount, 0.0, 1.0);
   vec3 col = terrainLighting(
     td.albedo, n, uSunDir, ao,
     tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
-    viewDir
+    proceduralSheen, viewDir
   );
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
   if (surf.amount > 0.001) {
     float ssp = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 24.0);
-    col += ssp * (1.0 - surf.rough) * surf.amount * 0.15 * max(uSunDir.y, 0.0);
+    float gloss = 1.0 - clamp(surf.rough, 0.0, 1.0);
+    col += ssp * gloss * gloss * surf.amount * 0.08 * max(uSunDir.y, 0.0);
   }
 
   // underwater caustics on the submerged sea floor (no-op when dry: the

@@ -2,7 +2,7 @@
   "renderer": "WebKit WebGL",
   "samplers": 16,
   "arrayLayers": 2048,
-  "ms": 162419,
+  "ms": 240593,
   "budget": {
     "resolution": 512,
     "contributions": 2,

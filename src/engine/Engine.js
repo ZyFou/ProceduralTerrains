@@ -4535,7 +4535,7 @@ export class Engine {
     u.uSurfBlend.value = p.surfaceTextureBlend ?? 0.35;
     u.uSurfNormalAmt.value = p.surfaceTextureNormal ?? 1.0;
     u.uSurfRoughAmt.value = 1.0;
-    u.uSurfAOAmt.value = 1.0;
+    u.uSurfAOAmt.value = surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR ? 0.55 : 1.0;
     u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
     this._needsRender = true;
   }

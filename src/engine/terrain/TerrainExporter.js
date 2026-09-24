@@ -148,6 +148,7 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
         vec3 col = terrainLighting(
           tc.albedo, n, uSunDir, ao,
           tc.snow, tc.sandBand, hRel, tc.flatness, bw.wetland,
+          1.0 - clamp(surface.amount, 0.0, 1.0),
           viewDir
         );
         col = pow(col, vec3(1.0 / 2.2));

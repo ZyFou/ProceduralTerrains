@@ -6,6 +6,7 @@ export default function SurfacePackCredits() {
   return <details><summary>Terrain textures — Poly Haven &amp; ambientCG (CC0)</summary>
     {error && <p role="alert">{error}</p>}
     <p>Recipes are artistic adaptations. Texture files are included with this application.</p>
+    <p>{catalog?.recipes.map(recipe=>`${recipe.name}: ${recipe.assets.join(' + ')}, albedo multiplier ${recipe.tint.join(', ')}`).join('; ')}</p>
     <ul>{catalog?.assets.map(asset=><li key={asset.id}><a href={asset.sourceUrl} target="_blank" rel="noopener noreferrer">{asset.name}</a> — {asset.authors.join(', ')} / {asset.provider}, CC0-1.0.<small style={{display:'block'}}>{asset.transformations.join('; ')}</small></li>)}</ul>
   </details>;
 }

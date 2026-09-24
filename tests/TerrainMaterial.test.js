@@ -238,7 +238,7 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(tile.fragmentShader).toContain('uniform sampler2D uSurfProps');
     expect(tile.fragmentShader).not.toContain('uniform sampler2D uSurfAO');
     expect(tile.fragmentShader).toContain('manualCoverage');
-    expect(tile.fragmentShader).toContain('(useManualWeights ? 1.0 : roleBlend)');
+    expect(tile.fragmentShader).toContain('bWeight / max(aWeight + bWeight');
   });
 
   it('keeps the dedicated Manual Terrain shader below the 16 texture-unit limit', () => {

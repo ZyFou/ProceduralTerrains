@@ -261,9 +261,11 @@ void main() {
 
   float spec = pow(max(dot(reflect(-uSunDir, n), viewDir), 0.0), 32.0);
   float shoreSheen = 1.0 - smoothstep(0.0, max(tc.sandBand, 0.5), abs(hRel));
-  col += spec * (tc.snow * 0.30 + shoreSheen * 0.10 + bw.wetland * tc.flatness * 0.15);
+  float proceduralSheen = 1.0 - clamp(surf.amount, 0.0, 1.0);
+  col += spec * (tc.snow * 0.30 + shoreSheen * 0.10 + bw.wetland * tc.flatness * 0.15) * proceduralSheen;
   if (surf.amount > 0.001) {
-    col += spec * (1.0 - surf.rough) * surf.amount * 0.15 * max(uSunDir.y, 0.0);
+    float gloss = 1.0 - clamp(surf.rough, 0.0, 1.0);
+    col += spec * gloss * gloss * surf.amount * 0.08 * max(uSunDir.y, 0.0);
   }
 
   if (uLodDebug > 0.5) {

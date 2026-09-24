@@ -117,6 +117,7 @@ async function buildAsset(asset) {
 async function verify() {
   const manifest=await json(path.join(output,'catalog.json'));
   if(manifest.assets.length!==SURFACE_ASSETS.length) throw new Error('Pack must contain all 22 assets');
+  if(JSON.stringify(manifest.recipes)!==JSON.stringify(SURFACE_RECIPES)) throw new Error('Recipe manifest is out of date; run npm run materials:build');
   const ids=new Set();
   for(const asset of manifest.assets) {
     if(ids.has(asset.id)||!SURFACE_ASSETS.some(a=>a.id===asset.id)) throw new Error(`Invalid asset ${asset.id}`); ids.add(asset.id);
@@ -140,7 +141,7 @@ try {
     await fs.mkdir(output,{recursive:true});const assets=[];
     for(const asset of SURFACE_ASSETS) assets.push(await buildAsset(asset));
     await writeJSON(path.join(output,'catalog.json'),{version:1,packVersion:'1.0.0',assets,recipes:SURFACE_RECIPES});
-    await fs.writeFile(path.join(output,'ATTRIBUTION.md'),'# Terrain textures\n\nAssets licensed CC0-1.0. Recipes are artistic adaptations.\n\n'+assets.map(a=>`- **${a.name}** — ${a.authors.join(', ')} / ${a.provider}: ${a.sourceUrl}\n  ${a.transformations.join('; ')}.`).join('\n'));
+    await fs.writeFile(path.join(output,'ATTRIBUTION.md'),'# Terrain textures\n\nAssets licensed CC0-1.0. Recipes are artistic adaptations.\n\n'+assets.map(a=>`- **${a.name}** — ${a.authors.join(', ')} / ${a.provider}: ${a.sourceUrl}\n  ${a.transformations.join('; ')}.`).join('\n')+'\n\n## Derived recipes\n\n'+SURFACE_RECIPES.map(r=>`- **${r.name}** — ${r.assets.join(' + ')}; linear albedo multiplier ${r.tint.join(', ')}${r.wetness?`; wetness ${r.wetness}`:''}.`).join('\n')+'\n');
   } else if(command==='verify') await verify();
   else throw new Error('Usage: node tools/materials.mjs fetch|build|verify [--root=path/to/pbr]');
 } catch(error) { console.error(`${error.message}\nRepair: npm run materials:fetch && npm run materials:build`); process.exitCode=1; }

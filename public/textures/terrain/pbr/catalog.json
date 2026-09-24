@@ -2757,14 +2757,28 @@
     },
     {
       "id": "pt:dune-sand",
-      "name": "Dune sand",
+      "name": "Pale dune sand",
       "assets": [
         "polyhaven:sand_03"
       ],
       "tint": [
-        1.1,
-        0.94,
-        0.7
+        3.2,
+        3.5,
+        4
+      ],
+      "wetness": 0,
+      "derived": true
+    },
+    {
+      "id": "pt:powder-snow",
+      "name": "Bright powder snow",
+      "assets": [
+        "polyhaven:snow_02"
+      ],
+      "tint": [
+        2.2,
+        2.2,
+        2.2
       ],
       "wetness": 0,
       "derived": true

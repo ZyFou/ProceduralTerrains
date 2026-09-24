@@ -22,6 +22,8 @@ uniform sampler2D uSurfProps;
 `;
 export const SURFACE_ARRAY_FUNCTIONS = /* glsl */ `
 #ifdef SURFACE_ARRAYS
+vec3 pbrWorldDx;
+vec3 pbrWorldDy;
 vec3 pbrMapped(vec3 p,vec4 m){float c=cos(m.y),s=sin(m.y);p.xz=mat2(c,-s,s,c)*p.xz+m.zw;return p;}
 float pbrPaintWeight(vec2 p,int layer){
 #ifndef SURFACE_PAINT_LAYERS
@@ -39,18 +41,19 @@ return 0.0;
 vec2 pbrHash(vec2 p) {return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);}
 void pbrPatch(vec2 uv, vec2 dx, vec2 dy, vec2 cell, float layer, out vec4 color, out vec4 props) {
   // Offset-only patches preserve directional strata and normal-map axes.
-  vec2 offset=pbrHash(cell+layer*17.13)*uSurfBreakup;
+  // A half-tile offset left most patches strongly correlated. Spread the
+  // source phase over several tiles while keeping each patch orientation.
+  vec2 offset=pbrHash(cell+layer*17.13)*(uSurfBreakup*4.0);
   color=textureGrad(uSurfDiffuse,vec3(uv+offset,layer),dx,dy);
   props=textureGrad(uSurfProps,vec3(uv+offset,layer),dx,dy);
 }
-void pbrPlane(vec2 uv,float layer,out vec4 color,out vec4 props) {
-  vec2 dx=dFdx(uv),dy=dFdy(uv);
+void pbrPlane(vec2 uv,vec2 dx,vec2 dy,float layer,out vec4 color,out vec4 props) {
   if(uSurfBreakup<0.001){pbrPatch(uv,dx,dy,vec2(0),layer,color,props);return;}
   vec2 skew=vec2(uv.x-uv.y*0.57735027,uv.y*1.15470054);
   vec2 cell=floor(skew),f=fract(skew),a,b,c;vec3 weights;
   if(f.x+f.y<1.0){a=cell;b=cell+vec2(1,0);c=cell+vec2(0,1);weights=vec3(1.0-f.x-f.y,f.x,f.y);}
   else{a=cell+vec2(1);b=cell+vec2(0,1);c=cell+vec2(1,0);weights=vec3(f.x+f.y-1.0,1.0-f.x,1.0-f.y);}
-  weights=weights*weights;weights/=max(dot(weights,vec3(1)),0.0001);
+  weights=weights*weights*weights;weights/=max(dot(weights,vec3(1)),0.0001);
   vec4 ca,cb,cc,pa,pb,pc;
   pbrPatch(uv,dx,dy,a,layer,ca,pa);pbrPatch(uv,dx,dy,b,layer,cb,pb);pbrPatch(uv,dx,dy,c,layer,cc,pc);
   color=ca*weights.x+cb*weights.y+cc*weights.z;
@@ -58,12 +61,31 @@ void pbrPlane(vec2 uv,float layer,out vec4 color,out vec4 props) {
 }
 SurfMaterialSample pbrAsset(int layer,vec3 wp,vec3 blend,vec3 ng,float scale) {
   float metres=max(uSurfaceAssetSize[layer],0.01)*max(scale,0.01);
-  vec3 p=wp/max(metres,0.01)*max(uSurfScale,0.01);
+  float frequency=max(uSurfScale,0.01)/max(metres,0.01);
+  vec3 p=wp*frequency;
+  vec3 dpdx=pbrWorldDx*frequency,dpdy=pbrWorldDy*frequency;
+  // Switch to a world-anchored macro sample once a detail tile approaches
+  // subpixel size. The transition depends on pixel footprint, not the camera
+  // origin, so it remains stable across chunks and during exports.
+  float footprint=max(length(dpdx),length(dpdy));
+  float macroWeight=smoothstep(0.28,0.70,footprint);
+  vec3 sampleP=macroWeight>0.999?p*0.125:p;
+  float sampleScale=macroWeight>0.999?0.125:1.0;
   vec4 cx,cy,cz,px,py,pz;
-  pbrPlane(p.zy,float(layer),cx,px);pbrPlane(p.xz,float(layer),cy,py);pbrPlane(p.xy,float(layer),cz,pz);
+  pbrPlane(sampleP.zy,dpdx.zy*sampleScale,dpdy.zy*sampleScale,float(layer),cx,px);
+  pbrPlane(sampleP.xz,dpdx.xz*sampleScale,dpdy.xz*sampleScale,float(layer),cy,py);
+  pbrPlane(sampleP.xy,dpdx.xy*sampleScale,dpdy.xy*sampleScale,float(layer),cz,pz);
+  if(macroWeight>0.001 && macroWeight<0.999){
+    vec4 mx,my,mz,qx,qy,qz;vec3 macroP=p*0.125;
+    pbrPlane(macroP.zy,dpdx.zy*0.125,dpdy.zy*0.125,float(layer),mx,qx);
+    pbrPlane(macroP.xz,dpdx.xz*0.125,dpdy.xz*0.125,float(layer),my,qy);
+    pbrPlane(macroP.xy,dpdx.xy*0.125,dpdy.xy*0.125,float(layer),mz,qz);
+    cx=mix(cx,mx,macroWeight);cy=mix(cy,my,macroWeight);cz=mix(cz,mz,macroWeight);
+    px=mix(px,qx,macroWeight);py=mix(py,qy,macroWeight);pz=mix(pz,qz,macroWeight);
+  }
   vec2 nx=px.rg*2.0-1.0,ny=py.rg*2.0-1.0,nz=pz.rg*2.0-1.0;
   vec3 bump=vec3(0,nx.y,nx.x)*blend.x+vec3(ny.x,0,ny.y)*blend.y+vec3(nz.x,nz.y,0)*blend.z;
-  bump-=ng*dot(bump,ng);
+  bump-=ng*dot(bump,ng);bump*=mix(1.0,0.35,macroWeight);
   SurfMaterialSample s;s.albedo=cx.rgb*blend.x+cy.rgb*blend.y+cz.rgb*blend.z;
   s.normal=normalize(ng+bump);s.rough=px.b*blend.x+py.b*blend.y+pz.b*blend.z;
   s.ao=px.a*blend.x+py.a*blend.y+pz.a*blend.z;s.height=cx.a*blend.x+cy.a*blend.y+cz.a*blend.z;s.missing=0.0;return s;

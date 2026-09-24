@@ -3,10 +3,10 @@ import {
 } from '../engine/terrain/graph/GraphDocument.js';
 
 export const NODE_PROJECT_TEMPLATES = Object.freeze([
+  { id: 'nodes-blank', name: 'Blank graph', description: 'A flat slab with only Terrain Output.', icon: 'boxes', colorsEnabled: false, colorPreset: 'alpine' },
   {id:'nodes-pbr-alpine',name:'PBR Alpine',description:'Rock, mossy ground and fresh snow with slope and height masks.',icon:'mountain',colorsEnabled:false,colorPreset:'alpine'},
   {id:'nodes-pbr-canyon',name:'PBR Canyon',description:'Sandstone and red rock with oriented material mapping.',icon:'route',colorsEnabled:false,colorPreset:'canyon'},
   {id:'nodes-pbr-marsh',name:'PBR Jungle / Marsh',description:'Damp forest floor, wet mud and a local painted path mask.',icon:'layers',colorsEnabled:false,colorPreset:'river'},
-  { id: 'nodes-blank', name: 'Blank graph', description: 'A flat slab with only Terrain Output.', icon: 'boxes', colorsEnabled: false, colorPreset: 'alpine' },
   { id: 'nodes-geological-hybrid', name: 'Geological Hybrid', description: 'An editable noise recipe with eroded FBM mass, organic warp, weathered terraces, rock ridges, and fine geological detail.', icon: 'layers', colorsEnabled: true, colorPreset: 'alpine' },
   { id: 'nodes-alpine', name: 'Alpine ridges', description: 'A staged massif with shaped body, broken strata, scree, drainage, and alpine surface color.', icon: 'mountain', colorsEnabled: true, colorPreset: 'alpine' },
   { id: 'nodes-highlands', name: 'Layered highlands', description: 'Broad combined landforms with mass shaping, strata, thermal weathering, and temperate color.', icon: 'layers', colorsEnabled: true, colorPreset: 'temperate' },
@@ -70,12 +70,12 @@ const pbrExample=(kind)=>{
   const g=createBlankGraph('terrain');
   const add=(id,type,params,x,y)=>g.nodes.push(makeGraphNode(type,{x,y},{id,params}));
   add('landform',kind==='canyon'?'canyon':'mountain',{},0,0);
-  add('ground','pbrMaterial',{material:kind==='marsh'?'pt:jungle-floor':kind==='canyon'?'polyhaven:sand_03':'ambientcg:Ground037'},0,220);
+  add('ground','pbrMaterial',{material:kind==='marsh'?'pt:jungle-floor':kind==='canyon'?'pt:dune-sand':'ambientcg:Ground037'},0,220);
   add('rock','pbrMaterial',{material:kind==='marsh'?'pt:wet-mud':kind==='canyon'?'pt:canyon-red-stone':'polyhaven:rock_boulder_dry'},0,420);
   add('slope','slopeMask',{},230,600);add('mix','materialBlend',{},470,300);
   const edges=[['landform','height','terrain-output','height'],['ground','surface','mix','a'],['rock','surface','mix','b'],['slope','mask','mix','mask']];
   if(kind==='alpine'){
-    add('snow','pbrMaterial',{material:'polyhaven:snow_02'},230,40);add('altitude','heightMask',{low:0.6,high:0.8},470,40);add('summit','heightBlend',{},700,250);
+    add('snow','pbrMaterial',{material:'pt:powder-snow'},230,40);add('altitude','heightMask',{low:0.6,high:0.8},470,40);add('summit','heightBlend',{},700,250);
     edges.push(['mix','surface','summit','a'],['snow','surface','summit','b'],['altitude','mask','summit','mask'],['summit','surface','terrain-output','surface']);
   }else if(kind==='marsh'){
     add('path','paintMask',{},470,520);add('pathMix','materialBlend',{},700,300);

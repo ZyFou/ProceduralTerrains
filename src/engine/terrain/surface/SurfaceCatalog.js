@@ -40,13 +40,14 @@ export const SURFACE_RECIPES = [
   ['canyon-red-stone','Red canyon sandstone',[ph('sandstone_cracks')],[1.1,0.52,0.32],0],
   ['volcanic-dark-rock','Stylized volcanic rock',[ph('rock_boulder_cracked')],[0.23,0.24,0.26],0],
   ['alien-mineral','Alien mineral',[ph('rock_boulder_dry')],[0.62,0.38,0.88],0],
-  ['dune-sand','Dune sand',[ph('sand_03')],[1.1,0.94,0.7],0],
+  ['dune-sand','Pale dune sand',[ph('sand_03')],[3.2,3.5,4.0],0],
+  ['powder-snow','Bright powder snow',[ph('snow_02')],[2.2,2.2,2.2],0],
 ].map(([id,name,assets,tint,wetness]) => ({id:`pt:${id}`,name,assets,tint,wetness,derived:true}));
 export const DEFAULT_SURFACE_ROLES = {
-  sand:ph('sand_03'), dune:'pt:dune-sand', dryGrass:'pt:dry-grass', grass:ac('Ground037'),
-  forest:ph('forest_ground_04'), jungle:'pt:jungle-floor', swamp:'pt:wet-mud', tundra:'pt:tundra-ground',
-  redRock:'pt:canyon-red-stone', redRock2:ph('rock_boulder_cracked'), rock:ph('rock_boulder_dry'),
-  rockHi:ph('rock_face'), snow:ph('snow_02'),
+  sand:'pt:dune-sand', dune:'pt:dune-sand', dryGrass:ph('brown_mud_dry'), grass:ac('Ground037'),
+  forest:ph('forest_ground_04'), jungle:ph('forest_leaves_02'), swamp:ph('brown_mud'), tundra:ph('aerial_grass_rock'),
+  redRock:ph('rock_face'), redRock2:ph('rock_boulder_cracked'), rock:ph('rock_boulder_dry'),
+  rockHi:ph('rock_face'), snow:'pt:powder-snow',
 };
 export const SURFACE_PROFILES = {
   eco:{resolution:512,contributions:2,budgetBytes:96*1024**2},

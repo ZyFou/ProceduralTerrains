@@ -10,8 +10,8 @@ import { zlibSync } from 'fflate';
 import { decodeSurfaceMipChain,createMipArray } from '../src/engine/terrain/surface/SurfaceResources.js';
 
 describe('shared PBR resources',()=>{
-  it('has 22 distinct sources, eight nonduplicated recipes and excludes tracks from natural fill',()=>{
-    expect(new Set(SURFACE_ASSETS.map(a=>a.id)).size).toBe(22);expect(SURFACE_RECIPES).toHaveLength(8);
+  it('has 22 distinct sources, the base recipes plus bright snow, and excludes tracks from natural fill',()=>{
+    expect(new Set(SURFACE_ASSETS.map(a=>a.id)).size).toBe(22);expect(SURFACE_RECIPES).toHaveLength(9);
     for(const recipe of SURFACE_RECIPES)for(const asset of recipe.assets)expect(SURFACE_ASSETS.some(a=>a.id===asset)).toBe(true);
     for(const name of ['snow_01','sand_02','red_sand','grass_path_2'])expect(SURFACE_ASSETS.find(a=>a.sourceId===name).naturalFill).toBe(false);
   });

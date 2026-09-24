@@ -46,3 +46,15 @@ Assets licensed CC0-1.0. Recipes are artistic adaptations.
   2K normalization; linear-light color mipmaps; renormalized normal mipmaps; RGBA8 color/height and normal/roughness/AO packing.
 - **Marked red sand** — Rohit Seervi / polyhaven: https://polyhaven.com/a/red_sand
   2K normalization; linear-light color mipmaps; renormalized normal mipmaps; RGBA8 color/height and normal/roughness/AO packing.
+
+## Derived recipes
+
+- **Dry sparse grass** — ambientcg:Grass004 + polyhaven:brown_mud_dry; linear albedo multiplier 1.12, 0.94, 0.68.
+- **Mineral tundra** — polyhaven:aerial_grass_rock + polyhaven:mossy_rock; linear albedo multiplier 1, 1, 1.
+- **Damp tropical floor** — ambientcg:Ground037 + polyhaven:forest_leaves_02; linear albedo multiplier 0.85, 0.94, 0.8; wetness 0.25.
+- **Wet mud** — polyhaven:brown_mud + polyhaven:brown_mud_leaves_01; linear albedo multiplier 0.7, 0.7, 0.7; wetness 0.45.
+- **Red canyon sandstone** — polyhaven:sandstone_cracks; linear albedo multiplier 1.1, 0.52, 0.32.
+- **Stylized volcanic rock** — polyhaven:rock_boulder_cracked; linear albedo multiplier 0.23, 0.24, 0.26.
+- **Alien mineral** — polyhaven:rock_boulder_dry; linear albedo multiplier 0.62, 0.38, 0.88.
+- **Pale dune sand** — polyhaven:sand_03; linear albedo multiplier 3.2, 3.5, 4.
+- **Bright powder snow** — polyhaven:snow_02; linear albedo multiplier 2.2, 2.2, 2.2.
