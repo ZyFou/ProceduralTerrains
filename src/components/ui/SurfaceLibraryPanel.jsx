@@ -409,7 +409,7 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
 
 const slider = (key, label, min, max, step, opts = {}) => ({ key, label, min, max, step, ...opts });
 const SURFACE_MODE_SLIDERS = [
-  slider('surfaceTextureScale', 'Scale', 0.25, 20, 0.05, { digits: 2, fallback: 1 }),
+  slider('surfaceTextureScale', 'Scale', 0.1, 5, 0.05, { digits: 2, fallback: 1 }),
   slider('surfaceTextureBreakup', 'Break Tiling', 0, 1, 0.02, { digits: 2, fallback: 0.5 }),
   slider('surfaceTextureBlend', 'Blend Textures', 0, 1, 0.02, { digits: 2, fallback: 0.35 }),
   slider('surfaceTexturePaletteInfluence', 'Palette Influence', 0, 1, 0.02, { digits: 2, fallback: 0.6 }),
@@ -467,7 +467,9 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
             <SliderCtl
               key={def.key}
               def={def}
-              value={params[def.key] ?? def.fallback ?? 1}
+              value={def.key === 'surfaceTextureScale'
+                ? Math.min(def.max, Math.max(def.min, params[def.key] ?? def.fallback ?? 1))
+                : (params[def.key] ?? def.fallback ?? 1)}
               onChange={(v) => onParam(def.key, v)}
               settingId={`surface.${def.key}`}
             />

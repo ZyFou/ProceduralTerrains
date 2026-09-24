@@ -4529,7 +4529,9 @@ export class Engine {
     u.uSurfPaletteInfluence.value = flatManual || p.surfaceTextureRawColor !== false
       ? 0.0 : (p.surfaceTexturePaletteInfluence ?? 0.6);
     if (!u.uSurfScale) u.uSurfScale = { value: 1.0 };
-    u.uSurfScale.value = p.surfaceTextureScale ?? 1.0;
+    p.surfaceTextureScale = Number.isFinite(p.surfaceTextureScale)
+      ? Math.min(5, Math.max(0.1, p.surfaceTextureScale)) : 1.0;
+    u.uSurfScale.value = p.surfaceTextureScale;
     if (!u.uSurfBreakup) u.uSurfBreakup = { value: 0.5 };
     u.uSurfBreakup.value = flatManual ? 0.0 : (p.surfaceTextureBreakup ?? 0.5);
     if (!u.uSurfBlend) u.uSurfBlend = { value: 0.35 };

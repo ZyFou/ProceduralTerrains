@@ -170,6 +170,21 @@ describe('atomic terrain height transitions', () => {
     expect(engine.uniforms.uSurfPaletteInfluence.value).toBe(0.7);
   });
 
+  it('clamps saved texture scales to the current slider range', () => {
+    const engine = heightTransitionHarness();
+    engine.params = { surfaceTextureSource: 'customTextures', surfaceTextureScale: 20 };
+    engine.uniforms = createTerrainUniforms();
+
+    engine._applySurfaceSettings();
+    expect(engine.params.surfaceTextureScale).toBe(5);
+    expect(engine.uniforms.uSurfScale.value).toBe(5);
+
+    engine.params.surfaceTextureScale = 0.01;
+    engine._applySurfaceSettings();
+    expect(engine.params.surfaceTextureScale).toBe(0.1);
+    expect(engine.uniforms.uSurfScale.value).toBe(0.1);
+  });
+
   it('keeps a Nodes graph as the generation source of a hybrid Manual project', () => {
     const engine = heightTransitionHarness();
     engine.projectMode = 'manual';
