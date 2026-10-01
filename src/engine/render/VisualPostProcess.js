@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { resolveCameraRenderPlan } from './CameraRenderPlan.js';
+import { resolveCameraReconstruction, SPATIAL_UPSCALE_GLSL } from './SpatialUpscaler.js';
 
 const VERTEX = /* glsl */ `
 varying vec2 vUv;
@@ -136,7 +137,8 @@ precision highp float;
 uniform sampler2D tDiffuse;
 uniform vec2 uSourceSize;
 uniform vec2 uOutputSize;
-uniform float uReconstructionMode; // 0 linear/downsample, 1 clean, 2 pixelated
+uniform float uReconstructionMode; // 0 linear/downsample, 1 clean, 2 pixelated, 3 spatial
+uniform float uSpatialSharpness;
 uniform float uDithering;
 uniform float uDitherStrength;
 uniform float uDitherLevels;
@@ -182,20 +184,21 @@ vec3 sampleClean(vec2 uv) {
   return acc / total;
 }
 
+${SPATIAL_UPSCALE_GLSL}
+
 vec3 sampleSource(vec2 uv) {
-  uv = clamp(uv, vec2(0.001), vec2(0.999));
-  vec3 result = texture2D(tDiffuse, uv).rgb;
+  vec2 halfTexel = 0.5 / max(uSourceSize, vec2(1.0));
+  uv = clamp(uv, halfTexel, vec2(1.0) - halfTexel);
 #if USE_PIXELATED
-  if (uReconstructionMode > 1.5) {
-    vec2 snapped = (floor(uv * uSourceSize) + 0.5) / uSourceSize;
-    result = texture2D(tDiffuse, snapped).rgb;
-  }
+  vec2 snapped = (floor(uv * uSourceSize) + 0.5) / uSourceSize;
+  return texture2D(tDiffuse, snapped).rgb;
+#elif USE_SPATIAL_RECONSTRUCTION
+  return sampleSpatial(uv);
 #elif USE_CLEAN_RECONSTRUCTION
-  if (uReconstructionMode > 0.5) {
-    result = sampleClean(uv);
-  }
+  return sampleClean(uv);
+#else
+  return texture2D(tDiffuse, uv).rgb;
 #endif
-  return result;
 }
 
 float bayer4(vec2 p) {
@@ -241,7 +244,7 @@ void main() {
 
 #if USE_DITHERING
   if (uDithering > 0.5 && uDitherStrength > 0.001) {
-    vec2 ditherCoord = uReconstructionMode > 1.5 ? floor(uv * uSourceSize) : gl_FragCoord.xy;
+    vec2 ditherCoord = (uReconstructionMode > 1.5 && uReconstructionMode < 2.5) ? floor(uv * uSourceSize) : gl_FragCoord.xy;
     ditherCoord = floor(ditherCoord / max(uDitherScale, 1.0));
     float threshold = bayer4(ditherCoord) / 16.0 - 0.5;
     float steps = clamp(floor(uDitherLevels + 0.5), 2.0, 32.0) - 1.0;
@@ -323,6 +326,7 @@ export class VisualPostProcess {
         uSourceSize: { value: new THREE.Vector2(1, 1) },
         uOutputSize: { value: new THREE.Vector2(1, 1) },
         uReconstructionMode: { value: 0 },
+        uSpatialSharpness: { value: 0.35 },
         uDithering: { value: 0 },
         uDitherStrength: { value: 0.65 },
         uDitherLevels: { value: 8 },
@@ -340,6 +344,7 @@ export class VisualPostProcess {
       defines: {
         USE_PIXELATED: 0,
         USE_CLEAN_RECONSTRUCTION: 0,
+        USE_SPATIAL_RECONSTRUCTION: 0,
         USE_DITHERING: 0,
         USE_CRT: 0,
         USE_CHROMATIC: 0,
@@ -445,8 +450,7 @@ export class VisualPostProcess {
       USE_SUN_RAYS: (params.visualsSunRaysStrength ?? 0) > 0.001 ? 1 : 0,
     };
     const cameraDefines = {
-      USE_PIXELATED: params.visualsPixelatedEnabled ? 1 : 0,
-      USE_CLEAN_RECONSTRUCTION: !params.visualsPixelatedEnabled && plan.reconstructionMode === 'clean' ? 1 : 0,
+      ...resolveCameraReconstruction(plan, params, this._perf).defines,
       USE_DITHERING: params.visualsDitheringEnabled ? 1 : 0,
       USE_CRT: params.visualsCrtEnabled ? 1 : 0,
       USE_CHROMATIC: params.visualsChromaticAberrationEnabled ? 1 : 0,
@@ -512,16 +516,13 @@ export class VisualPostProcess {
     }
 
     if (plan.needsFinalPass) {
-      const artisticPixel = !!this._params.visualsPixelatedEnabled;
-      const isUpscale = plan.sceneWidth < plan.outputWidth || plan.sceneHeight < plan.outputHeight;
-      let mode = 0;
-      if (artisticPixel || (isUpscale && this._perf.resolutionDenoiseMode === 'pixelated')) mode = 2;
-      else if (isUpscale) mode = 1;
+      const reconstruction = resolveCameraReconstruction(plan, this._params, this._perf);
       const u = this._cameraMaterial.uniforms;
       u.tDiffuse.value = sourceTexture;
       u.uSourceSize.value.set(plan.sceneWidth, plan.sceneHeight);
       u.uOutputSize.value.set(plan.outputWidth, plan.outputHeight);
-      u.uReconstructionMode.value = mode;
+      u.uReconstructionMode.value = reconstruction.mode;
+      u.uSpatialSharpness.value = reconstruction.sharpness;
       this._renderMaterial(renderer, this._cameraMaterial, null);
     }
   }
@@ -545,9 +546,11 @@ export class VisualPostProcess {
     return {
       output: { w: this._plan.outputWidth, h: this._plan.outputHeight },
       scene: { w: this._plan.sceneWidth, h: this._plan.sceneHeight },
-      reconstruction: this._params?.visualsPixelatedEnabled
-        ? 'pixelated-artistic'
-        : (this._plan.needsReconstruction ? (this._perf?.resolutionDenoiseMode || 'clean') : 'native'),
+      reconstruction: resolveCameraReconstruction(this._plan, this._params, this._perf).label,
+      spatialUpscaler: {
+        active: resolveCameraReconstruction(this._plan, this._params, this._perf).mode === 3,
+        sharpness: resolveCameraReconstruction(this._plan, this._params, this._perf).sharpness,
+      },
       pixelated: !!this._params?.visualsPixelatedEnabled,
       dithering: this._params?.visualsDitheringEnabled ? {
         strength: this._params.visualsDitheringStrength ?? 0.65,
