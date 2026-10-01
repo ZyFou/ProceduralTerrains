@@ -1,4 +1,4 @@
-import { Engine } from './Engine.js';
+import { Engine } from './EnergySavingEngine.js';
 import { ENGINE_METHODS } from './EngineProxy.js';
 import { prepareWorkerResult } from './WorkerProtocol.js';
 
