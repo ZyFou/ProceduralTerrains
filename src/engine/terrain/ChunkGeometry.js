@@ -8,7 +8,11 @@ import * as THREE from 'three';
 // Geometries are shared: every chunk currently at LOD n uses the same one.
 // ============================================================================
 
-export function buildChunkGeometry(res, lodIndex) {
+// `morph` marks the shared per-LOD grids that take part in geomorphing
+// (aMorph = 1): their odd vertices slide onto the next-coarser grid as they
+// approach the LOD switch distance. Merged/boundary/export meshes leave it 0
+// (or omit the attribute, which WebGL reads as 0).
+export function buildChunkGeometry(res, lodIndex, { morph = false } = {}) {
   const vps = res + 1;                  // vertices per side
   const gridCount = vps * vps;
 
@@ -76,6 +80,7 @@ export function buildChunkGeometry(res, lodIndex) {
   // aWall stays 0 for terrain chunks; only the dedicated circular radial wall
   // mesh sets it to 1 so the shared terrain shader can tell them apart.
   geo.setAttribute('aWall', new THREE.BufferAttribute(new Float32Array(total), 1));
+  if (morph) geo.setAttribute('aMorph', new THREE.BufferAttribute(new Float32Array(total).fill(1), 1));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
   return geo;
 }

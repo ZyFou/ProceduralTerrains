@@ -8,12 +8,21 @@
 // centered at the world origin), never of sphere UVs — so there is no pole
 // stretching and no seam around the globe.
 //
-// All loop bounds are compile-time constants (fixed octave counts, the 3×3×3
-// worley cell loop, and the CLOUD_STEPS / CLOUD_LIGHT_STEPS #defines). Dynamic
-// trip counts hang ANGLE's D3D11 shader compiler, so we never use them here.
+// Loop bounds are the fixed octave counts, the 3×3×3 worley cell loop and the
+// CLOUD_STEPS / CLOUD_LIGHT_STEPS #defines plus the zero-valued uLoopGuard
+// uniform: identical trip counts, but the D3D compiler keeps real loops instead
+// of unrolling the whole march (the cloud pass ran 2.5x faster, compiled in half
+// the time, pixel-identical). What used to hang ANGLE's D3D11 compiler was
+// implicit-derivative texture lookups inside such loops; the occupancy fetch is
+// an explicit-LOD lookup, and no loop body may sample with derivatives.
 // ============================================================================
 
 export const CLOUD_NOISE_GLSL = /* glsl */ `
+#ifndef TERRAIN_LOOP_GUARD
+#define TERRAIN_LOOP_GUARD
+uniform int uLoopGuard;   // always 0: keeps the loops below as real loops
+#endif
+
 // --- 3D hash (Dave Hoskins) --------------------------------------------------
 float cl_hash13(vec3 p3) {
   p3 = fract(p3 * 0.1031);
@@ -71,7 +80,7 @@ float cl_fbm_base(vec3 p) {
   #ifndef CLOUD_OCTAVES
   #define CLOUD_OCTAVES 5
   #endif
-  for (int i = 0; i < CLOUD_OCTAVES; i++) {
+  for (int i = 0; i < CLOUD_OCTAVES + uLoopGuard; i++) {
     sum += amp * cl_vnoise(p);
     norm += amp;
     amp *= 0.5;
@@ -84,7 +93,7 @@ float cl_fbm_base(vec3 p) {
 // smooth and cheap: three base octaves, no detail FBM, and no Worley erosion.
 float cl_fbm_light(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0;
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 3 + uLoopGuard; i++) {
     sum += amp * cl_vnoise(p);
     norm += amp;
     amp *= 0.5;
@@ -97,7 +106,7 @@ float cl_fbm_light(vec3 p) {
 #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
 float cl_fbm_detail(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0;
-  for (int i = 0; i < CLOUD_DETAIL_OCTAVES; i++) {
+  for (int i = 0; i < CLOUD_DETAIL_OCTAVES + uLoopGuard; i++) {
     sum += amp * cl_vnoise(p);
     norm += amp;
     amp *= 0.5;
@@ -113,9 +122,9 @@ float cl_worley(vec3 p) {
   vec3 id = floor(p);
   vec3 f = fract(p);
   float md = 1.0;
-  for (int z = -1; z <= 1; z++)
-  for (int y = -1; y <= 1; y++)
-  for (int x = -1; x <= 1; x++) {
+  for (int z = -1; z <= 1 + uLoopGuard; z++)
+  for (int y = -1; y <= 1 + uLoopGuard; y++)
+  for (int x = -1; x <= 1 + uLoopGuard; x++) {
     vec3 g = vec3(float(x), float(y), float(z));
     vec3 o = cl_hash33(id + g);
     vec3 r = g + o - f;
@@ -180,6 +189,9 @@ float cloudShape(vec3 q) {
   float evoT = uCloudTime * uCloudEvolve;
   vec3 baseP = q * uCloudScale + uCloudNoiseOffset
     + drift + vec3(0.0, evoT, 0.0);
+  // coverage: higher slider -> lower threshold -> more cloud
+  float threshold = 1.0 - uCloudCoverage;
+  float soft = max(uCloudSoftness, 0.06);
   float base = cl_fbm_base(baseP);
 
   // Soft base coverage from the LARGE-scale shape first. This is the smooth
@@ -187,9 +199,6 @@ float cloudShape(vec3 q) {
   // so raw high-frequency noise never maps straight to opacity (that direct
   // mapping was the source of the salt-and-pepper grain, and it compounded when
   // a ray crossed several cloud masses).
-  // coverage: higher slider -> lower threshold -> more cloud
-  float threshold = 1.0 - uCloudCoverage;
-  float soft = max(uCloudSoftness, 0.06);
   float cov = smoothstep(threshold, threshold + soft, base);
   if (cov <= 0.0) return 0.0;
 
@@ -203,6 +212,9 @@ float cloudShape(vec3 q) {
   // detail/erosion octaves get their own, quicker evolution offset.
   float evoD = uCloudTime * uCloudEvolve * 2.5;
   float carve = 0.0;
+  // carve only acts through edge, which is exactly 0 in solid cores
+  // (cov == 1): skip the detail FBM and the 27-cell Worley there.
+  if (edge > 0.0) {
   #if defined(CLOUD_DETAIL_OCTAVES) && CLOUD_DETAIL_OCTAVES > 0
   // centered (detail - 0.5): redistributes density instead of biasing brightness
   float detailRatio = uCloudDetailScale / max(uCloudScale, 1e-6);
@@ -218,6 +230,7 @@ float cloudShape(vec3 q) {
     + vec3(0.0, evoD, 0.0));
   carve -= ero * uCloudErosionStrength;
   #endif
+  }
 
   float dens = clamp(cov + carve * edge, 0.0, 1.0);
   // final soft ease so density ramps in gently — never a binary threshold
@@ -229,9 +242,9 @@ float cloudShapeForLight(vec3 q) {
   float evoT = uCloudTime * uCloudEvolve;
   vec3 baseP = q * uCloudScale + uCloudNoiseOffset
     + drift + vec3(0.0, evoT, 0.0);
-  float base = cl_fbm_light(baseP);
   float threshold = 1.0 - uCloudCoverage;
   float soft = max(uCloudSoftness, 0.08);
+  float base = cl_fbm_light(baseP);
   float cov = smoothstep(threshold, threshold + soft, base);
   return cov * cov * (3.0 - 2.0 * cov);
 }
@@ -297,7 +310,7 @@ float cl_lightTransmittance(vec3 P) {
   float stepLen = span / float(CLOUD_LIGHT_STEPS) * 0.65;
   float dsum = 0.0;
   vec3 sp = P;
-  for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
+  for (int i = 0; i < CLOUD_LIGHT_STEPS + uLoopGuard; i++) {
     sp += uCloudSunDir * stepLen;
     dsum += cloudDensityForLight(sp);
   }
@@ -354,7 +367,7 @@ float cl_lightTransmittance(vec3 P) {
   float stepLen = span / float(CLOUD_LIGHT_STEPS) * 0.65;
   float dsum = 0.0;
   vec3 sp = P;
-  for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
+  for (int i = 0; i < CLOUD_LIGHT_STEPS + uLoopGuard; i++) {
     sp += uCloudSunDir * stepLen;
     dsum += cloudDensityForLight(sp);
   }

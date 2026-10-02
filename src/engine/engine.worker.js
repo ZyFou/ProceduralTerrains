@@ -188,6 +188,7 @@ async function initialize(payload) {
     renderWorker: true,
     coldShaderRun: payload.coldShaderRun,
     shaderBenchmark: payload.shaderBenchmark,
+    bootLinkMode: payload.bootLinkMode,
     initialView: payload.initialView,
     initialBootMode: payload.initialBootMode,
   });

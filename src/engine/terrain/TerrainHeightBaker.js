@@ -16,9 +16,9 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 //
 // This baker evaluates the field once into a 2D texture whenever it actually
 // changes (seed / shape / biome / paint edits, tracked by the engine's terrain
-// generation counter). Restore the stable packed representation used before
-// the performance passes:
-//   RGB = geometric surface normal (encoded * 0.5 + 0.5)
+// generation counter). Packed representation (RGBA16F, signed):
+//   R,G = geometric surface normal x,z (y is positive and implied)
+//   B   = curvature ((hX + hZ) / 2 - hC) / eps (concavity AO / ridge accent)
 //   A   = height / heightScale
 // Baking the exact finite-difference normal keeps terrain lighting identical to
 // the live field. Reconstructing it later from a filtered height-only texture
@@ -53,23 +53,35 @@ ${heightGLSL}
 varying vec2 vUv;
 uniform vec4 uBakeUvTransform;
 uniform float uEps;
+uniform int uBakeSampleCount;   // always 3; a uniform bound keeps ONE inlined heightAt
 
 void main() {
   vec2 bakeUv = uBakeUvTransform.xy + vUv * uBakeUvTransform.zw;
   vec2 xz = uBakeOrigin + bakeUv * max(uBakeSpan, vec2(1.0));
   float eps = uEps;
-  float hC = heightAt(xz);
-  float hX = heightAt(xz + vec2(eps, 0.0));
-  float hZ = heightAt(xz + vec2(0.0, eps));
+  // Same sample order and offsets as the live terrain fragment, so a texel
+  // centre stores exactly the values the live path computes at that point.
+  vec3 samples = vec3(0.0);
+  for (int sampleIndex = 0; sampleIndex < uBakeSampleCount; sampleIndex++) {
+    vec2 offset = sampleIndex == 1 ? vec2(eps, 0.0) : sampleIndex == 2 ? vec2(0.0, eps) : vec2(0.0);
+    samples[sampleIndex] = heightAt(xz + offset);
+  }
+  float hC = samples.x;
+  float hX = samples.y;
+  float hZ = samples.z;
   vec3 nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
+  float curvature = ((hX + hZ) * 0.5 - hC) / eps;
   float h01 = hC / max(uHeightScale, 1e-3);
-  gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);
+  // R,G = normal x,z (y implied, always positive), B = curvature, A = height.
+  gl_FragColor = vec4(nGeo.x, nGeo.z, curvature, h01);
 }
 `;
 
 // Climate changes over hundreds of world units, so it does not need the
-// high-resolution height target. Baking it separately keeps Studio water on a
-// cheap texture lookup while preserving the exact procedural biome layout.
+// high-resolution height target. The four slowly varying fields (temperature,
+// moisture, continentalness, erosion) are baked in half float, exact at texel
+// centres; the medium-scale region jitter (~0.7 cycles per noise unit) is too
+// fine for this grid and stays live in the shaders that read the bake.
 const BIOME_BAKE_FRAGMENT = /* glsl */ `
 precision highp float;
 
@@ -88,7 +100,7 @@ void main() {
     climate.temp,
     climate.moist,
     climate.cont,
-    climate.region
+    climate.erosion
   );
 }
 `;
@@ -155,8 +167,46 @@ export class TerrainHeightBaker {
     this._biomeProgramPrepared = false;
   }
 
-  get texture() { return this.target.texture; }
-  get biomeTexture() { return this.biomeTarget.texture; }
+  get texture() { return this.target?.texture ?? null; }
+  get biomeTexture() { return this.biomeTarget?.texture ?? null; }
+
+  /**
+   * Free every render target (front and back) while keeping the compiled bake
+   * program. Used when Tile mode is left: the bake is board-local, so other
+   * world modes should not pay its VRAM. The next begin() reallocates.
+   */
+  releaseTargets() {
+    this.cancel();
+    this.target?.dispose();
+    this.biomeTarget?.dispose();
+    this.target = null;
+    this.biomeTarget = null;
+    this._releaseWriteTargets();
+  }
+
+  /** World units covered by one texel of the published bake. */
+  texelWorldSize(span) {
+    const t = this.target ?? { width: this._texW, height: this._texH };
+    return Math.max(
+      (span?.x ?? 1) / Math.max(1, t.width),
+      (span?.y ?? 1) / Math.max(1, t.height),
+    );
+  }
+
+  // The back buffers only exist while a bake is in flight: they are released
+  // right after the swap (the front pair stays published) and recreated on
+  // the next bake, which halves the steady-state VRAM of the studio cache.
+  _ensureWriteTargets() {
+    if (!this._writeTarget) this._writeTarget = this._makeTarget(this._texW, this._texH);
+    if (!this._writeBiomeTarget) this._writeBiomeTarget = this._makeBiomeTarget(this._biomeW, this._biomeH);
+  }
+
+  _releaseWriteTargets() {
+    this._writeTarget?.dispose();
+    this._writeBiomeTarget?.dispose();
+    this._writeTarget = null;
+    this._writeBiomeTarget = null;
+  }
 
   _makeTarget(w, h, name = 'TerrainHeightNormalRGBA16F') {
     const target = new THREE.WebGLRenderTarget(w, h, {
@@ -174,7 +224,8 @@ export class TerrainHeightBaker {
 
   _makeBiomeTarget(w, h, name = 'TerrainBiomeClimate') {
     const target = new THREE.WebGLRenderTarget(w, h, {
-      type: THREE.UnsignedByteType,
+      // half float: 8-bit climate quantized biome thresholds into visible steps
+      type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
       magFilter: THREE.LinearFilter,
       minFilter: THREE.LinearFilter,
@@ -193,9 +244,9 @@ export class TerrainHeightBaker {
     const h = Math.min(cap, this._baseSize * Math.max(1, rows));
     // Keep the published front target alive because visible water may still be
     // sampling it. Only resize the hidden target used by the pending bake.
-    if (this._writeTarget.width !== w || this._writeTarget.height !== h) {
+    if (this._writeTarget && (this._writeTarget.width !== w || this._writeTarget.height !== h)) {
       this._writeTarget.dispose();
-      this._writeTarget = this._makeTarget(w, h);
+      this._writeTarget = null;
     }
     this._texW = w;
     this._texH = h;
@@ -203,13 +254,14 @@ export class TerrainHeightBaker {
     const maxCells = Math.max(1, cols, rows);
     const biomeW = Math.max(128, Math.round(512 * cols / maxCells));
     const biomeH = Math.max(128, Math.round(512 * rows / maxCells));
-    if (this._writeBiomeTarget.width !== biomeW
-        || this._writeBiomeTarget.height !== biomeH) {
+    if (this._writeBiomeTarget && (this._writeBiomeTarget.width !== biomeW
+        || this._writeBiomeTarget.height !== biomeH)) {
       this._writeBiomeTarget.dispose();
-      this._writeBiomeTarget = this._makeBiomeTarget(biomeW, biomeH);
+      this._writeBiomeTarget = null;
     }
     this._biomeW = biomeW;
     this._biomeH = biomeH;
+    this._ensureWriteTargets();
 
   }
 
@@ -218,6 +270,7 @@ export class TerrainHeightBaker {
       uniforms: {
         ...this.uniforms,
         uBakeUvTransform: this._bakeUvTransform,
+        uBakeSampleCount: { value: 3 },
       },
       defines: { OCTAVES: octaves },
       vertexShader: BAKE_VERTEX,
@@ -328,10 +381,13 @@ export class TerrainHeightBaker {
       } else {
         this._activeJob = null;
         this._bakeUvTransform.value.set(0, 0, 1, 1);
-        // Publish the complete height and climate pair in one frame.
+        // Publish the complete height and climate pair in one frame. The
+        // caller repoints every sampler at the new front pair immediately, so
+        // the previous pair can be released now.
         [this.target, this._writeTarget] = [this._writeTarget, this.target];
         [this.biomeTarget, this._writeBiomeTarget] =
           [this._writeBiomeTarget, this.biomeTarget];
+        this._releaseWriteTargets();
         return { complete: true, progress: 1 };
       }
     }
@@ -378,10 +434,10 @@ export class TerrainHeightBaker {
   }
 
   dispose() {
-    this.target.dispose();
-    this._writeTarget.dispose();
-    this.biomeTarget.dispose();
-    this._writeBiomeTarget.dispose();
+    this.target?.dispose();
+    this._writeTarget?.dispose();
+    this.biomeTarget?.dispose();
+    this._writeBiomeTarget?.dispose();
     this.mesh.geometry.dispose();
     if (this.material) this.material.dispose();
     this.biomeMaterial.dispose();

@@ -51,7 +51,7 @@ describe('Geological Hybrid noise stack preset', () => {
   it('generates finite 2D/3D GLSL and finite CPU terrain samples', () => {
     const stack = buildNoiseStackPreset('geologicalHybrid');
     const generated = generateStackGLSL(stack);
-    expect(generated.body2d).toContain('for (int i = 0; i < 6; i++)');
+    expect(generated.body2d).toContain('for (int i = 0; i < 6 + uLoopGuard; i++)');
     expect(generated.body2d).toContain('float terr =');
     expect(generated.body3d).toContain('float terr =');
 

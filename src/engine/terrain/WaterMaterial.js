@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from './terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
@@ -30,7 +30,7 @@ void main() {
 }
 `;
 
-const buildFragment = (stackGLSL, infinite = false) => {
+const buildFragmentSource = (stackGLSL, infinite = false) => {
   const { dependencies, terrainHeightFunction } = buildWaterHeightShaderParts(stackGLSL, infinite);
   return /* glsl */ `
 precision highp float;
@@ -161,6 +161,8 @@ void main() {
 }
 `;
 };
+
+const buildFragment = (stackGLSL, infinite = false) => fitNearBake(buildFragmentSource(stackGLSL, infinite));
 
 // Per-material quality uniforms (NOT shared with terrain, so water quality
 // can never affect terrain rendering). Defaults match the original shader.

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
+import { stepTemporalLod } from './LodMorph.js';
 
 // ============================================================================
 // PlanetWorld: a cube-sphere terrain. Six cube faces, each subdivided into a
@@ -69,6 +70,16 @@ export class PlanetWorld {
     this._faceTrees = [];
     this._mergedPatches = [];       // patch nodes folded this frame
     this._mergeGeo = new Map();     // "res:aLod" -> shared BufferGeometry
+    // Folded patches draw as instanced batches (one InstancedMesh per patch
+    // grid size) sharing ONE material, through the same instanced program as
+    // the chunk batches. A material per patch (269 uniforms, 24 arrays) made
+    // three.js re-upload every uniform for each of ~70 patch draws (~1 ms CPU
+    // per frame in orbit) and kept a second, non-instanced program alive.
+    this._patchBatches = new Map(); // "res:aLod" -> instanced batch
+    this._patchMaterial = null;
+    this._patchUploadKey = '';
+    this._patchSerial = 0;
+    this._instancesDirty = true;
     this._mergeDebug = false;
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
@@ -96,7 +107,7 @@ export class PlanetWorld {
 
     // shared per-LOD geometries (unit grid + skirt ring)
     this.geometries = this.lodSegments.map((res, lod) => {
-      const geo = buildChunkGeometry(res, lod);
+      const geo = buildChunkGeometry(res, lod, { morph: true });
       setChunkBounds(geo, 1, this.maxHeight, this.skirtDepth);
       return geo;
     });
@@ -144,6 +155,7 @@ export class PlanetWorld {
           const chunk = {
             origin, faceU: cu.clone(), faceV: cv.clone(), centerDir, worldCenter,
             boundRadius, lod: 3, merged: false, visible: true,
+            morph: 0, fresh: true, forceLod3: false,
           };
           this.chunks.push(chunk);
           cells[j][i] = chunk;
@@ -167,6 +179,8 @@ export class PlanetWorld {
       instancedGeometry.setAttribute('aFaceOrigin', new THREE.InstancedBufferAttribute(origins, 3));
       instancedGeometry.setAttribute('aFaceU', new THREE.InstancedBufferAttribute(faceUs, 3));
       instancedGeometry.setAttribute('aFaceV', new THREE.InstancedBufferAttribute(faceVs, 3));
+      const morphs = new Float32Array(capacity);
+      instancedGeometry.setAttribute('aMorphK', new THREE.InstancedBufferAttribute(morphs, 1));
       const material = this.makeMaterial();
       material.wireframe = this.wireframe;
       this.materials.push(material);
@@ -177,13 +191,14 @@ export class PlanetWorld {
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();
       this.group.add(mesh);
-      return { mesh, geometry: instancedGeometry, material, origins, faceUs, faceVs };
+      return { mesh, geometry: instancedGeometry, material, origins, faceUs, faceVs, morphs };
     });
     this._uploadInstancedBatches();
   }
 
   _uploadInstancedBatches() {
     if (!this.batches) return;
+    this._instancesDirty = false;
     const counts = new Uint32Array(this.batches.length);
     for (const chunk of this.chunks) {
       if (chunk.merged || !chunk.visible) continue;
@@ -192,16 +207,17 @@ export class PlanetWorld {
       chunk.origin.toArray(batch.origins, index * 3);
       chunk.faceU.toArray(batch.faceUs, index * 3);
       chunk.faceV.toArray(batch.faceVs, index * 3);
+      batch.morphs[index] = chunk.morph;
     }
     for (let lod = 0; lod < this.batches.length; lod++) {
       const batch = this.batches[lod];
       batch.mesh.count = counts[lod];
       batch.mesh.visible = counts[lod] > 0;
-      for (const name of ['aFaceOrigin', 'aFaceU', 'aFaceV']) {
+      for (const name of ['aFaceOrigin', 'aFaceU', 'aFaceV', 'aMorphK']) {
         const attribute = batch.geometry.getAttribute(name);
         attribute.needsUpdate = true;
         attribute.clearUpdateRanges?.();
-        attribute.addUpdateRange?.(0, counts[lod] * 3);
+        attribute.addUpdateRange?.(0, counts[lod] * attribute.itemSize);
       }
     }
   }
@@ -261,7 +277,8 @@ export class PlanetWorld {
       leaf: false, chunk: null, children, chunks, level, full, n: size,
       faceOrigin, faceU, faceV, centerDir, worldCenter,
       boundRadius: this._patchBoundRadius(faceOrigin, faceU, faceV, worldCenter),
-      spanWorld: size * this.chunkSpan, mesh: null, material: null, merged: false,
+      spanWorld: size * this.chunkSpan, merged: false, visible: false,
+      patchKey: null, patchRes: 0, patchLod: 0, serial: null,
     };
   }
 
@@ -292,6 +309,23 @@ export class PlanetWorld {
     );
   }
 
+  // --- temporal geomorph -----------------------------------------------------
+  // LOD decisions are unchanged; each change is animated instead of popping.
+  // chunk.lod is the rendered grid, chunk.morph (0..1) how far its odd vertices
+  // have slid onto the next-coarser grid (uploaded as the aMorphK attribute).
+  setMorphEnabled(enabled) {
+    this.morphEnabled = !!enabled;
+  }
+
+  _stepChunkLod(chunk, target, step) {
+    stepTemporalLod(chunk, target, step, this.lodSegments, this.morphEnabled !== false);
+  }
+
+  _publishMorph() {
+    const u = this.materials[0]?.uniforms?.uLodGridSegments;
+    if (u) u.value.set(this.lodSegments[0], this.lodSegments[1], this.lodSegments[2], this.lodSegments[3]);
+  }
+
   /** Change per-LOD segment counts — rebuilt gradually (one level/frame). */
   setLodSegments(segments) {
     const same = segments.length === this.lodSegments.length
@@ -308,7 +342,7 @@ export class PlanetWorld {
     const res = this._targetSegments[lod];
     if (res === this.lodSegments[lod]) return;
 
-    const geo = buildChunkGeometry(res, lod);
+    const geo = buildChunkGeometry(res, lod, { morph: true });
     setChunkBounds(geo, 1, this.maxHeight, this.skirtDepth);
     const old = this.geometries[lod];
     this.geometries[lod] = geo;
@@ -319,9 +353,11 @@ export class PlanetWorld {
       instancedGeometry.setAttribute('aFaceOrigin', new THREE.InstancedBufferAttribute(batch.origins, 3));
       instancedGeometry.setAttribute('aFaceU', new THREE.InstancedBufferAttribute(batch.faceUs, 3));
       instancedGeometry.setAttribute('aFaceV', new THREE.InstancedBufferAttribute(batch.faceVs, 3));
+      instancedGeometry.setAttribute('aMorphK', new THREE.InstancedBufferAttribute(batch.morphs, 1));
       batch.geometry.dispose();
       batch.geometry = instancedGeometry;
       batch.mesh.geometry = instancedGeometry;
+      this._instancesDirty = true;
     }
     old.dispose();
   }
@@ -371,6 +407,12 @@ export class PlanetWorld {
 
   update(cameraPos, camera, debug = {}) {
     this._processLodRebuild();
+    this._publishMorph();
+    const nowMs = performance.now();
+    const dt = this._lastUpdateAt == null ? 0 : Math.min(0.1, Math.max(0, (nowMs - this._lastUpdateAt) / 1000));
+    this._lastUpdateAt = nowMs;
+    const morphStep = dt / Math.max(0.05, this.morphDuration ?? 0.4);
+    for (const c of this.chunks) c.forceLod3 = false;
 
     const [t0, t1, t2] = this.lodThresholds;
     const counts = [0, 0, 0, 0];
@@ -401,38 +443,48 @@ export class PlanetWorld {
 
     // 2. Per-chunk LOD + cull (folded chunks are hidden, skip them).
     let visible = 0, culled = 0;
+    let morphing = 0;
+    let dirty = this._instancesDirty;
     for (const c of this.chunks) {
-      if (c.merged) { c.visible = false; continue; }
-      const d = this._tmp.copy(c.worldCenter).sub(cameraPos).length();
-      const lod = d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3;
-      if (!freezeLod) {
-        if (lod !== c.lod) c.lod = lod;
+      if (c.merged) {
+        if (c.visible) { c.visible = false; dirty = true; }
+        continue;
       }
+      const d = this._tmp.copy(c.worldCenter).sub(cameraPos).length();
+      const lod = c.forceLod3 ? 3 : (d < t0 ? 0 : d < t1 ? 1 : d < t2 ? 2 : 3);
+      const prevLod = c.lod;
+      const prevMorph = c.morph;
+      if (!freezeLod) this._stepChunkLod(c, lod, morphStep);
+      if (c.morph > 0 || c.lod !== lod) morphing++;
       counts[c.lod]++;
 
       let show = c.visible;
       if (!freezeCulling) {
         show = this._isVisible(c.centerDir, c.worldCenter, c.boundRadius, camLen, horizonCos, camera);
       }
+      if (show !== c.visible || c.lod !== prevLod || c.morph !== prevMorph) dirty = true;
       c.visible = show;
       if (show) visible++; else culled++;
     }
-    this._uploadInstancedBatches();
+    // instance data only changes with visibility / LOD / morph
+    if (dirty) this._uploadInstancedBatches();
 
-    // 3. Cull the folded patch meshes (LOD is fixed for a patch).
+    // 3. Cull the folded patches (LOD is fixed for a patch).
     for (const p of this._mergedPatches) {
-      let show = p.mesh.visible;
+      let show = p.visible;
       if (!freezeCulling) {
         show = this._isVisible(p.centerDir, p.worldCenter, p.boundRadius, camLen, horizonCos, camera);
       }
-      p.mesh.visible = show;
+      p.visible = show;
       if (show) visible++; else culled++;
     }
+    this._uploadPatchBatches();
 
     this.lodCounts = counts;
     this.activeChunkCount = this.chunks.length;
     this.visibleChunkCount = visible;
     this.culledChunkCount = culled;
+    this.morphingChunkCount = morphing;
   }
 
   // Horizon (back-of-planet) + frustum visibility test for one patch/chunk.
@@ -449,13 +501,24 @@ export class PlanetWorld {
 
   // --- merge traversal -----------------------------------------------------
   _foldPass(node, camPos) {
-    if (node.leaf) { if (node.chunk.merged) node.chunk.merged = false; return; }
+    if (node.leaf) {
+      if (node.chunk.merged) { node.chunk.merged = false; this._instancesDirty = true; }
+      return;
+    }
     const canFold = node.full && (this.allowRootMerge || node.level > 0);
     if (canFold) {
       const nearest = this._tmp.copy(node.worldCenter).sub(camPos).length() - node.boundRadius;
       const foldDist = node.spanWorld * this.mergeDistance * this._budgetScale;
       const want = node.merged ? nearest > foldDist * 0.85 : nearest > foldDist;
-      if (want) {
+      // Temporal geomorph: a patch only folds once every chunk under it has
+      // morphed down to the LOD3 grid (= patch density); until then they are
+      // steered there, so the fold itself changes nothing on screen.
+      const ready = node.merged || this.morphEnabled === false
+        || node.chunks.every((c) => c.lod === 3 && c.morph === 0);
+      if (want && !ready) {
+        for (const c of node.chunks) c.forceLod3 = true;
+      }
+      if (want && ready) {
         if (!node.merged) this._foldPatch(node);
         this._mergedPatches.push(node);
         this._hiddenByMerge += node.chunks.length;
@@ -468,42 +531,132 @@ export class PlanetWorld {
 
   _foldPatch(node) {
     node.merged = true;
-    if (!node.mesh) {
+    if (!node.patchKey) {
       const tier = Math.max(1, Math.round(Math.log2(node.n)));
-      const res = Math.min(160, Math.max(8, node.n * this.mergeQuadsPerChunk));
-      const aLod = 3 + Math.min(5, tier);
-      const mat = this.makeMaterial();
-      mat.uniforms.uFaceOrigin.value.copy(node.faceOrigin);
-      mat.uniforms.uFaceU.value.copy(node.faceU);
-      mat.uniforms.uFaceV.value.copy(node.faceV);
-      mat.wireframe = this.wireframe;
-      // match the current octave count (makeMaterial captured the count at
-      // planet creation; setOctaves only updates materials that already exist)
-      const liveOct = this.materials[0]?.defines?.OCTAVES;
-      if (liveOct !== undefined && mat.defines.OCTAVES !== liveOct) {
-        mat.defines.OCTAVES = liveOct;
-        mat.needsUpdate = true;
-      }
-      this.materials.push(mat);   // so wireframe / octave updates reach it
-      node.material = mat;
-      const mesh = new THREE.Mesh(this._mergeGeometry(res, aLod), mat);
-      mesh.frustumCulled = false;
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      this.group.add(mesh);
-      node.mesh = mesh;
+      node.patchRes = Math.min(160, Math.max(8, node.n * this.mergeQuadsPerChunk));
+      node.patchLod = 3 + Math.min(5, tier);
+      node.patchKey = `${node.patchRes}:${node.patchLod}`;
     }
-    node.mesh.visible = true;
+    node.visible = true;
+    this._instancesDirty = true;   // its chunks leave the chunk batches
     for (const c of node.chunks) { c.merged = true; c.visible = false; }
     this._forEachDescendantInternal(node, (d) => {
       d.merged = false;
-      if (d.mesh) d.mesh.visible = false;
+      d.visible = false;
     });
   }
 
   _unfoldPatch(node) {
     node.merged = false;
-    if (node.mesh) node.mesh.visible = false;
+    node.visible = false;
+    this._instancesDirty = true;
+  }
+
+  _ensurePatchMaterial() {
+    if (this._patchMaterial) return this._patchMaterial;
+    const mat = this.makeMaterial();
+    mat.wireframe = this.wireframe;
+    // match the live octave count (makeMaterial captured the count at planet
+    // creation; setOctaves only updates materials that already exist)
+    const liveOct = this.materials[0]?.defines?.OCTAVES;
+    if (liveOct !== undefined && mat.defines.OCTAVES !== liveOct) {
+      mat.defines.OCTAVES = liveOct;
+      mat.needsUpdate = true;
+    }
+    this.materials.push(mat);   // so wireframe / octave / source updates reach it
+    this._patchMaterial = mat;
+    return mat;
+  }
+
+  // Upper bound of simultaneously folded patches sharing one grid size.
+  _patchCapacity(key) {
+    let n = 0;
+    this._forEachInternal((node) => {
+      if (!node.full) return;
+      const tier = Math.max(1, Math.round(Math.log2(node.n)));
+      const res = Math.min(160, Math.max(8, node.n * this.mergeQuadsPerChunk));
+      if (`${res}:${3 + Math.min(5, tier)}` === key) n++;
+    });
+    return Math.max(1, n);
+  }
+
+  _ensurePatchBatch(node) {
+    let batch = this._patchBatches.get(node.patchKey);
+    if (batch) return batch;
+    const capacity = this._patchCapacity(node.patchKey);
+    const geometry = this._mergeGeometry(node.patchRes, node.patchLod).clone();
+    const origins = new Float32Array(capacity * 3);
+    const faceUs = new Float32Array(capacity * 3);
+    const faceVs = new Float32Array(capacity * 3);
+    geometry.setAttribute('aFaceOrigin', new THREE.InstancedBufferAttribute(origins, 3));
+    geometry.setAttribute('aFaceU', new THREE.InstancedBufferAttribute(faceUs, 3));
+    geometry.setAttribute('aFaceV', new THREE.InstancedBufferAttribute(faceVs, 3));
+    // patches never geomorph: explicit zeros instead of whatever generic
+    // attribute value the driver holds for the missing slots
+    geometry.setAttribute('aMorph', new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count), 1));
+    geometry.setAttribute('aMorphK', new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
+    const mesh = new THREE.InstancedMesh(geometry, this._ensurePatchMaterial(), capacity);
+    mesh.name = `planet-patch-${node.patchKey}`;
+    mesh.count = 0;
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    this.group.add(mesh);
+    batch = { mesh, geometry, origins, faceUs, faceVs, capacity };
+    this._patchBatches.set(node.patchKey, batch);
+    return batch;
+  }
+
+  _uploadPatchBatches() {
+    // Re-upload only when the set of visible patches changed.
+    let key = '';
+    for (const p of this._mergedPatches) {
+      if (!p.visible) continue;
+      if (p.serial == null) p.serial = ++this._patchSerial;
+      key += `${p.serial},`;
+    }
+    if (key === this._patchUploadKey) return;
+    this._patchUploadKey = key;
+    const counts = new Map();
+    for (const p of this._mergedPatches) {
+      if (!p.visible) continue;
+      const batch = this._ensurePatchBatch(p);
+      const index = counts.get(batch) || 0;
+      if (index >= batch.capacity) continue;
+      counts.set(batch, index + 1);
+      p.faceOrigin.toArray(batch.origins, index * 3);
+      p.faceU.toArray(batch.faceUs, index * 3);
+      p.faceV.toArray(batch.faceVs, index * 3);
+    }
+    for (const batch of this._patchBatches.values()) {
+      const count = counts.get(batch) || 0;
+      batch.mesh.count = count;
+      batch.mesh.visible = count > 0;
+      for (const name of ['aFaceOrigin', 'aFaceU', 'aFaceV']) {
+        const attribute = batch.geometry.getAttribute(name);
+        attribute.needsUpdate = true;
+        attribute.clearUpdateRanges?.();
+        attribute.addUpdateRange?.(0, count * attribute.itemSize);
+      }
+    }
+  }
+
+  _hidePatchBatches() {
+    for (const batch of this._patchBatches.values()) {
+      batch.mesh.count = 0;
+      batch.mesh.visible = false;
+    }
+    this._patchUploadKey = '';
+  }
+
+  _disposePatchBatches() {
+    for (const batch of this._patchBatches.values()) {
+      this.group.remove(batch.mesh);
+      batch.geometry.dispose();
+    }
+    this._patchBatches.clear();
+    this._patchUploadKey = '';
   }
 
   _mergeGeometry(res, aLod) {
@@ -537,22 +690,29 @@ export class PlanetWorld {
 
   _restoreMerge() {
     for (const c of this.chunks) { c.merged = false; }
-    this._forEachInternal((n) => { n.merged = false; if (n.mesh) n.mesh.visible = false; });
+    this._forEachInternal((n) => { n.merged = false; n.visible = false; });
     this._mergedPatches.length = 0;
+    this._hidePatchBatches();
+    this._instancesDirty = true;
     this.mergedGroupCount = 0;
     this.savedDrawCalls = 0;
   }
 
   _disposePatchMeshes() {
+    this._disposePatchBatches();
     this._forEachInternal((n) => {
-      if (n.mesh) { this.group.remove(n.mesh); n.mesh = null; }
-      if (n.material) { const i = this.materials.indexOf(n.material); if (i >= 0) this.materials.splice(i, 1); n.material.dispose(); n.material = null; }
       n.merged = false;
+      n.visible = false;
+      n.patchKey = null;
     });
+    for (const c of this.chunks) c.merged = false;
     this._mergedPatches.length = 0;
+    this._instancesDirty = true;
   }
 
   dispose() {
+    this._disposePatchBatches();
+    this._patchMaterial = null;
     for (const geo of this._mergeGeo.values()) geo.dispose();
     this._mergeGeo.clear();
     this._faceTrees = [];

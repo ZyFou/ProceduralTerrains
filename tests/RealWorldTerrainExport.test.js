@@ -10,7 +10,7 @@ describe('real-world terrain color export', () => {
     for (const shader of [material.fragmentShader, bakeFragment]) {
       expect(shader).toContain('vec3 applyImportedImageryAlbedo');
       expect(shader).toContain('vec2 imageryUv = importHeightUvAt(xz);');
-      expect(shader).toContain('texture2D(uImportImageryTex');
+      expect(shader).toContain('textureLod(uImportImageryTex');
       expect(shader).toContain('mix(baseAlbedo, imageryColor, uImportImageryBlend)');
     }
     expect(material.fragmentShader).toContain(

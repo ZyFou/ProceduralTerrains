@@ -54,7 +54,7 @@ uniform float uOccExtent;  // half-size of the mapped square (= fade radius)
 
 float occAt(vec3 P) {
   vec2 uv = (P.xz - uOccCenter) / (2.0 * max(uOccExtent, 1.0)) + 0.5;
-  return texture2D(uCloudOccupancy, uv).r;
+  return textureLod(uCloudOccupancy, uv, 0.0).r;
 }
 
 vec3 reconstructWorldPosition(vec2 uv, float depth) {
@@ -178,7 +178,7 @@ void main() {
   // rejects or leaps over a whole ray. Sparse three-point rejection and coarse
   // strides can miss a thin occupied cell on oblique views, producing hard
   // holes aligned to the occupancy grid.
-  for (int i = 0; i < CLOUD_STEPS; i++) {
+  for (int i = 0; i < CLOUD_STEPS + uLoopGuard; i++) {
     float sampleIndex = float(i);
     if (sampleIndex < float(effSteps) && transmittance > 0.01) {
       float a = (sampleIndex + dither) / float(effSteps);

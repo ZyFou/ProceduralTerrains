@@ -3,10 +3,12 @@
 // terrainGLSL / planetGLSL already provide (vnoise, fbm, ridgedFBM, hash12,
 // ROT2 / vnoise3, hash13, ROT3, terrace, planetTerrace).
 //
-// All loop bounds here are hard constants (3 / 9 / 27) — never dynamic — so the
-// ANGLE D3D11 compiler can unroll them without hanging. The per-layer FBM /
-// ridged / billow stacks with a USER octave count are emitted inline by the
-// codegen with the octave count baked as a literal (also constant).
+// Loop bounds are constants plus the zero-valued uLoopGuard uniform (see
+// terrainGLSL.js): identical trip counts, but ANGLE/FXC keeps real loops
+// instead of unrolling every cell/octave at every call site. No loop body uses
+// implicit-derivative texture lookups or breaks, which is what used to make
+// dynamic loops hang the D3D11 compiler. The per-layer FBM / ridged / billow
+// stacks are emitted by the codegen with the same guarded literal bound.
 //
 // PRIMS2D depends on: hash12, vnoise, ROT2.
 // PRIMS3D depends on: hash13, vnoise3, ROT3.
@@ -58,8 +60,8 @@ float voronoi2(vec2 p, float jitter, int dmode, int omode) {
   vec2 ip = floor(p), fp = fract(p);
   float f1 = 8.0, f2 = 8.0;
   float cellRnd = 0.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
+  for (int y = -1; y <= 1 + uLoopGuard; y++) {
+    for (int x = -1; x <= 1 + uLoopGuard; x++) {
       vec2 g = vec2(float(x), float(y));
       vec2 o = vec2(hash12(ip + g), hash12(ip + g + vec2(41.3, 13.7)));
       vec2 r = g + o * jitter - fp;
@@ -83,8 +85,8 @@ float voronoi2(vec2 p, float jitter, int dmode, int omode) {
 float crater2(vec2 p, float density, float depth, float rim, float rimWidth) {
   vec2 ip = floor(p), fp = fract(p);
   float best = 8.0, rnd = 0.0, rad = 0.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
+  for (int y = -1; y <= 1 + uLoopGuard; y++) {
+    for (int x = -1; x <= 1 + uLoopGuard; x++) {
       vec2 g = vec2(float(x), float(y));
       vec2 o = vec2(hash12(ip + g), hash12(ip + g + vec2(23.7, 5.9)));
       float d = length(g + o - fp);
@@ -176,9 +178,9 @@ float whiteNoise3(vec3 p, float smoothAmt) {
 float voronoi3(vec3 p, float jitter, int dmode, int omode) {
   vec3 ip = floor(p), fp = fract(p);
   float f1 = 8.0, f2 = 8.0, cellRnd = 0.0;
-  for (int z = -1; z <= 1; z++) {
-    for (int y = -1; y <= 1; y++) {
-      for (int x = -1; x <= 1; x++) {
+  for (int z = -1; z <= 1 + uLoopGuard; z++) {
+    for (int y = -1; y <= 1 + uLoopGuard; y++) {
+      for (int x = -1; x <= 1 + uLoopGuard; x++) {
         vec3 g = vec3(float(x), float(y), float(z));
         vec3 o = vec3(hash13(ip + g), hash13(ip + g + vec3(41.3, 13.7, 7.1)),
                       hash13(ip + g + vec3(9.2, 57.1, 33.3)));
@@ -202,9 +204,9 @@ float voronoi3(vec3 p, float jitter, int dmode, int omode) {
 float crater3(vec3 p, float density, float depth, float rim, float rimWidth) {
   vec3 ip = floor(p), fp = fract(p);
   float best = 8.0, rnd = 0.0;
-  for (int z = -1; z <= 1; z++) {
-    for (int y = -1; y <= 1; y++) {
-      for (int x = -1; x <= 1; x++) {
+  for (int z = -1; z <= 1 + uLoopGuard; z++) {
+    for (int y = -1; y <= 1 + uLoopGuard; y++) {
+      for (int x = -1; x <= 1 + uLoopGuard; x++) {
         vec3 g = vec3(float(x), float(y), float(z));
         vec3 o = vec3(hash13(ip + g), hash13(ip + g + vec3(23.7, 5.9, 11.1)),
                       hash13(ip + g + vec3(3.1, 47.7, 91.2)));

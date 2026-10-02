@@ -9,6 +9,62 @@ const DEVELOPMENT_WORKER_OVERRIDE = import.meta.env.DEV && typeof location !== '
   ? new URLSearchParams(location.search).get('workerRenderer')
   : null;
 
+// ---------------------------------------------------------------------------
+// Boot shader-link policy (render worker only).
+// Chrome only WRITES a WebGL program to its on-disk shader cache when the link
+// is resolved synchronously (KHR_parallel_shader_compile links are never
+// stored), but asynchronous links DO read cached programs. Measured on the
+// reference GPU: an uncached boot compiles the terrain for ~7-10 s every
+// launch; once cached, a boot is ready in ~1 s. A synchronous link runs on the
+// browser's GPU main thread (page presentation pauses for the compile, and a
+// very long one could trip the GPU watchdog), so it is used sparingly:
+//   * boots are asynchronous by default (no freeze, watchdog-safe);
+//   * after an async boot that missed the cache (compile >= CACHE_MISS_MS) and
+//     was comfortably short (< SAFE_MS), the NEXT boot links synchronously
+//     once to populate the cache; the boot after that is async again and reads
+//     it. A shader update therefore costs one cache-filling launch.
+//   * a synchronous boot that never completes falls back to async.
+const BOOT_SHADER_RECORD_KEY = 'terrain-studio-boot-shaders-v1';
+export const SYNC_BOOT_LINK_SAFE_MS = 12000;
+export const BOOT_CACHE_MISS_MS = 2000;
+
+function readBootShaderRecord() {
+  try {
+    const raw = localStorage.getItem(BOOT_SHADER_RECORD_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBootShaderRecord(record) {
+  try { localStorage.setItem(BOOT_SHADER_RECORD_KEY, JSON.stringify(record)); } catch { /* storage unavailable */ }
+}
+
+export function chooseBootLinkMode(record = readBootShaderRecord()) {
+  if (!record || record.pendingSync || record.linkMode === 'sync') return 'async';
+  const compileMs = Number(record.compileMs);
+  return Number.isFinite(compileMs)
+    && compileMs >= BOOT_CACHE_MISS_MS
+    && compileMs < SYNC_BOOT_LINK_SAFE_MS
+    ? 'sync' : 'async';
+}
+
+function markBootLinkAttempt(mode) {
+  if (mode !== 'sync') return;
+  writeBootShaderRecord({ ...(readBootShaderRecord() || {}), pendingSync: true });
+}
+
+export function recordBootShaderStats(stats) {
+  const compileMs = Number(stats?.compileMs);
+  if (!Number.isFinite(compileMs)) return;
+  writeBootShaderRecord({
+    compileMs: Math.round(compileMs),
+    linkMode: stats?.linkMode === 'sync' ? 'sync' : 'async',
+    at: Date.now(),
+  });
+}
+
 export function supportsWorkerRenderer(canvas) {
   return typeof OffscreenCanvas !== 'undefined'
     && typeof canvas?.transferControlToOffscreen === 'function'
@@ -123,6 +179,7 @@ export class WorkerEngineTransport {
       initialBootMode: options.initialBootMode,
       coldShaderRun: options.coldShaderRun,
       shaderBenchmark: options.shaderBenchmark,
+      bootLinkMode: options.bootLinkMode,
       viewport: {
         width: Math.max(1, rect.width),
         height: Math.max(1, rect.height),
@@ -349,6 +406,7 @@ export class EngineClient {
     }
     if (name === 'onProjectMode') patch.projectMode = args[0];
     if (name === 'onTimeOfDayChange') patch.timeOfDay = args[0];
+    if (name === 'onBootShaderStats') recordBootShaderStats(args[0]);
     this._setSnapshot({ ...this.snapshot, ...patch });
   }
 
@@ -415,6 +473,8 @@ export async function createEngineProxy(options) {
     ? parseShaderBenchmarkOptions(location.search)
     : null;
   const transport = useWorker ? new WorkerEngineTransport() : new MainThreadEngineTransport();
+  const bootLinkMode = useWorker && !shaderBenchmark ? chooseBootLinkMode() : 'async';
+  markBootLinkAttempt(bootLinkMode);
   const client = new EngineClient({
     ...options,
     initialPerf: perf,
@@ -422,6 +482,7 @@ export async function createEngineProxy(options) {
     renderWorker: useWorker,
     coldShaderRun: shaderBenchmark ? null : coldShaderRun,
     shaderBenchmark,
+    bootLinkMode,
   }, transport);
   await client.initialize();
   const rendererConfig = {

@@ -31,12 +31,12 @@ const fract = (v) => v - Math.floor(v);
 const fbmLoop2 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
-    for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise(q); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { sum += amp * vnoise(q); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P, dsum = vec2(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec3 n = vnoised2(q + dsum * selfWarp);
       float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
       sum += amp * n.x * damp; norm += amp * damp;
@@ -48,12 +48,12 @@ const fbmLoop2 = (oct) => `
 const fbmLoop3 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
-    for (int i = 0; i < ${oct}; i++) { sum += amp * vnoise3(q); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { sum += amp * vnoise3(q); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P, dsum = vec3(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec4 n = vnoised3(q + dsum * selfWarp);
       float damp = 1.0 / (1.0 + erosionAmt * 4.0 * dot(dsum, dsum));
       sum += amp * n.x * damp; norm += amp * damp;
@@ -65,12 +65,12 @@ const fbmLoop3 = (oct) => `
 const ridgedLoop2 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec2 q = P;
-    for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { float v = 1.0 - abs(vnoise(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec2 q = P, dsum = vec2(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec3 n = vnoised2(q + dsum * selfWarp);
       float raw = n.x * 2.0 - 1.0;
       float ridge = 1.0 - abs(raw);
@@ -88,12 +88,12 @@ const ridgedLoop2 = (oct) => `
 const ridgedLoop3 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec3 q = P;
-    for (int i = 0; i < ${oct}; i++) { float v = 1.0 - abs(vnoise3(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { float v = 1.0 - abs(vnoise3(q) * 2.0 - 1.0); v = pow(v, pa.z); sum += amp * v * carry; carry = clamp(v * 1.4, 0.0, 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0; vec3 q = P, dsum = vec3(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec4 n = vnoised3(q + dsum * selfWarp);
       float raw = n.x * 2.0 - 1.0;
       float ridge = 1.0 - abs(raw);
@@ -111,12 +111,12 @@ const ridgedLoop3 = (oct) => `
 const billowLoop2 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P;
-    for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { sum += amp * abs(vnoise(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT2 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec2 q = P, dsum = vec2(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec3 n = vnoised2(q + dsum * selfWarp);
       float raw = n.x * 2.0 - 1.0;
       float v = abs(raw);
@@ -131,12 +131,12 @@ const billowLoop2 = (oct) => `
 const billowLoop3 = (oct) => `
   if (pb.x <= 0.0 && pb.y <= 0.0) {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P;
-    for (int i = 0; i < ${oct}; i++) { sum += amp * abs(vnoise3(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) { sum += amp * abs(vnoise3(q) * 2.0 - 1.0); norm += amp; amp *= pa.x; q = ROT3 * q * pa.y; }
     val = sum / max(norm, 1e-4);
   } else {
     float amp = 0.5, sum = 0.0, norm = 0.0; vec3 q = P, dsum = vec3(0.0);
     float erosionAmt = max(pb.x, 0.0), selfWarp = max(pb.y, 0.0);
-    for (int i = 0; i < ${oct}; i++) {
+    for (int i = 0; i < ${oct} + uLoopGuard; i++) {
       vec4 n = vnoised3(q + dsum * selfWarp);
       float raw = n.x * 2.0 - 1.0;
       float v = abs(raw);
@@ -153,7 +153,7 @@ const fbmAssign2 = (name, expr, oct) => `
       float ${name} = 0.0;
       {
         float amp = 0.5, norm = 0.0; vec2 q = ${expr};
-        for (int i = 0; i < ${oct}; i++) {
+        for (int i = 0; i < ${oct} + uLoopGuard; i++) {
           ${name} += amp * vnoise(q); norm += amp;
           amp *= uPersistence; q = ROT2 * q * uLacunarity;
         }
@@ -164,7 +164,7 @@ const fbmAssign3 = (name, expr, oct) => `
       float ${name} = 0.0;
       {
         float amp = 0.5, norm = 0.0; vec3 q = ${expr};
-        for (int i = 0; i < ${oct}; i++) {
+        for (int i = 0; i < ${oct} + uLoopGuard; i++) {
           ${name} += amp * vnoise3(q); norm += amp;
           amp *= uPersistence; q = ROT3 * q * uLacunarity;
         }

@@ -34,7 +34,7 @@ return 0.0;
   if(any(lessThan(uv,vec2(0)))||any(greaterThanEqual(uv,vec2(1))))return 0.0;
   vec2 pixel=uv*1024.0,tile=floor(pixel/256.0);
   float page=(tile.y*4.0+tile.x)*8.0+float(layer/4);
-  vec4 weights=texture(uSurfacePaintArray,vec3((mod(pixel,256.0)+1.0)/258.0,page));
+  vec4 weights=textureLod(uSurfacePaintArray,vec3((mod(pixel,256.0)+1.0)/258.0,page),0.0);
   int c=layer-layer/4*4;return c==0?weights.r:c==1?weights.g:c==2?weights.b:weights.a;
 #endif
 }

@@ -1,0 +1,197 @@
+[
+  {
+    "label": "baseline",
+    "title": "Baseline",
+    "summary": "Unmodified branch head. Harness established; captures verified deterministic (re-run diff 0.000%).",
+    "changes": []
+  },
+  {
+    "label": "it1",
+    "title": "Branch-friendly sampling (exact)",
+    "summary": "Implicit-derivative texture lookups inside heightAt made ANGLE/FXC flatten every surrounding branch, so disabled features and the bake/live branch ran for every pixel. All non-mipmapped data-texture lookups now use explicit LOD 0 (bit-identical), and cache fallbacks use statement branches instead of ?:.",
+    "changes": [
+      "terrainGLSL.js / TerrainMaterial.js / waterShaderGLSL.js / RealisticWaterMaterial.js: data textures (bake, paint, sculpt, spline, erosion, destruction, imports, occupancy, clipmap, scene depth/colour, planar reflection) sampled with textureLod(..., 0.0)",
+      "TerrainDetailMaterial.js, SurfaceArrayGLSL.js: page/paint arrays sampled with textureLod",
+      "INFINITE_FIELD_CACHE_GLSL + waterTerrainHeightAt: real if/else so the procedural fallback is skipped when the cache covers the pixel"
+    ]
+  },
+  {
+    "label": "it2",
+    "title": "Live/baked hybrid height field (Tile mode)",
+    "summary": "Tile terrain + water fragments evaluated the full procedural height field 3x per pixel (~150 value-noise calls). A generation-, layout- and authoring-matched bake (normal xz, curvature, height) now replaces it wherever a pixel spans about one bake texel; the exact live field is kept near the camera. Realistic water's 6 low-pass height taps run in a uniform-bound loop (one inlined height graph instead of six).",
+    "changes": [
+      "TerrainHeightBaker.js: packed RGBA16F (normal.x, normal.z, curvature, height); single inlined heightAt via uniform-bound sample loop; back buffers released after each bake (VRAM)",
+      "terrainGLSL.js: terrainBakeBlendWeight / terrainBakeWeight / bakedNormalFromTexel helpers; uBakeTexelWorld, uPixelWorldPerDist, uBakeBlend uniforms",
+      "TerrainMaterial.js: studio fragment blends live and baked height/normal/curvature by pixel footprint; infinite far-normal derivative hoisted out of the branch",
+      "waterShaderGLSL.js / RealisticWaterMaterial.js: hybrid shoreline height, baked low-pass taps, looped smoothing/slope taps",
+      "Engine.js: bake enabled for procedural Tile projects; authoring tools (paint, sculpt, texture paint, splines, explode) keep the live field while active; bake key includes authoring revisions; per-render pixel footprint from scene.onBeforeRender (orthographic passes stay live); bake program no longer gates the boot compile; 2048 bake on medium/high tiers"
+    ]
+  },
+  {
+    "label": "it3",
+    "title": "Loop-unroll guard on every FBM loop + VRAM release",
+    "summary": "Octave loops had compile-time bounds, so ANGLE/FXC fully unrolled every FBM at every call site. Bounds now add a never-set uniform (GL guarantees 0): identical trip counts, real loops. Smaller D3D programs compile ~1/3 faster and run faster. The studio bake's render targets are freed when Tile mode is left.",
+    "changes": [
+      "terrainGLSL.js / planetGLSL.js / noise/noiseTypes.js: `i < OCTAVES + uLoopGuard` (and the 4-octave helpers)",
+      "TerrainHeightBaker.releaseTargets + Engine._releaseStudioHeightCache on Infinite/Planet entry",
+      "Harness: median-based score, idle detection per mode"
+    ]
+  },
+  {
+    "label": "it4",
+    "title": "Planet: real bake branch + single-copy height sampling",
+    "summary": "The planet terrain fragment sampled its baked cubemap with implicit derivatives, so FXC flattened the branch and the 3D height field ran 3x per pixel even with the bake published; the three samples were also inlined as three full copies (46.8 s compile). Cubemap lookups are now explicit-LOD and the samples share one uniform-bound loop (terrain fragment, minimal fragment, cubemap baker); planet water uses a statement branch.",
+    "changes": [
+      "PlanetMaterial.js: textureLod(uPlanetHeightTex, ...), single-copy sample loop, water if/else",
+      "PlanetHeightBaker.js: single-copy sample loop",
+      "Harness: best-of-2 static measurements (paths measured once to keep streaming hitches visible)"
+    ]
+  },
+  {
+    "label": "it5",
+    "title": "Geomorphing (smooth LOD transitions) — distance bands (Tile)",
+    "summary": "CDLOD-style morph in the terrain vertex shader: odd grid vertices slide onto the next-coarser grid inside a band placed half a chunk diagonal inside each LOD switch, so swaps are invisible in both directions. Merge-layer folds now wait until chunks are fully LOD3-shaped (the baseline folded LOD0/1 chunks straight to 8-quad density, an 8x pop). With pops gone, Tile LOD bands were retuned to a ~3 px screen-space target.",
+    "changes": [
+      "LodMorph.js: planMorphBands / publishMorphUniforms (+ unit tests)",
+      "ChunkGeometry.js: opt-in aMorph attribute on the shared per-LOD grids",
+      "TerrainMaterial.js: terrainMorphedGrid() in the vertex shader; uLodMorphStart/End/uLodGridSegments",
+      "TerrainBoard.js: morph bands, exact node distance, lossless fold gating, BASE_DISTANCE_BANDS [8,15,24] -> [5.2,9.75,15.6]",
+      "Harness: A/B LOD-pop metric (frozen vs re-selected LOD at the same pose)"
+    ]
+  },
+  {
+    "label": "it5b",
+    "title": "Temporal geomorph for Planet and Infinite World",
+    "summary": "Planet chunks are ~4000 units across, so distance bands would sit in front of the camera and soften visible detail (first attempt: MAE 2.96% on the near view, rejected). Planet and Infinite keep their original LOD decisions and instead animate every LOD change per chunk (0.4 s morph, per-instance factor); settled geometry is bit-identical to before. Planet folds wait until their chunks have morphed to LOD3; freshly created chunks snap to their level.",
+    "changes": [
+      "LodMorph.js: stepTemporalLod state machine (+ unit tests)",
+      "PlanetWorld.js / PlanetMaterial.js: per-instance aMorphK, fold readiness, fresh-chunk snap",
+      "InfiniteWorld.js / InfiniteTerrainBatches.js / TerrainMaterial.js: per-instance aMorphK for instanced chunks"
+    ]
+  },
+  {
+    "label": "it6",
+    "title": "Startup: shader cache, no first-use stall, smaller programs",
+    "summary": "Measured that Chrome only writes WebGL programs to its disk cache when a link is resolved synchronously, yet async links read the cache: every launch recompiled the terrain (~10 s). Boots now stay asynchronous by default and, after a launch that missed the cache with a safely short compile, the next boot links synchronously once to fill it — later launches are ready in ~0.9 s. Found and removed an 8.5-11 s main-thread freeze: the minimap rendered the scene before its programs linked, so three.js blocked in its first-use link check. Caustic Worley loops, cellular noise and fbm3 got the unroll guard (terrain fragment cold compile 8.2 -> 6.7 s).",
+    "changes": [
+      "EngineProxy.js: adaptive boot shader-link policy (record in localStorage, pending-sync fallback) + unit test",
+      "Engine.js: _resolveProgramLinks / _cacheableBootCompile, presented first-launch message before a cache-filling boot, onBootShaderStats",
+      "Minimap.js / Engine.js: scene renders gated on linked programs; worker frame packets reuse the base image and read back asynchronously; canvas-less minimap no longer forces a render every tick",
+      "TerrainMaterial.js / noisePrimsGLSL.js / biomeGLSL.js / planetGLSL.js: guarded caustic, cellular and fbm3 loops"
+    ]
+  },
+  {
+    "label": "it7",
+    "title": "CPU hitch removal: resumable prop sectors, cloud loop guard, planet bake race",
+    "summary": "Props sector builds (up to ~30 ms each) are now resumable inside the per-frame budget, so the orbit-zoom path CPU p95 dropped from 11.6 to 6.8 ms in studio-full. Cloud volume/slab loops got the unroll guard and non-mipmapped occupancy lookups use textureLod (no branch flattening). Fixed a pre-existing race exposed by the faster compiles: entering planet mode ran the warm-up and an octave rebuild that each prepared the same height-bake program, and the second invalidated the first, so the transition failed with \"Planet shader compilation did not complete\". Same-program preparations are now shared.",
+    "changes": [
+      "ProceduralPropsManager.js: _beginFlatSector/_stepFlatSector resumable sector builds (deadline checked every 32 candidates, identical output)",
+      "cloudGLSL.js / CloudSlabShader.js / CloudVolumeShader.js: guarded loops, textureLod occupancy",
+      "PlanetHeightBaker.js: shared pending program preparation + tests/PlanetHeightBakerPrepare.test.js",
+      "Engine.js: planet compile error names the stage that failed"
+    ]
+  },
+  {
+    "label": "it8",
+    "title": "Near-camera height from the bake + zoom-in freeze fix",
+    "summary": "GPU attribution of the close view showed the per-pixel live noise stack near the camera was ~60% of the frame (17.8 of 28.4 ms, terrain + water). A crossover sweep showed the bilinear bake (height, packed normal, curvature) stays within 0.4% SSIM of the live field down to ~0.3 texels per pixel, so the live/baked crossover moved from 0.75-1.25 to 0.3-0.5 texels per pixel; extreme close-ups still evaluate the live field. Also fixed the user-reported 6-12 s freeze when zooming close: three.js r185 keys programs on HAS_NORMAL and terrain chunk grids have no normal attribute, so every terrain warm-compile on the normal-bearing probe plane built a program the chunks never used; the first close-up frame then compiled the real 75k-char terrain program synchronously (11.8 s on the baseline build, 0 ms now).",
+    "changes": [
+      "TerrainMaterial.js / terrainGLSL.js: uBakeBlend 0.3:0.5 (was 0.75:1.25)",
+      "Engine.js: _warmGeometryFor + normal-less warm probe for terrain/planet chunk materials; regression test in BootShaderCompilation.test.js",
+      "perf-harness: probe --cold (empty shader cache), experiments zoom-lag, gpu-attribution3, bake-threshold, depth-prepass (rejected: -13% only, vertex pass is cheap but live height dominates)"
+    ]
+  },
+  {
+    "label": "it9",
+    "title": "Clouds: no detail noise inside solid cores",
+    "summary": "Attribution of the clouds + props + realistic-water scene put the volumetric clouds at 6.2 of 9.3 ms in the overview. The detail FBM and the 27-cell Worley erosion only act through the edge mask 4·cov·(1−cov), which is exactly zero in solid cloud cores, yet both were evaluated there. They are now skipped when the mask is zero: pixel-identical output, overview 9.4 -> 8.7 ms GPU. An exact early-out for the base FBM (bounding the remaining octaves) was measured and rejected: the per-octave tests cost more than they saved in the overview.",
+    "changes": [
+      "cloudGLSL.js: detail FBM + Worley evaluated only where edge > 0 (studio slab, planet shell and infinite clouds share it)",
+      "perf-harness: gpu-attribution4, cloud-edge-skip, cloud-ab, verify-vs-run (fresh-boot A/B; in-page shader swaps proved order-dependent)"
+    ]
+  },
+  {
+    "label": "it10",
+    "title": "Planet: instanced merged patches, one material",
+    "summary": "CPU profiling of the planet orbit view showed three.js uniform refresh dominating the engine side: every folded far patch owned its own material (269 uniforms, 24 uncached array uniforms), so each of ~70 patch draws re-uploaded everything. Patches now render as instanced batches per patch grid size, sharing one material and the same instanced program as the chunk batches (one fewer shader variant). Chunk instance buffers are re-uploaded only when visibility, LOD or morph change. Orbit CPU 2.2 -> 0.6 ms and 73 -> 4 draw calls, frame 4.6 -> 3.0 ms; pixel-identical.",
+    "changes": [
+      "PlanetWorld.js: patch batches (_ensurePatchBatch/_uploadPatchBatches), shared patch material, dirty-tracked chunk instance uploads; fold/unfold mark instances dirty",
+      "tests/ModePerformanceStructures.test.js: patches share one material, folded chunks leave the chunk batches, steady camera re-uploads nothing",
+      "perf-harness: cpu-profile VIEW=, material-census"
+    ]
+  },
+  {
+    "label": "it11",
+    "title": "Near-camera bake level (one-level clipmap)",
+    "summary": "After it8 about 6 ms of the close view was still the live noise stack for pixels nearer than the 2048² board bake resolves. A camera-centred 1024² window at half the board texel size, baked by the same compiled program through a second material with private origin/span uniforms (no new shader), now serves those pixels with the same footprint criterion; the live stack only runs for extreme close-ups. Origins snap to a 32-texel grid so re-centring never changes a sampled value, bakes are progressive, and the window fades out over its last 16 texels. The extra sampler is only compiled into programs that stay within the 16 texture units ANGLE/D3D11 exposes (measured: default terrain 14 active, surface-texture variants 16), so those variants and realistic water keep the previous path. Close 18.4 -> 13.1 ms, grazing 17.5 -> 14.3 ms; studio-full close 23.0 -> 18.7 ms. The moving-camera paths got slightly slower: the window kept restarting its bake under motion.",
+    "changes": [
+      "NearHeightCache.js (new): camera-centred fine bake level",
+      "terrainGLSL.js: NEAR_BAKE_BLOCK, countReferencedSamplers, fitNearBake (16-sampler budget)",
+      "TerrainMaterial.js / waterShaderGLSL.js / WaterMaterial.js / RealisticWaterMaterial.js: 3-tier board/near/live blend behind TERRAIN_NEAR_BAKE, builders wrapped with fitNearBake",
+      "Engine.js: _updateNearHeightCache in the studio frame, released with the studio cache",
+      "tests: sampler budget per variant, updated hybrid assertions",
+      "perf-harness: sampler-audit (active samplers vs GPU limit), settle waits for the near bake"
+    ]
+  },
+  {
+    "label": "it12",
+    "title": "Near level: bake when the camera settles",
+    "summary": "it11 slowed the moving-camera paths because a moving camera kept restarting the near window before it could publish. The window is now re-baked only after three still frames, with a larger stripe budget so it lands within a few frames; a published window keeps serving while the camera moves (its data stays exact), and the back buffer is freed after each swap (+8 MB VRAM steady state instead of +16). Tile orbit path 11.7 -> 11.1 ms; static views unchanged; pixel-identical to it11.",
+    "changes": [
+      "NearHeightCache.js: settle detection, still/moving stripe budgets, back buffer released after swap",
+      "Engine.js: tiered still/moving row budgets",
+      "tests/NearHeightCache.test.js: snapped origins, no bake under motion, publish after settling, invalidation on terrain change, high-camera skip"
+    ]
+  },
+  {
+    "label": "it13",
+    "title": "Sampler budget by reachability: near level for realistic water",
+    "summary": "The textual sampler count over-estimated programs by the samplers that dead helpers in shared GLSL chunks reference (realistic water counted 16, the GPU reports 14 active), so realistic water had been denied the near bake level. The budget check now follows the call graph from main() (both #if branches count, so it never under-estimates) and matches the GPU exactly for the default terrain (14 + near = 15). Realistic water now uses the near level: studio-full close 18.75 -> 18.2 ms, grazing 15.2 -> 15.0 ms; image change <=0.02%. The same audit found that the surface-texture terrain variants already failed to link on 16-unit GPUs in the base commit (17 samplers); reported separately, unchanged here.",
+    "changes": [
+      "terrainGLSL.js: countReferencedSamplers = samplers reachable from main()",
+      "tests: per-variant budget",
+      "perf-harness: full-variant-link (link status per terrain variant), shade-ablation"
+    ]
+  },
+  {
+    "label": "it14",
+    "title": "Tile climate from a half-float bake",
+    "summary": "An ablation (one fresh page per variant) put the per-pixel climate function (five fbm3 fields) at ~2 ms of the 11 ms close-up. Four of the fields vary over hundreds of world units; the Studio climate bake now stores those (temperature, moisture, continentalness, erosion) in half float instead of 8-bit (whose quantization was why the terrain had stopped using it), and the terrain reads them while keeping the fine region jitter live. Water reads the same bake and now evaluates its region jitter live too. The extra sampler is budget-gated like the near level (default terrain sits at exactly 16). Close 13.2 -> 11.8 ms, grazing 14.0 -> 12.8 ms, overview 4.0 -> 3.6 ms; image change <=0.01%.",
+    "changes": [
+      "TerrainHeightBaker.js: climate bake = temp, moist, cont, erosion in RGBA16F",
+      "terrainGLSL.js: CLIMATE_CACHE_BLOCK (terrainStudioClimateAt), fitSamplerBudget drops optional blocks cheapest-first",
+      "TerrainMaterial.js: Tile fragment uses the cached climate under TERRAIN_CLIMATE_CACHE",
+      "RealisticWaterMaterial.js: region jitter live (bake alpha is now erosion)"
+    ]
+  },
+  {
+    "label": "it15",
+    "title": "Infinite World climate from its field cache",
+    "summary": "The Infinite World field cache already stored temperature, moisture and continentalness in half float next to the height, yet the terrain fragment still evaluated all five climate fbm3 fields live. It now reads those three from the cache sample it already takes for the height (one shared lookup) and keeps erosion and the region jitter live, falling back to the exact function outside the cached levels. No new sampler. Horizon 4.9 -> 4.2 ms, low 7.7 -> 6.6 ms, flight 4.9 -> 4.2 ms; image change <=0.003%.",
+    "changes": [
+      "terrainGLSL.js: INFINITE_CLIMATE_GLSL (terrainInfiniteClimateAt from a shared field sample)",
+      "TerrainMaterial.js: Infinite fragment samples the field cache once for climate and height"
+    ]
+  },
+  {
+    "label": "it16",
+    "title": "Planet climate cube",
+    "summary": "An ablation put the planet per-pixel climate (five 3D fbm fields) at about a third of the near-surface GPU time. The planet baker now renders a 512² half-float climate cube (temperature, moisture, continentalness, erosion) after the height faces, with a small stack-independent program prepared together with the height program (no compile stall); the terrain reads it and keeps the region jitter live. Climate parameters already invalidate the planet bake. Near 5.9 -> 4.3 ms, descent 4.6 -> 3.7 ms, orbit 3.0 -> 2.6 ms; image change <=0.008%. Fifth consecutive iteration under 5%: stop rule met.",
+    "changes": [
+      "planetGLSL.js: PLANET_CLIMATE_GLSL (shared planetDomain/planetClimateAt), PLANET_CLIMATE_CACHE_GLSL",
+      "PlanetHeightBaker.js: climate cube target/material, climate phase, prepared with the height program",
+      "PlanetMaterial.js: planetCachedClimateAt",
+      "Engine.js: publish/reset uPlanetClimateTex",
+      "tests/PerformancePhase2.test.js: climate phase"
+    ]
+  },
+  {
+    "label": "it17",
+    "title": "Validation fix: no redundant planet rebuild on entry",
+    "summary": "The final LOD-pop validation showed one Planet frame changing 7-9% of pixels. Instrumenting the pop test found the terrain generation bumping mid-flight: entering Planet ran the uniform refresh before the chunk materials existed, read that as an octave mismatch and started a full planet shader rebuild; when it finished it marked the terrain dirty and re-baked the planet, so for a few frames the planet shaded from the live field. The check now requires an existing material. Planet worst-frame change back to 0.71% (temporal geomorph), warm planet mode switch 2.8 s -> 0.5 s, descent path 3.7 -> 3.5 ms.",
+    "changes": [
+      "Engine.js: octave rebuild only when the active terrain material exists",
+      "perf-harness: popTest records generation/bake state on both sides of the worst frame; planet-pop-debug probe"
+    ]
+  }
+]

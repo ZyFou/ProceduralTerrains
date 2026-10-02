@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -95,7 +95,7 @@ void main() {
 }
 `;
 
-const buildFragment = (stackGLSL, infinite = false) => {
+const buildFragmentSource = (stackGLSL, infinite = false) => {
   const { dependencies, terrainHeightFunction } = buildWaterHeightShaderParts(stackGLSL, infinite);
   const biomeClimateFunction = infinite
     ? /* glsl */ `
@@ -117,7 +117,10 @@ float waterBiomeClimateAvailable() {
     : /* glsl */ `
 vec4 waterBiomeClimateAt(vec2 xz) {
   if (uUseWaterTerrainBiomeTex > 0.5) {
-    return texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz));
+    // the bake holds temp, moist, cont, erosion; region jitter is evaluated live
+    vec4 baked = textureLod(uWaterTerrainBiomeTex, waterBakedUvAt(xz), 0.0);
+    float region = fbm3((xz * uFrequency + uSeedOffset) * 0.700 + vec2(631.4, 199.2));
+    return vec4(baked.r, baked.g, baked.b, region);
   }
   Climate climate = climateAt(xz * uFrequency + uSeedOffset);
   return vec4(climate.temp, climate.moist, climate.cont, climate.region);
@@ -225,7 +228,7 @@ vec4 waterPaintedBiomeAt(vec2 xz) {
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     return vec4(0.0);
   }
-  return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+  return textureLod(uPaintBiomeTexture, uv, 0.0) * uPaintOpacity;
 }
 
 // Broad biome weights for the water above each point. The climate fields and
@@ -301,20 +304,30 @@ void waterNaturalColors(
 }
 
 // Cheap cross-kernel smoothing for depth tint. Reuses center sample when provided.
+// The taps run in a loop with a uniform bound (always 4) so the compiled
+// program keeps ONE inlined height lookup instead of one per tap.
+uniform int uWaterHeightTaps;
+
 float smoothedFloorHeight(vec2 xz, float centerH) {
   float e = mix(8.0, 16.0, clamp(uVisualShallowWaterSoftness, 0.0, 1.0));
-  float h1 = terrainHeightAt(xz + vec2(e, 0.0));
-  float h2 = terrainHeightAt(xz - vec2(e, 0.0));
-  float h3 = terrainHeightAt(xz + vec2(0.0, e));
-  float h4 = terrainHeightAt(xz + vec2(0.0, -e));
-  return (centerH + h1 + h2 + h3 + h4) * 0.2;
+  float sum = centerH;
+  for (int tap = 0; tap < uWaterHeightTaps; tap++) {
+    vec2 offset = tap == 0 ? vec2(e, 0.0)
+      : tap == 1 ? vec2(-e, 0.0)
+      : tap == 2 ? vec2(0.0, e)
+      : vec2(0.0, -e);
+    sum += waterTerrainKernelHeightAt(xz + offset);
+  }
+  return sum * 0.2;
 }
 
 float slopeFromCenter(vec2 xz, float centerH) {
   float e = 4.0;
-  float hx = terrainHeightAt(xz + vec2(e, 0.0));
-  float hz = terrainHeightAt(xz + vec2(0.0, e));
-  return length(vec2(hx - centerH, hz - centerH)) / e;
+  vec2 heights = vec2(centerH);
+  for (int tap = 0; tap < uWaterHeightTaps / 2; tap++) {
+    heights[tap] = waterTerrainKernelHeightAt(xz + (tap == 0 ? vec2(e, 0.0) : vec2(0.0, e)));
+  }
+  return length(heights - vec2(centerH)) / e;
 }
 
 // Sine-free hash (stable at large world coordinates).
@@ -480,10 +493,10 @@ void main() {
     // Reject samples that cross a terrain/prop silhouette. Sampling the
     // undistorted pixel instead prevents cliffs from smearing across the sea.
     float centerDepth = waterLinearSceneDepth(
-      texture2D(uSceneDepth, screenUv).r
+      textureLod(uSceneDepth, screenUv, 0.0).r
     );
     float distortedDepth = waterLinearSceneDepth(
-      texture2D(uSceneDepth, distortedUv).r
+      textureLod(uSceneDepth, distortedUv, 0.0).r
     );
     float rejectStart = max(
       1.5,
@@ -495,7 +508,7 @@ void main() {
       abs(distortedDepth - centerDepth)
     );
     refractedUv = mix(distortedUv, screenUv, silhouetteReject);
-    vec3 encodedScene = texture2D(uSceneColor, refractedUv).rgb;
+    vec3 encodedScene = textureLod(uSceneColor, refractedUv, 0.0).rgb;
     refractedSceneLinear = pow(
       max(encodedScene, vec3(0.0)),
       vec3(2.2)
@@ -584,22 +597,26 @@ void main() {
     );
     vec2 blurOffset = uPlanarReflectionTexelSize
       * mix(1.0, 8.0, roughness * roughness);
-    vec3 planarEncoded = texture2D(uPlanarReflection, planarUv).rgb * 0.40;
-    planarEncoded += texture2D(
+    vec3 planarEncoded = textureLod(uPlanarReflection, planarUv, 0.0).rgb * 0.40;
+    planarEncoded += textureLod(
       uPlanarReflection,
-      planarUv + vec2(blurOffset.x, 0.0)
+      planarUv + vec2(blurOffset.x, 0.0),
+      0.0
     ).rgb * 0.15;
-    planarEncoded += texture2D(
+    planarEncoded += textureLod(
       uPlanarReflection,
-      planarUv - vec2(blurOffset.x, 0.0)
+      planarUv - vec2(blurOffset.x, 0.0),
+      0.0
     ).rgb * 0.15;
-    planarEncoded += texture2D(
+    planarEncoded += textureLod(
       uPlanarReflection,
-      planarUv + vec2(0.0, blurOffset.y)
+      planarUv + vec2(0.0, blurOffset.y),
+      0.0
     ).rgb * 0.15;
-    planarEncoded += texture2D(
+    planarEncoded += textureLod(
       uPlanarReflection,
-      planarUv - vec2(0.0, blurOffset.y)
+      planarUv - vec2(0.0, blurOffset.y),
+      0.0
     ).rgb * 0.15;
     vec3 planarLinear = pow(max(planarEncoded, vec3(0.0)), vec3(2.2));
     float planarQuality = clamp(
@@ -896,11 +913,14 @@ void main() {
 `;
 };
 
+const buildFragment = (stackGLSL, infinite = false) => fitNearBake(buildFragmentSource(stackGLSL, infinite));
+
 function realisticUniforms(sharedUniforms, environmentUniforms) {
   const skyUniforms = environmentUniforms ?? createProceduralSkyUniforms();
   return {
     ...sharedUniforms,
     ...skyUniforms,
+    uWaterHeightTaps: { value: 4 },
     uWaterQuality: { value: 2.0 },
     uWaterDetail: { value: 1.0 },
     uWaterReflection: { value: 1.0 },

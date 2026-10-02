@@ -87,3 +87,8 @@ __pycache__/
 
 .codex-remote-attachments
 .playwright-cli
+
+# Performance harness scratch (browser profile + per-run captures)
+output/perf-harness/.profile-warm/
+output/perf-harness/runs/
+output/perf-harness/.profile-cold-*/
