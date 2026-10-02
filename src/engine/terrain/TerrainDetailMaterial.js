@@ -56,7 +56,9 @@ vec4 detailPageSample(vec3 p) {
   vec3 page = uDetailPageCoords[slot];
   if (length(page.xy - tile) > 0.1) return vec4(0.5);
   vec2 uv = fract(coord / 128.0);
-  return texture(uDetailPageArray, vec3(uv, float(slot)));
+  // Explicit LOD: the page array has no mips, and an implicit-derivative
+  // fetch here would force the compiler to flatten the detail branches.
+  return textureLod(uDetailPageArray, vec3(uv, float(slot)), 0.0);
 }
 
 float terrainDetailEnabled() {

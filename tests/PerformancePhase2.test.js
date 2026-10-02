@@ -46,8 +46,11 @@ describe('performance phase 2', () => {
     baker.begin(3);
     expect(baker.material.fragmentShader).toContain('uniform float uEps;');
     expect(baker.material.fragmentShader).toContain(
-      'gl_FragColor = vec4(nGeo * 0.5 + 0.5, h01);',
+      'gl_FragColor = vec4(nGeo.x, nGeo.z, curvature, h01);',
     );
+    // one inlined height graph: the three samples share a uniform-bound loop
+    expect(baker.material.fragmentShader.match(/heightAt\(xz \+ offset\)/g)).toHaveLength(1);
+    expect(baker.texelWorldSize({ x: 128, y: 64 })).toBe(2);
     baker.dispose();
   });
 
@@ -78,9 +81,15 @@ describe('performance phase 2', () => {
     expect(baker.phase).toBe('full');
 
     for (let face = 0; face < 6; face++) baker.step();
-    expect(baker.complete).toBe(true);
     expect(baker.texture).toBe(baker.target.texture);
     expect(renderer.render).toHaveBeenCalledTimes(12);
+    // then the climate cube (temp, moist, cont, erosion), one face per step
+    expect(baker.phase).toBe('climate');
+    expect(baker.climateTexture).toBeNull();
+    for (let face = 0; face < 6; face++) baker.step();
+    expect(baker.complete).toBe(true);
+    expect(baker.climateTexture).toBe(baker.climateTarget.texture);
+    expect(renderer.render).toHaveBeenCalledTimes(18);
     baker.dispose();
   });
 

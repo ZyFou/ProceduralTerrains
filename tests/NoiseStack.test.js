@@ -295,6 +295,6 @@ describe('slope masks and domain warp codegen', () => {
     const warp = makeLayer('domainWarp', { params: { scale: 1, octaves: 6 } });
     const detail = makeLayer('fbm');
     const glsl = generateStackGLSL(makeStack([warp, detail]));
-    expect(glsl.body2d).toContain('for (int i = 0; i < 6; i++)');
+    expect(glsl.body2d).toContain('for (int i = 0; i < 6 + uLoopGuard; i++)');
   });
 });

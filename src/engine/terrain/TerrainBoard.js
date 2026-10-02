@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
 import { createCullingContext, cullChunks } from './InfiniteTerrainCulling.js';
+import { MORPH_DISABLED, planMorphBands, publishMorphUniforms } from './LodMorph.js';
 
 // ============================================================================
 // ONE fixed terrain board. The board never moves, never streams, and is
@@ -11,7 +12,11 @@ import { createCullingContext, cullChunks } from './InfiniteTerrainCulling.js';
 // ============================================================================
 
 export const LOD_RESOLUTIONS = [64, 32, 16, 8];   // quads per chunk side
-const BASE_DISTANCE_BANDS = [8, 15, 24];          // × chunkSize
+// × chunkSize. Geomorphing makes LOD swaps invisible, so the bands follow a
+// screen-space target (~3 px quads at each switch at 1080p-class FOV) instead
+// of hiding pops at a distance; the earlier [8, 15, 24] rendered ~1.7 px
+// triangles near the LOD0 edge and paid for it in quad overshading.
+const BASE_DISTANCE_BANDS = [5.2, 9.75, 15.6];
 
 export class TerrainBoard {
   constructor(scene, material) {
@@ -32,6 +37,9 @@ export class TerrainBoard {
     this.targetChunkCount = 0;
     this.lodThresholds = [0, 0, 0];
     this.lodSegments = [...LOD_RESOLUTIONS];
+    // Geomorphing (smooth LOD transitions) — see LodMorph.js
+    this.morphEnabled = true;
+    this.morphBands = null;
 
     this._distanceScale = 1.0;
     this._maxHeight = 0;
@@ -128,7 +136,7 @@ export class TerrainBoard {
 
   _createSharedGeometries() {
     this.geometries = this.lodSegments.map((res, lodIndex) => {
-      const geo = buildChunkGeometry(res, lodIndex);
+      const geo = buildChunkGeometry(res, lodIndex, { morph: true });
       setChunkBounds(geo, this.chunkSize, this._maxHeight, this._skirtDepth);
       return geo;
     });
@@ -338,6 +346,33 @@ export class TerrainBoard {
     this.lodThresholds = BASE_DISTANCE_BANDS.map(
       (m) => m * this.chunkSize * this._distanceScale
     );
+    // Vertices sit within half a chunk diagonal (horizontally) of the centre
+    // the CPU measures from; the shader uses the same horizontal+height metric.
+    this.morphBands = planMorphBands(this.lodThresholds, this.chunkSize * Math.SQRT1_2);
+  }
+
+  // Distance at which every chunk vertex is already shaped like LOD3 — the
+  // density of a folded node — so folding/unfolding there is invisible.
+  get _losslessFoldDistance() {
+    const end = this.morphBands?.end?.[2];
+    return Number.isFinite(end) && end < MORPH_DISABLED ? end : this.lodThresholds[2];
+  }
+
+  // Exact nearest distance from the camera to a node's square, in the metric
+  // the vertex shader morphs with (horizontal distance + camera height).
+  _nodeMinDistance(node, camPos) {
+    const dx = Math.max(node.minX - camPos.x, 0, camPos.x - (node.minX + node.spanX));
+    const dz = Math.max(node.minZ - camPos.z, 0, camPos.z - (node.minZ + node.spanZ));
+    return Math.hypot(dx, dz, camPos.y);
+  }
+
+  setMorphEnabled(enabled) {
+    this.morphEnabled = !!enabled;
+    this._publishMorph();
+  }
+
+  _publishMorph() {
+    publishMorphUniforms(this.material?.uniforms, this.morphBands, this.lodSegments, this.morphEnabled);
   }
 
   // Scale the LOD distance bands (performance setting).
@@ -365,7 +400,7 @@ export class TerrainBoard {
     const res = this._targetSegments[lod];
     if (res === this.lodSegments[lod]) return;
 
-    const geo = buildChunkGeometry(res, lod);
+    const geo = buildChunkGeometry(res, lod, { morph: true });
     setChunkBounds(geo, this.chunkSize, this._maxHeight, this._skirtDepth);
     const old = this.geometries[lod];
     this.geometries[lod] = geo;
@@ -394,6 +429,7 @@ export class TerrainBoard {
   // detail — the height field itself is never touched.
   updateLOD(cameraPos) {
     this._processLodRebuild();
+    this._publishMorph();
 
     if (!this.mergeEnabled) {
       this._updateChunkLOD(cameraPos, false);
@@ -508,7 +544,13 @@ export class TerrainBoard {
     if (canFold) {
       const nearest = Math.hypot(node.center.x - camPos.x, camPos.y, node.center.z - camPos.z) - node.half;
       const foldDist = node.spanWorld * this.mergeDistance * this._distanceScale;
-      const want = node.merged ? nearest > foldDist * 0.85 : nearest > foldDist;
+      // With geomorphing, a node only folds once every vertex under it is
+      // already on the LOD3 grid (the folded mesh's density), and unfolds at
+      // that same distance, so folds no longer pop the silhouette. The 3%
+      // margin on folding is the hysteresis.
+      const lossless = !this.morphEnabled
+        || this._nodeMinDistance(node, camPos) >= this._losslessFoldDistance * (node.merged ? 1 : 1.03);
+      const want = lossless && (node.merged ? nearest > foldDist * 0.85 : nearest > foldDist);
       if (want) {
         if (!node.merged) this._foldNode(node);
         this._mergedNodes.push(node);

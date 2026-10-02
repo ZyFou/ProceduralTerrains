@@ -21,12 +21,20 @@ uniform float uBiomeDebug;   // 1 = visualize biome regions as flat colors
 // hardcoded gain/lacunarity so climate maps stay stable while the user
 // tweaks the terrain FBM parameters (and loop bounds stay compile-time
 // constant for the ANGLE D3D11 compiler).
+#ifndef TERRAIN_LOOP_GUARD
+#define TERRAIN_LOOP_GUARD
+uniform int uLoopGuard;   // always 0 (see terrainGLSL.js)
+#endif
+
 float fbm3(vec2 p) {
-  float v = vnoise(p) * 0.55;
-  p = ROT2 * p * 2.13;
-  v += vnoise(p) * 0.30;
-  p = ROT2 * p * 2.13;
-  v += vnoise(p) * 0.15;
+  // Same sums in the same order as the straight-line form; the guarded loop
+  // keeps one inlined value-noise instead of three per call site (climateAt
+  // calls this five times, and it is inlined into every height sample).
+  float v = 0.0;
+  for (int i = 0; i < 3 + uLoopGuard; i++) {
+    v += vnoise(p) * (i == 0 ? 0.55 : i == 1 ? 0.30 : 0.15);
+    p = ROT2 * p * 2.13;
+  }
   return v;
 }
 

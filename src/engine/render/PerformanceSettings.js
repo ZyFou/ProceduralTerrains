@@ -19,6 +19,7 @@ import {
   sanitizeGpuPreference,
   sanitizeRendererBackend,
 } from './RendererCapabilities.js';
+import { normalizeSpatialUpscaler } from './SpatialUpscaler.js';
 
 export const BASE_LOD_SEGMENTS = [64, 32, 16, 8];   // quads per chunk side
 export const BASE_LOD_DISTANCES = [4, 8, 14];       // thresholds × chunkSize
@@ -257,7 +258,7 @@ export function estimateTriangles(settings) {
  * worst-case triangle estimate fits under MAX_SAFE_TRIANGLES. Mutation-free.
  */
 export function sanitizePerfSettings(settings) {
-  const s = { ...settings };
+  const s = { ...settings, ...normalizeSpatialUpscaler(settings) };
 
   s.rendererBackend = sanitizeRendererBackend(s.rendererBackend);
   s.gpuPreference = sanitizeGpuPreference(s.gpuPreference);

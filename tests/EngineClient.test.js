@@ -115,3 +115,15 @@ describe('WorkerEngineTransport', () => {
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('boot shader-link policy', () => {
+  it('fills the browser shader cache once after a slow async boot, then stays async', async () => {
+    const { chooseBootLinkMode, SYNC_BOOT_LINK_SAFE_MS } = await import('../src/engine/EngineProxy.js');
+    expect(chooseBootLinkMode(null)).toBe('async');                                   // first launch
+    expect(chooseBootLinkMode({ compileMs: 7500, linkMode: 'async' })).toBe('sync');   // missed cache, safe
+    expect(chooseBootLinkMode({ compileMs: 7800, linkMode: 'sync' })).toBe('async');   // just populated
+    expect(chooseBootLinkMode({ compileMs: 180, linkMode: 'async' })).toBe('async');   // cache hit
+    expect(chooseBootLinkMode({ compileMs: SYNC_BOOT_LINK_SAFE_MS + 1, linkMode: 'async' })).toBe('async'); // slow machine
+    expect(chooseBootLinkMode({ compileMs: 7500, linkMode: 'async', pendingSync: true })).toBe('async');   // failed sync
+  });
+});

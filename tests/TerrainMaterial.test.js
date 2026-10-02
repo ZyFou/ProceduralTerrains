@@ -125,11 +125,17 @@ describe('shared Tile and Infinite terrain program', () => {
       'Climate cl = climateAt(xz * uFrequency + uSeedOffset);',
     );
     expect(material.fragmentShader).toContain(
-      'nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);',
+      'float bakeWeight = terrainBakeWeight(viewDistanceForBake);',
     );
     expect(material.fragmentShader).toContain(
-      'hC = packedHeightNormal.a * uHeightScale;',
+      'nGeo = normalize(mix(nGeo, bakedNormalFromTexel(bakeTexel), bakedWeight));',
     );
+    expect(material.fragmentShader).toContain(
+      'hC = mix(hC, bakeTexel.a * uHeightScale, bakedWeight);',
+    );
+    // the live field is skipped entirely once a pixel is fully baked (board
+    // bake + camera-centred near level)
+    expect(material.fragmentShader).toContain('if (bakedWeight < 1.0) {');
     expect(material.fragmentShader).toContain(
       'float hRel = vWorldPos.y - uSeaLevel;',
     );
@@ -372,5 +378,26 @@ describe('shared Tile and Infinite terrain program', () => {
     expect(heightOnlyGraph.colorBody).toBe('');
     expect(boot.fragmentShader).toContain('vec3 applyTerrainGraphColor');
     expect(boot.fragmentShader).toContain('return fallback;');
+  });
+});
+
+describe('near bake sampler budget', () => {
+  it('adds the near-bake level only where it stays within 16 samplers', async () => {
+    const { countReferencedSamplers, MAX_FRAGMENT_SAMPLERS } = await import('../src/engine/terrain/terrainGLSL.js');
+    const uniforms = createTerrainUniforms();
+    for (const variant of ['base', 'detail', 'surface', 'full', 'hybrid']) {
+      const material = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'studio', variant });
+      // a program only carries the extra sampler while within the budget
+      if (material.fragmentShader.includes('#define TERRAIN_NEAR_BAKE 1')) {
+        expect(countReferencedSamplers(material.fragmentShader)).toBeLessThanOrEqual(MAX_FRAGMENT_SAMPLERS);
+      }
+      material.dispose();
+    }
+    const base = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'studio', variant: 'base' });
+    const full = createTerrainMaterial(uniforms, 5, undefined, { worldMode: 'studio', variant: 'full' });
+    expect(base.fragmentShader).toContain('#define TERRAIN_NEAR_BAKE 1');
+    expect(full.fragmentShader).not.toContain('#define TERRAIN_NEAR_BAKE 1');
+    base.dispose();
+    full.dispose();
   });
 });

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const SIZE = 256;
 const SAMPLE_RES = 128;
@@ -42,6 +43,13 @@ export class Minimap {
     this._hover = null;
     this._lastView = null;
     this._baseImage = null;
+    // Worker path (no local canvases): last rendered base, reused while
+    // neither the scene nor the minimap view changed.
+    this._packetBase = null;
+    this._packetView = '';
+    // Optional gate: () => boolean. The scene is never drawn before its
+    // programs have linked (three.js would block on the first-use check).
+    this.canRenderScene = null;
     this.target = new THREE.WebGLRenderTarget(SIZE, SIZE);
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
     this.camera.up.set(0, 0, -1);
@@ -107,6 +115,15 @@ export class Minimap {
 
   requestRedraw() {
     this._dirty = true;
+  }
+
+  /** True only when local canvases exist and their base image is stale. */
+  get needsBaseRender() {
+    return this._dirty && !!this.baseCtx;
+  }
+
+  _sceneRenderable() {
+    return typeof this.canRenderScene !== 'function' || this.canRenderScene() !== false;
   }
 
   _viewState() {
@@ -232,6 +249,10 @@ export class Minimap {
     if (!sampler) return;
 
     if (this.config.mode === 'color') {
+      if (!this._sceneRenderable()) {
+        this._dirty = true;   // retry once the programs are ready
+        return;
+      }
       this._renderSceneColor();
       this._lastView = this._viewState();
       return;
@@ -373,10 +394,20 @@ export class Minimap {
     }
   }
 
-  createFramePacket(controls = this.sources.controls) {
-    const rgba = new Uint8ClampedArray(SIZE * SIZE * 4);
-    if (this.config.mode === 'color') {
-      const view = this._viewState();
+  async createFramePacket(controls = this.sources.controls) {
+    const view0 = this._viewState();
+    const viewKey = `${this.config.mode}:${view0.zoom}:${view0.centerX.toFixed(1)}:${view0.centerZ.toFixed(1)}:${view0.halfSpan.toFixed(1)}`;
+    // Camera motion only moves the overlay marker (drawn on the main thread).
+    // Re-render and read back the base only when the scene or view changed;
+    // the readback is asynchronous so it never stalls the GPU queue.
+    const reuse = !this._dirty && this._packetBase && this._packetView === viewKey;
+    const rgba = reuse ? this._packetBase.slice() : new Uint8ClampedArray(SIZE * SIZE * 4);
+    if (reuse) {
+      // cached base
+    } else if (this.config.mode === 'color' && !this._sceneRenderable()) {
+      if (this._packetBase) rgba.set(this._packetBase);
+    } else if (this.config.mode === 'color') {
+      const view = view0;
       this.camera.left = view.centerX - view.halfSpan;
       this.camera.right = view.centerX + view.halfSpan;
       this.camera.top = view.centerZ + view.halfSpan;
@@ -390,14 +421,17 @@ export class Minimap {
         this.renderer.setRenderTarget(this.target);
         this.renderer.clear();
         this.renderer.render(this.scene, this.camera);
-        this.renderer.readRenderTargetPixels(this.target, 0, 0, SIZE, SIZE, this._pixels);
       } finally {
         this.renderer.setRenderTarget(previous);
       }
+      this._dirty = false;
+      await readRenderTargetPixelsAsync(this.renderer, this.target, 0, 0, SIZE, SIZE, this._pixels);
       for (let y = 0; y < SIZE; y += 1) {
         const source = (SIZE - 1 - y) * SIZE * 4;
         rgba.set(this._pixels.subarray(source, source + SIZE * 4), y * SIZE * 4);
       }
+      this._packetBase = rgba.slice();
+      this._packetView = viewKey;
     } else {
       const cell = SIZE / SAMPLE_RES;
       for (let sy = 0; sy < SAMPLE_RES; sy += 1) {
@@ -418,6 +452,9 @@ export class Minimap {
           }
         }
       }
+      this._dirty = false;
+      this._packetBase = rgba.slice();
+      this._packetView = viewKey;
     }
     const focus = controls?.target ? this.worldToCanvas(controls.target.x, controls.target.z) : null;
     const view = this._viewState();

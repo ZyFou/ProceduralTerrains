@@ -49,8 +49,8 @@ describe('Realistic Water Surface V2', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
 
     expect(material.uniforms.uSceneRefractionEnabled.value).toBe(0);
-    expect(material.fragmentShader).toContain('texture2D(uSceneColor');
-    expect(material.fragmentShader).toContain('texture2D(uSceneDepth');
+    expect(material.fragmentShader).toContain('textureLod(uSceneColor');
+    expect(material.fragmentShader).toContain('textureLod(uSceneDepth');
     expect(material.fragmentShader).toContain('float silhouetteReject');
     expect(material.fragmentShader).toContain('refractedVolume');
     expect(material.fragmentShader).toContain(
@@ -89,7 +89,7 @@ describe('Realistic Water Surface V2', () => {
     expect(uniforms.uWaterTerrainBiomeTex.value).toBeNull();
     expect(uniforms.uUseWaterTerrainBiomeTex.value).toBe(0);
     expect(material.fragmentShader).toContain(
-      'texture2D(uWaterTerrainBiomeTex, waterBakedUvAt(xz))',
+      'textureLod(uWaterTerrainBiomeTex, waterBakedUvAt(xz), 0.0)',
     );
     expect(material.fragmentShader).toContain(
       'vec4 waterBiomeWeights(vec2 xz, out float canyon, out float strength)',
@@ -127,7 +127,7 @@ describe('Realistic Water Surface V2', () => {
       'uPlanarReflectionMatrix * vec4(vWorldPos, 1.0)',
     );
     expect(material.fragmentShader).toContain(
-      'texture2D(uPlanarReflection',
+      'textureLod(uPlanarReflection',
     );
     expect(material.fragmentShader).toContain(
       'reflectedSurface = mix(reflectedSky, planarLinear, planarBlend)',

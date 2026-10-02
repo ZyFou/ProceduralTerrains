@@ -534,6 +534,7 @@ export class ProceduralPropsManager {
       this._sectors.clear();
       this._buildQueue.length = 0;
       this._queued.clear();
+      this._sectorJob = null;
     }
     const requestedRadius = Math.max(32, params.propsCullDistance || 760);
     const radius = requestedRadius * this._qualityBudget.distanceScale;
@@ -564,15 +565,31 @@ export class ProceduralPropsManager {
 
     let built = false;
     const start = performance.now();
+    // One sector samples the terrain thousands of times (~13 ms, up to ~30 ms
+    // measured), so a sector build is resumable: the head of the queue keeps
+    // its cursor across frames and the per-frame budget is honoured inside a
+    // sector, not just between sectors. Results are identical either way.
+    const deadline = synchronous ? Infinity : start + this._qualityBudget.buildMs;
     const batchActive = this._buildQueue.length > 0;
     if (batchActive) sampler.beginBatch?.(center.x, center.z);
     try {
       while (this._buildQueue.length) {
-        if (!synchronous && built && performance.now() - start >= this._qualityBudget.buildMs) break;
-        const entry = this._buildQueue.shift();
+        if (built && performance.now() >= deadline) break;
+        const entry = this._buildQueue[0];
+        if (!this._desiredSectors.has(entry.key)) {
+          this._buildQueue.shift();
+          this._queued.delete(entry.key);
+          if (this._sectorJob?.key === entry.key) this._sectorJob = null;
+          continue;
+        }
+        if (this._sectorJob?.key !== entry.key) {
+          this._sectorJob = this._beginFlatSector(entry.key, entry.sx, entry.sz, params);
+        }
+        if (!this._stepFlatSector(this._sectorJob, params, sampler, deadline)) break;
+        this._buildQueue.shift();
         this._queued.delete(entry.key);
-        if (!this._desiredSectors.has(entry.key)) continue;
-        this._sectors.set(entry.key, this._buildFlatSector(entry.sx, entry.sz, params, sampler));
+        this._sectors.set(entry.key, this._sectorJob.buckets);
+        this._sectorJob = null;
         built = true;
       }
     } finally {
@@ -593,6 +610,7 @@ export class ProceduralPropsManager {
       for (let sx = minSx; sx <= maxSx; sx++) {
         const key = `${sx},${sz}`;
         this._sectors.delete(key);
+        if (this._sectorJob?.key === key) this._sectorJob = null;
         if (this._queued.has(key)) {
           this._queued.delete(key);
           this._buildQueue = this._buildQueue.filter((entry) => entry.key !== key);
@@ -602,13 +620,36 @@ export class ProceduralPropsManager {
   }
 
   _buildFlatSector(sx, sz, params, sampler) {
-    const buckets = emptyBuckets();
+    const job = this._beginFlatSector(`${sx},${sz}`, sx, sz, params);
+    this._stepFlatSector(job, params, sampler, Infinity);
+    return job.buckets;
+  }
+
+  _beginFlatSector(key, sx, sz, params) {
     const minX = sx * this._sectorSize;
     const minZ = sz * this._sectorSize;
-    const maxX = minX + this._sectorSize;
-    const maxZ = minZ + this._sectorSize;
-    const master = clamp(params.propsDensity ?? 0.65, 0, 2);
-    for (let typeIndex = 0; typeIndex < PROP_TYPES.length; typeIndex++) {
+    return {
+      key,
+      buckets: emptyBuckets(),
+      minX,
+      minZ,
+      maxX: minX + this._sectorSize,
+      maxZ: minZ + this._sectorSize,
+      master: clamp(params.propsDensity ?? 0.65, 0, 2),
+      typeIndex: 0,
+      gz: null,
+      gx: null,
+      candidates: 0,
+    };
+  }
+
+  // Advance a sector build until it completes (true) or the deadline passes
+  // (false, cursor kept). Visits candidates in exactly the order of the
+  // original single-pass loop.
+  _stepFlatSector(job, params, sampler, deadline) {
+    const { buckets, minX, minZ, maxX, maxZ, master } = job;
+    for (; job.typeIndex < PROP_TYPES.length; job.typeIndex++, job.gz = null) {
+      const typeIndex = job.typeIndex;
       const desc = PROP_TYPES[typeIndex];
       const assets = this._assetsByType?.[desc.id] || [];
       const libraryDensity = assets.length ? 1 : 0;
@@ -619,8 +660,12 @@ export class ProceduralPropsManager {
       const maxGz = Math.ceil(maxZ / cell);
       const typeDensity = clamp(params[desc.densityParam] ?? 1, 0, 2);
       if (master <= 0 || typeDensity <= 0 || libraryDensity <= 0) continue;
-      for (let gz = minGz; gz < maxGz; gz++) {
-        for (let gx = minGx; gx < maxGx; gx++) {
+      if (job.gz == null) { job.gz = minGz; job.gx = minGx; }
+      for (; job.gz < maxGz; job.gz++, job.gx = minGx) {
+        const gz = job.gz;
+        for (; job.gx < maxGx; job.gx++) {
+          if ((++job.candidates & 31) === 0 && performance.now() >= deadline) return false;
+          const gx = job.gx;
           const salt = 31 + typeIndex * 101;
           const jitterX = hashInt(gx + salt, gz - 17, params.seed);
           const jitterZ = hashInt(gx - 43, gz + salt, params.seed);
@@ -644,7 +689,7 @@ export class ProceduralPropsManager {
       }
     }
     this._diagnostics.cacheMisses++;
-    return buckets;
+    return true;
   }
 
   _treeSpacingWinner(gx, gz, seed, salt) {

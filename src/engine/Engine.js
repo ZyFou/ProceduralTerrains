@@ -31,6 +31,7 @@ import {
   resolveCloudQuality,
 } from './sky/CloudSettings.js';
 import { TerrainHeightBaker } from './terrain/TerrainHeightBaker.js';
+import { NearHeightCache } from './terrain/NearHeightCache.js';
 import {
   getLocation, makeCustomLocation, effectiveZoomFor, fetchBboxElevation,
   fetchBboxImagery, offsetBbox, compositeCellPatches, compositeCellImagery,
@@ -284,6 +285,7 @@ export class Engine {
     shaderBenchmark = null,
     initialView = 'landing',
     initialBootMode = 'full',
+    bootLinkMode = 'async',
   }) {
     this._bootStart = performance.now();   // boot timing baseline (see [boot] logs)
     this.canvas = canvas;
@@ -295,6 +297,9 @@ export class Engine {
     this._bootPresented = false;
     this._bootPipeline = null;
     this._renderWorker = !!renderWorker;
+    // 'sync' resolves the boot shader links synchronously so the browser caches
+    // the programs (see EngineProxy boot shader-link policy).
+    this._bootLinkMode = bootLinkMode === 'sync' ? 'sync' : 'async';
     this._shaderBenchmarkOptions = shaderBenchmark?.enabled ? shaderBenchmark : null;
     this._shaderBenchmarkResult = null;
     this._shaderColdRun = this._shaderBenchmarkOptions ? null : readShaderColdRun(coldShaderRun);
@@ -418,6 +423,12 @@ export class Engine {
     this._matTrash = [];         // warm materials kept alive until programs are acquired
     this._mainRenderSerial = 0;  // advances only after a live scene render
     this._warmGeo = new THREE.PlaneGeometry(1, 1);
+    // three.js keys programs on the geometry's attribute set (HAS_NORMAL).
+    // Terrain and planet chunk grids carry no normal attribute, so their
+    // materials must be warm-compiled on a normal-less probe or the compiled
+    // program is never the one the live meshes use (see _warmGeometryFor).
+    this._warmGeoNoNormal = new THREE.PlaneGeometry(1, 1);
+    this._warmGeoNoNormal.deleteAttribute('normal');
     this._erosionGPUModule = null;
     this._erosionGPUImportPromise = null;
     this._erosionGPUUnavailable = false;
@@ -549,13 +560,15 @@ export class Engine {
       mergeDebug: false,      // wireframe boxes around merged groups / macro proxy
       freeCamNoClip: false,
     };
-    // Correctness baseline for Tile mode. The optimized Studio height/climate
-    // cache has repeatedly allowed terrain geometry, shoreline masks and
-    // surface colour classification to observe different generations. Until a
-    // future cache implementation can prove atomic coordinate/generation
-    // parity, keep every visible Tile consumer on the same live height field.
-    // Infinite World and Planet retain their dedicated cache paths.
-    this._studioLiveHeightField = true;
+    // Tile mode height source. Geometry ALWAYS evaluates the live field per
+    // vertex. Fragment shading (terrain + water) uses a live/baked hybrid: the
+    // exact field near the camera, the packed bake where a pixel spans about a
+    // bake texel. The bake is only published when its generation, tile layout
+    // AND authoring revisions match the live field, and every authoring tool
+    // switches the fragments back to the live field while it is active, so no
+    // consumer can observe a stale generation. Manual / node projects keep the
+    // pure live path. Set true to force the live field everywhere (debug).
+    this._studioLiveHeightField = false;
     this._landingShowcase = this._initialView === 'landing';
 
     this._initRenderer();
@@ -802,6 +815,10 @@ export class Engine {
   _initScene(minimapBase, minimapOverlay) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0b0e14);
+    this.scene.onBeforeRender = (renderer, _scene, camera) => {
+      this._syncTerrainPixelFootprint(renderer, camera);
+      this._syncWaterDepthPull(camera);
+    };
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 1, 50000);
 
@@ -860,6 +877,7 @@ export class Engine {
     this.scene.add(new THREE.AmbientLight(0x4a5568, 0.5));
 
     this.minimap = new Minimap(this.renderer, this.scene, minimapBase, minimapOverlay);
+    this.minimap.canRenderScene = () => this._sceneProgramsReady();
 
     // camera-underwater post effect (inactive above water — zero cost) +
     // centralized submersion detection / transition (single source of truth).
@@ -1275,7 +1293,8 @@ export class Engine {
   }
 
   _studioBakeLayoutKey() {
-    return `${this.tileAssemblyShape}:${this.diskRadiusCells}:` + this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|');
+    return `${this.tileAssemblyShape}:${this.diskRadiusCells}:` + this.tiles.map((t) => `${t.cx},${t.cz}`).sort().join('|')
+      + `#${this._studioBakeAuthoringKey?.() ?? ''}`;
   }
 
   get tileGridSize() { return 5; }           // 5×5 window centred on (0,0)
@@ -2840,6 +2859,48 @@ export class Engine {
 
   /** Render the top-down minimap base with the sky dome hidden so the map stays
    *  a clean terrain view (the dome would otherwise fill its background). */
+  // Resolve the link status of freshly submitted programs synchronously. Chrome
+  // only writes a WebGL program to its on-disk shader cache when the link is
+  // resolved this way; links completed through KHR_parallel_shader_compile
+  // polling are never cached, so every launch recompiled from scratch
+  // (~10 s of FXC on the reference machine vs ~1 s ready from cache). This
+  // blocks the calling thread until the driver finishes, so it is only used
+  // on the render worker, where the UI thread stays responsive.
+  _resolveProgramLinks(renderer, materials) {
+    const gl = renderer?.getContext?.();
+    const props = renderer?.properties;
+    if (!gl || !props || gl.isContextLost?.()) return;
+    for (const material of materials || []) {
+      const program = props.get(material)?.currentProgram?.program;
+      if (program) gl.getProgramParameter(program, gl.LINK_STATUS);
+    }
+  }
+
+  _cacheableBootCompile() {
+    const override = typeof location !== 'undefined'
+      ? new URLSearchParams(location.search).get('syncBootLinks')
+      : null;
+    if (override === '0') return false;
+    if (override === '1') return true;
+    return this._renderWorker === true && this._bootLinkMode === 'sync';
+  }
+
+  // True once every program the minimap's scene render would use has finished
+  // linking. Drawing a material earlier makes three.js block inside its
+  // first-use link check for the whole cold compile (measured 8.5 s freeze of
+  // the main thread at startup).
+  _sceneProgramsReady() {
+    if (this._bootPending || this._compiling || this._modeTransitionCoordinator?.active) return false;
+    const props = this.renderer?.properties;
+    if (!props) return false;
+    for (const material of [this.terrainMaterial, this.water?.visible ? this.water.material : null]) {
+      if (!material) continue;
+      const program = props.get(material)?.currentProgram;
+      if (!program || program.isReady?.() === false) return false;
+    }
+    return true;
+  }
+
   _renderMinimapBase() {
     const sky = this.proceduralSky;
     const wasVisible = !!sky && sky.mesh.visible;
@@ -3853,7 +3914,9 @@ export class Engine {
         }
         if (compileResult?.ready !== true) {
           compileError = new Error('Terrain shader did not become ready');
-        } else {
+        } else if (!nodePreviewMaterial) {
+          // Node edits publish the preview as soon as it links; its bake
+          // program is prepared in the background after the swap (below).
           cachePreparation = await this._prepareHeightCacheProgram(modeAtStart, oct, sg);
           if (cachePreparation?.result?.ready !== true) {
             compileError = new Error('Terrain cache shader did not become ready');
@@ -3944,6 +4007,7 @@ export class Engine {
         if (heightSourceChanged || octavesChanged) {
           this.waterSystem?.onStackRebuilt(sg, oct);
         }
+        if (nodePreviewMaterial) void this._prepareStudioHeightCacheAsync();
         if (this.heightSampler) this.heightSampler.invalidate();
         if (this.propSurfaceField) this.propSurfaceField.invalidate();
         this._applyUniforms();
@@ -4537,7 +4601,11 @@ export class Engine {
     const activeTerrainMaterial = this.worldMode === 'planet'
       ? this.planetWorld?.materials?.[0]
       : (this.worldMode === 'infinite' ? this._infiniteTerrainMat : this.terrainMaterial);
-    if (activeTerrainMaterial?.defines?.OCTAVES !== oct) {
+    // Only an existing program can be on the wrong octave count. Entering
+    // Planet calls this before the chunk materials exist; treating that as a
+    // mismatch started a redundant planet shader rebuild whose late swap
+    // marked the terrain dirty and re-baked the planet a second time.
+    if (activeTerrainMaterial && activeTerrainMaterial.defines?.OCTAVES !== oct) {
       this._setOctavesAsync(oct);
     }
 
@@ -5358,6 +5426,24 @@ export class Engine {
     };
   }
 
+  /**
+   * Stand-in geometry for warm-compiling `material` when no live mesh is
+   * given. Terrain/planet chunk materials (the only ones tagged with a height
+   * program or fragment flavour) render normal-less grids; compiling them on
+   * the normal-bearing plane produced a HAS_NORMAL program the chunks never
+   * use, and the first close-up frame then linked the real 70k-char terrain
+   * program synchronously (a 6-12 s freeze on a cold shader cache).
+   */
+  _warmGeometryFor(material) {
+    const data = material?.userData;
+    const chunkMaterial = !!data && (
+      data.heightProgramSig !== undefined
+      || data.terrainVariant !== undefined
+      || data.minimalFragment !== undefined
+    );
+    return chunkMaterial ? this._warmGeoNoNormal : this._warmGeo;
+  }
+
   async _compileMaterialVariants(mats, {
     canvasOnly = false,
     timeoutMs,
@@ -5369,6 +5455,7 @@ export class Engine {
     targetScene = this.scene,
     logCompile = true,
     isCurrent = () => true,
+    resolveLinks = false,
   } = {}) {
     // Capture the renderer for the whole operation. Vite HMR and explicit
     // disposal can replace/null `this.renderer` while the driver is linking a
@@ -5445,7 +5532,7 @@ export class Engine {
         probe.material = material;
         if (probe.isInstancedMesh && probe.count < 1) probe.count = 1;
       } else {
-        probe = new THREE.Mesh(source?.geometry || this._warmGeo, material);
+        probe = new THREE.Mesh(source?.geometry || this._warmGeometryFor(material), material);
       }
       probe.castShadow = Boolean(source?.castShadow);
       probe.receiveShadow = Boolean(source?.receiveShadow);
@@ -5480,6 +5567,7 @@ export class Engine {
       return { ready: false, aborted: true, timedOut: false, pendingCount: 0,
         materialCount: list.length, waitMs: 0, syncCompileMs: 0, asyncWaitMs: 0 };
     }
+    if (resolveLinks) this._resolveProgramLinks(renderer, pending);
     const syncCompileMs = performance.now() - compileStartedAt;
     const waitStartedAt = performance.now();
     const canvasResult = await this._waitForMaterialsReady(pending, waitOpts);
@@ -5857,7 +5945,7 @@ export class Engine {
     for (const { material, source, topology } of variants.values()) {
       if (this._disposed) break;
       const group = new THREE.Group();
-      const geometry = source?.geometry ?? this._warmGeo;
+      const geometry = source?.geometry ?? this._warmGeometryFor(material);
       let probe;
       if (topology === 'instanced') {
         probe = new THREE.InstancedMesh(geometry, material, 1);
@@ -6096,9 +6184,17 @@ export class Engine {
     context.assertCurrent();
     this._prepareCameraPipeline();
 
-    const cacheReady = await this._prepareStudioHeightCacheAsync();
-    context.assertCurrent();
-    if (!cacheReady) throw new Error('Final terrain height source is not ready');
+    // The live field is always a complete, correct terrain source, so the
+    // studio bake program never gates the boot compile. Its preparation is
+    // submitted first and links in parallel with the terrain/water programs;
+    // it publishes the bake on its own once ready.
+    if (this._usesLiveStudioHeightField()) {
+      const cacheReady = await this._prepareStudioHeightCacheAsync();
+      context.assertCurrent();
+      if (!cacheReady) throw new Error('Final terrain height source is not ready');
+    } else {
+      void this._prepareStudioHeightCacheAsync();
+    }
 
     // Prepare the requested water material without compiling or attaching it.
     // Terrain and water are intentionally submitted together in the compile
@@ -6142,6 +6238,17 @@ export class Engine {
         error.shaderBenchmark = benchmark;
         throw error;
       }
+    }
+    if (this._cacheableBootCompile()) {
+      // The cacheable submission resolves every link synchronously. On a
+      // warm launch that is a cache read (~0.2 s); on the first launch for
+      // this GPU / shader version the driver compiles for several seconds and
+      // the browser cannot present frames meanwhile, so say so first and give
+      // the main thread two frames to put the message on screen.
+      context.progress?.('Compiling shaders for this GPU… (first launch only takes a few seconds)', 0, 1);
+      await yieldFrame();
+      await yieldFrame();
+      context.assertCurrent?.();
     }
     this._submitFinalBootCompilePlan(context);
     return {
@@ -6360,6 +6467,7 @@ export class Engine {
       stagger: !this._renderWorker,
       timeoutMs: 120000,
       renderTarget: plan.renderTarget,
+      resolveLinks: this._cacheableBootCompile(),
     });
     // Cancellation can retire the pipeline during geometry. Keep the submitted
     // driver job observed until its owning compile stage either awaits or drops it.
@@ -6666,6 +6774,11 @@ export class Engine {
       ...result,
       backend: this.rendererConfig?.activeBackend || 'webgl2',
       transport: this._renderWorker ? 'worker' : 'main-thread',
+    });
+    const bootStages = result.manifest?.stageDurations || {};
+    this.cb.onBootShaderStats?.({
+      compileMs: (Number(bootStages.resources) || 0) + (Number(bootStages.compile) || 0),
+      linkMode: this._cacheableBootCompile() ? 'sync' : 'async',
     });
     console.info(
       `[boot] final frame ready in ${result.duration.toFixed(0)}ms `
@@ -7367,8 +7480,84 @@ export class Engine {
   }
 
   _usesLiveStudioHeightField() {
+    // Manual sculpting streams field edits every frame and its full fragment
+    // shades the live field per pixel. Node projects keep the lightweight
+    // preview fragment, whose only per-pixel normal source is the bake (its
+    // fallback is per-vertex), so they bake like procedural projects.
     return this._studioLiveHeightField === true
-      || this._debug?.disableHeightBake === true;
+      || this._debug?.disableHeightBake === true
+      || (this.projectMode != null && this.projectMode !== 'procedural' && this.projectMode !== 'nodes');
+  }
+
+  // Every revision that can change the studio height field without bumping
+  // _terrainGen (authoring textures, imported maps). Part of the bake key so a
+  // published bake is never sampled against a newer live field.
+  _studioBakeAuthoringKey() {
+    const tex = (t) => (t ? `${t.uuid}:${t.version}` : '-');
+    return [
+      this.paintMode?.layers?.revision ?? 0,
+      this.manualTerrain?.field?.revision ?? 0,
+      this.splineManager?.baker?.revision ?? 0,
+      this.destructionField?.revision ?? 0,
+      this.erosionField?.revision ?? 0,
+      tex(this.importedMaps?.noise?.texture),
+      tex(this.importedMaps?.height?.texture),
+      tex(this.importedMaps?.biome?.texture),
+    ].join(',');
+  }
+
+  // Authoring tools stream edits every frame; keep the fragments on the live
+  // field while any of them is active (the bake catches up afterwards).
+  _studioAuthoringActive() {
+    return !!(this.paintState?.enabled
+      || this.manualTerrain?.sculpt?.enabled
+      || this.manualTerrain?.texturePaint?.enabled
+      || this.splineState?.enabled
+      || this.explodeTool?.enabled);
+  }
+
+  // Per-render pixel footprint for the live/baked hybrid (scene.onBeforeRender
+  // runs inside every renderer.render with the active camera + viewport).
+  // Orthographic passes (minimap, height-packing exports, prop/collision
+  // tiles) stay on the exact live field.
+  _syncTerrainPixelFootprint(renderer, camera) {
+    const uniform = this.uniforms?.uPixelWorldPerDist;
+    if (!uniform) return;
+    if (!camera?.isPerspectiveCamera || this.worldMode !== 'studio') {
+      uniform.value = 0;
+      return;
+    }
+    const viewport = renderer.getCurrentViewport(this._footprintViewport ||= new THREE.Vector4());
+    const heightPx = Math.max(1, viewport.w);
+    uniform.value = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5)
+      / (Math.max(camera.zoom || 1, 1e-6) * heightPx);
+  }
+
+  // Water depth-test tolerance (WATER_DEPTH_PULL_GLSL). Pulling the water's
+  // depth toward the camera by a fraction c of the eye distance lets it win
+  // against terrain lying within c × (camera height above the water) of it,
+  // a band that is constant across a flat sea. It is sized to the terrain
+  // mesh's vertical error, which grows with viewing distance (coarser LODs,
+  // larger planet patches). Terrain clearly in front still occludes water,
+  // and dry land never gets water because the shader discards it.
+  _syncWaterDepthPull(camera) {
+    const uniform = this.uniforms?.uWaterDepthPull;
+    if (!uniform) return;
+    if (!camera?.isPerspectiveCamera || !this.params) {
+      uniform.value = 0;
+      return;
+    }
+    const position = (this._waterPullCameraPosition ||= new THREE.Vector3())
+      .setFromMatrixPosition(camera.matrixWorld);
+    const seaLevel = this.params.seaLevel ?? 0;
+    const planet = this.worldMode === 'planet';
+    const height = Math.abs(planet
+      ? position.length() - (this._planetRadius() + seaLevel)
+      : position.y - seaLevel);
+    const tolerance = planet
+      ? Math.min(96, 1 + height * 0.01)
+      : Math.min(6, 0.5 + height * 0.01);
+    uniform.value = Math.min(0.2, tolerance / Math.max(height, 1e-3));
   }
 
   _scheduleWaterWarmRetry(renderTarget = null, delayMs = 250) {
@@ -9143,9 +9332,64 @@ export class Engine {
     return this._enterStudioMode({ deferCompile });
   }
 
+  // The studio height/normal bake is board-local: release its render targets
+  // (the compiled bake program stays cached) when Tile mode is left, and
+  // re-bake on return. Infinite/Planet never sample it.
+  /**
+   * Camera-centred fine level of the studio bake (see NearHeightCache). Only
+   * runs while the board bake is published and current; it shares the bake's
+   * compiled program, so it never compiles anything.
+   */
+  _updateNearHeightCache() {
+    const u = this.uniforms;
+    if (!u?.uUseNearBake) return;
+    const boardReady = this.worldMode === 'studio'
+      && u.uUseTerrainHeightTex.value > 0.5
+      && !!this.terrainHeightBaker?.texture
+      && !this.terrainHeightBaker.isBaking
+      && this._bakedStudioGen === this._terrainGen;
+    if (!boardReady) {
+      this._nearHeightCache?.invalidate();
+      return;
+    }
+    this._nearHeightCache ||= new NearHeightCache({ renderer: this.renderer, uniforms: u });
+    const cache = this._nearHeightCache;
+    cache.update({
+      baker: this.terrainHeightBaker,
+      sourceKey: `${this._bakedStudioGen}:${this._bakedStudioLayout}`,
+      enabled: true,
+      camera: this.camera,
+      boardTexel: u.uBakeTexelWorld.value,
+      pixelWorldPerDist: u.uPixelWorldPerDist.value,
+      // conservative: the camera's height above the highest possible terrain
+      groundY: this._maxHeight?.() ?? 0,
+      rows: this.gpuTier === 'low' ? 48 : (this.gpuTier === 'medium' ? 96 : 128),
+      movingRows: this.gpuTier === 'low' ? 16 : (this.gpuTier === 'medium' ? 32 : 48),
+    });
+    if (cache.isBaking) this._needsRender = true;
+  }
+
+  _releaseStudioHeightCache() {
+    this._nearHeightCache?.releaseTargets();
+    const baker = this.terrainHeightBaker;
+    if (!baker) return;
+    baker.releaseTargets?.();
+    this._terrainBakeJobKey = null;
+    this._bakedStudioGen = -1;
+    const u = this.uniforms;
+    u.uUseTerrainHeightTex.value = 0.0;
+    u.uUseTerrainBiomeTex.value = 0.0;
+    u.uUseWaterTerrainBiomeTex.value = 0.0;
+    u.uTerrainHeightTex.value = null;
+    u.uTerrainBiomeTex.value = null;
+    u.uWaterTerrainHeightTex.value = null;
+    u.uWaterTerrainBiomeTex.value = null;
+  }
+
   _enterInfiniteMode({ deferCompile = false } = {}) {
     this._packNoiseUniforms();
     this._syncCpuHeightProgram();
+    this._releaseStudioHeightCache();
     // Infinite exploration stays fully procedural; Studio paint layers are
     // board-local overrides and are restored when returning to Studio mode.
     this.uniforms.uPaintEnabled.value = 0;
@@ -9596,15 +9840,17 @@ export class Engine {
     const octaves = Math.round(
       this.params?.octaves ?? this.terrainMaterial?.defines?.OCTAVES ?? 1,
     );
+    let superseded = false;
     const job = (async () => {
       let preparation = null;
       try {
         preparation = await this._prepareHeightCacheProgram('studio', octaves, program);
         const current = this._activeHeightProgram('studio');
         const currentSig = current?.heightSig || current?.sig;
+        superseded = currentSig !== programSig
+          || Math.round(this.params?.octaves ?? octaves) !== octaves;
         if (this._disposed || !this.params || this.worldMode !== 'studio'
-            || currentSig !== programSig
-            || Math.round(this.params?.octaves ?? octaves) !== octaves
+            || superseded
             || preparation?.result?.ready !== true) {
           return false;
         }
@@ -9623,6 +9869,14 @@ export class Engine {
       if (this._terrainHeightPreparePromise === pending) {
         this._terrainHeightPreparePromise = null;
       }
+    }).then((ready) => {
+      // The program changed while this one linked (a node edit during a
+      // background preparation): prepare the current one instead of leaving
+      // the bake deferred.
+      if (!ready && superseded && !this._disposed && this.params && this.worldMode === 'studio') {
+        return this._prepareStudioHeightCacheAsync();
+      }
+      return ready;
     });
     this._terrainHeightPreparePromise = pending;
     return pending;
@@ -9697,13 +9951,19 @@ export class Engine {
       }
       this._planetBakeRequestedGen = this._terrainGen;
       this.uniforms.uUsePlanetHeightTex.value = 0.0;
+      this.uniforms.uUsePlanetClimateTex.value = 0.0;
     }
     const result = this.planetHeightBaker.step();
     if (result.ready) {
       this.uniforms.uPlanetHeightTex.value = result.texture;
       this.uniforms.uUsePlanetHeightTex.value = 1.0;
     }
-    if (result.complete) this._bakedTerrainGen = this._terrainGen;
+    if (result.complete) {
+      this._bakedTerrainGen = this._terrainGen;
+      const climate = this.planetHeightBaker.climateTexture;
+      this.uniforms.uPlanetClimateTex.value = climate;
+      this.uniforms.uUsePlanetClimateTex.value = climate ? 1.0 : 0.0;
+    }
   }
 
   /**
@@ -9737,14 +9997,14 @@ export class Engine {
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       return;
     }
-    if (this.paintState?.enabled) {
+    if (this._studioAuthoringActive()) {
       this.uniforms.uUseTerrainHeightTex.value = 0.0;
       this.uniforms.uUseTerrainBiomeTex.value = 0.0;
       this.uniforms.uUseWaterTerrainBiomeTex.value = 0.0;
       this._paintWasEnabled = true;
       return;
     }
-    if (this._paintWasEnabled) {      // just left paint mode — capture the edits
+    if (this._paintWasEnabled) {      // just left an authoring tool — capture the edits
       this._bakedStudioGen = -1;
       this._paintWasEnabled = false;
     }
@@ -9804,6 +10064,9 @@ export class Engine {
 
     this.profiler.setMetric('lastBakeMs', this._terrainBakeElapsedMs);
     this.uniforms.uTerrainHeightTex.value = this.terrainHeightBaker.texture;
+    this.uniforms.uBakeTexelWorld.value = this.terrainHeightBaker.texelWorldSize(
+      this.uniforms.uBakeSpan.value,
+    );
     this.uniforms.uUseTerrainHeightTex.value = 1.0;
     this.uniforms.uTerrainBiomeTex.value = this.terrainHeightBaker.biomeTexture;
     this.uniforms.uUseTerrainBiomeTex.value = 1.0;
@@ -9834,9 +10097,12 @@ export class Engine {
    * and quarters that cost; strong GPUs keep the crisp 2048².
    */
   _bakeBaseSize() {
+    // One texel per world unit on the default 2048 board: the live/baked
+    // hybrid hands a pixel to the bake once it spans ~1 texel, so a finer bake
+    // moves the switch closer to the camera. Back buffers exist only while a
+    // bake runs, so the steady-state cost is one RGBA16F target.
     if (this.gpuTier === 'low') return 1024;
-    if (this.gpuTier === 'medium') return 1024;
-    return 1536;
+    return 2048;
   }
 
   _enterPlanetMode(planet, { deferCompile = false } = {}) {
@@ -9845,7 +10111,7 @@ export class Engine {
     // planet is fully procedural — Studio paint layers don't apply
     this.uniforms.uPaintEnabled.value = 0;
     this.uniforms.uManualEnabled.value = 0;
-    this.uniforms.uUseTerrainHeightTex.value = 0.0;   // studio-only bake
+    this._releaseStudioHeightCache();   // studio-only bake
     if (this.studioCloud) this.studioCloud.setInScene(false);
 
     // hide studio objects + sleep the editor camera
@@ -10146,7 +10412,7 @@ export class Engine {
       ]);
       if (!isCurrent()) throw new ModeTransitionCancelledError();
       if (terrainResult?.ready !== true || waterResult?.ready !== true || !cacheReady) {
-        throw new Error('Planet shader compilation did not complete');
+        throw new Error(`Planet shader compilation did not complete (terrain ${terrainResult?.ready === true ? 'ready' : terrainResult?.reason || 'pending'}, water ${waterResult?.ready === true ? 'ready' : waterResult?.reason || 'pending'}, height cache ${cacheReady ? 'ready' : 'pending'})`);
       }
       const currentTarget = this._resolveCameraCompileTarget();
       if (!this._sameCameraCompileTarget(targetSnapshot, currentTarget)) {
@@ -10251,6 +10517,8 @@ export class Engine {
     // reset the shared cubemap uniforms so studio/infinite never sample a stale
     // (or disposed) planet texture
     this.uniforms.uPlanetHeightTex.value = null;
+    this.uniforms.uPlanetClimateTex.value = null;
+    this.uniforms.uUsePlanetClimateTex.value = 0.0;
     this.uniforms.uUsePlanetHeightTex.value = 0.0;
     this._bakedTerrainGen = -1;
     this._planetBakeRequestedGen = -1;
@@ -12696,7 +12964,10 @@ export class Engine {
       manualEditing ||
       this.board?.isBuilding ||
       (!this._debug.freezeLod && this.board._lodRebuildQueue.length > 0);
-    const minimapDirty = this.minimap._dirty && now - this._minimapDirtyAt > 280;
+    // Only a minimap with local canvases needs the scene re-rendered here; the
+    // worker path pulls frames on demand. (A canvas-less minimap stays dirty
+    // forever, which used to force a full render on every tick.)
+    const minimapDirty = this.minimap.needsBaseRender && now - this._minimapDirtyAt > 280;
     // Heartbeat safety net: redraw at least ~1 Hz so any state change that
     // forgot to invalidate self-heals within a second (cheap insurance).
     const heartbeat = now - this._lastRenderAt > 1000;
@@ -12762,6 +13033,7 @@ export class Engine {
       // steady frame); the studio terrain + water shaders then sample it per
       // pixel instead of re-evaluating the full height field.
       this._ensureTerrainHeightTexSafely();
+      this._updateNearHeightCache();
 
       this._maybeWarmUnderwater();
       const sharedOpaqueTarget = this._prepareSharedOpaque(cameraPlan, cameraSceneSize);
@@ -13305,6 +13577,8 @@ export class Engine {
     else if (this.fpsControls) { this.fpsControls.dispose(); this.fpsControls = null; }
     if (this.studioCloud) { this.studioCloud.dispose(); this.studioCloud = null; }
     if (this.terrainHeightBaker) { this.terrainHeightBaker.dispose(); this.terrainHeightBaker = null; }
+    this._nearHeightCache?.dispose();
+    this._nearHeightCache = null;
     if (this.proceduralSky) { this.proceduralSky.dispose(); this.proceduralSky = null; }
     this.board.dispose();
     this.minimap.dispose();
@@ -13315,6 +13589,7 @@ export class Engine {
     for (const t of this._matTrash) for (const m of t.mats) m.dispose();
     this._matTrash = [];
     this._warmGeo.dispose();
+    this._warmGeoNoNormal.dispose();
     if (this.terrainMaterial) this.terrainMaterial.dispose();
     this._bootDegradedMaterial?.dispose?.();
     if (this.waterMaterial) this.waterMaterial.dispose();

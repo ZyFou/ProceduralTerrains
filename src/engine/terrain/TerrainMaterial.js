@@ -6,6 +6,10 @@ import {
   NOISE_GLSL,
   buildHeightGLSL,
   TERRAIN_HEIGHT_TEX_GLSL,
+  NEAR_BAKE_BLOCK,
+  CLIMATE_CACHE_BLOCK,
+  INFINITE_CLIMATE_GLSL,
+  fitNearBake,
   INFINITE_FIELD_CACHE_GLSL,
   TERRAIN_CLIMATE_CACHE_GLSL,
   MANUAL_SURFACE_WEIGHTS_GLSL,
@@ -69,8 +73,8 @@ const TERRAIN_COMMON_UNIFORMS_GLSL = COMMON_UNIFORMS_GLSL.replace(
 // drives the normal path; an unavailable sample is a temporary zero-height
 // value until the prepared cache is published.
 const INFINITE_FIELD_CACHE_STRICT_GLSL = INFINITE_FIELD_CACHE_GLSL.replace(
-  'return available > 0.5 ? field.r * uHeightScale : heightAt(xz);',
-  'return available > 0.5 ? field.r * uHeightScale : 0.0;',
+  '  return heightAt(xz);\n}',
+  '  return 0.0;\n}',
 );
 
 const MANUAL_HEIGHT_GLSL = /* glsl */ `
@@ -80,7 +84,7 @@ float manualHeightOffsetAt(vec2 xz) {
   if (uManualEnabled < 0.5) return 0.0;
   vec2 uv = (xz - uManualOrigin) / max(uManualSpan, vec2(1.0));
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  return texture2D(uManualHeightTexture, uv).r;
+  return textureLod(uManualHeightTexture, uv, 0.0).r;
 }
 
 // Manual Terrain owns its complete height and surface fields. These stubs keep
@@ -95,7 +99,7 @@ vec2 destructionSampleAt(vec2 xz) {
   if (uDestructionEnabled < 0.5) return vec2(0.0);
   vec2 uv = (xz - uDestructionOrigin) / max(uDestructionSpan, vec2(1.0));
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec2(0.0);
-  return texture2D(uDestructionTexture, uv).rg;
+  return textureLod(uDestructionTexture, uv, 0.0).rg;
 }
 float destructionOffsetAt(vec2 xz) { return destructionSampleAt(xz).r; }
 float destructionScorchAt(vec2 xz) { return destructionSampleAt(xz).g; }
@@ -375,6 +379,45 @@ ${preview ? 'uniform float uEps;' : ''}
 attribute float aSkirt;
 attribute float aLod;
 attribute float aWall;   // 1 on the dedicated circular radial-wall mesh, else 0
+attribute float aMorph;  // 1 on the shared per-LOD chunk grids (absent = 0)
+#ifdef USE_INSTANCING
+attribute float aMorphK; // Infinite World: per-chunk temporal geomorph factor
+#endif
+
+// CDLOD geomorphing. A vertex of LOD L slides its odd grid indices onto the
+// even neighbours (= the LOD L+1 grid) as its distance goes from
+// uLodMorphStart[L] to uLodMorphEnd[L]. The engine places that band strictly
+// between the chunk switch distances (half a chunk diagonal inside each), so a
+// chunk is already exactly the coarser shape when it swaps geometry and still
+// exactly the finer shape when it swaps back: LOD changes never pop. The
+// metric matches the CPU selection: horizontal distance + camera height.
+uniform vec3 uLodMorphStart;
+uniform vec3 uLodMorphEnd;
+uniform vec4 uLodGridSegments;   // quads per chunk side, LOD 0..3
+
+vec3 terrainMorphedGrid(vec3 grid) {
+  if (aMorph < 0.5 || aLod > 2.5) return grid;
+  float segments = aLod < 0.5 ? uLodGridSegments.x : aLod < 1.5 ? uLodGridSegments.y : uLodGridSegments.z;
+  float coarser = aLod < 0.5 ? uLodGridSegments.y : aLod < 1.5 ? uLodGridSegments.z : uLodGridSegments.w;
+  // only an exact 2:1 ladder collapses onto the next level's vertices
+  if (abs(coarser * 2.0 - segments) > 0.5) return grid;
+  #ifdef USE_INSTANCING
+    // Infinite World chunks are instanced: their LOD changes are animated per
+    // chunk by InfiniteWorld (temporal geomorph), settled chunks sit at 0.
+    float morph = clamp(aMorphK, 0.0, 1.0);
+    if (morph <= 0.0) return grid;
+  #else
+    vec4 base = modelMatrix * vec4(grid, 1.0);
+    float viewDistance = length(vec3(base.x - cameraPosition.x, cameraPosition.y, base.z - cameraPosition.z));
+    float morphStart = aLod < 0.5 ? uLodMorphStart.x : aLod < 1.5 ? uLodMorphStart.y : uLodMorphStart.z;
+    float morphEnd = aLod < 0.5 ? uLodMorphEnd.x : aLod < 1.5 ? uLodMorphEnd.y : uLodMorphEnd.z;
+    if (morphEnd <= morphStart) return grid;
+    float morph = clamp((viewDistance - morphStart) / (morphEnd - morphStart), 0.0, 1.0);
+  #endif
+  vec2 index = floor(grid.xz * segments + 0.5);
+  grid.xz -= mod(index, 2.0) / segments * morph;
+  return grid;
+}
 
 varying vec3  vWorldPos;
 varying float vLod;
@@ -384,7 +427,7 @@ varying float vWallMesh;
 ${preview ? 'varying vec3 vTerrainPreviewNormal;' : ''}
 
 void main() {
-  vec4 localPosition = vec4(position, 1.0);
+  vec4 localPosition = vec4(terrainMorphedGrid(position), 1.0);
   #ifdef USE_INSTANCING
     localPosition = instanceMatrix * localPosition;
   #endif
@@ -462,7 +505,7 @@ ${preview ? /* glsl */ `
 `;
 };
 
-const buildFragment = (
+const buildFragmentSource = (
   heightGLSL,
   graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
   variant = 'full',
@@ -476,12 +519,12 @@ const buildFragment = (
     : TERRAIN_COMMON_UNIFORMS_GLSL;
   const terrainHeightGLSL = features.manual || worldMode === 'infinite'
     ? ''
-    : TERRAIN_HEIGHT_TEX_GLSL;
+    : `${TERRAIN_HEIGHT_TEX_GLSL}\n${NEAR_BAKE_BLOCK}${worldMode === 'studio' ? `\n${CLIMATE_CACHE_BLOCK}` : ''}`;
   const climateCacheGLSL = features.manual
     ? MANUAL_TERRAIN_CLIMATE_GLSL
     : worldMode === 'shared' && !features.tileOnly
       ? TERRAIN_CLIMATE_CACHE_GLSL
-      : '';
+      : worldMode === 'infinite' ? INFINITE_CLIMATE_GLSL : '';
   return /* glsl */ `
 precision highp float;
 
@@ -582,8 +625,8 @@ float causticCellEdges(vec2 uv, float t, float defocus) {
   float second = 10.0;
   vec2 nearestDelta = vec2(0.0);
   vec2 secondDelta = vec2(1.0);
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
+  for (int y = -1; y <= 1 + uLoopGuard; y++) {
+    for (int x = -1; x <= 1 + uLoopGuard; x++) {
       vec2 offset = vec2(float(x), float(y));
       vec2 id = cell + offset;
       vec2 phase = 6.28318 * vec2(
@@ -731,12 +774,26 @@ void main() {
   // height. The radial wall (vWallMesh) sits ON the perimeter, so it is exempt.
   if (uInfiniteMode < 0.5 && uTileShape > 0.5 && vWallMesh < 0.5 && tileOccupiedAt(xz) < 0.5) discard;
 
-  // Correctness path: procedural terrain shading uses the same exact climate
-  // function as terrain formation. The low-resolution climate cache introduced
-  // visible color blocks and stale biome classifications after water changes.
-  Climate cl = ${features.manual
-    ? 'terrainCachedClimateAt(xz)'
-    : 'climateAt(xz * uFrequency + uSeedOffset)'};
+  // Procedural terrain shading uses the same climate function as terrain
+  // formation. Tile mode reads its four slow fields from the half-float,
+  // generation-matched climate bake (exact at texel centres; the old 8-bit
+  // cache quantized biome thresholds into visible colour steps) and keeps the
+  // region jitter live; without the bake the exact live function runs.
+${features.manual ? /* glsl */ `
+  Climate cl = terrainCachedClimateAt(xz);
+` : /* glsl */ `
+${worldMode === 'infinite' ? /* glsl */ `
+  float infiniteFieldAvailable = 0.0;
+  vec4 infiniteField = infiniteFieldSampleAt(xz, infiniteFieldAvailable);
+  Climate cl = terrainInfiniteClimateAt(xz, infiniteField, infiniteFieldAvailable);
+` : /* glsl */ `
+#ifdef TERRAIN_CLIMATE_CACHE
+  Climate cl = terrainStudioClimateAt(xz);
+#else
+  Climate cl = climateAt(xz * uFrequency + uSeedOffset);
+#endif
+`}
+`}
   BiomeWeights bw = biomeWeightsAt(cl);
   vec4 paintedBiome = ${features.manual ? 'vec4(0.0)' : 'paintBiomeAt(xz)'};
   vec4 splineMask = ${features.manual ? 'vec4(0.0)' : 'splineMaskAt(xz)'};
@@ -772,13 +829,19 @@ ${features.manual ? /* glsl */ `
   hZ = terrainCachedHeightAt(xz + vec2(0.0, eps));
   nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
 ` : worldMode === 'infinite' ? /* glsl */ `
-  hC = terrainCachedHeightAt(xz);
+  // same field sample as the climate above (terrainCachedHeightAt, strict)
+  if (infiniteFieldAvailable > 0.5) hC = infiniteField.r * uHeightScale;
+  else hC = 0.0;
   float normalDistance = length(cameraPosition - vWorldPos);
   bool farInfiniteNormal = vLod > 1.5 || normalDistance > max(uChunkSize * 7.0, 900.0);
+  // Screen derivatives are taken in uniform control flow: a gradient inside the
+  // divergent branch would make the compiler flatten it and always pay for the
+  // two neighbour samples below.
+  vec3 faceNormal = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
   if (farInfiniteNormal) {
     hX = hC;
     hZ = hC;
-    nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+    nGeo = faceNormal;
     if (nGeo.y < 0.0) nGeo = -nGeo;
   } else {
     hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
@@ -786,20 +849,28 @@ ${features.manual ? /* glsl */ `
     nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
   }
 ` : /* glsl */ `
-  if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    // Stable packed bake: the centre fetch contains the exact finite-difference
-    // normal plus height. Neighbour heights remain available for concavity AO.
-    vec2 uv = bakedUvAt(xz);
-    vec2 duv = vec2(
-      uEps / max(uBakeSpan.x, 1.0),
-      uEps / max(uBakeSpan.y, 1.0)
-    );
-    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
-    hC = packedHeightNormal.a * uHeightScale;
-    hX = texture2D(uTerrainHeightTex, uv + vec2(duv.x, 0.0)).a * uHeightScale;
-    hZ = texture2D(uTerrainHeightTex, uv + vec2(0.0, duv.y)).a * uHeightScale;
-    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
-  } else {
+  // Live/baked hybrid (see terrainBakeBlendWeight). Near the camera the exact
+  // procedural field is evaluated per pixel; once a pixel spans about a bake
+  // texel the packed bake (exact values at texel centres) replaces it. Both
+  // are real branches: nothing in either path uses implicit derivatives.
+  hC = 0.0;
+  hX = 0.0;
+  hZ = 0.0;
+  nGeo = vec3(0.0, 1.0, 0.0);
+  float viewDistanceForBake = length(cameraPosition - vWorldPos);
+  float bakeWeight = terrainBakeWeight(viewDistanceForBake);
+  // the near level serves what the board bake would magnify
+  float nearWeight = 0.0;
+#ifdef TERRAIN_NEAR_BAKE
+  if (bakeWeight < 1.0 && uUseTerrainHeightTex > 0.5 && uInfiniteMode < 0.5) {
+    nearWeight = terrainNearBakeBlendWeight(xz, viewDistanceForBake) * (1.0 - bakeWeight);
+  }
+#endif
+  float bakedWeight = bakeWeight + nearWeight;
+${worldMode === 'studio' ? '' : /* glsl */ `
+  vec3 faceNormal = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+`}
+  if (bakedWeight < 1.0) {
 ${worldMode === 'studio' ? /* glsl */ `
     // Keep one copy of the procedural field in the driver program. Three
     // separate calls inline the entire noise/biome graph three times in ANGLE.
@@ -820,7 +891,7 @@ ${worldMode === 'studio' ? /* glsl */ `
     if (farInfiniteNormal) {
       hX = hC;
       hZ = hC;
-      nGeo = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+      nGeo = faceNormal;
       if (nGeo.y < 0.0) nGeo = -nGeo;
     } else {
       hX = terrainCachedHeightAt(xz + vec2(eps, 0.0));
@@ -828,6 +899,32 @@ ${worldMode === 'studio' ? /* glsl */ `
       nGeo = normalize(vec3(-(hX - hC) / eps, 1.0, -(hZ - hC) / eps));
     }
 `}
+  }
+  if (bakedWeight > 0.0) {
+    vec4 bakeTexel;
+#ifdef TERRAIN_NEAR_BAKE
+    if (nearWeight > 0.0) {
+      vec4 nearTexel = textureLod(uNearBakeTex, nearBakedUvAt(xz), 0.0);
+      if (bakeWeight > 0.0) {
+        vec4 boardTexel = textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0);
+        bakeTexel = (boardTexel * bakeWeight + nearTexel * nearWeight) / bakedWeight;
+      } else {
+        bakeTexel = nearTexel;
+      }
+    } else {
+      bakeTexel = textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0);
+    }
+#else
+    bakeTexel = textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0);
+#endif
+    float liveCurvature = ((hX + hZ) * 0.5 - hC) / eps;
+    float curvature = mix(liveCurvature, bakeTexel.b, bakedWeight);
+    hC = mix(hC, bakeTexel.a * uHeightScale, bakedWeight);
+    nGeo = normalize(mix(nGeo, bakedNormalFromTexel(bakeTexel), bakedWeight));
+    // Neighbour heights only feed the curvature terms (concavity AO, ridge
+    // accent, curvature analysis); rebuild them from the blended curvature.
+    hX = hC + curvature * eps;
+    hZ = hX;
   }
 `}
 
@@ -1038,6 +1135,9 @@ ${features.manual ? '' : /* glsl */ `
 `;
 };
 
+// Variants already at the 16-sampler budget compile without the near-bake level.
+const buildFragment = (...args) => fitNearBake(buildFragmentSource(...args));
+
 // Minimal boot fragment: height + a simple height/slope-banded colour + sun +
 // fog only. It skips the palette/colour, surface-texture, terrain-detail and
 // caustic blocks — the dominant cost of the full fragment's synchronous
@@ -1049,6 +1149,7 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
+${NEAR_BAKE_BLOCK}
 ${PALETTE_UNIFORMS_GLSL}
 ${graphColorGLSL}
 
@@ -1063,6 +1164,23 @@ varying float vWall;
 varying float vWallMesh;
 varying vec3  vTerrainPreviewNormal;
 
+// The preview has no live per-pixel field: wherever the camera-centred near
+// level covers a pixel finer than the board bake, prefer it (it holds the
+// same exact values at twice the density).
+vec4 previewBakedTexel(vec2 xz) {
+  vec4 texel = textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0);
+  if (uUseNearBake > 0.5) {
+    vec2 nearUv = nearBakedUvAt(xz);
+    vec2 border = min(nearUv, 1.0 - nearUv) * uNearBakeSpan;
+    float inside = clamp(min(border.x, border.y) / max(uNearBakeTexelWorld * 16.0, 1e-4), 0.0, 1.0);
+    // a pixel wider than one board texel is better served by the board bake
+    float footprint = length(cameraPosition - vWorldPos) * uPixelWorldPerDist / max(uNearBakeTexelWorld, 1e-4);
+    float nearWeight = inside * (1.0 - smoothstep(1.0, 2.0, footprint));
+    if (nearWeight > 0.0) texel = mix(texel, textureLod(uNearBakeTex, nearUv, 0.0), nearWeight);
+  }
+  return texel;
+}
+
 void main() {
   vec2 xz = vWorldPos.xz;
 
@@ -1071,21 +1189,15 @@ void main() {
   float hC;
   vec3 nGeo;
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    vec2 uv = bakedUvAt(xz);
-    vec2 duv = vec2(
-      uEps / max(uBakeSpan.x, 1.0),
-      uEps / max(uBakeSpan.y, 1.0)
-    );
-    vec4 packedHeightNormal = texture2D(uTerrainHeightTex, uv);
+    vec4 packedHeightNormal = previewBakedTexel(xz);
     hC = packedHeightNormal.a * uHeightScale;
-    nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
+    nGeo = bakedNormalFromTexel(packedHeightNormal);
   } else
   {
     hC = vWorldPos.y;
-    // Node authoring deliberately keeps this lightweight fragment live while
-    // the graph changes. Its height cache is therefore commonly unavailable.
-    // Use the smoothly interpolated normal prepared by the preview vertex
-    // shader instead of treating every slope as horizontal.
+    // Until the bake of the current graph completes (just after a node edit,
+    // or during boot) use the smoothly interpolated normal prepared by the
+    // preview vertex shader instead of treating every slope as horizontal.
     nGeo = normalize(vTerrainPreviewNormal);
   }
 
@@ -1299,6 +1411,8 @@ export function createTerrainUniforms() {
     // Ignored by the studio/infinite materials, which never declare them.
     uPlanetHeightTex:    { value: null },
     uUsePlanetHeightTex: { value: 0.0 },
+    uPlanetClimateTex:    { value: null },   // PlanetHeightBaker climate cube
+    uUsePlanetClimateTex: { value: 0.0 },
 
     // Studio-mode packed height/normal texture (shared by the studio terrain +
     // water shaders). When uUseTerrainHeightTex is 1, those shaders sample this
@@ -1315,6 +1429,8 @@ export function createTerrainUniforms() {
     // bindings and hides Studio water; the matching final height + climate
     // textures are then published together.
     uWaterTerrainHeightTex:   { value: null },
+    // Water depth-test tolerance (WATER_DEPTH_PULL_GLSL), set per render.
+    uWaterDepthPull:          { value: 0.0 },
     uWaterTerrainBiomeTex:    { value: null },
     uUseWaterTerrainBiomeTex: { value: 0.0 },
     uInfiniteFieldTex0:   { value: null },
@@ -1328,8 +1444,27 @@ export function createTerrainUniforms() {
     uInfiniteFieldSpan2:  { value: new THREE.Vector2(1, 1) },
     uInfiniteFieldReady:  { value: new THREE.Vector3() },
     uUseInfiniteFieldCache: { value: 0.0 },
+    // Geomorph bands (see terrainMorphedGrid). Defaults disable morphing until
+    // the active world publishes its LOD distances.
+    uLodMorphStart:       { value: new THREE.Vector3(1e9, 1e9, 1e9) },
+    uLodMorphEnd:         { value: new THREE.Vector3(1e9, 1e9, 1e9) },
+    uLodGridSegments:     { value: new THREE.Vector4(64, 32, 16, 8) },
     uBakeOrigin:          { value: new THREE.Vector2(-1024, -1024) },
     uBakeSpan:            { value: new THREE.Vector2(2048, 2048) },
+    // Live/baked hybrid (terrainBakeBlendWeight). Texel size is published with
+    // the bake; the pixel footprint is refreshed per frame from the camera.
+    uBakeTexelWorld:      { value: 1.0 },
+    uPixelWorldPerDist:   { value: 0.0 },
+    // Measured (perf-harness bake-threshold sweep): the bilinear bake stays
+    // within <0.4% SSIM of the live field down to ~0.3 texels per pixel, and
+    // the live stack near the camera was ~60% of the close-view GPU time.
+    uBakeBlend:           { value: new THREE.Vector2(0.3, 0.5) },
+    // Camera-centred fine bake level (NearHeightCache); off until published.
+    uNearBakeTex:         { value: null },
+    uNearBakeOrigin:      { value: new THREE.Vector2() },
+    uNearBakeSpan:        { value: new THREE.Vector2(1, 1) },
+    uNearBakeTexelWorld:  { value: 0.5 },
+    uUseNearBake:         { value: 0 },
 
     // Erosion height-offset field (signed world-unit delta over the bake region,
     // R channel). Added in heightAt() so mesh/normals/collision/props/export all

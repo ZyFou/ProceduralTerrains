@@ -4,10 +4,11 @@ import {
   COMMON_UNIFORMS_GLSL,
   MANUAL_SURFACE_WEIGHTS_GLSL,
   NOISE_GLSL,
+  WATER_DEPTH_PULL_GLSL,
 } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
-  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, buildPlanetHeightGLSL,
+  PLANET_UNIFORMS_GLSL, PLANET_NOISE_GLSL, PLANET_CLIMATE_CACHE_GLSL, buildPlanetHeightGLSL,
 } from './planetGLSL.js';
 import {
   PALETTE_UNIFORMS_GLSL,
@@ -62,6 +63,31 @@ attribute vec3 aFaceV;
 
 attribute float aSkirt;
 attribute float aLod;
+attribute float aMorph;  // 1 on the shared per-LOD chunk grids (absent = 0)
+#ifdef USE_INSTANCING
+attribute float aMorphK; // per-chunk temporal geomorph factor, animated by PlanetWorld
+#endif
+
+// Temporal geomorph in face-grid space. Planet chunks are too large for
+// distance bands (a band would sit right in front of the camera), so the LOD
+// decisions stay exactly as before and PlanetWorld animates each LOD change:
+// the finer grid's odd vertices slide onto the coarser grid (aMorphK 0 -> 1)
+// before a coarsening swap, and back out (1 -> 0) after a refining swap. At
+// rest aMorphK is 0, so settled geometry is unchanged.
+uniform vec4 uLodGridSegments;
+
+vec2 planetMorphedGrid(vec2 grid) {
+#ifdef USE_INSTANCING
+  if (aMorph < 0.5 || aLod > 2.5 || aMorphK <= 0.0) return grid;
+  float segments = aLod < 0.5 ? uLodGridSegments.x : aLod < 1.5 ? uLodGridSegments.y : uLodGridSegments.z;
+  float coarser = aLod < 0.5 ? uLodGridSegments.y : aLod < 1.5 ? uLodGridSegments.z : uLodGridSegments.w;
+  if (abs(coarser * 2.0 - segments) > 0.5) return grid;
+  vec2 index = floor(grid * segments + 0.5);
+  return grid - mod(index, 2.0) / segments * clamp(aMorphK, 0.0, 1.0);
+#else
+  return grid;
+#endif
+}
 
 varying vec3  vDir;
 varying vec3  vWorldPos;
@@ -70,9 +96,11 @@ varying float vSkirt;
 
 void main() {
   #ifdef USE_INSTANCING
-    vec3 cube = aFaceOrigin + position.x * aFaceU + position.z * aFaceV;
+    vec2 grid = planetMorphedGrid(position.xz);
+    vec3 cube = aFaceOrigin + grid.x * aFaceU + grid.y * aFaceV;
   #else
-    vec3 cube = uFaceOrigin + position.x * uFaceU + position.z * uFaceV;
+    vec2 grid = planetMorphedGrid(position.xz);
+    vec3 cube = uFaceOrigin + grid.x * uFaceU + grid.y * uFaceV;
   #endif
   vec3 dir = normalize(cube);
 
@@ -98,6 +126,7 @@ ${NOISE_GLSL}
 ${BIOME_GLSL}
 ${PLANET_NOISE_GLSL}
 ${planetHeightGLSL}
+${PLANET_CLIMATE_CACHE_GLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${SURFACE_TEXTURE_UNIFORMS_GLSL}
@@ -166,15 +195,22 @@ void main() {
   float hC, hA, hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    vec4 packedHeightNormal = textureCube(uPlanetHeightTex, dir);
+    vec4 packedHeightNormal = textureLod(uPlanetHeightTex, dir, 0.0);
     hC = packedHeightNormal.a * uHeightScale;
-    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
-    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+    hA = textureLod(uPlanetHeightTex, dA, 0.0).a * uHeightScale;
+    hB = textureLod(uPlanetHeightTex, dB, 0.0).a * uHeightScale;
     nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
-    hC = heightAt3D(dir);
-    hA = heightAt3D(dA);
-    hB = heightAt3D(dB);
+    // One inlined copy of the 3D height graph: the three samples share a
+    // loop whose bound the compiler cannot fold (uLoopGuard is always 0).
+    vec3 samples = vec3(0.0);
+    for (int sampleIndex = 0; sampleIndex < 3 + uLoopGuard; sampleIndex++) {
+      vec3 sampleDir = sampleIndex == 1 ? dA : sampleIndex == 2 ? dB : dir;
+      samples[sampleIndex] = heightAt3D(sampleDir);
+    }
+    hC = samples.x;
+    hA = samples.y;
+    hB = samples.z;
     vec3 pC = dir * (uPlanetRadius + hC);
     vec3 pA = dA  * (uPlanetRadius + hA);
     vec3 pB = dB  * (uPlanetRadius + hB);
@@ -187,7 +223,7 @@ void main() {
   vec3 n = normalize(mix(dir, nGeo, uNormalStrength));
   vec3 surfaceBaseNormal = n;
 
-  Climate cl = planetClimateAt(dir);
+  Climate cl = planetCachedClimateAt(dir);
   BiomeWeights bw = biomeWeightsAt(cl);
 
   float slope = 1.0 - up;
@@ -332,15 +368,22 @@ void main() {
   float hB;
   vec3 nGeo;
   if (uUsePlanetHeightTex > 0.5) {
-    vec4 packedHeightNormal = textureCube(uPlanetHeightTex, dir);
+    vec4 packedHeightNormal = textureLod(uPlanetHeightTex, dir, 0.0);
     hC = packedHeightNormal.a * uHeightScale;
-    hA = textureCube(uPlanetHeightTex, dA).a * uHeightScale;
-    hB = textureCube(uPlanetHeightTex, dB).a * uHeightScale;
+    hA = textureLod(uPlanetHeightTex, dA, 0.0).a * uHeightScale;
+    hB = textureLod(uPlanetHeightTex, dB, 0.0).a * uHeightScale;
     nGeo = normalize(packedHeightNormal.rgb * 2.0 - 1.0);
   } else {
-    hC = heightAt3D(dir);
-    hA = heightAt3D(dA);
-    hB = heightAt3D(dB);
+    // One inlined copy of the 3D height graph: the three samples share a
+    // loop whose bound the compiler cannot fold (uLoopGuard is always 0).
+    vec3 samples = vec3(0.0);
+    for (int sampleIndex = 0; sampleIndex < 3 + uLoopGuard; sampleIndex++) {
+      vec3 sampleDir = sampleIndex == 1 ? dA : sampleIndex == 2 ? dB : dir;
+      samples[sampleIndex] = heightAt3D(sampleDir);
+    }
+    hC = samples.x;
+    hA = samples.y;
+    hB = samples.z;
     vec3 pC = dir * (uPlanetRadius + hC);
     vec3 pA = dA  * (uPlanetRadius + hA);
     vec3 pB = dB  * (uPlanetRadius + hB);
@@ -433,13 +476,14 @@ export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL)
 // ============================================================================
 
 const WATER_VERTEX = /* glsl */ `
+${WATER_DEPTH_PULL_GLSL}
 varying vec3 vDir;
 varying vec3 vWorldPos;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
   vDir = normalize(wp.xyz);
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = waterClipPosition(wp);
 }
 `;
 
@@ -491,9 +535,14 @@ void main() {
 
   // The terrain field is the wet/dry authority, matching the stable 1.0.0-b
   // planet coastline and keeping foam attached to the spherical relief.
-  float terrainH = uUsePlanetHeightTex > 0.5
-    ? textureCube(uPlanetHeightTex, dir).a * uHeightScale
-    : heightAt3D(dir);
+  // Statement branch: the procedural field is skipped whenever the baked
+  // cubemap is published.
+  float terrainH;
+  if (uUsePlanetHeightTex > 0.5) {
+    terrainH = textureLod(uPlanetHeightTex, dir, 0.0).a * uHeightScale;
+  } else {
+    terrainH = heightAt3D(dir);
+  }
   float terrainR = uPlanetRadius + terrainH;
   float waterR = uPlanetRadius + uSeaLevel;
   float depth = waterR - terrainR;

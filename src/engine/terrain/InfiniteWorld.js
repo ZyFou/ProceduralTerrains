@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildChunkGeometry, setChunkBounds } from './ChunkGeometry.js';
+import { publishMorphUniforms, stepTemporalLod } from './LodMorph.js';
 import { createCullingContext, cullChunks } from './InfiniteTerrainCulling.js';
 import { ChunkStreamScheduler, getRadialOffsets } from './ChunkStreamScheduler.js';
 import { InfiniteTerrainBatches } from './InfiniteTerrainBatches.js';
@@ -84,7 +85,7 @@ export class InfiniteWorld {
 
     // shared geometries per LOD
     this.geometries = this.lodSegments.map((res, lodIndex) => {
-      const geo = buildChunkGeometry(res, lodIndex);
+      const geo = buildChunkGeometry(res, lodIndex, { morph: true });
       setChunkBounds(geo, this.chunkSize, this.maxHeight, this.skirtDepth);
       return geo;
     });
@@ -96,6 +97,11 @@ export class InfiniteWorld {
     this._lodMultiplier = 1.0;
     this.lodThresholds = this._baseLodThresholds.map(m => m * this.chunkSize);
     this._lodThresholds2 = this.lodThresholds.map(t => t * t);
+    // Temporal geomorphing (smooth LOD transitions) — see LodMorph.js
+    this.morphEnabled = true;
+    this.morphDuration = 0.4;
+    this.morphingChunkCount = 0;
+    this._lastLodStepAt = null;
 
     // chunk map: "cx,cz" -> { cx, cz, centerX, centerZ, lod, visible }
     this.chunks = new Map();
@@ -214,6 +220,10 @@ export class InfiniteWorld {
     this._lodThresholds2 = this.lodThresholds.map(t => t * t);
   }
 
+  setMorphEnabled(enabled) {
+    this.morphEnabled = !!enabled;
+  }
+
   /**
    * Change max chunk creates per frame. 0 selects the automatic time-budgeted
    * scheduler; it no longer means unbounded work in one frame.
@@ -258,7 +268,7 @@ export class InfiniteWorld {
     const res = this._targetSegments[lod];
     if (res === this.lodSegments[lod]) return;   // this level is unchanged
 
-    const geo = buildChunkGeometry(res, lod);
+    const geo = buildChunkGeometry(res, lod, { morph: true });
     setChunkBounds(geo, this.chunkSize, this.maxHeight, this.skirtDepth);
     const old = this.geometries[lod];
     this.geometries[lod] = geo;
@@ -340,8 +350,14 @@ export class InfiniteWorld {
     this._processLodRebuild();
 
     // Select logical LODs, then cull and compact only visible records into the
-    // four persistent GPU batches.
+    // four persistent GPU batches. Morph bands follow the (budget-scaled)
+    // thresholds every frame.
     this._updateLOD(playerPos);
+    // Instanced chunks morph temporally (per-instance factor); the distance
+    // bands are a Tile-board feature, so only the grid ladder is published.
+    publishMorphUniforms(this.terrainMaterial?.uniforms, null, this.lodSegments, false);
+    const segs = this.terrainMaterial?.uniforms?.uLodGridSegments;
+    if (segs) segs.value.set(this.lodSegments[0], this.lodSegments[1], this.lodSegments[2], this.lodSegments[3]);
     if (camera) this._cull(camera);
     if (this._batchesDirty) {
       const batchCounts = this.batches.commit(this.chunks.values(), this.chunkSize);
@@ -432,6 +448,8 @@ export class InfiniteWorld {
         centerX: cx * this.chunkSize + this.chunkSize / 2,
         centerZ: cz * this.chunkSize + this.chunkSize / 2,
         lod: 3,
+        morph: 0,
+        fresh: true,
         visible: true,
       });
       return true;
@@ -451,6 +469,11 @@ export class InfiniteWorld {
   _updateLOD(playerPos) {
     const [t0, t1, t2] = this._lodThresholds2;
     const counts = [0, 0, 0, 0];
+    const now = performance.now();
+    const dt = this._lastLodStepAt == null ? 0 : Math.min(0.1, Math.max(0, (now - this._lastLodStepAt) / 1000));
+    this._lastLodStepAt = now;
+    const step = dt / Math.max(0.05, this.morphDuration);
+    let morphing = 0;
 
     for (const chunk of this.chunks.values()) {
       const dx = chunk.centerX - playerPos.x;
@@ -458,12 +481,13 @@ export class InfiniteWorld {
       const dz = chunk.centerZ - playerPos.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       const lod = d2 < t0 ? 0 : d2 < t1 ? 1 : d2 < t2 ? 2 : 3;
-      if (lod !== chunk.lod) {
-        chunk.lod = lod;
+      if (stepTemporalLod(chunk, lod, step, this.lodSegments, this.morphEnabled)) {
         this._batchesDirty = true;
       }
-      counts[lod]++;
+      if (chunk.lod !== lod || chunk.morph > 0) morphing++;
+      counts[chunk.lod]++;
     }
+    this.morphingChunkCount = morphing;
 
     this.lodCounts = counts;
     this.activeChunkCount = this.chunks.size;

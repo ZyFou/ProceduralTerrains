@@ -90,9 +90,30 @@ uniform float uImportHeightOffset;
 uniform float uImportBiomeBlend;
 uniform float uImportImageryBlend;
 
+// Zero-valued loop-unroll guard (documented with the FBM helpers below).
+#ifndef TERRAIN_LOOP_GUARD
+#define TERRAIN_LOOP_GUARD
+uniform int uLoopGuard;
+#endif
+
 // Studio height bake region (world XZ). Single cell: origin=(-half,-half), span=boardSize.
 uniform vec2 uBakeOrigin;
 uniform vec2 uBakeSpan;
+// Live/baked hybrid. The bake stores the exact field at texel centres; once a
+// screen pixel spans a third of a texel or more, a bilinear fetch (height +
+// packed normal + curvature) is visually indistinguishable from evaluating
+// the procedural field, so the full noise stack is only evaluated for extreme
+// close-ups. uPixelWorldPerDist = world units per pixel per
+// unit of view distance; uBakeBlend = footprint/texel ratio range live→baked.
+uniform float uBakeTexelWorld;
+uniform float uPixelWorldPerDist;
+uniform vec2 uBakeBlend;
+
+float terrainBakeBlendWeight(float viewDistance) {
+  float ratio = viewDistance * uPixelWorldPerDist / max(uBakeTexelWorld, 1e-4);
+  return smoothstep(uBakeBlend.x, uBakeBlend.y, ratio);
+}
+
 
 // Erosion height-offset field (studio / tile mode). The terrain height is fully
 // analytic — there is no stored heightmap to carve — so erosion is expressed as
@@ -116,7 +137,7 @@ vec2 tileUvAt(vec2 xz) { return xz / (2.0 * uBoardHalf) + vec2(0.5); }
 uniform vec4 uImportHeightRegion;
 vec2 importHeightUvAt(vec2 xz) { return (xz - uImportHeightRegion.xy) / uImportHeightRegion.zw; }
 float importedMapValue(sampler2D tex, vec2 uv) {
-  vec3 c = texture2D(tex, clamp(uv, 0.0, 1.0)).rgb;
+  vec3 c = textureLod(tex, clamp(uv, 0.0, 1.0), 0.0).rgb;
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
@@ -172,7 +193,7 @@ float tileOccAt(vec2 cell) {
   if (cell.x < 0.0 || cell.y < 0.0 ||
       cell.x > uTileGridDim.x - 0.5 || cell.y > uTileGridDim.y - 0.5) return 0.0;
   vec2 uv = (cell + 0.5) / uTileGridDim;
-  return step(0.5, texture2D(uTileOccupancy, uv).r);
+  return step(0.5, textureLod(uTileOccupancy, uv, 0.0).r);
 }
 
 // Per-cell, occupancy-aware island falloff. Each side fades toward its edge
@@ -253,13 +274,144 @@ float assemblyFalloff(vec2 xz) {
 // terrain includes the same declarations so both modes share one GPU program;
 // uInfiniteMode keeps the unbounded world on the procedural path at runtime.
 // Studio bake covers uBakeOrigin … uBakeOrigin+uBakeSpan in world XZ.
+// Camera-centred fine level of the Tile bake (NearHeightCache): identical
+// packing at half the texel size over a window ahead of the camera, same
+// footprint criterion as the board bake, faded out over the last 16 texels of
+// the window so its border never shows. It costs a sampler unit, so a program
+// only includes it while it stays within the 16 units ANGLE/D3D11 exposes
+// (fitNearBake); otherwise the board bake / live path compiles unchanged.
+const NEAR_BAKE_GLSL = /* glsl */ `
+uniform sampler2D uNearBakeTex;
+uniform vec2 uNearBakeOrigin;
+uniform vec2 uNearBakeSpan;
+uniform float uNearBakeTexelWorld;
+uniform float uUseNearBake;
+
+vec2 nearBakedUvAt(vec2 xz) {
+  return (xz - uNearBakeOrigin) / max(uNearBakeSpan, vec2(1.0));
+}
+
+float terrainNearBakeBlendWeight(vec2 xz, float viewDistance) {
+  if (uUseNearBake < 0.5) return 0.0;
+  vec2 uv = nearBakedUvAt(xz);
+  vec2 border = min(uv, 1.0 - uv) * uNearBakeSpan;
+  float inside = clamp(min(border.x, border.y) / max(uNearBakeTexelWorld * 16.0, 1e-4), 0.0, 1.0);
+  float ratio = viewDistance * uPixelWorldPerDist / max(uNearBakeTexelWorld, 1e-4);
+  return inside * smoothstep(uBakeBlend.x, uBakeBlend.y, ratio);
+}
+`;
+export const NEAR_BAKE_BLOCK = `#define TERRAIN_NEAR_BAKE 1\n${NEAR_BAKE_GLSL}`;
+
+// Tile terrain climate from the half-float climate bake (temperature,
+// moisture, continentalness, erosion; wavelengths of hundreds of world units,
+// exact at texel centres) with the medium-scale region jitter kept live.
+// Saves four of the five fbm3 fields per pixel. Optional like the near level.
+const STUDIO_CLIMATE_CACHE_GLSL = /* glsl */ `
+uniform sampler2D uTerrainBiomeTex;
+uniform float uUseTerrainBiomeTex;
+
+Climate terrainStudioClimateAt(vec2 xz) {
+  vec2 p = xz * uFrequency + uSeedOffset;
+  if (uUseTerrainBiomeTex > 0.5) {
+    vec4 baked = textureLod(uTerrainBiomeTex, bakedUvAt(xz), 0.0);
+    return Climate(baked.r, baked.g, baked.b, baked.a, fbm3(p * 0.700 + vec2(631.4, 199.2)));
+  }
+  return climateAt(p);
+}
+`;
+export const CLIMATE_CACHE_BLOCK = `#define TERRAIN_CLIMATE_CACHE 1\n${STUDIO_CLIMATE_CACHE_GLSL}`;
+
+// Infinite World climate: temperature, moisture and continentalness come from
+// the half-float field cache (baked with the height by the same climateAt,
+// exact at texel centres); erosion and the region jitter stay live. Outside
+// the cached levels the exact function runs. No extra sampler: the fragment
+// samples the cache once and shares it with the height.
+export const INFINITE_CLIMATE_GLSL = /* glsl */ `
+Climate terrainInfiniteClimateAt(vec2 xz, vec4 field, float available) {
+  vec2 p = xz * uFrequency + uSeedOffset;
+  if (available > 0.5) {
+    vec2 b = p * uBiomeScale;
+    return Climate(field.g, field.b, field.a,
+      fbm3(b * 0.190 + vec2(157.1, 423.7)),
+      fbm3(p * 0.700 + vec2(631.4, 199.2)));
+  }
+  return climateAt(p);
+}
+`;
+export const MAX_FRAGMENT_SAMPLERS = 16;
+
+const SAMPLER_DECL = /uniform\s+(?:(?:highp|mediump|lowp)\s+)?sampler\w+\s+(\w+)\s*;/g;
+
+const FUNCTION_HEAD = /\b(?:void|float|int|uint|bool|[biu]?vec[234]|mat[234]|[A-Z]\w*)\s+(\w+)\s*\([^;{)]*\)\s*\{/g;
+const IDENTIFIER = /\b[A-Za-z_]\w*\b/g;
+
+/**
+ * Upper bound of the samplers a program can make active: sampler names
+ * referenced from main() or any function reachable from it. The compilers
+ * drop unreachable helpers (shared GLSL chunks carry many), so a plain
+ * textual count over-estimated by several units. Both sides of #if blocks
+ * are treated as reachable, so this never under-estimates the linker.
+ */
+export function countReferencedSamplers(source) {
+  const text = String(source).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const samplers = new Set([...text.matchAll(SAMPLER_DECL)].map((m) => m[1]));
+  const bodies = new Map();   // function name -> concatenated bodies (overloads)
+  for (const head of text.matchAll(FUNCTION_HEAD)) {
+    let depth = 0;
+    let end = head.index + head[0].length - 1;
+    for (; end < text.length; end++) {
+      if (text[end] === '{') depth++;
+      else if (text[end] === '}' && --depth === 0) break;
+    }
+    const body = text.slice(head.index + head[0].length, end);
+    bodies.set(head[1], (bodies.get(head[1]) || '') + '\n' + body);
+  }
+  if (!bodies.has('main')) return samplers.size;
+  const reached = new Set(['main']);
+  const queue = ['main'];
+  const used = new Set();
+  while (queue.length) {
+    const body = bodies.get(queue.pop()) || '';
+    for (const [id] of body.matchAll(IDENTIFIER)) {
+      if (samplers.has(id)) used.add(id);
+      else if (bodies.has(id) && !reached.has(id)) { reached.add(id); queue.push(id); }
+    }
+  }
+  return used.size;
+}
+
+/**
+ * Drop optional cache blocks, cheapest win first (cached climate, then the
+ * near bake level), until the program fits the sampler budget. A dropped
+ * block falls back to the exact live path through its #ifdef.
+ */
+export function fitSamplerBudget(source, maxSamplers = MAX_FRAGMENT_SAMPLERS) {
+  let out = source;
+  for (const block of [CLIMATE_CACHE_BLOCK, NEAR_BAKE_BLOCK]) {
+    if (countReferencedSamplers(out) <= maxSamplers) break;
+    if (out.includes(block)) out = out.replace(block, '');
+  }
+  return out;
+}
+export const fitNearBake = fitSamplerBudget;
+
 export const TERRAIN_HEIGHT_TEX_GLSL = /* glsl */ `
 uniform sampler2D uTerrainHeightTex;
 uniform float uUseTerrainHeightTex;   // 1 = sample the baked texture, 0 = live field
 vec2 bakedUvAt(vec2 xz) { return (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0)); }
 float bakedHeightAt(vec2 xz) {
-  return texture2D(uTerrainHeightTex, bakedUvAt(xz)).a * uHeightScale;
+  return textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0).a * uHeightScale;
 }
+// Packed bake texel: R,G = geometric normal x,z (y is positive and implied),
+// B = curvature ((hX + hZ) / 2 - hC) / eps, A = height / heightScale.
+vec3 bakedNormalFromTexel(vec4 texel) {
+  return vec3(texel.r, sqrt(max(1.0 - texel.r * texel.r - texel.g * texel.g, 0.0)), texel.g);
+}
+float terrainBakeWeight(float viewDistance) {
+  if (uInfiniteMode > 0.5 || uUseTerrainHeightTex < 0.5) return 0.0;
+  return terrainBakeBlendWeight(viewDistance);
+}
+
 `;
 
 // Camera-centred Infinite World field cache. Three nested levels cover the
@@ -293,15 +445,15 @@ vec4 infiniteFieldSampleAt(vec2 xz, out float available) {
     if (uInfiniteFieldReady.x > 0.5
         && infiniteFieldUv(xz, uInfiniteFieldOrigin0, uInfiniteFieldSpan0, uv)) {
       available = 1.0;
-      field = texture2D(uInfiniteFieldTex0, uv);
+      field = textureLod(uInfiniteFieldTex0, uv, 0.0);
     } else if (uInfiniteFieldReady.y > 0.5
         && infiniteFieldUv(xz, uInfiniteFieldOrigin1, uInfiniteFieldSpan1, uv)) {
       available = 1.0;
-      field = texture2D(uInfiniteFieldTex1, uv);
+      field = textureLod(uInfiniteFieldTex1, uv, 0.0);
     } else if (uInfiniteFieldReady.z > 0.5
         && infiniteFieldUv(xz, uInfiniteFieldOrigin2, uInfiniteFieldSpan2, uv)) {
       available = 1.0;
-      field = texture2D(uInfiniteFieldTex2, uv);
+      field = textureLod(uInfiniteFieldTex2, uv, 0.0);
     }
   }
   return field;
@@ -310,7 +462,10 @@ vec4 infiniteFieldSampleAt(vec2 xz, out float available) {
 float terrainCachedHeightAt(vec2 xz) {
   float available = 0.0;
   vec4 field = infiniteFieldSampleAt(xz, available);
-  return available > 0.5 ? field.r * uHeightScale : heightAt(xz);
+  // Statement branch (not ?:) so the procedural fallback is skipped wherever
+  // the cache covers the fragment instead of being evaluated and discarded.
+  if (available > 0.5) return field.r * uHeightScale;
+  return heightAt(xz);
 }
 `;
 
@@ -330,7 +485,7 @@ Climate terrainCachedClimateAt(vec2 xz) {
   float region = 0.0;
   float cached = 0.0;
   if (uInfiniteMode < 0.5 && uUseTerrainBiomeTex > 0.5) {
-    vec4 baked = texture2D(uTerrainBiomeTex, bakedUvAt(xz));
+    vec4 baked = textureLod(uTerrainBiomeTex, bakedUvAt(xz), 0.0);
     temp = baked.r;
     moist = baked.g;
     cont = baked.b;
@@ -380,14 +535,14 @@ vec4 manualSurfaceWeightsAAt(vec2 xz) {
   #ifdef SURFACE_PAINT_LAYERS
   return vec4(0.0);
   #else
-  return texture2D(uPaintBiomeTexture, uv);
+  return textureLod(uPaintBiomeTexture, uv, 0.0);
   #endif
 }
 
 vec4 manualSurfaceWeightsBAt(vec2 xz) {
   vec2 uv = manualSurfaceUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uPaintPropsTexture, uv);
+  return textureLod(uPaintPropsTexture, uv, 0.0);
 }
 `;
 
@@ -405,7 +560,7 @@ vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) {
   if (uInfiniteMode < 0.5 && uImportImageryMode > 1.5) {
     vec2 imageryUv = importHeightUvAt(xz);
     if (imageryUv.x >= 0.0 && imageryUv.x <= 1.0 && imageryUv.y >= 0.0 && imageryUv.y <= 1.0) {
-      vec3 imageryColor = texture2D(uImportImageryTex, clamp(imageryUv, 0.0, 1.0)).rgb;
+      vec3 imageryColor = textureLod(uImportImageryTex, clamp(imageryUv, 0.0, 1.0), 0.0).rgb;
       result = imageryColor;
       if (uImportImageryMode > 2.5) {
         result = mix(baseAlbedo, imageryColor, uImportImageryBlend);
@@ -413,6 +568,25 @@ vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) {
     }
   }
   return result;
+}
+`;
+
+// Water/terrain coincidence tolerance. Every water shader decides wet/dry per
+// pixel from the exact height field, but is depth-tested against the terrain
+// mesh, a coarser geomorphing approximation of that field. In shallow flats
+// the mesh pokes slightly above the water, so patches flicker dry as LODs
+// change (and z-fight where both are almost coplanar). The water's rasterized
+// depth is pulled toward the camera by uWaterDepthPull x the eye distance:
+// its screen position and shading are unchanged, and it now wins against
+// terrain within a vertical band of uWaterDepthPull x (camera height above
+// the water). Engine._syncWaterDepthPull sizes that band per render.
+export const WATER_DEPTH_PULL_GLSL = /* glsl */ `
+uniform float uWaterDepthPull;
+vec4 waterClipPosition(vec4 worldPosition) {
+  vec4 viewPosition = viewMatrix * worldPosition;
+  // Perspective only: scaling an orthographic view position would move it on screen.
+  if (projectionMatrix[2][3] != 0.0) viewPosition.xyz *= 1.0 - uWaterDepthPull;
+  return projectionMatrix * viewPosition;
 }
 `;
 
@@ -470,16 +644,26 @@ float vnoise(vec2 p) {
 
 const mat2 ROT2 = mat2(0.80, -0.60, 0.60, 0.80);
 
-// NOTE: all loop bounds are compile-time constants (OCTAVES is a #define
-// injected by the material). Dynamic trip counts / breaks make ANGLE's
-// D3D11 shader compiler hang while trying to unroll, so avoid them here.
+// NOTE: OCTAVES is a #define injected by the material. Loop bounds add the
+// zero-valued uLoopGuard (see below) so they are not unrolled; never add a
+// break or an implicit-derivative texture lookup inside these loops.
+// Loop-unroll guard. GL initializes every uniform to 0 and nothing ever sets
+// this one, so trip counts are unchanged; but because the bounds are no longer
+// compile-time constants, ANGLE/FXC keeps real loops instead of unrolling every
+// octave of every FBM call site. That shrinks the D3D programs (much faster cold
+// compiles) and also runs faster. Safe because no loop body samples a texture
+// with implicit derivatives (gradient ops in dynamic loops break FXC).
+#ifndef TERRAIN_LOOP_GUARD
+#define TERRAIN_LOOP_GUARD
+uniform int uLoopGuard;
+#endif
 
 // --- standard FBM at full octave count (rolling hills / plains) --------------
 float fbm(vec2 p) {
   float amp = 0.5;
   float sum = 0.0;
   float norm = 0.0;
-  for (int i = 0; i < OCTAVES; i++) {
+  for (int i = 0; i < OCTAVES + uLoopGuard; i++) {
     sum += amp * vnoise(p);
     norm += amp;
     amp *= uPersistence;
@@ -493,7 +677,7 @@ float fbm4(vec2 p) {
   float amp = 0.5;
   float sum = 0.0;
   float norm = 0.0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4 + uLoopGuard; i++) {
     sum += amp * vnoise(p);
     norm += amp;
     amp *= uPersistence;
@@ -508,7 +692,7 @@ float ridgedFBM(vec2 p) {
   float sum = 0.0;
   float norm = 0.0;
   float carry = 1.0;
-  for (int i = 0; i < OCTAVES; i++) {
+  for (int i = 0; i < OCTAVES + uLoopGuard; i++) {
     float v = 1.0 - abs(vnoise(p) * 2.0 - 1.0);
     v = v * v;
     sum += amp * v * carry;     // spectral weighting: detail follows ridges
@@ -683,7 +867,7 @@ float paintHeightOffsetAt(vec2 xz) {
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
   // R already carries the signed world-unit delta (HalfFloat texture) — no
   // fixed-range decode needed, matching erosionOffsetAt's convention.
-  return texture2D(uPaintHeightTexture, uv).r * uPaintOpacity;
+  return textureLod(uPaintHeightTexture, uv, 0.0).r * uPaintOpacity;
 }
 
 vec4 paintBiomeAt(vec2 xz) {
@@ -693,7 +877,7 @@ vec4 paintBiomeAt(vec2 xz) {
   #ifdef SURFACE_PAINT_LAYERS
   return vec4(0.0);
   #else
-  return texture2D(uPaintBiomeTexture, uv) * uPaintOpacity;
+  return textureLod(uPaintBiomeTexture, uv, 0.0) * uPaintOpacity;
   #endif
 }
 
@@ -708,7 +892,7 @@ float manualHeightOffsetAt(vec2 xz) {
   if (uManualEnabled < 0.5) return 0.0;
   vec2 uv = (xz - uManualOrigin) / max(uManualSpan, vec2(1.0));
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  return texture2D(uManualHeightTexture, uv).r;
+  return textureLod(uManualHeightTexture, uv, 0.0).r;
 #endif
 }
 
@@ -717,13 +901,13 @@ float splineHeightOffsetAt(vec2 xz) {
   if (uSplineEnabled < .5) return 0.0;
   vec2 uv = splineUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  return texture2D(uSplineHeightTexture, uv).r;
+  return textureLod(uSplineHeightTexture, uv, 0.0).r;
 }
 vec4 splineMaskAt(vec2 xz) {
   if (uSplineEnabled < .5) return vec4(0.0);
   vec2 uv = splineUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
-  return texture2D(uSplineMaskTexture, uv);
+  return textureLod(uSplineMaskTexture, uv, 0.0);
 }
 
 // Erosion height offset: signed world-unit delta added on top of the analytic
@@ -734,7 +918,7 @@ float erosionOffsetAt(vec2 xz) {
   if (uErosionEnabled < 0.5) return 0.0;
   vec2 uv = (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0));
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  return texture2D(uErosionOffsetTex, uv).r;
+  return textureLod(uErosionOffsetTex, uv, 0.0).r;
 }
 
 vec2 destructionUvAt(vec2 xz) {
@@ -744,7 +928,7 @@ vec2 destructionSampleAt(vec2 xz) {
   if (uDestructionEnabled < 0.5) return vec2(0.0);
   vec2 uv = destructionUvAt(xz);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec2(0.0);
-  return texture2D(uDestructionTexture, uv).rg;
+  return textureLod(uDestructionTexture, uv, 0.0).rg;
 }
 float destructionOffsetAt(vec2 xz) { return destructionSampleAt(xz).r; }
 float destructionScorchAt(vec2 xz) { return destructionSampleAt(xz).g; }

@@ -59,4 +59,44 @@ describe('mode performance structures', () => {
     world.dispose();
     expect(scene.children).not.toContain(world.group);
   });
+
+  it('draws folded planet patches as instanced batches sharing one material', () => {
+    const scene = new THREE.Scene();
+    const makeMaterial = () => new THREE.ShaderMaterial({
+      uniforms: {
+        uFaceOrigin: { value: new THREE.Vector3() },
+        uFaceU: { value: new THREE.Vector3() },
+        uFaceV: { value: new THREE.Vector3() },
+        uMergeDebug: { value: 0 },
+      },
+    });
+    const world = new PlanetWorld(scene, makeMaterial, {
+      radius: 16000, maxHeight: 1000, skirtDepth: 30, faceGrid: 8, lodSegments: [16, 8, 4, 2],
+    });
+    const camera = new THREE.PerspectiveCamera(50, 1, 10, 1e6);
+    camera.position.set(0, 0, 80000);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    world.update(camera.position, camera);
+
+    const patchMeshes = world.group.children.filter((o) => o.name.startsWith('planet-patch-'));
+    expect(world.mergedGroupCount).toBeGreaterThan(0);
+    expect(patchMeshes.length).toBeGreaterThan(0);
+    expect(patchMeshes.every((m) => m.isInstancedMesh && m.material === patchMeshes[0].material)).toBe(true);
+    // 4 chunk-batch materials + one shared patch material, however many patches fold
+    expect(world.materials).toHaveLength(5);
+    // chunks under a folded patch leave the chunk batches (no hidden double draw)
+    const drawnChunks = world.batches.reduce((sum, batch) => sum + batch.mesh.count, 0);
+    expect(drawnChunks).toBe(world.chunks.filter((c) => !c.merged && c.visible).length);
+    expect(drawnChunks).toBeLessThan(world.chunks.length);
+    const drawnPatches = patchMeshes.reduce((sum, m) => sum + m.count, 0);
+    expect(drawnPatches).toBe(world._mergedPatches.filter((p) => p.visible).length);
+
+    // a steady camera re-uploads nothing
+    const attr = patchMeshes.find((m) => m.count > 0).geometry.getAttribute('aFaceOrigin');
+    const version = attr.version;
+    world.update(camera.position, camera);
+    expect(attr.version).toBe(version);
+    world.dispose();
+  });
 });

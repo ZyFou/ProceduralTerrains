@@ -19,8 +19,21 @@ export class InfiniteTerrainBatches {
     this._createMeshes();
   }
 
+  // Per-instance temporal geomorph factor (see LodMorph.stepTemporalLod).
+  // The LOD geometries are owned by this batch set, so the instanced
+  // attribute lives directly on them.
+  _attachMorphAttribute(geometry) {
+    const current = geometry.getAttribute('aMorphK');
+    if (current && current.count >= this.capacity) return current;
+    const attribute = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1);
+    attribute.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('aMorphK', attribute);
+    return attribute;
+  }
+
   _createMeshes() {
     this.meshes = this.geometries.map((geometry, lod) => {
+      this._attachMorphAttribute(geometry);
       const mesh = new THREE.InstancedMesh(geometry, this.material, this.capacity);
       mesh.name = `infinite-terrain-lod-${lod}`;
       mesh.count = 0;
@@ -42,6 +55,7 @@ export class InfiniteTerrainBatches {
   }
 
   updateGeometry(lod, geometry) {
+    this._attachMorphAttribute(geometry);
     this.geometries[lod] = geometry;
     this.meshes[lod].geometry = geometry;
   }
@@ -62,6 +76,8 @@ export class InfiniteTerrainBatches {
       this._matrix.makeScale(chunkSize, chunkSize, chunkSize);
       this._matrix.setPosition(chunk.cx * chunkSize, 0, chunk.cz * chunkSize);
       this.meshes[lod].setMatrixAt(slot, this._matrix);
+      const morph = this.meshes[lod].geometry.getAttribute('aMorphK');
+      if (morph) morph.array[slot] = chunk.morph || 0;
     }
 
     for (let lod = 0; lod < LOD_COUNT; lod++) {
@@ -69,6 +85,8 @@ export class InfiniteTerrainBatches {
       mesh.count = counts[lod];
       if (counts[lod] > 0 || this.counts[lod] > 0) {
         mesh.instanceMatrix.needsUpdate = true;
+        const morph = mesh.geometry.getAttribute('aMorphK');
+        if (morph) morph.needsUpdate = true;
       }
     }
     this.counts = counts;

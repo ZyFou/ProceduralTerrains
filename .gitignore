@@ -24,13 +24,12 @@ out/
 .parcel-cache/
 .vite/
 
-# README documentation screenshots are intentionally versioned
-!output/
+# Generated QA, screenshot and perf-harness output stays local. The README
+# hero screenshot is the only versioned file under output/.
+output/*
 !output/playwright/
-!output/playwright/*.png
-!output/playwright/*.jpg
-!output/playwright/*.jpeg
-!output/playwright/*.webp
+output/playwright/*
+!output/playwright/landing-source-desktop.png
 !docs/images/
 !docs/images/*.png
 

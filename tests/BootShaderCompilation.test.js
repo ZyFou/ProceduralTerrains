@@ -236,3 +236,23 @@ describe('boot shader compilation', () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('warm-compile probe geometry', () => {
+  it('warms terrain chunk materials on a normal-less probe (matching the chunk grids)', async () => {
+    const THREE = await import('three');
+    const { createTerrainMaterial } = await import('../src/engine/terrain/TerrainMaterial.js');
+    const { buildChunkGeometry } = await import('../src/engine/terrain/ChunkGeometry.js');
+    const engine = engineHarness();
+    engine._warmGeo = new THREE.PlaneGeometry(1, 1);
+    engine._warmGeoNoNormal = new THREE.PlaneGeometry(1, 1);
+    engine._warmGeoNoNormal.deleteAttribute('normal');
+
+    const terrain = createTerrainMaterial({}, 4);
+    const chunk = buildChunkGeometry(8, 0, { morph: true });
+    const probe = engine._warmGeometryFor(terrain);
+    // three.js keys programs on HAS_NORMAL: probe and live chunks must agree.
+    expect(!!probe.attributes.normal).toBe(!!chunk.attributes.normal);
+    expect(engine._warmGeometryFor(new THREE.MeshStandardMaterial())).toBe(engine._warmGeo);
+    expect(engine._warmGeometryFor(new THREE.ShaderMaterial())).toBe(engine._warmGeo);
+  });
+});

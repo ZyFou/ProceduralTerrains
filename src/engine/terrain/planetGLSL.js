@@ -66,9 +66,20 @@ const mat3 ROT3 = mat3(
   -0.60, -0.48,  0.64
 );
 
+// Loop-unroll guard. GL initializes every uniform to 0 and nothing ever sets
+// this one, so trip counts are unchanged; but because the bounds are no longer
+// compile-time constants, ANGLE/FXC keeps real loops instead of unrolling every
+// octave of every FBM call site. That shrinks the D3D programs (much faster cold
+// compiles) and also runs faster. Safe because no loop body samples a texture
+// with implicit derivatives (gradient ops in dynamic loops break FXC).
+#ifndef TERRAIN_LOOP_GUARD
+#define TERRAIN_LOOP_GUARD
+uniform int uLoopGuard;
+#endif
+
 float fbm3D(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0;
-  for (int i = 0; i < OCTAVES; i++) {
+  for (int i = 0; i < OCTAVES + uLoopGuard; i++) {
     sum += amp * vnoise3(p);
     norm += amp;
     amp *= uPersistence;
@@ -79,7 +90,7 @@ float fbm3D(vec3 p) {
 
 float fbm3D4(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4 + uLoopGuard; i++) {
     sum += amp * vnoise3(p);
     norm += amp;
     amp *= uPersistence;
@@ -91,17 +102,18 @@ float fbm3D4(vec3 p) {
 // 3-octave climate FBM (hardcoded gain/lacunarity — stable while terrain
 // params change), the 3D twin of biomeGLSL's fbm3.
 float fbm3Dc(vec3 p) {
-  float v = vnoise3(p) * 0.55;
-  p = ROT3 * p * 2.13;
-  v += vnoise3(p) * 0.30;
-  p = ROT3 * p * 2.13;
-  v += vnoise3(p) * 0.15;
+  // guarded loop: identical sums, one inlined noise per call site
+  float v = 0.0;
+  for (int i = 0; i < 3 + uLoopGuard; i++) {
+    v += vnoise3(p) * (i == 0 ? 0.55 : i == 1 ? 0.30 : 0.15);
+    p = ROT3 * p * 2.13;
+  }
   return v;
 }
 
 float ridgedFBM3D(vec3 p) {
   float amp = 0.5, sum = 0.0, norm = 0.0, carry = 1.0;
-  for (int i = 0; i < OCTAVES; i++) {
+  for (int i = 0; i < OCTAVES + uLoopGuard; i++) {
     float v = 1.0 - abs(vnoise3(p) * 2.0 - 1.0);
     v = v * v;
     sum += amp * v * carry;
@@ -118,24 +130,16 @@ float ridgedFBM3D(vec3 p) {
 // terrainGLSL.buildHeightGLSL — the codegen injects stackHeight3D and the
 // default stack is a single `legacy` layer (legacyShape3D) so planets render
 // bit-identically to before by default.
-export function buildPlanetHeightGLSL(stackBody3D) {
-  return /* glsl */ `
-${NOISE_STACK_PRIMS3D_GLSL}
-${NOISE_STACK_MASKS3D_GLSL}
-
+// Noise-domain point for a unit direction and the planet climate. Shared by
+// the height block below and the climate cube bake (PlanetHeightBaker), which
+// do not depend on the noise stack.
+export const PLANET_CLIMATE_GLSL = /* glsl */ `
 // Noise-domain point for a unit direction. Scaling by (radius * frequency)
 // makes surface features the same world-size as in the flat board modes:
 // moving along the surface by world distance d shifts the domain by ~d*freq.
 vec3 planetDomain(vec3 dir) {
   vec3 seed = vec3(uSeedOffset.x, uSeedOffset.y, uSeedOffset.y - uSeedOffset.x);
   return dir * (uPlanetRadius * uFrequency) + seed;
-}
-
-// C1-smooth terrace steps (twin of HEIGHT_GLSL's terrace).
-float planetTerrace(float h, float steps) {
-  float t = h * steps;
-  float s = smoothstep(0.20, 0.80, fract(t));
-  return (floor(t) + s) / steps;
 }
 
 // Climate on the sphere. Temperature blends 3D noise with LATITUDE
@@ -152,6 +156,37 @@ Climate planetClimateAt(vec3 dir) {
   c.erosion = fbm3Dc(b * 0.190 + vec3(157.1, 423.7, 91.6));
   c.region  = fbm3Dc(p * 0.700 + vec3(631.4, 199.2, 77.1));
   return c;
+}
+`;
+
+// Visible planet shading reads the four slow climate fields (wavelengths of
+// hundreds of world units) from the half-float climate cube baked with the
+// height, exact at texel centres, and keeps the region jitter live.
+export const PLANET_CLIMATE_CACHE_GLSL = /* glsl */ `
+uniform samplerCube uPlanetClimateTex;
+uniform float uUsePlanetClimateTex;
+
+Climate planetCachedClimateAt(vec3 dir) {
+  if (uUsePlanetClimateTex > 0.5) {
+    vec4 c = textureLod(uPlanetClimateTex, dir, 0.0);   // temp, moist, cont, erosion
+    return Climate(c.r, c.g, c.b, c.a,
+      fbm3Dc(planetDomain(dir) * 0.700 + vec3(631.4, 199.2, 77.1)));
+  }
+  return planetClimateAt(dir);
+}
+`;
+
+export function buildPlanetHeightGLSL(stackBody3D) {
+  return /* glsl */ `
+${NOISE_STACK_PRIMS3D_GLSL}
+${NOISE_STACK_MASKS3D_GLSL}
+${PLANET_CLIMATE_GLSL}
+
+// C1-smooth terrace steps (twin of HEIGHT_GLSL's terrace).
+float planetTerrace(float h, float steps) {
+  float t = h * steps;
+  float s = smoothstep(0.20, 0.80, fract(t));
+  return (floor(t) + s) / steps;
 }
 
 // The original biome-coupled recipe (layers 1-6) for a unit direction, h in

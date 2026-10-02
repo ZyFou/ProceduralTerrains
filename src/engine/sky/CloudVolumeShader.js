@@ -108,7 +108,7 @@ vec2 octEncode(vec3 n) {
 }
 
 float occAt(vec3 P) {
-  return texture2D(uCloudOccupancy, octEncode(normalize(P))).r;
+  return textureLod(uCloudOccupancy, octEncode(normalize(P)), 0.0).r;
 }
 
 void main() {
@@ -179,7 +179,7 @@ void main() {
   // keeping stepLen/baseT (the global lattice) unchanged. Add a small overlap
   // margin (chunkEps) to ensure no seams between adjacent chunks due to float precision.
   float chunkEps = 0.05 * stepLen;
-  for (int k = 0; k < 4; k++) {
+  for (int k = 0; k < 4 + uLoopGuard; k++) {
     vec3 N = uCellNormals[k];
     float nro = dot(N, ro);
     float nrd = dot(N, rd);
@@ -202,7 +202,7 @@ void main() {
   // sample positions. Kept for the opt-in chunked path.
   float n0 = max(0.0, ceil((tStart - baseT) / stepLen));
   float t = baseT + n0 * stepLen;
-  for (int i = 0; i < CLOUD_STEPS; i++) {
+  for (int i = 0; i < CLOUD_STEPS + uLoopGuard; i++) {
     if (t < tEnd && transmittance > 0.01) {
       vec3 P = ro + rd * t;
       vec2 sampleData = cloudSample(P);
@@ -225,7 +225,7 @@ void main() {
   // complete ray from a few probes or skip an extra interval: on long oblique
   // rays either shortcut can jump over a thin occupied cell and punch a hard
   // hole into the cloud layer.
-  for (int i = 0; i < CLOUD_STEPS; i++) {
+  for (int i = 0; i < CLOUD_STEPS + uLoopGuard; i++) {
     float sampleIndex = float(i);
     if (sampleIndex < float(effSteps) && transmittance > 0.01) {
       float a = (sampleIndex + dither) / float(effSteps);
