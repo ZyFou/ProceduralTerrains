@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from '../terrain/terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_DEPTH_PULL_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from '../terrain/terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import {
   PROCEDURAL_SKY_UNIFORMS_GLSL,
@@ -45,6 +45,7 @@ uniform vec2 uWaveDir;
 uniform float uAnimSpeed;
 uniform vec2 uGeometryFocus;
 uniform float uGeometryDisplacementEnabled;
+${WATER_DEPTH_PULL_GLSL}
 
 varying vec3 vWorldPos;
 
@@ -91,7 +92,7 @@ void main() {
     wp.xyz += displacement * distanceFade;
   }
   vWorldPos = wp.xyz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = waterClipPosition(wp);
 }
 `;
 

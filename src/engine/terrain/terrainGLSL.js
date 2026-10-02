@@ -571,6 +571,25 @@ vec3 applyImportedImageryAlbedo(vec3 baseAlbedo, vec2 xz) {
 }
 `;
 
+// Water/terrain coincidence tolerance. Every water shader decides wet/dry per
+// pixel from the exact height field, but is depth-tested against the terrain
+// mesh, a coarser geomorphing approximation of that field. In shallow flats
+// the mesh pokes slightly above the water, so patches flicker dry as LODs
+// change (and z-fight where both are almost coplanar). The water's rasterized
+// depth is pulled toward the camera by uWaterDepthPull x the eye distance:
+// its screen position and shading are unchanged, and it now wins against
+// terrain within a vertical band of uWaterDepthPull x (camera height above
+// the water). Engine._syncWaterDepthPull sizes that band per render.
+export const WATER_DEPTH_PULL_GLSL = /* glsl */ `
+uniform float uWaterDepthPull;
+vec4 waterClipPosition(vec4 worldPosition) {
+  vec4 viewPosition = viewMatrix * worldPosition;
+  // Perspective only: scaling an orthographic view position would move it on screen.
+  if (projectionMatrix[2][3] != 0.0) viewPosition.xyz *= 1.0 - uWaterDepthPull;
+  return projectionMatrix * viewPosition;
+}
+`;
+
 export const WATER_TILE_MASK_GLSL = /* glsl */ `
 uniform float uWallThickness;
 

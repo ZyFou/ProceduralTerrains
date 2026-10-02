@@ -4,6 +4,7 @@ import {
   COMMON_UNIFORMS_GLSL,
   MANUAL_SURFACE_WEIGHTS_GLSL,
   NOISE_GLSL,
+  WATER_DEPTH_PULL_GLSL,
 } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
 import {
@@ -475,13 +476,14 @@ export function upgradePlanetMaterialSource(mat, stackGLSL = DEFAULT_STACK_GLSL)
 // ============================================================================
 
 const WATER_VERTEX = /* glsl */ `
+${WATER_DEPTH_PULL_GLSL}
 varying vec3 vDir;
 varying vec3 vWorldPos;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
   vDir = normalize(wp.xyz);
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = waterClipPosition(wp);
 }
 `;
 

@@ -14,6 +14,14 @@ const pointerPayload = (event) => ({
   metaKey: event.metaKey,
 });
 
+// Key events are dispatched on the worker's document stand-in, so worker-side
+// shortcut handlers cannot see the focused element. Forward the bits their
+// "is the user typing in a field?" checks read.
+const keyTargetPayload = (target) => {
+  const tagName = typeof target?.tagName === 'string' ? target.tagName : '';
+  return tagName ? { tagName, isContentEditable: !!target.isContentEditable } : undefined;
+};
+
 const keyPayload = (event) => ({
   type: event.type,
   key: event.key,
@@ -23,6 +31,7 @@ const keyPayload = (event) => ({
   shiftKey: event.shiftKey,
   altKey: event.altKey,
   metaKey: event.metaKey,
+  target: keyTargetPayload(event.target),
 });
 
 const TERRAIN_SHAPE_DRAG_TYPE = 'application/x-terrain-shape';

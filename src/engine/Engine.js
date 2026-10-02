@@ -817,6 +817,7 @@ export class Engine {
     this.scene.background = new THREE.Color(0x0b0e14);
     this.scene.onBeforeRender = (renderer, _scene, camera) => {
       this._syncTerrainPixelFootprint(renderer, camera);
+      this._syncWaterDepthPull(camera);
     };
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 1, 50000);
@@ -3913,7 +3914,9 @@ export class Engine {
         }
         if (compileResult?.ready !== true) {
           compileError = new Error('Terrain shader did not become ready');
-        } else {
+        } else if (!nodePreviewMaterial) {
+          // Node edits publish the preview as soon as it links; its bake
+          // program is prepared in the background after the swap (below).
           cachePreparation = await this._prepareHeightCacheProgram(modeAtStart, oct, sg);
           if (cachePreparation?.result?.ready !== true) {
             compileError = new Error('Terrain cache shader did not become ready');
@@ -4004,6 +4007,7 @@ export class Engine {
         if (heightSourceChanged || octavesChanged) {
           this.waterSystem?.onStackRebuilt(sg, oct);
         }
+        if (nodePreviewMaterial) void this._prepareStudioHeightCacheAsync();
         if (this.heightSampler) this.heightSampler.invalidate();
         if (this.propSurfaceField) this.propSurfaceField.invalidate();
         this._applyUniforms();
@@ -7476,9 +7480,13 @@ export class Engine {
   }
 
   _usesLiveStudioHeightField() {
+    // Manual sculpting streams field edits every frame and its full fragment
+    // shades the live field per pixel. Node projects keep the lightweight
+    // preview fragment, whose only per-pixel normal source is the bake (its
+    // fallback is per-vertex), so they bake like procedural projects.
     return this._studioLiveHeightField === true
       || this._debug?.disableHeightBake === true
-      || (this.projectMode != null && this.projectMode !== 'procedural');
+      || (this.projectMode != null && this.projectMode !== 'procedural' && this.projectMode !== 'nodes');
   }
 
   // Every revision that can change the studio height field without bumping
@@ -7523,6 +7531,33 @@ export class Engine {
     const heightPx = Math.max(1, viewport.w);
     uniform.value = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5)
       / (Math.max(camera.zoom || 1, 1e-6) * heightPx);
+  }
+
+  // Water depth-test tolerance (WATER_DEPTH_PULL_GLSL). Pulling the water's
+  // depth toward the camera by a fraction c of the eye distance lets it win
+  // against terrain lying within c × (camera height above the water) of it,
+  // a band that is constant across a flat sea. It is sized to the terrain
+  // mesh's vertical error, which grows with viewing distance (coarser LODs,
+  // larger planet patches). Terrain clearly in front still occludes water,
+  // and dry land never gets water because the shader discards it.
+  _syncWaterDepthPull(camera) {
+    const uniform = this.uniforms?.uWaterDepthPull;
+    if (!uniform) return;
+    if (!camera?.isPerspectiveCamera || !this.params) {
+      uniform.value = 0;
+      return;
+    }
+    const position = (this._waterPullCameraPosition ||= new THREE.Vector3())
+      .setFromMatrixPosition(camera.matrixWorld);
+    const seaLevel = this.params.seaLevel ?? 0;
+    const planet = this.worldMode === 'planet';
+    const height = Math.abs(planet
+      ? position.length() - (this._planetRadius() + seaLevel)
+      : position.y - seaLevel);
+    const tolerance = planet
+      ? Math.min(96, 1 + height * 0.01)
+      : Math.min(6, 0.5 + height * 0.01);
+    uniform.value = Math.min(0.2, tolerance / Math.max(height, 1e-3));
   }
 
   _scheduleWaterWarmRetry(renderTarget = null, delayMs = 250) {
@@ -9805,15 +9840,17 @@ export class Engine {
     const octaves = Math.round(
       this.params?.octaves ?? this.terrainMaterial?.defines?.OCTAVES ?? 1,
     );
+    let superseded = false;
     const job = (async () => {
       let preparation = null;
       try {
         preparation = await this._prepareHeightCacheProgram('studio', octaves, program);
         const current = this._activeHeightProgram('studio');
         const currentSig = current?.heightSig || current?.sig;
+        superseded = currentSig !== programSig
+          || Math.round(this.params?.octaves ?? octaves) !== octaves;
         if (this._disposed || !this.params || this.worldMode !== 'studio'
-            || currentSig !== programSig
-            || Math.round(this.params?.octaves ?? octaves) !== octaves
+            || superseded
             || preparation?.result?.ready !== true) {
           return false;
         }
@@ -9832,6 +9869,14 @@ export class Engine {
       if (this._terrainHeightPreparePromise === pending) {
         this._terrainHeightPreparePromise = null;
       }
+    }).then((ready) => {
+      // The program changed while this one linked (a node edit during a
+      // background preparation): prepare the current one instead of leaving
+      // the bake deferred.
+      if (!ready && superseded && !this._disposed && this.params && this.worldMode === 'studio') {
+        return this._prepareStudioHeightCacheAsync();
+      }
+      return ready;
     });
     this._terrainHeightPreparePromise = pending;
     return pending;

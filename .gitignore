@@ -92,3 +92,4 @@ __pycache__/
 output/perf-harness/.profile-warm/
 output/perf-harness/runs/
 output/perf-harness/.profile-cold-*/
+output/perf-harness/.profile-e2e/

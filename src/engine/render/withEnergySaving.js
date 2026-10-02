@@ -55,8 +55,8 @@ export function withEnergySaving(BaseEngine) {
 
     _wakeEnergy() {
       this._energyActivityAt = performance.now();
-      // The worker DOM facade does not bubble canvas events to window, where
-      // the base engine tracks activity. Keep its deferred-work policy in sync.
+      // Keep the base engine's deferred-work policy in sync with every input
+      // this wrapper sees (not only those its window listeners receive).
       this._lastUserActivityAt = this._energyActivityAt;
     }
 

@@ -1,78 +1,7 @@
 import { Engine } from './EnergySavingEngine.js';
 import { ENGINE_METHODS } from './EngineProxy.js';
 import { prepareWorkerResult } from './WorkerProtocol.js';
-
-class TerrainEventTarget {
-  constructor() { this.listeners = new Map(); }
-  addEventListener(type, listener) {
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type).add(listener);
-  }
-  removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
-  dispatchTerrainEvent(type, payload = {}) {
-    const event = {
-      type,
-      preventDefault() {},
-      stopPropagation() {},
-      button: 0,
-      buttons: 0,
-      pointerType: 'mouse',
-      clientX: 0,
-      clientY: 0,
-      deltaX: 0,
-      deltaY: 0,
-      deltaMode: 0,
-      key: '',
-      code: '',
-      repeat: false,
-      ...payload,
-      target: this,
-      currentTarget: this,
-    };
-    for (const listener of this.listeners.get(type) || []) listener(event);
-  }
-}
-
-class WorkerCanvasFacade extends TerrainEventTarget {
-  constructor(canvas, viewport) {
-    super();
-    this.canvas = canvas;
-    this.viewport = { ...viewport };
-    this.style = {};
-    this.parentElement = this;
-    this.tabIndex = 0;
-    for (const type of ['webglcontextlost', 'webglcontextrestored']) {
-      canvas.addEventListener?.(type, (event) => {
-        this.dispatchTerrainEvent(type, {
-          statusMessage: event?.statusMessage || '',
-          preventDefault: () => event?.preventDefault?.(),
-        });
-      });
-    }
-  }
-  get width() { return this.canvas.width; }
-  set width(value) { this.canvas.width = value; }
-  get height() { return this.canvas.height; }
-  set height(value) { this.canvas.height = value; }
-  get clientWidth() { return this.viewport.width; }
-  get clientHeight() { return this.viewport.height; }
-  getContext(...args) { return this.canvas.getContext(...args); }
-  getBoundingClientRect() {
-    return {
-      left: 0,
-      top: 0,
-      right: this.viewport.width,
-      bottom: this.viewport.height,
-      width: this.viewport.width,
-      height: this.viewport.height,
-    };
-  }
-  setTerrainViewport(width, height) { this.viewport = { ...this.viewport, width, height }; }
-  setPointerCapture() {}
-  releasePointerCapture() {}
-  requestPointerLock() { document.pointerLockElement = this; }
-  focus() {}
-}
+import { WorkerCanvasFacade, createWorkerDom } from './WorkerDom.js';
 
 let engine = null;
 let sequence = 0;
@@ -81,15 +10,7 @@ const allowedMethods = new Set(ENGINE_METHODS);
 const cancelledRequests = new Set();
 
 function installWorkerDom(canvasFacade) {
-  const windowTarget = new TerrainEventTarget();
-  const documentTarget = new TerrainEventTarget();
-  documentTarget.visibilityState = 'visible';
-  documentTarget.pointerLockElement = null;
-  documentTarget.exitPointerLock = () => { documentTarget.pointerLockElement = null; };
-  documentTarget.createElement = (tag) => {
-    if (tag === 'canvas') return new OffscreenCanvas(1, 1);
-    return new TerrainEventTarget();
-  };
+  const { windowTarget, documentTarget } = createWorkerDom(canvasFacade);
   globalThis.window = Object.assign(windowTarget, {
     location: globalThis.location,
     setTimeout: globalThis.setTimeout.bind(globalThis),
@@ -104,8 +25,6 @@ function installWorkerDom(canvasFacade) {
     innerWidth: canvasFacade.clientWidth,
     innerHeight: canvasFacade.clientHeight,
   });
-  documentTarget.defaultView = globalThis.window;
-  documentTarget.body = new TerrainEventTarget();
   globalThis.document = documentTarget;
   globalThis.ResizeObserver = class {
     constructor(callback) { this.callback = callback; }
@@ -122,7 +41,6 @@ function installWorkerDom(canvasFacade) {
     });
     return { canceled: false, path: null };
   };
-  canvasFacade.ownerDocument = documentTarget;
 }
 
 const serializeError = (error) => ({

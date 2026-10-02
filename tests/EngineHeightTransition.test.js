@@ -45,6 +45,8 @@ function heightTransitionHarness() {
     cb: { onStatus: vi.fn(), onCompileProgress: vi.fn() },
     _applyUniforms: vi.fn(),
     _syncCpuHeightProgram: vi.fn(),
+    // background bake preparation needs a renderer; observed, not run
+    _prepareStudioHeightCacheAsync: vi.fn(async () => true),
   });
   return engine;
 }
@@ -240,6 +242,25 @@ describe('atomic terrain height transitions', () => {
     expect(options).toMatchObject({ canvasOnly: true, stagger: true });
     expect(engine._underwaterWarmed).toBe(false);
     expect(engine.terrainMaterial.userData.minimalFragment).toBe(true);
+  });
+
+  it('publishes a node edit before its bake program and prepares that program in the background', async () => {
+    // Node projects bake like procedural ones (their preview fragment's only
+    // per-pixel normal source), but an edit must not wait on the bake shader.
+    const program = compileTerrainGraph(createNodeTemplateGraph('nodes-alpine')).program;
+    const engine = heightTransitionHarness();
+    engine.projectMode = 'nodes';
+    engine._compileMaterialVariants = vi.fn(async () => ({ ready: true }));
+    const prepareCache = vi.spyOn(engine, '_prepareHeightCacheProgram');
+
+    const result = await engine._rebuildStackMaterialsAsync(program, { terrainDirtyOnSwap: false });
+
+    expect(result.swapped).toBe(true);
+    expect(prepareCache).not.toHaveBeenCalled();
+    expect(engine._prepareStudioHeightCacheAsync).toHaveBeenCalledTimes(1);
+    expect(engine._usesLiveStudioHeightField()).toBe(false);
+    engine.projectMode = 'manual';
+    expect(engine._usesLiveStudioHeightField()).toBe(true);
   });
 
   it('skips WebGL compilation when a uniform-only update keeps the live shader signature', async () => {

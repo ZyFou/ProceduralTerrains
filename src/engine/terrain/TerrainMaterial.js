@@ -1149,6 +1149,7 @@ precision highp float;
 
 ${COMMON_UNIFORMS_GLSL}
 ${TERRAIN_HEIGHT_TEX_GLSL}
+${NEAR_BAKE_BLOCK}
 ${PALETTE_UNIFORMS_GLSL}
 ${graphColorGLSL}
 
@@ -1163,6 +1164,23 @@ varying float vWall;
 varying float vWallMesh;
 varying vec3  vTerrainPreviewNormal;
 
+// The preview has no live per-pixel field: wherever the camera-centred near
+// level covers a pixel finer than the board bake, prefer it (it holds the
+// same exact values at twice the density).
+vec4 previewBakedTexel(vec2 xz) {
+  vec4 texel = textureLod(uTerrainHeightTex, bakedUvAt(xz), 0.0);
+  if (uUseNearBake > 0.5) {
+    vec2 nearUv = nearBakedUvAt(xz);
+    vec2 border = min(nearUv, 1.0 - nearUv) * uNearBakeSpan;
+    float inside = clamp(min(border.x, border.y) / max(uNearBakeTexelWorld * 16.0, 1e-4), 0.0, 1.0);
+    // a pixel wider than one board texel is better served by the board bake
+    float footprint = length(cameraPosition - vWorldPos) * uPixelWorldPerDist / max(uNearBakeTexelWorld, 1e-4);
+    float nearWeight = inside * (1.0 - smoothstep(1.0, 2.0, footprint));
+    if (nearWeight > 0.0) texel = mix(texel, textureLod(uNearBakeTex, nearUv, 0.0), nearWeight);
+  }
+  return texel;
+}
+
 void main() {
   vec2 xz = vWorldPos.xz;
 
@@ -1171,21 +1189,15 @@ void main() {
   float hC;
   vec3 nGeo;
   if (uInfiniteMode < 0.5 && uUseTerrainHeightTex > 0.5) {
-    vec2 uv = bakedUvAt(xz);
-    vec2 duv = vec2(
-      uEps / max(uBakeSpan.x, 1.0),
-      uEps / max(uBakeSpan.y, 1.0)
-    );
-    vec4 packedHeightNormal = textureLod(uTerrainHeightTex, uv, 0.0);
+    vec4 packedHeightNormal = previewBakedTexel(xz);
     hC = packedHeightNormal.a * uHeightScale;
     nGeo = bakedNormalFromTexel(packedHeightNormal);
   } else
   {
     hC = vWorldPos.y;
-    // Node authoring deliberately keeps this lightweight fragment live while
-    // the graph changes. Its height cache is therefore commonly unavailable.
-    // Use the smoothly interpolated normal prepared by the preview vertex
-    // shader instead of treating every slope as horizontal.
+    // Until the bake of the current graph completes (just after a node edit,
+    // or during boot) use the smoothly interpolated normal prepared by the
+    // preview vertex shader instead of treating every slope as horizontal.
     nGeo = normalize(vTerrainPreviewNormal);
   }
 
@@ -1417,6 +1429,8 @@ export function createTerrainUniforms() {
     // bindings and hides Studio water; the matching final height + climate
     // textures are then published together.
     uWaterTerrainHeightTex:   { value: null },
+    // Water depth-test tolerance (WATER_DEPTH_PULL_GLSL), set per render.
+    uWaterDepthPull:          { value: 0.0 },
     uWaterTerrainBiomeTex:    { value: null },
     uUseWaterTerrainBiomeTex: { value: 0.0 },
     uInfiniteFieldTex0:   { value: null },

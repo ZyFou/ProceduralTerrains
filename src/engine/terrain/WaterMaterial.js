@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COMMON_UNIFORMS_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from './terrainGLSL.js';
+import { COMMON_UNIFORMS_GLSL, WATER_DEPTH_PULL_GLSL, WATER_TILE_MASK_GLSL, fitNearBake } from './terrainGLSL.js';
 import { PALETTE_UNIFORMS_GLSL } from '../shaders/terrainColor.glsl.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { defaultLegacyStack } from './noise/NoiseStack.js';
@@ -22,11 +22,12 @@ const DEFAULT_STACK_GLSL = generateStackGLSL(defaultLegacyStack());
 // ============================================================================
 
 const VERTEX = /* glsl */ `
+${WATER_DEPTH_PULL_GLSL}
 varying vec3 vWorldPos;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = waterClipPosition(wp);
 }
 `;
 
