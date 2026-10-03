@@ -2100,7 +2100,7 @@ export default function App() {
       panelAvailable(panelId, worldMode)
       && (!realTerrainMode || REAL_TERRAIN_PANEL_IDS.includes(panelId))
     ))
-      .filter((item) => !realTerrainMode || item.panelId !== 'terrain' || item.tabId === 'import')
+      .filter((item) => !realTerrainMode || item.panelId !== 'terrain' || item.tabId === 'import' || ['terrain.heightScale', 'terrain.noiseScale'].includes(item.settingId))
       .map((item) => ({ ...item, valueText: formatSearchValue(item) }));
   }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, realTerrainMode, formatSearchValue]);
 
@@ -2404,6 +2404,7 @@ export default function App() {
   const ctx = {
     params, worldMode, onParam,
     realTerrainMode, realWorldMapRequest,
+    onRealWorldMapRequestHandled: (handled) => setRealWorldMapRequest((request) => request === handled ? 0 : request),
     settingsTarget,
     settingsSearchOpen,
     onSettingsTargetHandled: () => setSettingsTarget(null),
@@ -2502,7 +2503,7 @@ export default function App() {
     onRealWorldImageryStyle: changeRealWorldImageryStyle,
     realWorldMarkers,
     realWorldMarkerStatus,
-    onRefreshCityMarkers: () => engine().refreshCityMarkers(),
+    onRefreshCityMarkers: () => engine().refreshCityMarkers({ show: true }),
     onMarkerRoutePicking: (enabled) => engine().setMarkerRoutePicking(enabled),
     onSelectMarkerForRoute: (id) => engine().selectMarkerForRoute(id),
     onRealWorldMarkers: (state) => engine().setRealWorldMarkers(state),

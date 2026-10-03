@@ -1,6 +1,33 @@
 import * as THREE from 'three';
 import { geoPointToCellWorld } from './RealWorldBuildings.js';
 
+// Render at double resolution and fit the card to the place name. Sprite size
+// stays constant on screen so distant labels remain readable when orbiting.
+function placeLabel(name, scale = 1) {
+  const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1) : document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const font = '600 28px "Segoe UI", sans-serif';
+  ctx.font = font;
+  const width = Math.min(420, Math.max(72, Math.ceil(ctx.measureText(name).width) + 40));
+  const height = 56;
+  canvas.width = width * 2; canvas.height = height * 2;
+  ctx.scale(2, 2);
+  ctx.clearRect(0, 0, width, height);
+  ctx.beginPath(); ctx.roundRect(1, 1, width - 2, height - 2, 14);
+  ctx.fillStyle = 'rgba(15,23,32,0.86)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.24)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.font = font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f5f7fa'; ctx.fillText(name, width / 2, height / 2 + 1, width - 32);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false, toneMapped: false, sizeAttenuation: false }));
+  label.scale.set(0.018 * scale * width / height, 0.018 * scale, 1);
+  label.center.set(0.5, 0);
+  return label;
+}
+
 export class RealWorldMarkerLayer {
   constructor(scene) {
     this.group = new THREE.Group();
@@ -21,6 +48,7 @@ export class RealWorldMarkerLayer {
     this.group.visible = visible && state.visible;
     if (!geo?.bbox0 || !visible) return;
     const size = Math.max(1, cellSize * 0.004);
+    const markerRadius = size * 0.7 * ((state.markerSize ?? 100) / 100);
     const world = (point) => geoPointToCellWorld(point, geo.bbox0, geo.zoom, 0, 0, cellSize);
     const inside = ({ x, z }) => tiles.some((t) => Math.abs(x / cellSize - t.cx) <= 0.5 && Math.abs(z / cellSize - t.cz) <= 0.5);
     const height = (p) => (sampleHeight(p.x, p.z) || 0);
@@ -29,22 +57,16 @@ export class RealWorldMarkerLayer {
       const p = world(point);
       if (!inside(p)) continue;
       const ground = height(p), y = ground + state.lift;
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffca65' }));
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(markerRadius, 16, 12), new THREE.MeshBasicMaterial({ color: '#ffca65', toneMapped: false }));
       dot.position.set(p.x, y, p.z);
       this.group.add(dot);
       dot.userData.markerId = point.id;
       this.pickTargets.push(dot);
-      const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(p.x, ground, p.z), new THREE.Vector3(p.x, y, p.z)]), new THREE.LineBasicMaterial({ color: '#ffca65', transparent: true, opacity: 0.6 }));
+      const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(p.x, ground, p.z), new THREE.Vector3(p.x, y, p.z)]), new THREE.LineBasicMaterial({ color: '#ffca65', transparent: true, opacity: 0.38, depthWrite: false, toneMapped: false }));
       this.group.add(stem);
       if (!state.labels) continue;
-      const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(512, 64) : Object.assign(document.createElement('canvas'), { width: 512, height: 64 });
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(18,24,32,0.9)'; ctx.fillRect(0, 0, 512, 64);
-      ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-      ctx.fillText(point.name, 256, 41, 490);
-      const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-      const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false }));
-      label.position.set(p.x, y + size * 4, p.z); label.scale.set(size * 32, size * 4, 1);
+      const label = placeLabel(point.name, (state.labelSize ?? 100) / 100);
+      label.position.set(p.x, y + Math.max(size * 1.8, markerRadius * 1.5), p.z);
       this.group.add(label);
       label.userData.markerId = point.id;
       this.pickTargets.push(label);

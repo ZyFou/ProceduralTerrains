@@ -35,17 +35,17 @@ export default function MarkersPanel({ ctx }) {
     <ToggleRow label="Show place labels" value={state.labels} onChange={(labels) => update({ labels })} />
     <ToggleRow label="Automatic city markers" value={state.autoCities} onChange={(autoCities) => update({ autoCities })} />
     <p className="section-hint">Automatically place named cities, towns, and villages from OpenStreetMap above loaded terrain.</p>
-    {state.autoCities && <>
-      <button className="action-btn" disabled={status.loading} onClick={ctx.onRefreshCityMarkers}>{status.loading ? 'Loading cities…' : 'Refresh city markers'}</button>
+    <button className="action-btn primary" disabled={status.loading} onClick={ctx.onRefreshCityMarkers}>{status.loading ? 'Loading cities…' : 'Fetch city names and show markers'}</button>
       {status.error && <p className="section-hint import-map-error" role="alert">{status.error}</p>}
-      {!status.loading && !status.error && <p className="section-hint">{state.points.filter((p) => p.source === 'city').length} city markers · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a></p>}
-    </>}
+      {state.autoCities && !status.loading && !status.error && <p className="section-hint">{state.points.filter((p) => p.source === 'city').length} city markers · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a></p>}
     <ToggleRow label="Click markers to create routes" value={!!status.picking} onChange={ctx.onMarkerRoutePicking} />
     {status.picking && <div className="marker-route-prompt" role="status">
       <p>{status.from ? `From ${status.fromName} — click the destination marker.` : 'Click a marker in the terrain view, then a second marker to create a route.'}</p>
       {status.from && <button className="action-btn" onClick={() => ctx.onMarkerRoutePicking(true)}>Cancel selection</button>}
     </div>}
     <SliderCtl def={{ label: 'Height above terrain', min: 1, max: 500, step: 1, unit: ' m', digits: 0 }} value={state.lift} onChange={(lift) => update({ lift })} />
+    <SliderCtl def={{ label: 'Marker size', min: 25, max: 300, step: 5, unit: '%', digits: 0 }} value={state.markerSize ?? 100} onChange={(markerSize) => update({ markerSize })} />
+    <SliderCtl def={{ label: 'Label size', min: 25, max: 300, step: 5, unit: '%', digits: 0 }} value={state.labelSize ?? 100} onChange={(labelSize) => update({ labelSize })} />
     <form className="markers-form" onSubmit={save}>
       <label className="setting-label" htmlFor="marker-name">Place name</label>
       <div className="seed-input-wrap"><input id="marker-name" value={name} maxLength={80} placeholder="City or place name" onChange={(e) => setName(e.target.value)} /></div>

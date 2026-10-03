@@ -7,5 +7,8 @@ export function normalizeMarkers(input = {}) {
   const routes = (Array.isArray(input.routes) ? input.routes : []).slice(0, 200)
     .filter((r) => r && typeof r.id === 'string' && ids.has(r.from) && ids.has(r.to) && r.from !== r.to)
     .map((r) => ({ id: r.id.slice(0, 80), from: r.from, to: r.to, visible: r.visible !== false }));
-  return { autoCities: input.autoCities === true, visible: input.visible !== false, labels: input.labels !== false, lift: Number.isFinite(input.lift) ? Math.max(1, Math.min(500, input.lift)) : 30, points, routes };
+  const size = (value) => Number.isFinite(value) ? Math.max(25, Math.min(300, value)) : 100;
+  return { autoCities: input.autoCities === true, visible: input.visible !== false, labels: input.labels !== false,
+    lift: Number.isFinite(input.lift) ? Math.max(1, Math.min(500, input.lift)) : 30,
+    markerSize: size(input.markerSize), labelSize: size(input.labelSize), points, routes };
 }

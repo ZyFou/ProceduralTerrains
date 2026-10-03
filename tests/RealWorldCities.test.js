@@ -10,6 +10,27 @@ const node = (id, name, place = 'city', lat = 46.5, lon = 3) => ({ type: 'node',
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('automatic city markers', () => {
+  it('fetches and displays named cities from the explicit button even when markers were disabled', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ elements: [node(31, 'Fetched city')] }) });
+    vi.stubGlobal('fetch', fetch);
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, { worldMode: 'studio', realWorldMarkers: normalizeMarkers({ autoCities: false, visible: false, labels: false }),
+      realWorldSource: {}, importedMaps: { height: { geoRef: { bbox0: { ...bbox, minLon: 2.31 } } } },
+      tiles: [{ cx: 0, cz: 0 }], cb: {} });
+    await engine.refreshCityMarkers({ show: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(engine.realWorldSource.markers).toMatchObject({ autoCities: true, visible: true, labels: true });
+    expect(engine.realWorldMarkers.points[0].name).toBe('Fetched city');
+    expect(engine._cityLoading).toBe(false);
+  });
+  it('explains why cities cannot be fetched before an area is loaded', async () => {
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    const engine = Object.create(Engine.prototype);
+    Object.assign(engine, { worldMode: 'studio', realWorldMarkers: normalizeMarkers(), cb: {} });
+    await engine.refreshCityMarkers({ show: true });
+    expect(engine._cityError).toContain('Load a real-world terrain area');
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('prioritizes named settlements, deduplicates and rejects out-of-area nodes', () => {
     const points = parseCityMarkers({ elements: [node(1, 'Village', 'village'), node(2, 'City'), node(3, 'City'), node(4, 'Outside', 'city', 0), node(5, 'Mountain', 'peak')] }, bbox);
     expect(points.map((p) => p.name)).toEqual(['City', 'Village']);

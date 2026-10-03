@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { normalizeMarkers } from '../src/engine/terrain/RealWorldMarkers.js';
 import { RealWorldMarkerLayer } from '../src/engine/terrain/RealWorldMarkerLayer.js';
@@ -30,11 +30,13 @@ describe('coordinate formats', () => {
 describe('geographic markers', () => {
   const points = [{ id: 'a', name: 'A', lat: 46.5, lon: 3 }, { id: 'b', name: 'B', lat: 46.6, lon: 3.1 }];
   it('persists markers and valid routes through the geographic source', () => {
-    const markers = normalizeMarkers({ points, routes: [{ id: 'r', from: 'a', to: 'b' }, { id: 'bad', from: 'a', to: 'missing' }] });
+    const markers = normalizeMarkers({ points, markerSize: 150, labelSize: 75, routes: [{ id: 'r', from: 'a', to: 'b' }, { id: 'bad', from: 'a', to: 'missing' }] });
     const source = normalizeRealWorldSource({ bbox: { minLat: 46, maxLat: 47, minLon: 2, maxLon: 4 }, zoom: 12, markers });
     expect(normalizeRealWorldSource(JSON.parse(JSON.stringify(source))).markers).toEqual(markers);
     expect(markers.routes).toHaveLength(1);
     expect(normalizeMarkers(null).points).toEqual([]);
+    expect(normalizeMarkers()).toMatchObject({ markerSize: 100, labelSize: 100 });
+    expect(normalizeMarkers({ markerSize: -1, labelSize: 999 })).toMatchObject({ markerSize: 25, labelSize: 300 });
     expect(ENGINE_METHODS).toContain('setRealWorldMarkers');
   });
   it('anchors points above the terrain and routes to sampled heights', () => {
@@ -56,5 +58,32 @@ describe('geographic markers', () => {
     engine.cb = {}; engine.realWorldSource = {}; engine._rebuildRealWorldMarkers = () => {};
     engine.setRealWorldMarkers({ points });
     expect(engine.realWorldSource.markers.points).toHaveLength(2);
+  });
+  it('fits readable labels to names and keeps their screen size and color stable', () => {
+    const context = { measureText: (name) => ({ width: name.length * 15 }), scale: vi.fn(), clearRect: vi.fn(),
+      beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn() };
+    vi.stubGlobal('OffscreenCanvas', class { getContext() { return context; } });
+    const layer = new RealWorldMarkerLayer(new THREE.Scene());
+    try {
+      layer.rebuild({ state: normalizeMarkers({ points: [points[0], { ...points[1], name: 'Saint-Martin-de-Belleville' }] }),
+        geo: { bbox0: { minLat: 46, maxLat: 47, minLon: 2, maxLon: 4 }, zoom: 12 },
+        cellSize: 1000, tiles: [{ cx: 0, cz: 0 }], sampleHeight: () => 123, visible: true });
+      const labels = layer.pickTargets.filter((object) => object.isSprite);
+      expect(labels[0].scale.x).toBeLessThan(labels[1].scale.x);
+      expect(labels[0].scale.y).toBe(labels[1].scale.y);
+      expect(labels[0].material.sizeAttenuation).toBe(false);
+      expect(labels[0].material.toneMapped).toBe(false);
+      expect(labels[0].material.depthWrite).toBe(false);
+      expect(context.roundRect).toHaveBeenCalledTimes(2);
+      layer.select('a'); expect(labels[0].material.color.getHexString()).toBe('69d7ff');
+      layer.select(null); expect(labels[0].material.color.getHexString()).toBe('ffffff');
+      const originalRadius = layer.pickTargets[0].geometry.parameters.radius;
+      const originalLabelHeight = labels[0].scale.y;
+      layer.rebuild({ state: normalizeMarkers({ points: [points[0]], markerSize: 200, labelSize: 150 }),
+        geo: { bbox0: { minLat: 46, maxLat: 47, minLon: 2, maxLon: 4 }, zoom: 12 },
+        cellSize: 1000, tiles: [{ cx: 0, cz: 0 }], sampleHeight: () => 123, visible: true });
+      expect(layer.pickTargets[0].geometry.parameters.radius).toBeCloseTo(originalRadius * 2);
+      expect(layer.pickTargets[1].scale.y).toBeCloseTo(originalLabelHeight * 1.5);
+    } finally { layer.dispose(); vi.unstubAllGlobals(); }
   });
 });

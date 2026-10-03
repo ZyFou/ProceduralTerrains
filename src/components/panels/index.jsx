@@ -136,6 +136,13 @@ function TerrainPanel({ ctx }) {
         ? <ErosionTabFooter erosion={erosion} />
         : realTerrainMode ? null : <RandomizeTerrainButton onRandomize={ctx.onRandomizeTerrain} />}>
       {!realTerrainMode && <PanelTabs active={activeTab} onChange={setTab} tabs={tabs} />}
+      {realTerrainMode && <>
+        <h3 className="setting-label">Terrain settings</h3>
+        <SliderCtl def={TERRAIN_SLIDERS.find((def) => def.key === 'heightScale')}
+          value={params.heightScale} onChange={(value) => onParam('heightScale', value)} settingId="terrain.heightScale" />
+        <SliderCtl def={NOISE_SLIDERS.find((def) => def.key === 'noiseScale')}
+          value={params.noiseScale} onChange={(value) => onParam('noiseScale', value)} settingId="terrain.noiseScale" />
+      </>}
       {activeTab === 'shape' && (
         <>
           <SelectRow label="Preset" value={params.preset} settingId="terrain.preset"

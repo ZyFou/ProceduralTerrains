@@ -2525,9 +2525,13 @@ export class Engine {
     this._needsRender = true;
   }
 
-  async refreshCityMarkers({ force = true } = {}) {
+  async refreshCityMarkers({ force = true, show = false } = {}) {
     const geo = this.importedMaps?.height?.geoRef, source = this.realWorldSource;
-    if (!this.realWorldMarkers?.autoCities || !geo?.bbox0 || !source || this.worldMode !== 'studio') {
+    if (show && (!geo?.bbox0 || !source || this.worldMode !== 'studio' || !this.tiles?.length)) {
+      this._cityError = 'Load a real-world terrain area before fetching city names.';
+      this._notifyMarkerStatus(); return;
+    }
+    if ((!show && !this.realWorldMarkers?.autoCities) || !geo?.bbox0 || !source || this.worldMode !== 'studio') {
       this._cityAbort?.abort(); this._cityRequestKey = ''; this._cityLoading = false; this._cityError = '';
       this._notifyMarkerStatus(); return;
     }
@@ -2540,6 +2544,7 @@ export class Engine {
     this._cityAbort?.abort();
     const controller = new AbortController(); this._cityAbort = controller;
     this._cityRequestKey = key; this._cityLoading = true; this._cityError = ''; this._notifyMarkerStatus();
+    if (show) this.setRealWorldMarkers({ ...this.realWorldMarkers, autoCities: true, visible: true, labels: true });
     try {
       const cities = await fetchCityMarkers(bbox, { signal: controller.signal });
       if (controller.signal.aborted || this.importedMaps?.height?.geoRef !== geo || !this.realWorldMarkers.autoCities) return;

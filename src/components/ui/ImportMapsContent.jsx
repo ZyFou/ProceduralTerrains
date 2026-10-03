@@ -277,7 +277,10 @@ function CustomAreaPicker({ ctx }) {
   const [mapOpen, setMapOpen] = useState(false);
 
   useEffect(() => {
-    if (ctx.realWorldMapRequest) setMapOpen(true);
+    if (ctx.realWorldMapRequest) {
+      setMapOpen(true);
+      ctx.onRealWorldMapRequestHandled?.(ctx.realWorldMapRequest);
+    }
   }, [ctx.realWorldMapRequest]);
 
   const info = useMemo(() => describeCustomArea(spec), [spec]);
