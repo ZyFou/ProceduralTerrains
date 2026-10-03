@@ -402,22 +402,20 @@ export class TerrainHeightBaker {
   _renderStripe(target, material, width, height, row, rows) {
     const r = this.renderer;
     const prevTarget = r.getRenderTarget();
-    const prevViewport = r.getViewport(new THREE.Vector4());
-    const prevScissor = r.getScissor(new THREE.Vector4());
-    const prevScissorTest = r.getScissorTest();
     this.mesh.material = material;
     this._bakeUvTransform.value.set(0, row / height, 1, rows / height);
     try {
+      // Render-target rectangles use physical texels. Renderer.setViewport /
+      // setScissor scale their arguments by the canvas pixel ratio, which
+      // shifts and stretches bake stripes on HiDPI screens. Binding the target
+      // applies its rectangles directly and leaves the canvas state untouched.
+      target.viewport.set(0, row, width, rows);
+      target.scissor.set(0, row, width, rows);
+      target.scissorTest = true;
       r.setRenderTarget(target);
-      r.setViewport(0, row, width, rows);
-      r.setScissor(0, row, width, rows);
-      r.setScissorTest(true);
       r.render(this.scene, this.cam);
     } finally {
       r.setRenderTarget(prevTarget);
-      r.setViewport(prevViewport);
-      r.setScissor(prevScissor);
-      r.setScissorTest(prevScissorTest);
       this.mesh.material = this.material;
     }
   }

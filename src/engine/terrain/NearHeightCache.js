@@ -179,20 +179,16 @@ export class NearHeightCache {
     u.uBakeSpan.value.set(job.span, job.span);
     u.uBakeUvTransform.value.set(0, job.row / this.size, 1, n / this.size);
     const prevTarget = r.getRenderTarget();
-    const prevViewport = r.getViewport(_v4a);
-    const prevScissor = r.getScissor(_v4b);
-    const prevScissorTest = r.getScissorTest();
     try {
+      // Match the board bake in physical texels, independently of canvas DPR.
+      // The renderer's viewport/scissor setters multiply by that DPR.
+      this.back.viewport.set(0, job.row, this.size, n);
+      this.back.scissor.set(0, job.row, this.size, n);
+      this.back.scissorTest = true;
       r.setRenderTarget(this.back);
-      r.setViewport(0, job.row, this.size, n);
-      r.setScissor(0, job.row, this.size, n);
-      r.setScissorTest(true);
       r.render(this.scene, this.cam);
     } finally {
       r.setRenderTarget(prevTarget);
-      r.setViewport(prevViewport);
-      r.setScissor(prevScissor);
-      r.setScissorTest(prevScissorTest);
     }
     job.row += n;
     if (job.row < this.size) return;
@@ -232,5 +228,3 @@ export class NearHeightCache {
 }
 
 const _dir = new THREE.Vector3();
-const _v4a = new THREE.Vector4();
-const _v4b = new THREE.Vector4();
