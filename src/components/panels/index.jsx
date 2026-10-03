@@ -5,6 +5,7 @@ import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
 export { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from './panelMeta.js';
+import MarkersPanel from './MarkersPanel.jsx';
 import ImportMapsContent from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
 import ControlSection from '../ui/ControlSection.jsx';
@@ -1080,6 +1081,7 @@ function NoiseLayersPanelWrapper({ ctx }) {
 }
 
 const COMPONENTS = {
+  markers: MarkersPanel,
   terrain: TerrainPanel, explode: ExplodePanel, noiseLayers: NoiseLayersPanelWrapper, world: WorldPanel, planet: PlanetPanel, biomes: BiomesPanel,
   water: WaterPanel, props: PropsPanel, clouds: CloudsPanel, visuals: VisualsPanel, skybox: SkyboxPanel, lighting: LightingPanel, export: ExportPanel,
   performance: PerformancePanel, debug: DebugPanel,

@@ -86,6 +86,17 @@ describe('performance phase 3', () => {
 
   it('splits the Studio height and climate bake into bounded stripes', () => {
     const renderer = renderTargetRenderer();
+    const stripes = [];
+    renderer.render.mockImplementation(() => {
+      const target = renderer.getRenderTarget();
+      stripes.push({
+        width: target.width,
+        height: target.height,
+        viewport: target.viewport.toArray(),
+        scissor: target.scissor.toArray(),
+        scissorTest: target.scissorTest,
+      });
+    });
     const baker = new TerrainHeightBaker({
       renderer,
       uniforms: createTerrainUniforms(),
@@ -100,7 +111,11 @@ describe('performance phase 3', () => {
     const first = baker.step(16);
     expect(first.complete).toBe(false);
     expect(renderer.render).toHaveBeenCalledTimes(1);
-    expect(renderer.setViewport).toHaveBeenCalledWith(0, 0, 64, 16);
+    expect(stripes[0].viewport).toEqual([0, 0, 64, 16]);
+    expect(stripes[0].scissor).toEqual(stripes[0].viewport);
+    expect(stripes[0].scissorTest).toBe(true);
+    expect(renderer.setViewport).not.toHaveBeenCalled();
+    expect(renderer.setScissor).not.toHaveBeenCalled();
 
     let result = first;
     let guard = 0;
@@ -108,6 +123,13 @@ describe('performance phase 3', () => {
     expect(result.complete).toBe(true);
     // 4 height stripes + 32 climate stripes; begin itself is render-free.
     expect(renderer.render).toHaveBeenCalledTimes(36);
+    for (const [index, stripe] of stripes.entries()) {
+      const row = (index < 4 ? index : index - 4) * 16;
+      expect(stripe.viewport).toEqual([0, row, stripe.width, 16]);
+      expect(stripe.scissor).toEqual(stripe.viewport);
+      expect(stripe.scissorTest).toBe(true);
+      expect(row + 16).toBeLessThanOrEqual(stripe.height);
+    }
     baker.dispose();
   });
 

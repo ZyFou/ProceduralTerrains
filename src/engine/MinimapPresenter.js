@@ -1,3 +1,5 @@
+import { drawMinimapScale } from './MinimapScale.js';
+
 export class MinimapPresenter {
   constructor() {
     this.baseCanvas = null;
@@ -60,5 +62,6 @@ export class MinimapPresenter {
       context.strokeStyle = 'rgba(255, 232, 153, 0.95)';
       context.beginPath(); context.arc(overlay.hover.x, overlay.hover.y, 5, 0, Math.PI * 2); context.stroke();
     }
+    drawMinimapScale(context, overlay.distanceScale, width, height);
   }
 }

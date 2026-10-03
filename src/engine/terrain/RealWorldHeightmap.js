@@ -15,6 +15,7 @@
 // <canvas>/<img> for decoding and returns plain data.
 // ============================================================================
 
+import { projectCoordinates, parseProjectedCoordinates, formatDMS } from './CoordinateFormats.js';
 const TILE = 256;
 // Single swappable endpoint — if CORS ever breaks, only this line changes.
 const ENDPOINT = 'https://elevation-tiles-prod.s3.dualstack.us-east-1.amazonaws.com/terrarium';
@@ -214,7 +215,8 @@ function parseCoordToken(match, kind) {
  * Accepts "46.07621°N, 6.96224°E", "37.21160°N, 112.98409°W",
  * DMS like 43° 20' 39.239" N 3° 12' 56.862" E, and signed decimals.
  */
-export function parseCoordinateInput(text) {
+export function parseCoordinateInput(text, format = 'degrees') {
+  if (format === 'lambert93' || format === 'mercator') return parseProjectedCoordinates(text, format);
   if (text == null) return null;
   const s = normalizeCoordText(text);
   if (!s) return null;
@@ -235,7 +237,12 @@ export function parseCoordinateInput(text) {
 }
 
 /** Format decimal degrees for the custom-area coordinate field. */
-export function formatCoordinateDisplay({ lat, lon }) {
+export function formatCoordinateDisplay({ lat, lon }, format = 'degrees') {
+  if (format === 'lambert93' || format === 'mercator') {
+    const { x, y } = projectCoordinates({ lat, lon }, format);
+    return `${x.toFixed(2)}, ${y.toFixed(2)}`;
+  }
+  if (format === 'dms') return `${formatDMS(lat, 'N', 'S')}, ${formatDMS(lon, 'E', 'W')}`;
   const latH = lat >= 0 ? 'N' : 'S';
   const lonH = lon >= 0 ? 'E' : 'W';
   return `${Math.abs(lat).toFixed(5)}°${latH}, ${Math.abs(lon).toFixed(5)}°${lonH}`;

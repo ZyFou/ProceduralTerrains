@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Ruler } from 'lucide-react';
 
 const MAP_MODES = [
   ['color', 'Color'],
@@ -46,13 +47,14 @@ export default function MinimapOverlay({
   const [mode, setMode] = useState('color');
   const [zoom, setZoom] = useState(1);
   const [showChunkGrid, setShowChunkGrid] = useState(false);
+  const [showDistanceScale, setShowDistanceScale] = useState(true);
   const [hoverInfo, setHoverInfo] = useState(null);
   const wrapRef = useRef(null);
   const hoverRequestRef = useRef(0);
 
   useEffect(() => {
-    onConfigChange?.({ mode, zoom, showChunkGrid });
-  }, [mode, zoom, showChunkGrid, onConfigChange]);
+    onConfigChange?.({ mode, zoom, showChunkGrid, showDistanceScale });
+  }, [mode, zoom, showChunkGrid, showDistanceScale, onConfigChange]);
 
   const modeLabel = useMemo(
     () => MAP_MODES.find(([value]) => value === mode)?.[1] ?? 'Color',
@@ -160,6 +162,12 @@ export default function MinimapOverlay({
           </div>
 
           <div className="minimap-mode-grid">
+            <button type="button"
+              className={`tb-btn minimap-chip minimap-icon-chip${showDistanceScale ? ' active' : ''}`}
+              onClick={() => setShowDistanceScale((value) => !value)}
+              title="Distance scale" aria-label="Distance scale" aria-pressed={showDistanceScale}>
+              <Ruler size={16} aria-hidden />
+            </button>
             {MAP_MODES.map(([value, label]) => (
               <button
                 key={value}

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createMinimapScale, drawMinimapScale } from './MinimapScale.js';
 import { readRenderTargetPixelsAsync } from './render/RendererReadback.js';
 
 const SIZE = 256;
@@ -58,6 +59,7 @@ export class Minimap {
       mode: 'color',
       zoom: 1,
       showChunkGrid: false,
+      showDistanceScale: true,
     };
     this.sources = {
       controls: null,
@@ -67,6 +69,7 @@ export class Minimap {
       getPropsMask: null,
       getWaterLevel: null,
       getChunkCount: null,
+      getScaleReference: null,
     };
     this.setCanvases(baseCanvas, overlayCanvas);
   }
@@ -104,6 +107,7 @@ export class Minimap {
       prev.mode !== this.config.mode
       || prev.zoom !== this.config.zoom
       || prev.showChunkGrid !== this.config.showChunkGrid
+      || prev.showDistanceScale !== this.config.showDistanceScale
     ) {
       this.requestRedraw();
     }
@@ -384,7 +388,9 @@ export class Minimap {
     }
 
     const view = this._viewState();
-    if (view.zoom > 1) {
+    if (this.config.showDistanceScale !== false) {
+      drawMinimapScale(ctx, createMinimapScale(view, this.sources.getScaleReference?.()), SIZE, SIZE);
+    } else if (view.zoom > 1) {
       const span = Math.round(view.halfSpan * 2);
       ctx.fillStyle = 'rgba(9, 12, 18, 0.58)';
       ctx.fillRect(6, SIZE - 20, 88, 14);
@@ -470,6 +476,8 @@ export class Minimap {
         span: Math.round(view.halfSpan * 2),
         showChunkGrid: !!this.config.showChunkGrid,
         chunkCount: this.sources.getChunkCount?.() || 0,
+        distanceScale: this.config.showDistanceScale !== false
+          ? createMinimapScale(view, this.sources.getScaleReference?.()) : null,
       },
     };
   }

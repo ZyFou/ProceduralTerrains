@@ -25,6 +25,7 @@ describe('real-world project source', () => {
       version: REAL_WORLD_SOURCE_VERSION,
       ...sourceInput,
       buildingsVisible: false,
+      markers: { visible: true, labels: true, lift: 30, points: [], routes: [] },
       heightSettings: {
         mode: 'replace',
         blend: 1,

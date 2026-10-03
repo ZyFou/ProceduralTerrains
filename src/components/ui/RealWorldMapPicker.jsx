@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crosshair, Download, Grip, LoaderCircle, Map, Search, X } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
+import './RealWorldSelectionCenter.css';
 import {
   CUSTOM_AREA_LIMITS,
   describeCustomArea,
   formatCoordinateDisplay,
+  parseCoordinateInput,
   makeCustomLocation,
   resolveImageryStyle,
 } from '../../engine/terrain/RealWorldHeightmap.js';
+import { COORDINATE_FORMATS } from '../../engine/terrain/CoordinateFormats.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const GEOCODING_SEARCH_URL = import.meta.env.VITE_GEOCODING_SEARCH_URL
@@ -90,6 +93,9 @@ export default function RealWorldMapPicker({
   const [searchResults, setSearchResults] = useState([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [coordinateFormat, setCoordinateFormat] = useState('degrees');
+  const [coordinateText, setCoordinateText] = useState(() => formatCoordinateDisplay(spec));
+  const [coordinateError, setCoordinateError] = useState('');
   const info = useMemo(() => describeCustomArea(spec), [spec]);
   const style = resolveImageryStyle(imageryStyle);
   const worldSizeOptions = [64, 128, 192, 256].map((size) => {
@@ -103,6 +109,48 @@ export default function RealWorldMapPicker({
   useEffect(() => {
     specRef.current = spec;
   }, [spec]);
+
+  useEffect(() => {
+    setCoordinateText(formatCoordinateDisplay({ lat: spec.lat, lon: spec.lon }, coordinateFormat));
+    setCoordinateError('');
+  }, [spec.lat, spec.lon, coordinateFormat]);
+
+  const commitSelectionCenter = () => {
+    const current = specRef.current;
+    if (coordinateText.trim() === formatCoordinateDisplay(current, coordinateFormat)) {
+      setCoordinateError('');
+      return current;
+    }
+    const point = parseCoordinateInput(coordinateText, coordinateFormat);
+    if (!point || point.lat < CUSTOM_AREA_LIMITS.lat.min || point.lat > CUSTOM_AREA_LIMITS.lat.max) {
+      setCoordinateError(coordinateFormat === 'lambert93'
+        ? 'Enter valid Lambert 93 easting, northing in meters within France.'
+        : coordinateFormat === 'mercator'
+          ? 'Enter valid Web Mercator easting, northing in meters (latitude between −85° and 85°).'
+          : 'Enter latitude (−85° to 85°), longitude (−180° to 180°) in decimal degrees or DMS.');
+      return null;
+    }
+    const next = { ...current, ...point };
+    // Update the map event source before recentering, so its move callback
+    // retains the newly entered center and current size/detail settings.
+    specRef.current = next;
+    cancelAnimationFrame(frameRef.current);
+    onChange(next);
+    mapRef.current?.panTo([next.lat, next.lon], { animate: false });
+    setCoordinateText(formatCoordinateDisplay(next, coordinateFormat));
+    setCoordinateError('');
+    return next;
+  };
+
+  const changeCoordinateFormat = (format) => {
+    const next = commitSelectionCenter();
+    if (!next) return;
+    if (format === 'lambert93' && !parseCoordinateInput(formatCoordinateDisplay(next, format), format)) {
+      setCoordinateError('Lambert 93 covers mainland France and Corsica. Choose another format for this location.');
+      return;
+    }
+    setCoordinateFormat(format);
+  };
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -375,10 +423,36 @@ export default function RealWorldMapPicker({
           </div>
 
           <aside className="realworld-map-sidebar">
-            <div className="realworld-map-coordinates">
-              <span>Selection center</span>
-              <strong>{formatCoordinateDisplay(spec)}</strong>
-            </div>
+            <form className="realworld-map-coordinates realworld-center" onSubmit={(event) => {
+              event.preventDefault();
+              if (!busy) commitSelectionCenter();
+            }}>
+              <div className="realworld-center-heading"><Crosshair size={15} aria-hidden /><h3>Selection center</h3></div>
+              <label className="realworld-map-select">
+                <span>Coordinate format</span>
+                <select aria-label="Selection center coordinate format" value={coordinateFormat}
+                  disabled={busy} onChange={(event) => changeCoordinateFormat(event.target.value)}>
+                  {COORDINATE_FORMATS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label className="realworld-center-label" htmlFor="realworld-selection-center">Coordinates</label>
+              <div className={`realworld-center-field${coordinateError ? ' is-invalid' : ''}`}>
+                <Crosshair size={15} aria-hidden />
+                <input id="realworld-selection-center" type="text" value={coordinateText}
+                disabled={busy} spellCheck={false} autoComplete="off"
+                aria-describedby="realworld-selection-center-hint"
+                aria-invalid={!!coordinateError}
+                aria-label="Selection center"
+                onChange={(event) => { setCoordinateText(event.target.value); setCoordinateError(''); }} />
+              </div>
+              <small className="realworld-center-hint" id="realworld-selection-center-hint">
+                {['lambert93', 'mercator'].includes(coordinateFormat) ? 'Easting, northing in meters' : 'Latitude, longitude · decimal degrees or DMS'}
+              </small>
+              {coordinateError && <p className="realworld-map-warning" role="alert">{coordinateError}</p>}
+              <button type="submit" className="action-btn realworld-center-apply" disabled={busy}>
+                <Crosshair size={14} aria-hidden /> Center map
+              </button>
+            </form>
 
             <div className="realworld-map-world-settings" aria-labelledby="realworld-world-settings-title">
               <h3 id="realworld-world-settings-title">World settings</h3>
@@ -426,7 +500,10 @@ export default function RealWorldMapPicker({
               type="button"
               className="realworld-map-load"
               disabled={busy}
-              onClick={() => onLoad(spec)}
+              onClick={() => {
+                const next = commitSelectionCenter();
+                if (next) onLoad(next);
+              }}
             >
               <Download size={16} aria-hidden />
               <span>{busy ? `Loading terrain… ${Math.round(progress * 100)}%` : 'Load selected area'}</span>

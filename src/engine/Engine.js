@@ -1,3 +1,5 @@
+import { normalizeMarkers } from './terrain/RealWorldMarkers.js';
+import { RealWorldMarkerLayer } from './terrain/RealWorldMarkerLayer.js';
 import { resolveSurfaceReference } from './terrain/surface/SurfaceDocument.js';
 import { compileSurfaceGraph } from './terrain/surface/SurfaceGraph.js';
 import * as THREE from 'three';
@@ -540,6 +542,9 @@ export class Engine {
     this.importedMapState = { noise: null, height: null, biome: null, imagery: null };
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
     this.realWorldBuildingsVisible = false;
+    this.realWorldMarkers = normalizeMarkers();
+    this.realWorldMarkerLayer?.clear();
+    this.cb.onRealWorldMarkers?.(this.realWorldMarkers);
     this.realWorldSource = null;
 
     // Erosion: additive world-space height-offset field applied in heightAt.
@@ -1032,6 +1037,7 @@ export class Engine {
   _initProps() {
     this.propsManager = new ProceduralPropsManager(this.scene);
     this.realWorldBuildingLayer = new RealWorldBuildingLayer(this.scene);
+    this.realWorldMarkerLayer = new RealWorldMarkerLayer(this.scene);
   }
 
   _creatorBounds() {
@@ -1082,6 +1088,8 @@ export class Engine {
         : (this.paintMode?.layers?.samplePropsMask(x, z) ?? { grass: 0, flowers: 0, mixed: 0 }),
       getWaterLevel: () => this.params.seaLevel,
       getChunkCount: () => this.params.chunkCount,
+      getScaleReference: () => this.worldMode === 'studio' && this.realWorldSource && this.importedMaps?.height?.geoRef
+        ? { bbox: this.importedMaps.height.geoRef.bbox0, cellSize: this.cellSize } : null,
     });
   }
 
@@ -1143,6 +1151,7 @@ export class Engine {
       this._explodeBuildingTimer = setTimeout(() => {
         this._explodeBuildingTimer = null;
         if (this.realWorldBuildingsVisible) this._rebuildRealWorldBuildings({ force: true });
+        else this._rebuildRealWorldMarkers();
         this._needsRender = true;
       }, 320);
     }
@@ -1757,6 +1766,9 @@ export class Engine {
     }
     this.realWorldSource = null;
     this.realWorldBuildingsVisible = false;
+    this.realWorldMarkers = normalizeMarkers();
+    this.realWorldMarkerLayer?.clear();
+    this.cb.onRealWorldMarkers?.(this.realWorldMarkers);
     this.realWorldBuildingLayer?.clear();
     this._realWorldBuildingLayoutKey = '';
     this.realWorldImageryStyle = DEFAULT_IMAGERY_STYLE;
@@ -1907,6 +1919,8 @@ export class Engine {
     // next local/cloud save does not lose the geographic source.
     this.realWorldSource = source;
     this.realWorldBuildingsVisible = source.buildingsVisible === true;
+    this.realWorldMarkers = normalizeMarkers(source.markers);
+    this.cb.onRealWorldMarkers?.(this.realWorldMarkers);
     this.realWorldImageryStyle = imageryStyle.id;
     this.cb.onRealWorldImageryStyle?.(imageryStyle.id);
     this.cb.onRealWorldBuildingsVisible?.(this.realWorldBuildingsVisible);
@@ -2437,7 +2451,27 @@ export class Engine {
     return height;
   }
 
+  setRealWorldMarkers(input) {
+    this.realWorldMarkers = normalizeMarkers(input);
+    if (this.realWorldSource) this.realWorldSource.markers = this.realWorldMarkers;
+    this.cb.onRealWorldMarkers?.(this.realWorldMarkers);
+    this._rebuildRealWorldMarkers();
+  }
+
+  _rebuildRealWorldMarkers() {
+    this.realWorldMarkerLayer?.rebuild({
+      state: this.realWorldMarkers || normalizeMarkers(),
+      geo: this.importedMaps?.height?.geoRef,
+      cellSize: this.cellSize,
+      tiles: this.tiles,
+      sampleHeight: (x, z) => this._sampleRealWorldHeight(x, z),
+      visible: this.worldMode === 'studio' && !!this.realWorldSource,
+    });
+    this._needsRender = true;
+  }
+
   _rebuildRealWorldBuildings({ force = false } = {}) {
+    this._rebuildRealWorldMarkers();
     const entry = this.importedMaps?.height;
     const geo = entry?.geoRef;
     if (!this.realWorldBuildingLayer || !geo?.buildingCells || !this.realWorldSource) {
@@ -9400,6 +9434,7 @@ export class Engine {
     // Hide studio objects
     this.board.group.visible = false;
     if (this.realWorldBuildingLayer) this.realWorldBuildingLayer.group.visible = false;
+    if (this.realWorldMarkerLayer) this.realWorldMarkerLayer.group.visible = false;
     this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
@@ -9654,6 +9689,7 @@ export class Engine {
   /** Restore the single-board studio scene + editor camera. */
   _enterStudioMode({ deferCompile = false } = {}) {
     this.board.group.visible = true;
+    this._rebuildRealWorldMarkers();
     if (this.realWorldBuildingLayer) {
       this.realWorldBuildingLayer.group.visible = this.realWorldBuildingsVisible;
     }
@@ -10117,6 +10153,7 @@ export class Engine {
     // hide studio objects + sleep the editor camera
     this.board.group.visible = false;
     if (this.realWorldBuildingLayer) this.realWorldBuildingLayer.group.visible = false;
+    if (this.realWorldMarkerLayer) this.realWorldMarkerLayer.group.visible = false;
     this._setPlinthVisible(false);
     this.water.visible = false;
     this._tileGhostCell = null;
@@ -13568,6 +13605,7 @@ export class Engine {
     if (this.manualTerrain) { this.manualTerrain.dispose(); this.manualTerrain = null; }
     if (this.splineManager) { this.splineManager.dispose(); this.splineManager = null; }
     if (this.propsManager) { this.propsManager.dispose(); this.propsManager = null; }
+    this.realWorldMarkerLayer?.dispose();
     if (this.realWorldBuildingLayer) { this.realWorldBuildingLayer.dispose(); this.realWorldBuildingLayer = null; }
     if (this.player) { this.player.dispose(); this.player = null; }
     if (this.heightSampler) { this.heightSampler.dispose(); this.heightSampler = null; }

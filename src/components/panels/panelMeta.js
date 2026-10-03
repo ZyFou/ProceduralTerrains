@@ -3,6 +3,7 @@ import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 // Lightweight panel metadata lives separately from the panel implementations so
 // the startup bundle does not pull every settings panel into the landing page.
 export const PANEL_META = {
+  markers: { label: 'Markers', title: 'Markers', desc: 'Floating places and routes.', icon: PANEL_ICONS.markers, modes: ['studio'] },
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },
   explode: { label: 'Explode', title: 'Explode', desc: 'Click the terrain to create permanent craters.', icon: PANEL_ICONS.explode, modes: ['studio'] },
   noiseLayers: { label: 'Layers', title: 'Noise Layers', desc: 'Stack noise layers to shape terrain.', icon: PANEL_ICONS.noiseLayers },

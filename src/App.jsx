@@ -1,3 +1,4 @@
+import { normalizeMarkers } from './engine/terrain/RealWorldMarkers.js';
 import { captureSurfaceProject, restoreSurfaceProject } from './engine/terrain/surface/SurfaceLibrary.js';
 import { encodePortableProject, decodePortableProject } from './project/PortableProject.js';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -82,7 +83,7 @@ import { getWaterBaselineScene } from './engine/water/WaterBaseline.js';
 
 const MODE_LABEL = { studio: 'Tile', infinite: 'Infinite World', planet: 'Planet' };
 const NODE_PANEL_IDS = ['explode', 'planet', 'water', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'debug'];
-const REAL_TERRAIN_PANEL_IDS = ['terrain', 'explode', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
+const REAL_TERRAIN_PANEL_IDS = ['terrain', 'markers', 'explode', 'water', 'props', 'clouds', 'visuals', 'skybox', 'lighting', 'export', 'performance', 'history', 'debug'];
 const PerformanceOverlay = lazy(() => import('./components/perf/PerformanceOverlay.jsx'));
 // Start loading the drawer chunk with the app so the first tool click does
 // not have to wait for the lazy module before anything can be shown.
@@ -234,6 +235,7 @@ export default function App() {
   const [diskRadiusCells, setDiskRadiusCells] = useState(0);
   const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null, imagery: null });
   const [realWorldImageryStyle, setRealWorldImageryStyle] = useState('satellite');
+  const [realWorldMarkers, setRealWorldMarkers] = useState(() => normalizeMarkers());
   const [realWorldBuildingsVisible, setRealWorldBuildingsVisible] = useState(false);
 
   const [worldMode, setWorldMode] = useState('studio');
@@ -553,6 +555,7 @@ export default function App() {
           onImportedMaps: setImportedMaps,
           onRealWorldImageryStyle: setRealWorldImageryStyle,
           onRealWorldBuildingsVisible: setRealWorldBuildingsVisible,
+          onRealWorldMarkers: setRealWorldMarkers,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
             setTileDebug({ ...DEFAULT_TILE_DEBUG });
@@ -2494,6 +2497,8 @@ export default function App() {
     ),
     realWorldImageryStyle,
     onRealWorldImageryStyle: changeRealWorldImageryStyle,
+    realWorldMarkers,
+    onRealWorldMarkers: (state) => engine().setRealWorldMarkers(state),
     realWorldBuildingsVisible,
     onRealWorldBuildingsVisible: (visible) => engine().setRealWorldBuildingsVisible(visible),
     onSoloLayer: (id) => engine().setSoloLayer(id),

@@ -7,6 +7,8 @@ import {
   formatCoordinateDisplay, parseCoordinateInput, resolveImageryStyle,
 } from '../../engine/terrain/RealWorldHeightmap.js';
 
+import { COORDINATE_FORMATS } from '../../engine/terrain/CoordinateFormats.js';
+
 const RealWorldMapPicker = lazy(() => import('./RealWorldMapPicker.jsx'));
 
 const IMPORT_MODE_OPTIONS = [
@@ -248,6 +250,7 @@ function RealWorldBrowser({ ctx }) {
 
 const CUSTOM_AREA_DEFAULT = { lat: 45.90, lon: 6.90, sizeKm: 30, zoom: 12 };
 const customAreaDraft = {
+  format: 'degrees',
   spec: { ...CUSTOM_AREA_DEFAULT },
   coordText: formatCoordinateDisplay(CUSTOM_AREA_DEFAULT),
 };
@@ -267,6 +270,7 @@ const CUSTOM_AREA_SLIDERS = {
 function CustomAreaPicker({ ctx }) {
   const [spec, setSpec] = useState(() => ({ ...customAreaDraft.spec }));
   const [coordText, setCoordText] = useState(() => customAreaDraft.coordText);
+  const [coordFormat, setCoordFormat] = useState(() => customAreaDraft.format);
   const [coordError, setCoordError] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -281,7 +285,7 @@ function CustomAreaPicker({ ctx }) {
     setSpec((s) => {
       const next = { ...s, [key]: v };
       const nextCoord = (key === 'lat' || key === 'lon')
-        ? formatCoordinateDisplay(next)
+        ? formatCoordinateDisplay(next, coordFormat)
         : customAreaDraft.coordText;
       if (key === 'lat' || key === 'lon') {
         setCoordText(nextCoord);
@@ -293,18 +297,18 @@ function CustomAreaPicker({ ctx }) {
   };
 
   const commitCoordText = () => {
-    const parsed = parseCoordinateInput(coordText);
+    const parsed = parseCoordinateInput(coordText, coordFormat);
     if (!parsed) {
-      const current = formatCoordinateDisplay(spec);
+      const current = formatCoordinateDisplay(spec, coordFormat);
       if (coordText.trim() && coordText.trim() !== current) {
-        setCoordError('Use e.g. 46.07621°N, 6.96224°E');
+        setCoordError(['lambert93', 'mercator'].includes(coordFormat) ? 'Enter easting, northing in meters (Lambert 93 covers France).' : 'Use latitude, longitude in degrees or DMS.');
         return null;
       }
       return spec;
     }
     setCoordError('');
     const next = { ...spec, lat: parsed.lat, lon: parsed.lon };
-    const nextCoord = formatCoordinateDisplay(parsed);
+    const nextCoord = formatCoordinateDisplay(parsed, coordFormat);
     setSpec(next);
     setCoordText(nextCoord);
     syncCustomAreaDraft(next, nextCoord);
@@ -319,7 +323,7 @@ function CustomAreaPicker({ ctx }) {
       sizeKm: Number(next.sizeKm),
       zoom: Number(next.zoom),
     };
-    const nextCoord = formatCoordinateDisplay(normalized);
+    const nextCoord = formatCoordinateDisplay(normalized, coordFormat);
     setSpec(normalized);
     setCoordText(nextCoord);
     setCoordError('');
@@ -350,6 +354,18 @@ function CustomAreaPicker({ ctx }) {
       forceOpen={mapOpen}
       settingId="terrain.realWorldCustom"
     >
+      <SelectRow label="Coordinate format" value={coordFormat} options={COORDINATE_FORMATS} onChange={(format) => {
+        const committed = commitCoordText();
+        if (!committed) return;
+        const next = formatCoordinateDisplay(committed, format);
+        if (format === 'lambert93' && !parseCoordinateInput(next, format)) {
+          setCoordError('Lambert 93 covers mainland France and Corsica. Choose another format for this area.');
+          return;
+        }
+        setCoordFormat(format);
+        customAreaDraft.format = format;
+        setCoordText(next); syncCustomAreaDraft(committed, next);
+      }} />
       <div className="stat-row">
         <span className="stat-label">Coordinates</span>
       </div>
@@ -370,8 +386,8 @@ function CustomAreaPicker({ ctx }) {
               load();
             }
           }}
-          placeholder="46.07621°N, 6.96224°E"
-          aria-label="Latitude and longitude"
+          placeholder={coordFormat === 'lambert93' ? '700000, 6600000' : coordFormat === 'mercator' ? '333958.47, 5860839.83' : '46.07621°N, 6.96224°E'}
+          aria-label={coordFormat === 'lambert93' || coordFormat === 'mercator' ? 'Easting and northing' : 'Latitude and longitude'}
           spellCheck={false}
         />
       </div>

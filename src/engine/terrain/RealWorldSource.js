@@ -1,3 +1,4 @@
+import { normalizeMarkers } from './RealWorldMarkers.js';
 export const REAL_WORLD_SOURCE_VERSION = 1;
 
 export const DEFAULT_IMPORT_SETTINGS = Object.freeze({
@@ -84,6 +85,7 @@ export function normalizeRealWorldSource(input) {
     // Building footprints use a separately rate-limited public OSM endpoint.
     // Only an explicit saved opt-in should enable those requests.
     buildingsVisible: input.buildingsVisible === true,
+    markers: normalizeMarkers(input.markers),
     heightSettings: normalizeHeightImportSettings(input.heightSettings),
     imagerySettings: normalizeImageryImportSettings(input.imagerySettings),
   };

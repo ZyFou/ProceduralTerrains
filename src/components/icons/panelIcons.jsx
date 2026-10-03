@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  MapPin,
   Activity,
   Bomb,
   Bug,
@@ -30,6 +31,7 @@ function panelIcon(Icon) {
 
 export const PANEL_ICONS = {
   terrain: panelIcon(Mountain),
+  markers: panelIcon(MapPin),
   explode: panelIcon(Bomb),
   tiles: panelIcon(Grid2x2),
   noiseLayers: panelIcon(Layers),

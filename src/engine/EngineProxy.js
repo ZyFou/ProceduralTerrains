@@ -104,7 +104,7 @@ export const ENGINE_METHODS = Object.freeze([
   'setMinimapCanvases', 'setMinimapConfig', 'setMinimapHover', 'setNoiseStack',
   'setPaintBaseMode', 'setPaintMode', 'setPaintSetting', 'setParam', 'setPerfPreset',
   'setPerfSetting', 'setPlanetStyleColor', 'setPlanetStyleTuning', 'setQuality',
-  'setRealWorldBuildingsVisible', 'setRealWorldImageryStyle', 'setSoloLayer',
+  'setRealWorldMarkers', 'setRealWorldBuildingsVisible', 'setRealWorldImageryStyle', 'setSoloLayer',
   'setSplineEditingEnabled', 'setSurfaceAtlas', 'setTerrainGraph', 'setTileAssemblyShape',
   'setTileDebug', 'setTileMapSetting', 'setTimeOfDay', 'setTouchInput', 'setViewport',
   'smoothExplosionEdges', 'startEmptyTerrain', 'transitionMode', 'updateManualShape',
