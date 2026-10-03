@@ -1,4 +1,5 @@
 import { normalizeMarkers } from './terrain/RealWorldMarkers.js';
+import { fetchCityMarkers } from './terrain/RealWorldCities.js';
 import { RealWorldMarkerLayer } from './terrain/RealWorldMarkerLayer.js';
 import { resolveSurfaceReference } from './terrain/surface/SurfaceDocument.js';
 import { compileSurfaceGraph } from './terrain/surface/SurfaceGraph.js';
@@ -1598,6 +1599,7 @@ export class Engine {
     return !this._landingShowcase
       && this.worldMode === 'studio'
       && this.exploreMode === 'none'
+      && !this._markerRoutePicking
       && !this.paintState?.enabled;
   }
 
@@ -1690,6 +1692,7 @@ export class Engine {
     this._onTilePointerDown = (e) => this._tilePointerDown(e);
     this._onTilePointerUp = (e) => this._tilePointerUp(e);
     this._onTilePointerLeave = () => {
+      this._markerDownAt = null;
       this._tileDownAt = null;
       if (this._tileGhostCell) {
         this._tileGhostCell = null;
@@ -1724,12 +1727,29 @@ export class Engine {
   }
 
   _tilePointerDown(e) {
+    if (this._markerRoutePicking && e.button === 0 && this.worldMode === 'studio') {
+      this._markerDownAt = { x: e.clientX, y: e.clientY };
+      this._tileDownAt = null;
+      return;
+    }
     if (e.pointerType === 'touch' || e.button !== 0) return;
     if (!this._tileInteractionActive()) return;
     this._tileDownAt = { x: e.clientX, y: e.clientY };
   }
 
   _tilePointerUp(e) {
+    if (this._markerRoutePicking && e.button === 0 && this.worldMode === 'studio') {
+      const down = this._markerDownAt;
+      this._markerDownAt = null;
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+      const rect = this.canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      this._tilePointer.set((e.clientX - rect.left) / rect.width * 2 - 1, 1 - (e.clientY - rect.top) / rect.height * 2);
+      this._tileRay.setFromCamera(this._tilePointer, this.camera);
+      const id = this.realWorldMarkerLayer?.pick(this._tileRay);
+      if (id) this.selectMarkerForRoute(id);
+      return;
+    }
     if (e.pointerType === 'touch' || e.button !== 0) return;
     const down = this._tileDownAt;
     this._tileDownAt = null;
@@ -1757,6 +1777,11 @@ export class Engine {
   }
 
   _clearImportedMaps() {
+    this._cityAbort?.abort();
+    this._cityRequestKey = '';
+    this._cityLoading = false;
+    this._cityError = '';
+    this.setMarkerRoutePicking(false);
     this._rwClearTileLoadOverlay();
     this._realWorldSyncGen = (this._realWorldSyncGen ?? 0) + 1;
     for (const type of ['noise', 'height', 'biome', 'imagery']) {
@@ -1909,6 +1934,7 @@ export class Engine {
       zoom,
       imageryStyle: imageryStyle.id,
       buildingsVisible: this.realWorldBuildingsVisible === true,
+      markers: { ...this.realWorldMarkers, points: [], routes: [] },
     });
     if (!source) {
       this.cb.onToast('The geographic terrain settings are invalid.');
@@ -1917,6 +1943,11 @@ export class Engine {
     // This descriptor intentionally outlives the fetched textures. Set it
     // before network work begins so a failed restore remains retryable and the
     // next local/cloud save does not lose the geographic source.
+    this._cityAbort?.abort();
+    this._cityRequestKey = '';
+    this._cityLoading = false;
+    this._cityError = '';
+    this.setMarkerRoutePicking(false);
     this.realWorldSource = source;
     this.realWorldBuildingsVisible = source.buildingsVisible === true;
     this.realWorldMarkers = normalizeMarkers(source.markers);
@@ -2458,7 +2489,74 @@ export class Engine {
     this._rebuildRealWorldMarkers();
   }
 
+  _notifyMarkerStatus() {
+    this.cb?.onRealWorldMarkerStatus?.({ loading: !!this._cityLoading, error: this._cityError || '',
+      picking: !!this._markerRoutePicking, from: this._markerRouteFrom || null,
+      fromName: this.realWorldMarkers?.points.find((p) => p.id === this._markerRouteFrom)?.name || '' });
+  }
+
+  setMarkerRoutePicking(enabled) {
+    this._markerRoutePicking = enabled === true && this.worldMode === 'studio';
+    this._markerRouteFrom = null;
+    this._markerDownAt = null;
+    this.realWorldMarkerLayer?.select(null);
+    this._notifyMarkerStatus();
+    this._needsRender = true;
+  }
+
+  selectMarkerForRoute(id) {
+    if (!this._markerRoutePicking || !this.realWorldMarkers.visible) return;
+    const point = this.realWorldMarkers.points.find((p) => p.id === id && p.visible && (p.source !== 'city' || this.realWorldMarkers.autoCities));
+    if (!point) return;
+    const from = this._markerRouteFrom;
+    if (!from) this._markerRouteFrom = id;
+    else if (from === id) this._markerRouteFrom = null;
+    else {
+      const routes = this.realWorldMarkers.routes;
+      if (routes.length >= 200) { this.cb.onToast?.('The limit is 200 routes.'); return; }
+      if (!routes.some((r) => r.from === from && r.to === id || r.from === id && r.to === from)) {
+        this.setRealWorldMarkers({ ...this.realWorldMarkers, routes: [...routes, { id: crypto.randomUUID(), from, to: id, visible: true }] });
+        this.cb.onToast?.('Route created between the selected markers.');
+      }
+      this._markerRouteFrom = null;
+    }
+    this.realWorldMarkerLayer?.select(this._markerRouteFrom);
+    this._notifyMarkerStatus();
+    this._needsRender = true;
+  }
+
+  async refreshCityMarkers({ force = true } = {}) {
+    const geo = this.importedMaps?.height?.geoRef, source = this.realWorldSource;
+    if (!this.realWorldMarkers?.autoCities || !geo?.bbox0 || !source || this.worldMode !== 'studio') {
+      this._cityAbort?.abort(); this._cityRequestKey = ''; this._cityLoading = false; this._cityError = '';
+      this._notifyMarkerStatus(); return;
+    }
+    const bboxes = this.tiles.map((t) => offsetBbox(geo.bbox0, t.cx, t.cz));
+    if (!bboxes.length) return;
+    const bbox = { minLat: Math.max(-85.051, Math.min(...bboxes.map((b) => b.minLat))), maxLat: Math.min(85.051, Math.max(...bboxes.map((b) => b.maxLat))),
+      minLon: Math.max(-180, Math.min(...bboxes.map((b) => b.minLon))), maxLon: Math.min(180, Math.max(...bboxes.map((b) => b.maxLon))) };
+    const key = JSON.stringify(bbox);
+    if (!force && this._cityRequestKey === key) return;
+    this._cityAbort?.abort();
+    const controller = new AbortController(); this._cityAbort = controller;
+    this._cityRequestKey = key; this._cityLoading = true; this._cityError = ''; this._notifyMarkerStatus();
+    try {
+      const cities = await fetchCityMarkers(bbox, { signal: controller.signal });
+      if (controller.signal.aborted || this.importedMaps?.height?.geoRef !== geo || !this.realWorldMarkers.autoCities) return;
+      const points = [...this.realWorldMarkers.points];
+      const ids = new Set(points.map((p) => p.id));
+      for (const city of cities) if (!ids.has(city.id) && points.length < 200) { points.push(city); ids.add(city.id); }
+      this.setRealWorldMarkers({ ...this.realWorldMarkers, points });
+    } catch (error) {
+      if (!controller.signal.aborted && this.importedMaps?.height?.geoRef === geo) this._cityError = error.message || 'Could not load city markers. Try again.';
+    } finally {
+      if (this._cityAbort === controller) { this._cityLoading = false; this._notifyMarkerStatus(); }
+    }
+  }
+
   _rebuildRealWorldMarkers() {
+    void this.refreshCityMarkers({ force: false });
+    if (!this.realWorldMarkers?.points.some((p) => p.id === this._markerRouteFrom && p.visible && (p.source !== 'city' || this.realWorldMarkers.autoCities))) this._markerRouteFrom = null;
     this.realWorldMarkerLayer?.rebuild({
       state: this.realWorldMarkers || normalizeMarkers(),
       geo: this.importedMaps?.height?.geoRef,
@@ -2467,6 +2565,8 @@ export class Engine {
       sampleHeight: (x, z) => this._sampleRealWorldHeight(x, z),
       visible: this.worldMode === 'studio' && !!this.realWorldSource,
     });
+    this.realWorldMarkerLayer?.select(this._markerRouteFrom);
+    this._notifyMarkerStatus();
     this._needsRender = true;
   }
 
@@ -13514,6 +13614,7 @@ export class Engine {
   }
 
   dispose() {
+    this._cityAbort?.abort();
     this._gpuFramePacer?.dispose();
     for (const entry of Object.values(this.importedMaps || {})) entry?.texture?.dispose();
     this.erosionField?.dispose();

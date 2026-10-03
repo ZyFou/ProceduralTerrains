@@ -236,6 +236,7 @@ export default function App() {
   const [importedMaps, setImportedMaps] = useState({ noise: null, height: null, biome: null, imagery: null });
   const [realWorldImageryStyle, setRealWorldImageryStyle] = useState('satellite');
   const [realWorldMarkers, setRealWorldMarkers] = useState(() => normalizeMarkers());
+  const [realWorldMarkerStatus, setRealWorldMarkerStatus] = useState({ loading: false, error: '', picking: false, from: null, fromName: '' });
   const [realWorldBuildingsVisible, setRealWorldBuildingsVisible] = useState(false);
 
   const [worldMode, setWorldMode] = useState('studio');
@@ -556,6 +557,7 @@ export default function App() {
           onRealWorldImageryStyle: setRealWorldImageryStyle,
           onRealWorldBuildingsVisible: setRealWorldBuildingsVisible,
           onRealWorldMarkers: setRealWorldMarkers,
+          onRealWorldMarkerStatus: setRealWorldMarkerStatus,
           onDebugReset: () => {
             setDebugFlags({ ...DEFAULT_DEBUG_FLAGS });
             setTileDebug({ ...DEFAULT_TILE_DEBUG });
@@ -2206,6 +2208,7 @@ export default function App() {
 
   useEffect(() => {
     engineRef.current?.setExplodeToolEnabled?.(effectivePanel === 'explode');
+    if (effectivePanel !== 'markers') engineRef.current?.setMarkerRoutePicking?.(false);
   }, [effectivePanel]);
 
   const clearExplosions = useCallback(async () => {
@@ -2498,6 +2501,10 @@ export default function App() {
     realWorldImageryStyle,
     onRealWorldImageryStyle: changeRealWorldImageryStyle,
     realWorldMarkers,
+    realWorldMarkerStatus,
+    onRefreshCityMarkers: () => engine().refreshCityMarkers(),
+    onMarkerRoutePicking: (enabled) => engine().setMarkerRoutePicking(enabled),
+    onSelectMarkerForRoute: (id) => engine().selectMarkerForRoute(id),
     onRealWorldMarkers: (state) => engine().setRealWorldMarkers(state),
     realWorldBuildingsVisible,
     onRealWorldBuildingsVisible: (visible) => engine().setRealWorldBuildingsVisible(visible),

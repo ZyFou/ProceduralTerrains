@@ -98,6 +98,7 @@ export function createRealWorldSource({
   zoom,
   imageryStyle,
   buildingsVisible,
+  markers,
   heightSettings,
   imagerySettings,
 }) {
@@ -109,6 +110,7 @@ export function createRealWorldSource({
     zoom,
     imageryStyle,
     buildingsVisible,
+    markers,
     heightSettings: heightSettings ?? DEFAULT_REAL_WORLD_HEIGHT_SETTINGS,
     imagerySettings: imagerySettings ?? DEFAULT_REAL_WORLD_IMAGERY_SETTINGS,
   });

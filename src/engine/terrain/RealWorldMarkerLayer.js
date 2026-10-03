@@ -8,6 +8,7 @@ export class RealWorldMarkerLayer {
     scene.add(this.group);
   }
   clear() {
+    this.pickTargets = [];
     for (const child of [...this.group.children]) {
       child.geometry?.dispose();
       child.material?.map?.dispose();
@@ -23,13 +24,16 @@ export class RealWorldMarkerLayer {
     const world = (point) => geoPointToCellWorld(point, geo.bbox0, geo.zoom, 0, 0, cellSize);
     const inside = ({ x, z }) => tiles.some((t) => Math.abs(x / cellSize - t.cx) <= 0.5 && Math.abs(z / cellSize - t.cz) <= 0.5);
     const height = (p) => (sampleHeight(p.x, p.z) || 0);
-    for (const point of state.points.filter((p) => p.visible)) {
+    const shown = (p) => p?.visible && (p.source !== 'city' || state.autoCities);
+    for (const point of state.points.filter(shown)) {
       const p = world(point);
       if (!inside(p)) continue;
       const ground = height(p), y = ground + state.lift;
       const dot = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffca65' }));
       dot.position.set(p.x, y, p.z);
       this.group.add(dot);
+      dot.userData.markerId = point.id;
+      this.pickTargets.push(dot);
       const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(p.x, ground, p.z), new THREE.Vector3(p.x, y, p.z)]), new THREE.LineBasicMaterial({ color: '#ffca65', transparent: true, opacity: 0.6 }));
       this.group.add(stem);
       if (!state.labels) continue;
@@ -42,10 +46,12 @@ export class RealWorldMarkerLayer {
       const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false }));
       label.position.set(p.x, y + size * 4, p.z); label.scale.set(size * 32, size * 4, 1);
       this.group.add(label);
+      label.userData.markerId = point.id;
+      this.pickTargets.push(label);
     }
     for (const route of state.routes.filter((r) => r.visible)) {
       const from = state.points.find((p) => p.id === route.from), to = state.points.find((p) => p.id === route.to);
-      if (!from?.visible || !to?.visible) continue;
+      if (!shown(from) || !shown(to)) continue;
       const a = world(from), b = world(to);
       let segment = [];
       const flush = () => {
@@ -58,6 +64,16 @@ export class RealWorldMarkerLayer {
         segment.push(new THREE.Vector3(p.x, height(p) + Math.max(size, state.lift * 0.12), p.z));
       }
       flush();
+    }
+  }
+  pick(raycaster) {
+    if (!this.group.visible) return null;
+    this.group.updateMatrixWorld(true);
+    return raycaster.intersectObjects(this.pickTargets || [], false)[0]?.object.userData.markerId || null;
+  }
+  select(id) {
+    for (const object of this.pickTargets || []) {
+      object.material.color.set(object.userData.markerId === id ? '#69d7ff' : object.isSprite ? '#ffffff' : '#ffca65');
     }
   }
   dispose() { this.clear(); this.group.removeFromParent(); }
