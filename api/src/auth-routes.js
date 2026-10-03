@@ -285,6 +285,8 @@ export async function registerAuthRoutes(app) {
   });
 
   app.get('/api/v1/users/:userId/avatar', async (request, reply) => {
+    const requester = await requireSession(request, reply);
+    if (!requester) return;
     const [rows] = await db.execute(
       `SELECT avatar_mime_type, avatar_data
          FROM users
