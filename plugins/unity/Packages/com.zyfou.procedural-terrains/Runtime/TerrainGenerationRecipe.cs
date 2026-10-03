@@ -165,7 +165,7 @@ namespace Zyfou.ProceduralTerrains
         public float Height = 560f;
         public int TilesX = 1;
         public int TilesZ = 1;
-        public int Resolution = 257;
+        public int Resolution = 513;
         public TerrainGenerationPlacement Placement = TerrainGenerationPlacement.WorldOrigin;
         public bool CreatePreviewMaterial = true;
         public float NoiseScale = 45f;
@@ -186,6 +186,27 @@ namespace Zyfou.ProceduralTerrains
         public bool NormalizeOutput;
         public float OutputMinimum;
         public float OutputMaximum = 1.35f;
+        public bool DetailEnabled = true;
+        public float DetailAmplitude = 2f;
+        public float DetailWavelength = 40f;
+        [Range(0f, 1f)] public float DetailSlopeInfluence = .5f;
+        public bool ErosionEnabled = true;
+        public int ErosionIterations = 30;
+        [Range(0f, 1f)] public float ErosionStrength = .4f;
+        public float ErosionAngle = 30f;
+        public bool ProceduralSurface = true;
+        public Color SandColor = new Color(.58f, .44f, .25f);
+        public Color GrassColor = new Color(.12f, .22f, .055f);
+        public Color RockColor = new Color(.28f, .27f, .25f);
+        public Color SnowColor = new Color(.87f, .90f, .94f);
+        public float SurfaceGrain = 3f;
+        public float SurfaceNormalStrength = .35f;
+        public float SnowHeight = .78f;
+        public float RockSlope = 40f;
+        public float SurfaceTransition = .12f;
+        public bool WaterEnabled = true;
+        public float WaterLevel = 100f;
+        public Color WaterColor = new Color(.025f, .22f, .35f);
         public List<TerrainNoiseLayerSettings> Layers = new List<TerrainNoiseLayerSettings>
         {
             new TerrainNoiseLayerSettings(),
@@ -197,9 +218,9 @@ namespace Zyfou.ProceduralTerrains
     }
 
     [CreateAssetMenu(menuName = "Procedural Terrains/Generation Recipe", fileName = "TerrainGenerationRecipe")]
-    public sealed class TerrainGenerationRecipe : ScriptableObject
+    public sealed class TerrainGenerationRecipe : ScriptableObject, ISerializationCallbackReceiver
     {
-        [SerializeField] private int generationVersion = 1;
+        [SerializeField] private int generationVersion = 2;
         [SerializeField] private TerrainGenerationSettings settings = new TerrainGenerationSettings();
 
         public int GenerationVersion => generationVersion;
@@ -207,8 +228,20 @@ namespace Zyfou.ProceduralTerrains
 
         internal void Initialize(TerrainGenerationSettings value)
         {
-            generationVersion = 1;
+            generationVersion = 2;
             settings = value?.Clone() ?? new TerrainGenerationSettings();
+        }
+
+        public void OnBeforeSerialize() { }
+        public void OnAfterDeserialize()
+        {
+            if (generationVersion >= 2) return;
+            settings ??= new TerrainGenerationSettings();
+            settings.DetailEnabled = false;
+            settings.ErosionEnabled = false;
+            settings.ProceduralSurface = false;
+            settings.WaterEnabled = false;
+            generationVersion = 2;
         }
     }
 

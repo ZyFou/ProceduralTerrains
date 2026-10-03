@@ -68,6 +68,17 @@ namespace Zyfou.ProceduralTerrains.Editor
                     result.MoistureScale = .8f;
                     break;
             }
+            result.WaterLevel = result.FormationSeaLevel;
+            result.DetailAmplitude = preset == TerrainGenerationPreset.Alpine ? 4f : preset == TerrainGenerationPreset.Dunes ? .35f
+                : preset == TerrainGenerationPreset.Rolling ? .7f : preset == TerrainGenerationPreset.Cartoon ? .25f
+                : preset == TerrainGenerationPreset.Volcanic || preset == TerrainGenerationPreset.Canyon ? 3f : 2f;
+            result.DetailWavelength = preset == TerrainGenerationPreset.Dunes || preset == TerrainGenerationPreset.Rolling ? 60f : 40f;
+            result.ErosionStrength = preset == TerrainGenerationPreset.Dunes ? .2f : preset == TerrainGenerationPreset.Rolling ? .55f : preset == TerrainGenerationPreset.Cartoon ? .6f : .4f;
+            result.SnowHeight = preset == TerrainGenerationPreset.Alpine ? .65f : preset == TerrainGenerationPreset.Dunes
+                || preset == TerrainGenerationPreset.Volcanic || preset == TerrainGenerationPreset.Canyon ? 1.35f : .78f;
+            result.GrassColor = preset == TerrainGenerationPreset.Dunes ? new UnityEngine.Color(.32f, .24f, .12f) : defaults.GrassColor;
+            result.RockColor = preset == TerrainGenerationPreset.Volcanic ? new UnityEngine.Color(.10f, .105f, .11f)
+                : preset == TerrainGenerationPreset.Canyon ? new UnityEngine.Color(.42f, .19f, .09f) : defaults.RockColor;
             return result;
         }
 

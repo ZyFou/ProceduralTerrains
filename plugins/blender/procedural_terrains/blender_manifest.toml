@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "procedural_terrains"
-version = "0.3.3"
+version = "0.4.0"
 name = "Procedural Terrains"
 tagline = "Generate terrain and import packages as editable meshes"
 maintainer = "ZyFou"
@@ -20,6 +20,8 @@ paths = [
   "builder.py",
   "generation.py",
   "generation_builder.py",
+  "surfaces.py",
+  "water.py",
   "heightfield.py",
   "operators.py",
   "runtime_document.py",

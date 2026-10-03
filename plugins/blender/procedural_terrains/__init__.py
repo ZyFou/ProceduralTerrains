@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Procedural Terrains",
     "author": "ZyFou",
-    "version": (0, 3, 3),
+    "version": (0, 4, 0),
     "blender": (5, 2, 0),
     "location": "File > Import; 3D View > Sidebar > Terrain",
     "description": "Generate native terrain or import validated ZIP and .ptrterrain packages",

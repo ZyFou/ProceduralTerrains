@@ -103,7 +103,7 @@ namespace Zyfou.ProceduralTerrains.EditorTests
             Assert.That(result.Terrains.Count, Is.EqualTo(2));
             Assert.That(result.Root.GetComponent<GeneratedTerrainRoot>().Recipe, Is.Not.Null);
             Assert.That(result.Terrains[0].GetComponent<TerrainCollider>(), Is.Not.Null);
-            Assert.That(result.Terrains[0].terrainData.terrainLayers.Length, Is.EqualTo(1));
+            Assert.That(result.Terrains[0].terrainData.terrainLayers.Length, Is.EqualTo(4));
             Assert.That(result.Terrains[0].rightNeighbor, Is.EqualTo(result.Terrains[1]));
             Assert.That(result.Terrains[1].leftNeighbor, Is.EqualTo(result.Terrains[0]));
             var leftEdge = result.Terrains[0].terrainData.GetHeights(settings.Resolution - 1, 0, 1, settings.Resolution);
@@ -134,6 +134,69 @@ namespace Zyfou.ProceduralTerrains.EditorTests
                 TerrainGenerationSceneBuilder.Build(settings, null, _ => true));
             Assert.That(Object.FindObjectsByType<GeneratedTerrainRoot>(FindObjectsSortMode.None), Is.Empty);
             Assert.That(AssetDatabase.IsValidFolder(GeneratedRoot), Is.False);
+        }
+
+        [Test]
+        public void ThermalErosionConservesMassAndBorders()
+        {
+            var heights = new float[11 * 17]; heights[5 * 17 + 8] = 100f;
+            TerrainThermalErosion.Apply(heights, 17, 11, 2f, 5f, 30, .4f, 30f);
+            double sum = 0;
+            for (var z = 0; z < 11; z++) for (var x = 0; x < 17; x++)
+            {
+                sum += heights[z * 17 + x];
+                Assert.That(heights[z * 17 + x], Is.GreaterThanOrEqualTo(0f));
+                if (z == 0 || z == 10 || x == 0 || x == 16) Assert.That(heights[z * 17 + x], Is.Zero);
+            }
+            Assert.That(sum, Is.EqualTo(100d).Within(.0001));
+            Assert.That(heights[5 * 17 + 8], Is.LessThan(100f));
+        }
+
+        [Test]
+        public void SurfaceWeightsAndAlphamapsMeetAcrossRectangularTileSeams()
+        {
+            var s = BaseSettings(); s.Height = 100f; s.Width = 300f; s.Depth = 120f; s.TilesX = 3; s.TilesZ = 2;
+            s.CreatePreviewMaterial = true;
+            var result = TerrainGenerationSceneBuilder.Build(s);
+            var left = result.Terrains[0].terrainData; var right = result.Terrains[1].terrainData;
+            var a = left.GetAlphamaps(left.alphamapResolution - 1, 0, 1, left.alphamapResolution);
+            var b = right.GetAlphamaps(0, 0, 1, right.alphamapResolution);
+            for (var z = 0; z < left.alphamapResolution; z++)
+            {
+                var sum = 0f;
+                for (var role = 0; role < 4; role++)
+                { Assert.That(a[z, 0, role], Is.EqualTo(b[z, 0, role]).Within(.004f)); sum += a[z, 0, role]; }
+                Assert.That(sum, Is.EqualTo(1f).Within(.01f));
+            }
+        }
+
+        [Test]
+        public void WaterUpdatesLiveAndRegenerationKeepsOnlyOnePlaceholder()
+        {
+            var s = BaseSettings(); s.WaterLevel = 17f;
+            var result = TerrainGenerationSceneBuilder.Build(s);
+            var water = result.Root.GetComponentInChildren<TerrainWaterPlaceholder>();
+            Assert.That(water.GetComponent<Collider>(), Is.Null);
+            water.Configure(false, 29f, Color.cyan, result.Recipe);
+            Assert.That(water.GetComponent<MeshRenderer>().enabled, Is.False);
+            Assert.That(water.transform.localPosition.y, Is.EqualTo(29f));
+            Assert.That(result.Recipe.Settings.WaterLevel, Is.EqualTo(29f));
+            TerrainGenerationSceneBuilder.Build(result.Recipe.Settings.Clone(), result.Root.GetComponent<GeneratedTerrainRoot>());
+            Assert.That(result.Root.GetComponentsInChildren<TerrainWaterPlaceholder>(true).Length, Is.EqualTo(1));
+            Assert.That(water.Level, Is.EqualTo(29f));
+        }
+
+        [Test]
+        public void LegacyRecipeRetainsHistoricalFeatures()
+        {
+            var recipe = ScriptableObject.CreateInstance<TerrainGenerationRecipe>();
+            var serialized = new SerializedObject(recipe);
+            serialized.FindProperty("generationVersion").intValue = 1;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            recipe.OnAfterDeserialize();
+            Assert.That(recipe.GenerationVersion, Is.EqualTo(2));
+            Assert.That(recipe.Settings.DetailEnabled || recipe.Settings.ErosionEnabled || recipe.Settings.ProceduralSurface || recipe.Settings.WaterEnabled, Is.False);
+            Object.DestroyImmediate(recipe);
         }
 
         private static TerrainGenerationSettings BaseSettings()

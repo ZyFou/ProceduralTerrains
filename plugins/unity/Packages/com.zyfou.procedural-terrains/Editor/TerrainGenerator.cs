@@ -52,6 +52,24 @@ namespace Zyfou.ProceduralTerrains.Editor
                 throw new ArgumentException("Terrain resolution must be 65, 129, 257, 513, or 1025.");
             if (settings.SampleCount > TerrainGenerationSettings.MaximumSamples)
                 throw new ArgumentException($"Terrain would contain {settings.SampleCount:N0} samples; the limit is {TerrainGenerationSettings.MaximumSamples:N0}.");
+            foreach (var number in new[] { settings.Width, settings.Depth, settings.Height, settings.DetailAmplitude,
+                settings.DetailWavelength, settings.DetailSlopeInfluence, settings.ErosionStrength, settings.ErosionAngle,
+                settings.SurfaceGrain, settings.SurfaceNormalStrength, settings.SnowHeight, settings.RockSlope,
+                settings.SurfaceTransition, settings.WaterLevel })
+                if (float.IsNaN(number) || float.IsInfinity(number)) throw new ArgumentException("Terrain settings must be finite.");
+            if (settings.DetailAmplitude < 0f || settings.DetailWavelength <= 0f || settings.DetailSlopeInfluence < 0f || settings.DetailSlopeInfluence > 1f)
+                throw new ArgumentException("Invalid fine detail settings.");
+            if (settings.ErosionIterations < 0 || settings.ErosionIterations > 200 || settings.ErosionStrength < 0f
+                || settings.ErosionStrength > 1f || settings.ErosionAngle < 0f || settings.ErosionAngle > 85f)
+                throw new ArgumentException("Invalid thermal erosion settings.");
+            if (settings.SurfaceGrain <= 0f || settings.SurfaceNormalStrength < 0f || settings.SurfaceNormalStrength > 2f
+                || settings.SnowHeight < 0f || settings.SnowHeight > 1.35f || settings.RockSlope < 0f || settings.RockSlope > 85f
+                || settings.SurfaceTransition < .001f || settings.SurfaceTransition > 1f)
+                throw new ArgumentException("Invalid surface settings.");
+            foreach (var color in new[] { settings.SandColor, settings.GrassColor, settings.RockColor, settings.SnowColor, settings.WaterColor })
+                for (var component = 0; component < 4; component++)
+                    if (float.IsNaN(color[component]) || float.IsInfinity(color[component]) || color[component] < 0f || color[component] > 1f)
+                        throw new ArgumentException("Surface colors must contain finite values between 0 and 1.");
             if (settings.Layers == null || settings.Layers.FindAll(layer => layer != null && layer.Enabled).Count == 0)
                 throw new ArgumentException("At least one terrain layer must be enabled.");
             if (settings.Layers.Count > TerrainGenerationSettings.MaximumLayers)
@@ -115,7 +133,7 @@ namespace Zyfou.ProceduralTerrains.Editor
             var active = settings.Layers.FindAll(layer => layer != null && layer.Enabled);
             for (var layerIndex = 0; layerIndex < active.Count; layerIndex++)
             {
-                if (cancel != null && cancel(layerIndex / (float)Mathf.Max(active.Count + 1, 1)))
+                if (cancel != null && cancel(.65f * layerIndex / Mathf.Max(active.Count, 1)))
                     throw new OperationCanceledException("Terrain generation was cancelled.");
                 var layer = active[layerIndex];
                 var parameters = layer.Parameters ?? new TerrainNoiseParameters();
@@ -157,13 +175,32 @@ namespace Zyfou.ProceduralTerrains.Editor
                 }
             }
 
+            var detailSlope = settings.DetailEnabled ? CalculateSlope(accumulated, columns, rows, settings.Width, settings.Depth, settings.Height * settings.NoiseStrength) : null;
+            var wavelength = Mathf.Max(settings.DetailWavelength, 8f * Mathf.Max(settings.Width / (columns - 1), settings.Depth / (rows - 1)));
             var maximum = 0f;
             for (var index = 0; index < count; index++)
             {
+                if (index % 65536 == 0 && cancel != null && cancel(.65f + .05f * index / count))
+                    throw new OperationCanceledException("Terrain generation was cancelled.");
                 var value = accumulated[index] * settings.NoiseStrength;
+                if (settings.DetailEnabled && settings.DetailAmplitude > 0f)
+                {
+                    var gradient = detailSlope[index];
+                    var slope = 1f - 1f / Mathf.Sqrt(1f + gradient * gradient);
+                    var detail = Fbm(worldX[index] / wavelength + seedX + 173.7f, worldY[index] / wavelength + seedY + 419.2f, 2, .5f, 2f, 0f, 0f);
+                    value += (detail * 2f - 1f) * settings.DetailAmplitude / settings.Height * Mathf.Lerp(1f, slope, settings.DetailSlopeInfluence);
+                }
                 value = PostProcess(settings, worldX[index], worldY[index], frequency, seedX, seedY, value);
                 accumulated[index] = value * settings.Height;
                 maximum = Mathf.Max(maximum, accumulated[index]);
+            }
+            if (settings.ErosionEnabled)
+            {
+                TerrainThermalErosion.Apply(accumulated, columns, rows, settings.Width / (columns - 1), settings.Depth / (rows - 1),
+                    settings.ErosionIterations, settings.ErosionStrength, settings.ErosionAngle,
+                    cancel == null ? null : progress => cancel(.7f + .3f * progress));
+                maximum = 0f;
+                foreach (var value in accumulated) maximum = Mathf.Max(maximum, value);
             }
             if (cancel != null && cancel(1f)) throw new OperationCanceledException("Terrain generation was cancelled.");
             return new GeneratedHeightfield(columns, rows, accumulated, Mathf.Max(maximum, .0001f));

@@ -131,9 +131,9 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
               <Grid3X3 size={14} aria-hidden />
             </div>
             <div className="blender-option-preview">
-              <span><Check size={11} /> 257 × 257 resolution</span>
+              <span><Check size={11} /> 513 × 513 resolution</span>
               <span><Check size={11} /> Smooth shading</span>
-              <span><Check size={11} /> Height/slope preview</span>
+              <span><Check size={11} /> Procedural surfaces</span>
             </div>
             <div className="unity-preview-checks">
               <span><CheckCircle2 size={13} /> Deterministic Noise Stack</span>
@@ -222,10 +222,10 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <StepList steps={[
               { title: 'Open the Terrain sidebar', body: 'In the 3D View, press N to open the Sidebar, choose Terrain, then select the Create workflow.' },
               { title: 'Choose the quick setup', body: 'Select one of the eight Terrain presets, click Apply, and set the deterministic seed, width, depth, maximum height, tile grid, and mesh resolution.' },
-              { title: 'Set placement and shading', body: 'Center the assembly at World Origin or the 3D Cursor, then choose smooth shading and the Blender-native height/slope preview material.' },
+              { title: 'Set placement and shading', body: 'Center the assembly at World Origin or the 3D Cursor, then choose smooth shading and the editable procedural sand, grass, rock and snow material.' },
               { title: 'Customize the Noise Stack', body: 'Open Advanced Noise Stack to apply a stack preset or add, duplicate, reorder, and remove layers. Each layer exposes its blend, parameters, seed offset, and height, noise, slope, or biome masks.' },
               { title: 'Check density', body: 'Review Estimated vertices. Blender warns above one million vertices and blocks recipes above sixteen million.' },
-              { title: 'Generate Terrain', body: 'The extension creates a collection of ordinary mesh tiles with UVs, smooth shading, preview material data, tile metadata, and the complete saved recipe.' },
+              { title: 'Generate Terrain', body: 'The extension creates a collection of ordinary mesh tiles with UVs, smooth shading, procedural surface nodes, placeholder water, tile metadata, and the complete saved recipe.' },
             ]} />
           </div>
           <div className="unity-method-card">
@@ -236,7 +236,7 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <StepList steps={[
               { title: 'Select a generated tile', body: 'Choose any tile inside a collection created by the extension.' },
               { title: 'Load Selected', body: 'Click Load Selected to restore the collection recipe into the Create controls.' },
-              { title: 'Adjust the recipe', body: 'Change presets, seed, dimensions, resolution, layers, masks, placement, or preview options.' },
+              { title: 'Adjust the recipe', body: 'Change presets, seed, dimensions, resolution, layers, masks, placement, fine detail, thermal erosion, surface settings, or water.' },
               { title: 'Regenerate Selected', body: 'The extension replaces generated tile geometry while keeping the collection and any unrelated objects inside it.' },
             ]} />
           </div>
@@ -333,6 +333,9 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <ul>
               <li>Secure ZIP and .ptrterrain validation</li>
               <li>Native seeded Noise Stack terrain generation</li>
+              <li>Fine detail and assembly-wide thermal erosion</li>
+              <li>Procedural sand, grass, rock and snow surfaces</li>
+              <li>Live placeholder water in creation and import</li>
               <li>Custom dimensions and origin/cursor placement</li>
               <li>Tiled editable mesh reconstruction</li>
               <li>Aligned UVs and baked normal materials</li>
@@ -344,9 +347,9 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
             <h3>Planned next</h3>
             <ul>
               <li>Detailed biome shader reconstruction</li>
-              <li>Water, props, and spline objects</li>
+              <li>Advanced water shaders and splines</li>
               <li>Non-destructive reimport workflows</li>
-              <li>Node graph and erosion authoring</li>
+              <li>Node graph and hydraulic erosion authoring</li>
             </ul>
           </div>
         </div>
@@ -364,7 +367,7 @@ export default function BlenderPluginPage({ onOpenEditor, onDownload }) {
           </details>
           <details>
             <summary>Can I create terrain without exporting first?<ChevronRight size={16} aria-hidden /></summary>
-            <p>Yes. The Create workflow includes seeded presets and an advanced editable Noise Stack, tiled dimensions, regeneration, and a Blender-native height/slope preview material.</p>
+            <p>Yes. The Create workflow includes seeded presets and an advanced editable Noise Stack, tiled dimensions, regeneration, and an editable procedural sand, grass, rock and snow material.</p>
           </details>
           <details>
             <summary>Why does Automatic use 513 × 513 vertices?<ChevronRight size={16} aria-hidden /></summary>

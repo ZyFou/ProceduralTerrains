@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-alpha.1
+
+- Added density-aware fine detail and conservative thermal erosion over the full assembly.
+- Added Draft/Standard/High/Very High quality presets, sample spacing and a 513 default.
+- Added four procedural TerrainLayers with color/normal textures and altitude/slope alphamaps.
+- Added independent placeholder water to native creation and import, with live level/color/visibility controls.
+- Migrated old generation recipes without enabling new effects or changing their preview surface.
+- Retained native TerrainData, colliders and neighbors; no clouds or props are generated.
+
 ## 0.3.0-alpha.1
 
 - Enabled native seeded terrain creation in the Unity Editor.

@@ -14,6 +14,11 @@ namespace Zyfou.ProceduralTerrains.Editor
         private bool createInScene = true;
         private bool createBakedMaterials = true;
         private bool createTerrainLayers = true;
+        [SerializeField] private TerrainImportWaterMode importWaterMode = TerrainImportWaterMode.Source;
+        [SerializeField] private bool importWaterCustomLevel;
+        [SerializeField] private float importWaterLevel = 100f;
+        [SerializeField] private Color importWaterColor = new Color(.025f, .22f, .35f);
+        [SerializeField] private int qualityIndex = 3;
         private Vector2 scroll;
         private string statusMessage = string.Empty;
         private MessageType statusType = MessageType.None;
@@ -81,6 +86,10 @@ namespace Zyfou.ProceduralTerrains.Editor
                 createTerrainLayers = EditorGUILayout.ToggleLeft(
                     "Create a baked TerrainLayer from exported textures",
                     createTerrainLayers);
+                importWaterMode = (TerrainImportWaterMode)EditorGUILayout.EnumPopup("Water placeholder", importWaterMode);
+                importWaterCustomLevel = EditorGUILayout.Toggle("Custom water level", importWaterCustomLevel);
+                if (importWaterCustomLevel) importWaterLevel = EditorGUILayout.FloatField("Water level (m)", importWaterLevel);
+                importWaterColor = EditorGUILayout.ColorField("Water color", importWaterColor);
             }
 
             EditorGUILayout.Space(8f);
@@ -121,6 +130,7 @@ namespace Zyfou.ProceduralTerrains.Editor
                 EditorGUILayout.Space(8f);
                 DrawProjectSummary(importedProject);
             }
+            DrawSelectedWater();
         }
 
         private void DrawCreateTab()
@@ -149,19 +159,28 @@ namespace Zyfou.ProceduralTerrains.Editor
                     generationSettings.TilesX = EditorGUILayout.IntSlider("Tiles X", generationSettings.TilesX, 1, 16);
                     generationSettings.TilesZ = EditorGUILayout.IntSlider("Tiles Z", generationSettings.TilesZ, 1, 16);
                 }
-                var resolutionIndex = Array.IndexOf(GenerationResolutions, generationSettings.Resolution);
-                generationSettings.Resolution = GenerationResolutions[Mathf.Max(0,
-                    EditorGUILayout.Popup("Resolution", Mathf.Max(0, resolutionIndex), GenerationResolutionLabels))];
+                EditorGUI.BeginChangeCheck();
+                qualityIndex = EditorGUILayout.Popup("Quality", qualityIndex, new[] { "Custom", "Draft (129)", "Standard (257)", "High (513)", "Very High (1025)" });
+                if (EditorGUI.EndChangeCheck() && qualityIndex > 0) generationSettings.Resolution = GenerationResolutions[qualityIndex];
+                if (qualityIndex == 0)
+                {
+                    var resolutionIndex = Array.IndexOf(GenerationResolutions, generationSettings.Resolution);
+                    generationSettings.Resolution = GenerationResolutions[Mathf.Max(0,
+                        EditorGUILayout.Popup("Resolution", Mathf.Max(0, resolutionIndex), GenerationResolutionLabels))];
+                }
                 generationSettings.Placement = (TerrainGenerationPlacement)EditorGUILayout.EnumPopup("Placement", generationSettings.Placement);
                 generationSettings.CreatePreviewMaterial = EditorGUILayout.ToggleLeft(
-                    "Create height/slope preview TerrainLayers", generationSettings.CreatePreviewMaterial);
+                    "Create surface TerrainLayers", generationSettings.CreatePreviewMaterial);
                 EditorGUILayout.LabelField($"Estimated samples: {generationSettings.SampleCount:N0}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"Sample spacing: {generationSettings.Width / (generationSettings.TilesX * (generationSettings.Resolution - 1)):0.##} × {generationSettings.Depth / (generationSettings.TilesZ * (generationSettings.Resolution - 1)):0.##} m", EditorStyles.miniLabel);
                 if (generationSettings.SampleCount > TerrainGenerationSettings.MaximumSamples)
                     EditorGUILayout.HelpBox("This exceeds the 16 million sample limit.", MessageType.Error);
                 else if (generationSettings.SampleCount > 1_000_000)
                     EditorGUILayout.HelpBox("High-density generation can take substantial time and memory.", MessageType.Warning);
             }
 
+            DrawGenerationEnhancements();
+            DrawSelectedWater();
             using (new EditorGUILayout.HorizontalScope())
             {
                 using (new EditorGUI.DisabledScope(generationSettings.SampleCount > TerrainGenerationSettings.MaximumSamples))
@@ -268,6 +287,80 @@ namespace Zyfou.ProceduralTerrains.Editor
                 DrawGenerationLayer(generationSettings.Layers[Mathf.Clamp(activeGenerationLayer, 0, generationSettings.Layers.Count - 1)]);
         }
 
+        private void DrawGenerationEnhancements()
+        {
+            var s = generationSettings;
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                s.DetailEnabled = EditorGUILayout.Toggle("Fine detail", s.DetailEnabled);
+                using (new EditorGUI.DisabledScope(!s.DetailEnabled))
+                {
+                    s.DetailAmplitude = Mathf.Max(0f, EditorGUILayout.FloatField("Amplitude (m)", s.DetailAmplitude));
+                    s.DetailWavelength = Mathf.Max(.001f, EditorGUILayout.FloatField("Wavelength (m)", s.DetailWavelength));
+                    s.DetailSlopeInfluence = EditorGUILayout.Slider("Slope influence", s.DetailSlopeInfluence, 0f, 1f);
+                }
+                s.ErosionEnabled = EditorGUILayout.Toggle("Thermal erosion", s.ErosionEnabled);
+                using (new EditorGUI.DisabledScope(!s.ErosionEnabled))
+                {
+                    s.ErosionIterations = EditorGUILayout.IntSlider("Iterations", s.ErosionIterations, 0, 200);
+                    s.ErosionStrength = EditorGUILayout.Slider("Erosion strength", s.ErosionStrength, 0f, 1f);
+                    s.ErosionAngle = EditorGUILayout.Slider("Stability angle (degrees)", s.ErosionAngle, 0f, 85f);
+                }
+            }
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                s.ProceduralSurface = EditorGUILayout.Toggle("Procedural surfaces", s.ProceduralSurface);
+                using (new EditorGUI.DisabledScope(!s.ProceduralSurface || !s.CreatePreviewMaterial))
+                {
+                    s.SandColor = EditorGUILayout.ColorField("Sand", s.SandColor);
+                    s.GrassColor = EditorGUILayout.ColorField("Grass", s.GrassColor);
+                    s.RockColor = EditorGUILayout.ColorField("Rock", s.RockColor);
+                    s.SnowColor = EditorGUILayout.ColorField("Snow", s.SnowColor);
+                    s.SurfaceGrain = Mathf.Max(.001f, EditorGUILayout.FloatField("Grain scale (m)", s.SurfaceGrain));
+                    s.SurfaceNormalStrength = EditorGUILayout.Slider("Normal strength", s.SurfaceNormalStrength, 0f, 2f);
+                    s.SnowHeight = EditorGUILayout.Slider("Snow height (relative)", s.SnowHeight, 0f, 1.35f);
+                    s.RockSlope = EditorGUILayout.Slider("Rock slope (degrees)", s.RockSlope, 0f, 85f);
+                    s.SurfaceTransition = EditorGUILayout.Slider("Transition softness", s.SurfaceTransition, .001f, 1f);
+                }
+            }
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                s.WaterEnabled = EditorGUILayout.Toggle("Water placeholder", s.WaterEnabled);
+                s.WaterLevel = EditorGUILayout.FloatField("Water level (m)", s.WaterLevel);
+                s.WaterColor = EditorGUILayout.ColorField("Water color", s.WaterColor);
+            }
+        }
+
+        private void DrawSelectedWater()
+        {
+            var selected = Selection.activeGameObject;
+            if (selected == null) return;
+            var water = selected.GetComponent<TerrainWaterPlaceholder>()
+                ?? selected.transform.root.GetComponentInChildren<TerrainWaterPlaceholder>(true);
+            if (water == null) return;
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Selected assembly water", EditorStyles.boldLabel);
+                EditorGUI.BeginChangeCheck();
+                var enabled = EditorGUILayout.Toggle("Visible", water.Visible);
+                var level = EditorGUILayout.FloatField("Level (m)", water.Level);
+                var color = EditorGUILayout.ColorField("Color", water.Color);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(water, "Edit Water Placeholder");
+                    Undo.RecordObject(water.transform, "Edit Water Level");
+                    if (water.Recipe != null) Undo.RecordObject(water.Recipe, "Edit Water Settings");
+                    var material = water.GetComponent<MeshRenderer>().sharedMaterial;
+                    Undo.RecordObject(material, "Edit Water Color");
+                    water.Configure(enabled, level, color, water.Recipe);
+                    EditorUtility.SetDirty(water); EditorUtility.SetDirty(material);
+                    if (water.Recipe != null) EditorUtility.SetDirty(water.Recipe);
+                    if (loadedGeneratedRoot != null && water.Recipe == loadedGeneratedRoot.Recipe)
+                    { generationSettings.WaterEnabled = enabled; generationSettings.WaterLevel = level; generationSettings.WaterColor = color; }
+                }
+            }
+        }
+
         private void DrawGenerationLayer(TerrainNoiseLayerSettings layer)
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -368,6 +461,7 @@ namespace Zyfou.ProceduralTerrains.Editor
                 return;
             }
             generationSettings = loadedGeneratedRoot.Recipe.Settings.Clone();
+            qualityIndex = 0;
             activeGenerationLayer = 0;
             statusType = MessageType.Info;
             statusMessage = $"Loaded settings from {loadedGeneratedRoot.name}.";
@@ -479,6 +573,10 @@ namespace Zyfou.ProceduralTerrains.Editor
                 CreateBakedMaterials = createBakedMaterials,
                 CreateTerrainLayers = createTerrainLayers,
                 ConnectNeighbors = true,
+                WaterMode = importWaterMode,
+                WaterCustomLevel = importWaterCustomLevel,
+                WaterLevel = importWaterLevel,
+                WaterColor = importWaterColor,
             };
         }
 

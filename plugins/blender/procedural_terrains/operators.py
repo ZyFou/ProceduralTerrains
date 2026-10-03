@@ -7,7 +7,7 @@ import traceback
 import bpy
 from bpy.props import (
     BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty,
-    PointerProperty, StringProperty,
+    PointerProperty, StringProperty, FloatVectorProperty,
 )
 from bpy.types import Operator, PropertyGroup
 from bpy_extras.io_utils import ImportHelper
@@ -20,6 +20,7 @@ from .generation import (
 )
 from .generation_builder import build_generated_terrain, generated_collection_from_context
 from .heightfield import HeightfieldError
+from .water import collection_from_context, update_water
 from .runtime_document import TerrainDocumentError, read_document
 
 
@@ -37,6 +38,24 @@ LAYER_TYPE_ITEMS = tuple((item, item.replace("domainWarp", "Domain Warp").replac
 BLEND_ITEMS = tuple((item, item.title(), "") for item in BLEND_MODES)
 TERRAIN_PRESET_ITEMS = tuple((key, key.replace("archipelago", "Archipelago").replace("highlands", "Highlands").replace("rolling", "Rolling Hills").replace("volcanic", "Volcanic Island").replace("canyon", "Canyonlands").replace("cartoon", "Cartoon").replace("alpine", "Alpine Peaks").replace("dunes", "Desert Dunes"), "") for key in TERRAIN_PRESETS)
 STACK_PRESET_ITEMS = tuple((key, "".join((" " + ch if ch.isupper() else ch) for ch in key).strip().title(), "") for key in STACK_PRESETS)
+QUALITY_ITEMS = (("CUSTOM", "Custom", "Use the selected resolution"), ("129", "Draft", "129 x 129"), ("257", "Standard", "257 x 257"), ("513", "High", "513 x 513"), ("1025", "Very High", "1025 x 1025"))
+WATER_ITEMS = (("SOURCE", "From Source", "Use source water presence"), ("ENABLED", "Enabled", "Force placeholder water"), ("DISABLED", "Disabled", "Hide placeholder water"))
+ENHANCED_FIELDS = ("detail_enabled", "detail_amplitude", "detail_wavelength", "detail_slope_influence", "erosion_enabled", "erosion_iterations", "erosion_strength", "erosion_angle", "surface_mode", "sand_color", "grass_color", "rock_color", "snow_color", "surface_grain", "surface_normal_strength", "snow_height", "rock_slope", "surface_transition", "water_enabled", "water_level", "water_color")
+
+
+def _quality_changed(self, context):
+    if self.gen_quality != "CUSTOM":
+        self.gen_resolution = self.gen_quality
+
+
+def _live_water_changed(self, context):
+    collection = collection_from_context(context)
+    if collection is not None:
+        update_water(collection, self.live_water_enabled, self.live_water_level, self.live_water_color)
+        if collection.get("ptr_generated"):
+            self.gen_water_enabled = self.live_water_enabled
+            self.gen_water_level = self.live_water_level
+            self.gen_water_color = self.live_water_color
 
 
 class PTRTERRAIN_PG_layer(PropertyGroup):
@@ -116,10 +135,40 @@ class PTRTERRAIN_PG_settings(PropertyGroup):
     gen_height: FloatProperty(name="Maximum Height", default=560, min=.001, subtype="DISTANCE", unit="LENGTH")
     gen_tiles_x: IntProperty(name="Tiles X", default=1, min=1, max=16)
     gen_tiles_y: IntProperty(name="Tiles Y", default=1, min=1, max=16)
-    gen_resolution: EnumProperty(name="Resolution", items=GEN_RESOLUTION_ITEMS, default="257")
+    gen_resolution: EnumProperty(name="Resolution", items=GEN_RESOLUTION_ITEMS, default="513")
+    gen_quality: EnumProperty(name="Quality", items=QUALITY_ITEMS, default="513", update=_quality_changed)
     gen_placement: EnumProperty(name="Placement", items=PLACEMENT_ITEMS, default="ORIGIN")
     gen_smooth_shading: BoolProperty(name="Smooth Shading", default=True)
-    gen_create_material: BoolProperty(name="Height/Slope Preview Material", default=True)
+    gen_create_material: BoolProperty(name="Create Surface Material", default=True)
+    gen_detail_enabled: BoolProperty(name="Fine Detail", default=True)
+    gen_detail_amplitude: FloatProperty(name="Amplitude (m)", default=2, min=0, max=100)
+    gen_detail_wavelength: FloatProperty(name="Wavelength (m)", default=40, min=.001)
+    gen_detail_slope_influence: FloatProperty(name="Slope Influence", default=.5, min=0, max=1)
+    gen_erosion_enabled: BoolProperty(name="Thermal Erosion", default=True)
+    gen_erosion_iterations: IntProperty(name="Iterations", default=30, min=0, max=200)
+    gen_erosion_strength: FloatProperty(name="Strength", default=.4, min=0, max=1)
+    gen_erosion_angle: FloatProperty(name="Stability Angle (degrees)", default=30, min=0, max=85)
+    gen_surface_mode: EnumProperty(name="Surface", items=(("PROCEDURAL", "Procedural", "Sand, grass, rock and snow"), ("LEGACY", "Legacy Preview", "Original height/slope colors")), default="PROCEDURAL")
+    gen_sand_color: FloatVectorProperty(name="Sand", subtype="COLOR", size=3, default=(.58, .44, .25), min=0, max=1)
+    gen_grass_color: FloatVectorProperty(name="Grass", subtype="COLOR", size=3, default=(.12, .22, .055), min=0, max=1)
+    gen_rock_color: FloatVectorProperty(name="Rock", subtype="COLOR", size=3, default=(.28, .27, .25), min=0, max=1)
+    gen_snow_color: FloatVectorProperty(name="Snow", subtype="COLOR", size=3, default=(.87, .90, .94), min=0, max=1)
+    gen_surface_grain: FloatProperty(name="Grain Scale (m)", default=3, min=.001)
+    gen_surface_normal_strength: FloatProperty(name="Normal Strength", default=.35, min=0, max=2)
+    gen_snow_height: FloatProperty(name="Snow Height (relative)", default=.78, min=0, max=1.35)
+    gen_rock_slope: FloatProperty(name="Rock Slope (degrees)", default=40, min=0, max=85)
+    gen_surface_transition: FloatProperty(name="Transition Softness", default=.12, min=.001, max=1)
+    gen_water_enabled: BoolProperty(name="Water Placeholder", default=True)
+    gen_water_level: FloatProperty(name="Level (m)", default=100)
+    gen_water_color: FloatVectorProperty(name="Water Color", subtype="COLOR", size=3, default=(.025, .22, .35), min=0, max=1)
+    import_water_mode: EnumProperty(name="Water", items=WATER_ITEMS, default="SOURCE")
+    import_water_custom_level: BoolProperty(name="Custom Water Level", default=False)
+    import_water_level: FloatProperty(name="Level Above Placement (m)", default=100)
+    import_water_color: FloatVectorProperty(name="Water Color", subtype="COLOR", size=3, default=(.025, .22, .35), min=0, max=1)
+    live_water_enabled: BoolProperty(name="Visible", default=True, update=_live_water_changed)
+    live_water_collection: StringProperty(default="")
+    live_water_level: FloatProperty(name="Level Above Placement (m)", default=100, update=_live_water_changed)
+    live_water_color: FloatVectorProperty(name="Color", subtype="COLOR", size=3, default=(.025, .22, .35), min=0, max=1, update=_live_water_changed)
     gen_noise_scale: FloatProperty(name="Noise Scale", default=45, min=.01, max=1000)
     gen_noise_strength: FloatProperty(name="Noise Strength", default=1, min=0, max=4)
     gen_terrain_smoothing: FloatProperty(name="Terrain Smoothing", default=0, min=0, max=1)
@@ -189,6 +238,7 @@ def generation_from_scene(settings) -> GenerationSettings:
         biome_scale=settings.gen_biome_scale, temp_bias=settings.gen_temp_bias,
         normalize_output=settings.gen_normalize, output_min=settings.gen_output_min,
         output_max=settings.gen_output_max, layers=layers,
+        **{name: tuple(getattr(settings, "gen_" + name)) if name.endswith("_color") else getattr(settings, "gen_" + name) for name in ENHANCED_FIELDS},
     )
 
 
@@ -220,10 +270,32 @@ def load_generation_to_scene(target, source: GenerationSettings) -> None:
         "normalize_output": "gen_normalize", "output_min": "gen_output_min", "output_max": "gen_output_max",
     }
     for source_name, target_name in mapping.items(): setattr(target, target_name, getattr(source, source_name))
+    for name in ENHANCED_FIELDS:
+        setattr(target, "gen_" + name, getattr(source, name))
+    target.gen_quality = "CUSTOM"
     target.gen_resolution = str(source.resolution)
     target.layers.clear()
     for layer in source.layers: _set_layer_item(target.layers.add(), layer)
     target.active_layer_index = min(target.active_layer_index, max(0, len(target.layers) - 1))
+
+
+class PTRTERRAIN_OT_load_water(Operator):
+    bl_idname = "ptrterrain.load_water"
+    bl_label = "Edit Selected Water"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        collection = collection_from_context(context)
+        if collection is None or "ptr_water_level" not in collection:
+            self.report({"ERROR"}, "Select a terrain with placeholder water.")
+            return {"CANCELLED"}
+        settings = context.scene.ptrterrain_settings
+        # ID-property assignment bypasses callbacks while loading the three values.
+        settings["live_water_enabled"] = bool(collection["ptr_water_enabled"])
+        settings["live_water_level"] = float(collection["ptr_water_level"])
+        settings["live_water_color"] = list(collection["ptr_water_color"])
+        settings.live_water_collection = collection.name
+        return {"FINISHED"}
 
 
 class PTRTERRAIN_OT_generate(Operator):
@@ -308,6 +380,10 @@ class PTRTERRAIN_OT_import(Operator, ImportHelper):
     mesh_resolution: EnumProperty(name="Mesh detail", items=MESH_RESOLUTION_ITEMS, default="AUTO")
     create_materials: BoolProperty(name="Create baked materials", default=True)
     smooth_shading: BoolProperty(name="Smooth shading", default=True)
+    water_mode: EnumProperty(name="Water", items=WATER_ITEMS, default="SOURCE")
+    water_custom_level: BoolProperty(name="Custom Water Level", default=False)
+    water_level: FloatProperty(name="Level Above Placement (m)", default=100)
+    water_color: FloatVectorProperty(name="Water Color", subtype="COLOR", size=3, default=(.025, .22, .35), min=0, max=1)
     pack_images: BoolProperty(name="Pack texture images", default=True)
     select_imported: BoolProperty(name="Select imported tiles", default=True)
     dimension_mode: EnumProperty(name="Dimensions", items=(("SOURCE", "Source Dimensions", ""), ("CUSTOM", "Custom Dimensions", "")), default="SOURCE")
@@ -327,16 +403,20 @@ class PTRTERRAIN_OT_import(Operator, ImportHelper):
         if self.dimension_mode == "CUSTOM": layout.prop(self, "target_width"); layout.prop(self, "target_depth")
         layout.prop(self, "vertical_scale"); layout.prop(self, "placement")
         for name in ("create_materials", "smooth_shading", "pack_images", "select_imported"): layout.prop(self, name)
+        layout.prop(self, "water_mode")
+        layout.prop(self, "water_custom_level")
+        if self.water_custom_level: layout.prop(self, "water_level")
+        layout.prop(self, "water_color")
         if self.mesh_resolution == "FULL": layout.label(text="Full grids can consume substantial memory", icon="ERROR")
 
     def execute(self, context):
         settings = context.scene.ptrterrain_settings
         if self.use_scene_settings:
             source_path = bpy.path.abspath(settings.source_path)
-            options = BuildOptions(settings.mesh_resolution, settings.create_materials, settings.smooth_shading, settings.pack_images, settings.select_imported, settings.dimension_mode, settings.target_width, settings.target_depth, settings.vertical_scale, settings.import_placement)
+            options = BuildOptions(settings.mesh_resolution, settings.create_materials, settings.smooth_shading, settings.pack_images, settings.select_imported, settings.dimension_mode, settings.target_width, settings.target_depth, settings.vertical_scale, settings.import_placement, settings.import_water_mode, settings.import_water_custom_level, settings.import_water_level, tuple(settings.import_water_color))
         else:
             source_path = self.filepath
-            options = BuildOptions(self.mesh_resolution, self.create_materials, self.smooth_shading, self.pack_images, self.select_imported, self.dimension_mode, self.target_width, self.target_depth, self.vertical_scale, self.placement)
+            options = BuildOptions(self.mesh_resolution, self.create_materials, self.smooth_shading, self.pack_images, self.select_imported, self.dimension_mode, self.target_width, self.target_depth, self.vertical_scale, self.placement, self.water_mode, self.water_custom_level, self.water_level, tuple(self.water_color))
         if not source_path:
             self.report({"ERROR"}, "Select a Procedural Terrains ZIP or .ptrterrain file."); return {"CANCELLED"}
         try:
@@ -356,7 +436,7 @@ class PTRTERRAIN_OT_import(Operator, ImportHelper):
             settings.last_status = "Import failed"; self.report({"ERROR"}, (str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__)[:1000]); traceback.print_exc(); return {"CANCELLED"}
 
 
-CLASSES = (PTRTERRAIN_PG_layer, PTRTERRAIN_PG_settings, PTRTERRAIN_OT_generate, PTRTERRAIN_OT_load_generated, PTRTERRAIN_OT_apply_preset, PTRTERRAIN_OT_layer, PTRTERRAIN_OT_import)
+CLASSES = (PTRTERRAIN_PG_layer, PTRTERRAIN_PG_settings, PTRTERRAIN_OT_generate, PTRTERRAIN_OT_load_generated, PTRTERRAIN_OT_load_water, PTRTERRAIN_OT_apply_preset, PTRTERRAIN_OT_layer, PTRTERRAIN_OT_import)
 
 
 def _registered_class(cls):

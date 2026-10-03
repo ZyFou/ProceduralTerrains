@@ -5,6 +5,7 @@ try:
     from plugins.blender.procedural_terrains.generation import (
         GenerationSettings, LAYER_TYPES, NoiseLayer, TerrainEvaluator,
         apply_stack_preset,
+        thermal_erosion, surface_fields,
     )
 except ModuleNotFoundError:
     np = None
@@ -76,6 +77,60 @@ class GenerationTests(unittest.TestCase):
         height = TerrainEvaluator(settings).tile_grid(0, 0)[2]
         self.assertTrue(np.isfinite(height).all())
         self.assertGreater(float(height.max()), float(height.min()))
+
+    def test_thermal_erosion_conserves_mass_and_fixed_edges(self):
+        base = np.zeros((11, 17), dtype=np.float32)
+        base[5, 8] = 100
+        eroded = thermal_erosion(base, 2, 5, 30, .4, 30)
+        self.assertAlmostEqual(float(eroded.sum()), 100, delta=.0001)
+        self.assertLess(eroded[5, 8], 100)
+        self.assertGreaterEqual(float(eroded.min()), 0)
+        self.assertTrue(np.array_equal(eroded[[0, -1]], base[[0, -1]]))
+        self.assertTrue(np.array_equal(eroded[:, [0, -1]], base[:, [0, -1]]))
+        self.assertTrue(np.array_equal(base, thermal_erosion(base, 2, 5, 0, .4, 30)))
+        self.assertTrue(np.array_equal(base, thermal_erosion(base, 2, 5, 30, 0, 30)))
+
+    def test_old_recipe_disables_new_features_and_roundtrips(self):
+        old = GenerationSettings.from_dict({"resolution": 257, "layers": [NoiseLayer.make("legacy").to_dict()]})
+        self.assertFalse(old.detail_enabled)
+        self.assertFalse(old.erosion_enabled)
+        self.assertFalse(old.water_enabled)
+        self.assertEqual(old.surface_mode, "LEGACY")
+        self.assertEqual(old.to_json(), GenerationSettings.from_json(old.to_json()).to_json())
+        self.assertEqual(GenerationSettings().resolution, 513)
+
+    def test_final_surface_fields_are_normalized_and_shared_at_seams(self):
+        settings = GenerationSettings(width=300, depth=120, tiles_x=3, tiles_y=2, resolution=65)
+        evaluator = TerrainEvaluator(settings)
+        left = evaluator.tile_grid(0, 0)[2]
+        right = evaluator.tile_grid(1, 0)[2]
+        bottom = evaluator.tile_grid(0, 1)[2]
+        self.assertTrue(np.array_equal(left[:, -1], right[:, 0]))
+        self.assertTrue(np.array_equal(left[-1], bottom[0]))
+        normals, weights = surface_fields(evaluator._assembly_cache[2], settings)
+        np.testing.assert_allclose(np.linalg.norm(normals, axis=-1), 1, atol=1e-6)
+        np.testing.assert_allclose(weights.sum(axis=-1), 1, atol=1e-6)
+        self.assertTrue(np.isfinite(weights).all())
+        self.assertGreaterEqual(float(weights.min()), 0)
+        copy = TerrainEvaluator(GenerationSettings.from_json(settings.to_json()))
+        np.testing.assert_array_equal(evaluator._assembly_cache[2], self._full(copy))
+
+    def _full(self, evaluator):
+        evaluator.tile_grid(0, 0)
+        return evaluator._assembly_cache[2]
+
+    def test_fine_detail_is_effective_and_frequency_is_density_limited(self):
+        settings = GenerationSettings(resolution=65, erosion_enabled=False, falloff=0, detail_slope_influence=0)
+        fine = TerrainEvaluator(settings).tile_grid(0, 0)[2]
+        settings.detail_enabled = False
+        base = TerrainEvaluator(settings).tile_grid(0, 0)[2]
+        self.assertGreater(float(np.abs(fine - base).max()), .01)
+        self.assertLessEqual(float(np.abs(fine - base).max()), settings.detail_amplitude + .0001)
+        settings.detail_enabled = True
+        settings.detail_wavelength = .001
+        first = TerrainEvaluator(settings).tile_grid(0, 0)[2]
+        settings.detail_wavelength = 8 * settings.width / (settings.resolution - 1)
+        np.testing.assert_array_equal(first, TerrainEvaluator(settings).tile_grid(0, 0)[2])
 
 
 if __name__ == "__main__":

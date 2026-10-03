@@ -11,12 +11,16 @@ editable without relying on a baked CPU heightmap.
 
 ## What’s new
 
-- **Unity integration 0.3.0-alpha.1** — create seeded terrain directly in the
+- **Unity integration 0.4.0-alpha.1** — create seeded terrain directly in the
   Unity Editor, generate tiled `TerrainData`, connect neighbors, and regenerate
   saved recipes.
-- **Blender extension 0.3.3** — create editable procedural meshes in Blender
+  Version 0.4 adds fine detail, thermal erosion, procedural TerrainLayers and live
+  placeholder water for creation and import.
+- **Blender extension 0.4.0** — create editable procedural meshes in Blender
   5.2, import validated export packages, preserve source metadata, and resize
   imported assemblies.
+  Version 0.4 adds density-aware detail, thermal erosion, editable procedural
+  surface nodes and independently toggleable placeholder water.
 - **Real-world terrain mode** — search for a location, preview geographic
   elevation and imagery, then load it into the editor.
 - **Production export presets** — prepare Unity, Unreal, Godot, Blender, and
@@ -103,8 +107,8 @@ The latest archives are available from the app and checked into
 
 | Integration | Version | Requirements | Source | Download |
 | --- | --- | --- | --- | --- |
-| **Unity** | `0.3.0-alpha.1` | Unity `6000.3+` | [`plugins/unity/Packages/com.zyfou.procedural-terrains`](plugins/unity/Packages/com.zyfou.procedural-terrains) | [`Unity ZIP`](public/downloads/plugins/procedural-terrains-unity-0.3.0-alpha.1.zip) |
-| **Blender** | `0.3.3` | Blender `5.2+` | [`plugins/blender/procedural_terrains`](plugins/blender/procedural_terrains) | [`Blender ZIP`](public/downloads/plugins/procedural-terrains-blender-0.3.3.zip) |
+| **Unity** | `0.4.0-alpha.1` | Unity `6000.3+` | [`plugins/unity/Packages/com.zyfou.procedural-terrains`](plugins/unity/Packages/com.zyfou.procedural-terrains) | [`Unity ZIP`](public/downloads/plugins/procedural-terrains-unity-0.4.0-alpha.1.zip) |
+| **Blender** | `0.4.0` | Blender `5.2+` | [`plugins/blender/procedural_terrains`](plugins/blender/procedural_terrains) | [`Blender ZIP`](public/downloads/plugins/procedural-terrains-blender-0.4.0.zip) |
 
 ### Unity workflow
 
@@ -121,7 +125,7 @@ for current limitations and release details.
 
 ### Blender workflow
 
-1. Download `procedural-terrains-blender-0.3.3.zip`.
+1. Download `procedural-terrains-blender-0.4.0.zip`.
 2. In Blender 5.2, open **Edit > Preferences > Get Extensions > Install from Disk**.
 3. Enable the extension and open **3D View > Sidebar > Terrain**.
 4. Use **Create** for native procedural terrain or **Import** for a ZIP/

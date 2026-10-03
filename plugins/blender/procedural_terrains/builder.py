@@ -13,6 +13,7 @@ import bpy
 
 from .heightfield import HeightfieldError, loop_uvs, quad_faces, read_raw_heightfield, vertices
 from .transforms import ImportTransform, import_transform
+from .water import update_water
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,10 @@ class BuildOptions:
     target_depth: float = 1000.0
     vertical_scale: float = 1.0
     placement: str = "ORIGIN"
+    water_mode: str = "SOURCE"
+    water_custom_level: bool = False
+    water_level: float = 100.0
+    water_color: tuple = (.025, .22, .35)
 
 
 @dataclass(frozen=True)
@@ -305,6 +310,14 @@ def build_project(
                 window_manager.progress_update(index + 1)
         finally:
             window_manager.progress_end()
+        enabled = options.water_mode == "ENABLED" or (options.water_mode == "SOURCE" and document["features"].get("water", False))
+        level = options.water_level if options.water_custom_level else (document["bounds"]["seaLevel"] - transform.source_min_height) * transform.scale_z
+        water = update_water(collection, enabled, level, options.water_color)
+        # Track auxiliary output for failure cleanup, but keep result.objects terrain-only.
+        meshes.append(water.data)
+        materials.append(water.data.materials[0])
+        if enabled:
+            warnings.append("Water is represented by a flat placeholder; the source water shader is not reconstructed.")
         if options.select_imported:
             for selected in context.selected_objects:
                 selected.select_set(False)
@@ -314,5 +327,9 @@ def build_project(
                 context.view_layer.objects.active = objects[0]
         return BuildResult(collection, tuple(objects), tuple(warnings))
     except Exception:
+        if collection is not None:
+            for auxiliary in tuple(collection.objects):
+                if auxiliary.get("ptr_generated_water"):
+                    bpy.data.objects.remove(auxiliary, do_unlink=True)
         _cleanup(collection, objects, meshes, materials, images)
         raise

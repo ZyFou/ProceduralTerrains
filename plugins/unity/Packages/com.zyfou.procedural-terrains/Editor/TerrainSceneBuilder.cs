@@ -15,6 +15,10 @@ namespace Zyfou.ProceduralTerrains.Editor
         internal bool CreateBakedMaterials { get; set; } = true;
         internal bool CreateTerrainLayers { get; set; } = true;
         internal bool ConnectNeighbors { get; set; } = true;
+        internal TerrainImportWaterMode WaterMode { get; set; } = TerrainImportWaterMode.Source;
+        internal bool WaterCustomLevel { get; set; }
+        internal float WaterLevel { get; set; } = 100f;
+        internal Color WaterColor { get; set; } = new Color(.025f, .22f, .35f);
     }
 
     internal sealed class TerrainSceneBuildResult
@@ -146,6 +150,13 @@ namespace Zyfou.ProceduralTerrains.Editor
                     }
                 }
 
+                var waterEnabled = options.WaterMode == TerrainImportWaterMode.Enabled
+                    || (options.WaterMode == TerrainImportWaterMode.Source && project.Features.Water);
+                TerrainWaterBuilder.Build(root, project.Bounds.SizeX, project.Bounds.SizeZ,
+                    new Vector2(project.Bounds.MinX + project.Bounds.SizeX * .5f, project.Bounds.MinZ + project.Bounds.SizeZ * .5f),
+                    waterEnabled, options.WaterCustomLevel ? options.WaterLevel : project.Bounds.SeaLevel,
+                    options.WaterColor, generatedFolder, createdAssets);
+                if (waterEnabled) warnings.Add("Water is represented by a flat placeholder; the source water shader is not reconstructed.");
                 AssetDatabase.SaveAssets();
                 EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
                 Selection.activeGameObject = root;
@@ -277,7 +288,7 @@ namespace Zyfou.ProceduralTerrains.Editor
             };
         }
 
-        private static Material CreateTerrainMaterial(string name)
+        internal static Material CreateTerrainMaterial(string name)
         {
             var shader = FindTerrainShader();
             if (shader == null) return null;

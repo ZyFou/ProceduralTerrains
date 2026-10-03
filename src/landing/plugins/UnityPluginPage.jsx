@@ -152,7 +152,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <div className="unity-drop-preview">
               <Mountain size={28} aria-hidden />
               <strong>Highlands · Seed 1337</strong>
-              <small>1000 × 1000 m · 257² · 4 tiles</small>
+              <small>1000 × 1000 m · 513² · 4 tiles</small>
             </div>
             <div className="unity-preview-checks">
               <span><CheckCircle2 size={13} /> Deterministic Noise Stack</span>
@@ -256,9 +256,9 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
               { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
               { title: 'Name and seed the recipe', body: 'Enter a project name, choose one of the eight Terrain presets, click Apply, and set the deterministic seed.' },
               { title: 'Set the assembly', body: 'Choose total width, depth, height scale, Tiles X/Z, and a 65, 129, 257, 513, or 1025 heightmap resolution per tile.' },
-              { title: 'Choose placement and preview', body: 'Center the assembly at World Origin or the current Scene View Pivot, then optionally enable height/slope preview TerrainLayers.' },
+              { title: 'Choose placement and preview', body: 'Center the assembly at World Origin or the current Scene View Pivot, then optionally enable procedural sand, grass, rock and snow TerrainLayers.' },
               { title: 'Customize the Noise Stack', body: 'Open Advanced Noise Stack to apply a stack preset or add, duplicate, reorder, and remove layers. Every layer exposes its blend, parameters, seed offset, and optional height, noise, slope, or biome masks.' },
-              { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, Terrain GameObjects, colliders, connected neighbors, preview assets, and a saved generation recipe.' },
+              { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, Terrain GameObjects, colliders, connected neighbors, procedural surface assets, placeholder water, and a saved generation recipe.' },
             ]} />
           </div>
           <div className="unity-method-card">
@@ -269,7 +269,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <StepList steps={[
               { title: 'Select generated terrain', body: 'Select the Procedural Terrain root or any generated Terrain tile in the Hierarchy.' },
               { title: 'Load Selected', body: 'Click Load Selected to copy the referenced TerrainGenerationRecipe back into the Create controls.' },
-              { title: 'Adjust the recipe', body: 'Change the seed, dimensions, resolution, presets, layers, masks, or preview option.' },
+              { title: 'Adjust the recipe', body: 'Change the seed, dimensions, resolution, presets, layers, masks, fine detail, thermal erosion, surface settings, or water.' },
               { title: 'Regenerate Selected', body: 'Unity replaces only marked generated tiles and assets, reconnects neighbors, and preserves unrelated child GameObjects under the root.' },
             ]} />
           </div>
@@ -369,6 +369,9 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
               <li>ZIP and .ptrterrain validation</li>
               <li>TerrainData, colliders and tile neighbors</li>
               <li>Seeded presets and editable Noise Stacks</li>
+              <li>Fine detail and thermal erosion across tile seams</li>
+              <li>Procedural sand, grass, rock and snow surfaces</li>
+              <li>Live placeholder water in creation and import</li>
               <li>Saved recipes, load selected and regeneration</li>
               <li>Baked color and normal TerrainLayer</li>
               <li>Built-in, URP and HDRP Terrain materials</li>
@@ -379,7 +382,7 @@ export default function UnityPluginPage({ onOpenEditor, onDownload }) {
             <h3>Planned next</h3>
             <ul>
               <li>Runtime terrain generation</li>
-              <li>Detailed biome materials and props</li>
+              <li>Full studio biome shader reconstruction</li>
               <li>Splines and richer water reconstruction</li>
               <li>Expanded runtime generation tools</li>
             </ul>

@@ -125,7 +125,7 @@ class GenerationSettings:
     height: float = 560.0
     tiles_x: int = 1
     tiles_y: int = 1
-    resolution: int = 257
+    resolution: int = 513
     placement: str = "ORIGIN"
     smooth_shading: bool = True
     create_material: bool = True
@@ -147,6 +147,28 @@ class GenerationSettings:
     normalize_output: bool = False
     output_min: float = 0.0
     output_max: float = 1.35
+    generation_version: int = 2
+    detail_enabled: bool = True
+    detail_amplitude: float = 2.0
+    detail_wavelength: float = 40.0
+    detail_slope_influence: float = 0.5
+    erosion_enabled: bool = True
+    erosion_iterations: int = 30
+    erosion_strength: float = 0.4
+    erosion_angle: float = 30.0
+    surface_mode: str = "PROCEDURAL"
+    sand_color: tuple = (0.58, 0.44, 0.25)
+    grass_color: tuple = (0.12, 0.22, 0.055)
+    rock_color: tuple = (0.28, 0.27, 0.25)
+    snow_color: tuple = (0.87, 0.90, 0.94)
+    surface_grain: float = 3.0
+    surface_normal_strength: float = 0.35
+    snow_height: float = 0.78
+    rock_slope: float = 40.0
+    surface_transition: float = 0.12
+    water_enabled: bool = True
+    water_level: float = 100.0
+    water_color: tuple = (0.025, 0.22, 0.35)
     layers: list[NoiseLayer] = field(default_factory=lambda: [NoiseLayer.make("legacy", name="Classic Terrain")])
 
     @property
@@ -162,6 +184,21 @@ class GenerationSettings:
             raise ValueError("Terrain resolution must be 65, 129, 257, 513, or 1025.")
         if self.vertex_count > MAX_VERTICES:
             raise ValueError(f"Terrain would contain {self.vertex_count:,} vertices; the limit is {MAX_VERTICES:,}.")
+        numeric = (self.width, self.depth, self.height, self.detail_amplitude, self.detail_wavelength,
+                   self.detail_slope_influence, self.erosion_strength, self.erosion_angle,
+                   self.surface_grain, self.surface_normal_strength, self.snow_height,
+                   self.rock_slope, self.surface_transition, self.water_level)
+        if not all(np.isfinite(v) for v in numeric):
+            raise ValueError("Terrain settings must be finite.")
+        if self.detail_amplitude < 0 or self.detail_wavelength <= 0 or not 0 <= self.detail_slope_influence <= 1:
+            raise ValueError("Invalid fine detail settings.")
+        if not 0 <= self.erosion_iterations <= 200 or not 0 <= self.erosion_strength <= 1 or not 0 <= self.erosion_angle <= 85:
+            raise ValueError("Invalid thermal erosion settings.")
+        if self.surface_mode not in {"PROCEDURAL", "LEGACY"} or self.surface_grain <= 0 or not 0 <= self.surface_normal_strength <= 2 or not 0 <= self.snow_height <= 1.35 or not 0 <= self.rock_slope <= 85 or not 0.001 <= self.surface_transition <= 1:
+            raise ValueError("Invalid surface settings.")
+        for color in (self.sand_color, self.grass_color, self.rock_color, self.snow_color, self.water_color):
+            if len(color) != 3 or not all(np.isfinite(v) and 0 <= v <= 1 for v in color):
+                raise ValueError("Surface and water colors must contain three finite values in [0, 1].")
         active = [layer for layer in self.layers if layer.enabled]
         if not active:
             raise ValueError("At least one terrain layer must be enabled.")
@@ -191,6 +228,9 @@ class GenerationSettings:
             "smoothShading": "smooth_shading", "stackPreset": "stack_preset",
         }
         normalized = {aliases.get(key, key): item for key, item in value.items()}
+        if normalized.get("generation_version", 1) < 2:
+            normalized.update(generation_version=2, detail_enabled=False, erosion_enabled=False,
+                              surface_mode="LEGACY", water_enabled=False)
         normalized["layers"] = [NoiseLayer.from_dict(item) for item in normalized.get("layers", [])]
         valid = set(cls.__dataclass_fields__)
         return cls(**{key: item for key, item in normalized.items() if key in valid})
@@ -248,6 +288,13 @@ def apply_terrain_preset(settings: GenerationSettings, key: str) -> GenerationSe
     for name, value in TERRAIN_PRESETS.get(key, {}).items():
         setattr(base, name, value)
     base.preset = key if key in TERRAIN_PRESETS else "highlands"
+    base.water_level = base.formation_sea_level
+    base.detail_amplitude = {"alpine": 4, "volcanic": 3, "canyon": 3, "dunes": .35, "rolling": .7, "cartoon": .25}.get(key, 2)
+    base.detail_wavelength = {"dunes": 60, "rolling": 60}.get(key, 40)
+    base.erosion_strength = {"dunes": .2, "rolling": .55, "cartoon": .6}.get(key, .4)
+    base.snow_height = {"alpine": .65, "dunes": 1.35, "volcanic": 1.35, "canyon": 1.35}.get(key, .78)
+    base.grass_color = (.32, .24, .12) if key == "dunes" else defaults.grass_color
+    base.rock_color = (.10, .105, .11) if key == "volcanic" else (.42, .19, .09) if key == "canyon" else defaults.rock_color
     return base
 
 
@@ -630,6 +677,19 @@ class TerrainEvaluator:
 
     def sample(self, world_x, world_y):
         height = self._evaluate_stack(np.asarray(world_x, dtype=np.float32), np.asarray(world_y, dtype=np.float32))
+        s = self.settings
+        if s.detail_enabled and s.detail_amplitude > 0:
+            dx, dy = s.width / (s.tiles_x * (s.resolution - 1)), s.depth / (s.tiles_y * (s.resolution - 1))
+            wavelength = max(s.detail_wavelength, 4 * max(dx, dy))
+            # Two octaves, with the shortest wavelength still resolved by four cells.
+            wavelength = max(wavelength, 8 * max(dx, dy))
+            slope = 0.0
+            if np.ndim(height) == 2 and min(height.shape) > 1:
+                gy, gx = np.gradient(height * s.height, dy, dx)
+                slope = 1 - 1 / np.sqrt(1 + gx * gx + gy * gy)
+            detail = fbm2(np.asarray(world_x) / wavelength + self.seed_x + 173.7,
+                          np.asarray(world_y) / wavelength + self.seed_y + 419.2, 2, .5, 2)
+            height += (detail * 2 - 1) * s.detail_amplitude / s.height * ((1 - s.detail_slope_influence) + s.detail_slope_influence * slope)
         smoothing = np.clip(self.settings.terrain_smoothing, 0, 1)
         if smoothing > .0001:
             normalized = np.clip(height / 1.35, 0, 1)
@@ -672,10 +732,57 @@ class TerrainEvaluator:
             xs = np.linspace(-self.settings.width * .5, self.settings.width * .5, columns, dtype=np.float32)
             ys = np.linspace(-self.settings.depth * .5, self.settings.depth * .5, rows, dtype=np.float32)
             full_x, full_y = np.meshgrid(xs, ys)
-            self._assembly_cache = (xs, ys, self.sample(full_x, full_y))
+            heights = self.sample(full_x, full_y)
+            if self.settings.erosion_enabled:
+                heights = thermal_erosion(heights, self.settings.width / (columns - 1),
+                                          self.settings.depth / (rows - 1), self.settings.erosion_iterations,
+                                          self.settings.erosion_strength, self.settings.erosion_angle)
+            self._assembly_cache = (xs, ys, heights)
         xs, ys, full_height = self._assembly_cache
         x0, y0 = tile_x * (resolution - 1), tile_y * (resolution - 1)
         tile_xs = xs[x0:x0 + resolution]
         tile_ys = ys[y0:y0 + resolution]
         grid_x, grid_y = np.meshgrid(tile_xs, tile_ys)
         return grid_x, grid_y, full_height[y0:y0 + resolution, x0:x0 + resolution]
+
+
+def thermal_erosion(heights, dx, dy, iterations, strength, angle):
+    """Conservative four-neighbor relaxation. Outer cells neither send nor receive."""
+    result = np.asarray(heights, dtype=np.float32).copy()
+    talus = np.tan(np.float32(angle * np.pi / 180))
+    for _ in range(iterations):
+        center = result[1:-1, 1:-1]
+        excess = np.stack((center - result[1:-1, :-2] - talus * dx,
+                           center - result[1:-1, 2:] - talus * dx,
+                           center - result[:-2, 1:-1] - talus * dy,
+                           center - result[2:, 1:-1] - talus * dy))
+        excess[0, :, 0] = excess[1, :, -1] = -np.inf
+        excess[2, 0, :] = excess[3, -1, :] = -np.inf
+        direction = np.argmax(excess, axis=0)
+        # 1/8 is stable even when all four neighbors deposit into the same cell.
+        amount = np.maximum(np.max(excess, axis=0), 0) * np.float32(strength * .125)
+        delta = np.zeros_like(result)
+        delta[1:-1, 1:-1] -= amount
+        for k, target in enumerate((delta[1:-1, :-2], delta[1:-1, 2:], delta[:-2, 1:-1], delta[2:, 1:-1])):
+            target += np.where(direction == k, amount, 0)
+        result += delta
+    return result
+
+
+def surface_fields(heights, settings):
+    """Global normals and normalized sand/grass/rock/snow weights after erosion."""
+    rows, columns = heights.shape
+    gy, gx = np.gradient(heights, settings.depth / (rows - 1), settings.width / (columns - 1))
+    normals = np.stack((-gx, gy, np.ones_like(gx)), axis=-1)
+    normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
+    altitude = heights / settings.height
+    slope = np.arctan(np.hypot(gx, gy)) * np.float32(180 / np.pi)
+    t = settings.surface_transition
+    rock = _smoothstep(settings.rock_slope - t * 45, settings.rock_slope + t * 45, slope)
+    snow = _smoothstep(settings.snow_height - t, settings.snow_height + t, altitude) * (1 - rock)
+    sand = (1 - _smoothstep(settings.water_level / settings.height + .025 - t * .25,
+                           settings.water_level / settings.height + .025 + t * .25, altitude)) * (1 - rock) * (1 - snow)
+    grass = (1 - rock) * (1 - snow) * (1 - sand)
+    weights = np.stack((sand, grass, rock, snow), axis=-1)
+    weights /= np.maximum(weights.sum(axis=-1, keepdims=True), 1e-8)
+    return normals.astype(np.float32), weights.astype(np.float32)

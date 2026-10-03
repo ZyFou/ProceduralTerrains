@@ -42,6 +42,8 @@ namespace Zyfou.ProceduralTerrains.Editor
             var createdAssets = new List<string>();
             var oldAssetsToDelete = new HashSet<string>();
             var originalTerrainData = new Dictionary<Terrain, TerrainData>();
+            var originalMaterials = new Dictionary<Terrain, Material>();
+            var originalNeighbors = new Dictionary<Terrain, Terrain[]>();
             var createdTileObjects = new List<GameObject>();
             Dictionary<GeneratedTerrainTile, (string Name, Vector3 LocalPosition)> originalTileStates = null;
             var createdRoot = existingRoot == null;
@@ -50,6 +52,12 @@ namespace Zyfou.ProceduralTerrains.Editor
             var originalRecipeSettings = recipe != null ? recipe.Settings.Clone() : null;
             var originalRootName = rootObject != null ? rootObject.name : null;
             var originalRootPosition = rootObject != null ? rootObject.transform.position : Vector3.zero;
+            var originalWater = rootObject != null ? rootObject.GetComponentInChildren<TerrainWaterPlaceholder>(true) : null;
+            var originalWaterPosition = originalWater != null ? originalWater.transform.localPosition : Vector3.zero;
+            var originalWaterScale = originalWater != null ? originalWater.transform.localScale : Vector3.one;
+            var originalWaterVisible = originalWater != null && originalWater.Visible;
+            var originalWaterLevel = originalWater != null ? originalWater.Level : 0f;
+            var originalWaterColor = originalWater != null ? originalWater.Color : Color.white;
             var folder = recipe != null ? Path.GetDirectoryName(AssetDatabase.GetAssetPath(recipe))?.Replace('\\', '/') : null;
             var createdFolder = false;
 
@@ -104,7 +112,11 @@ namespace Zyfou.ProceduralTerrains.Editor
                         AssetDatabase.CreateAsset(terrainData, dataPath);
                         createdAssets.Add(dataPath);
 
-                        if (settings.CreatePreviewMaterial)
+                        if (settings.CreatePreviewMaterial && settings.ProceduralSurface)
+                        {
+                            TerrainProceduralSurface.Build(terrainData, generated, settings, tileX, tileZ, folder, createdAssets);
+                        }
+                        else if (settings.CreatePreviewMaterial)
                         {
                             var previewTexture = CreatePreviewTexture(generated, settings, tileX, tileZ);
                             var texturePath = AssetDatabase.GenerateUniqueAssetPath($"{folder}/{tileStem}_Preview.asset");
@@ -139,6 +151,8 @@ namespace Zyfou.ProceduralTerrains.Editor
                             terrain = tileMarker.GetComponent<Terrain>();
                             if (terrain == null) throw new InvalidOperationException($"Generated tile {tileMarker.name} has no Terrain component.");
                             originalTerrainData[terrain] = terrain.terrainData;
+                            originalMaterials[terrain] = terrain.materialTemplate;
+                            originalNeighbors[terrain] = new[] { terrain.leftNeighbor, terrain.topNeighbor, terrain.rightNeighbor, terrain.bottomNeighbor };
                             CollectTerrainAssets(terrain.terrainData, folder, oldAssetsToDelete);
                             Undo.RecordObject(terrain, "Regenerate Procedural Terrain Tile");
                             terrain.terrainData = terrainData;
@@ -159,6 +173,14 @@ namespace Zyfou.ProceduralTerrains.Editor
                         tileMarker.transform.localRotation = Quaternion.identity;
                         tileMarker.transform.localScale = Vector3.one;
                         terrain.drawInstanced = true;
+                        var material = TerrainSceneBuilder.CreateTerrainMaterial(tileStem);
+                        if (material != null)
+                        {
+                            var oldMaterial = terrain.materialTemplate;
+                            AddIfGenerated(AssetDatabase.GetAssetPath(oldMaterial), folder, oldAssetsToDelete);
+                            TerrainProceduralSurface.Save(material, $"{folder}/{tileStem}_Terrain.mat", createdAssets);
+                            terrain.materialTemplate = material;
+                        }
                         terrain.allowAutoConnect = false;
                         terrain.Flush();
                         terrains.Add(terrain);
@@ -168,7 +190,10 @@ namespace Zyfou.ProceduralTerrains.Editor
 
                 foreach (var stale in existingTiles.Values)
                     if (stale.TryGetComponent<Terrain>(out var staleTerrain))
+                    {
                         CollectTerrainAssets(staleTerrain.terrainData, folder, oldAssetsToDelete);
+                        AddIfGenerated(AssetDatabase.GetAssetPath(staleTerrain.materialTemplate), folder, oldAssetsToDelete);
+                    }
 
                 foreach (var pair in terrainByCoordinate)
                 {
@@ -181,6 +206,8 @@ namespace Zyfou.ProceduralTerrains.Editor
                 }
 
                 recipe.Initialize(settings);
+                TerrainWaterBuilder.Build(rootObject, settings.Width, settings.Depth, Vector2.zero,
+                    settings.WaterEnabled, settings.WaterLevel, settings.WaterColor, folder, createdAssets, recipe);
                 EditorUtility.SetDirty(recipe);
                 AssetDatabase.SaveAssets();
                 foreach (var stale in existingTiles.Values) Undo.DestroyObjectImmediate(stale.gameObject);
@@ -202,6 +229,8 @@ namespace Zyfou.ProceduralTerrains.Editor
                     {
                         if (pair.Key == null) continue;
                         pair.Key.terrainData = pair.Value;
+                        if (originalMaterials.TryGetValue(pair.Key, out var originalMaterial)) pair.Key.materialTemplate = originalMaterial;
+                        if (originalNeighbors.TryGetValue(pair.Key, out var neighbors)) pair.Key.SetNeighbors(neighbors[0], neighbors[1], neighbors[2], neighbors[3]);
                         var collider = pair.Key.GetComponent<TerrainCollider>();
                         if (collider != null) collider.terrainData = pair.Value;
                     }
@@ -225,6 +254,17 @@ namespace Zyfou.ProceduralTerrains.Editor
                     {
                         recipe.Initialize(originalRecipeSettings);
                         EditorUtility.SetDirty(recipe);
+                    }
+                    if (originalWater != null)
+                    {
+                        originalWater.transform.localPosition = originalWaterPosition;
+                        originalWater.transform.localScale = originalWaterScale;
+                        originalWater.Configure(originalWaterVisible, originalWaterLevel, originalWaterColor, recipe);
+                    }
+                    else if (rootObject != null)
+                    {
+                        var createdWater = rootObject.GetComponentInChildren<TerrainWaterPlaceholder>(true);
+                        if (createdWater != null) Object.DestroyImmediate(createdWater.gameObject);
                     }
                 }
                 foreach (var path in createdAssets.AsEnumerable().Reverse()) AssetDatabase.DeleteAsset(path);
@@ -335,6 +375,7 @@ namespace Zyfou.ProceduralTerrains.Editor
             {
                 if (layer == null) continue;
                 AddIfGenerated(AssetDatabase.GetAssetPath(layer.diffuseTexture), folder, paths);
+                AddIfGenerated(AssetDatabase.GetAssetPath(layer.normalMapTexture), folder, paths);
                 AddIfGenerated(AssetDatabase.GetAssetPath(layer), folder, paths);
             }
         }

@@ -1,6 +1,6 @@
 {
   "name": "com.zyfou.procedural-terrains",
-  "version": "0.3.0-alpha.1",
+  "version": "0.4.0-alpha.1",
   "displayName": "Procedural Terrains",
   "description": "Creates deterministic native terrain and imports Procedural Terrains ZIP exports as validated Unity Terrain scenes.",
   "unity": "6000.3",

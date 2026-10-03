@@ -86,17 +86,29 @@ def _draw_create(layout, settings):
     grid = preset.row(align=True)
     grid.prop(settings, "gen_tiles_x")
     grid.prop(settings, "gen_tiles_y")
-    preset.prop(settings, "gen_resolution")
+    preset.prop(settings, "gen_quality")
+    if settings.gen_quality == "CUSTOM": preset.prop(settings, "gen_resolution")
     preset.prop(settings, "gen_placement")
     preset.prop(settings, "gen_smooth_shading")
     preset.prop(settings, "gen_create_material")
     resolution = int(settings.gen_resolution)
     vertex_count = settings.gen_tiles_x * settings.gen_tiles_y * resolution * resolution
     preset.label(text=f"Estimated vertices: {vertex_count:,}", icon="MESH_GRID")
+    preset.label(text=f"Sample spacing: {settings.gen_width / (settings.gen_tiles_x * (resolution - 1)):.2f} x {settings.gen_depth / (settings.gen_tiles_y * (resolution - 1)):.2f} m")
     if vertex_count > 16_000_000:
         preset.label(text="Exceeds the 16 million vertex limit", icon="ERROR")
     elif vertex_count > 1_000_000:
         preset.label(text="High-density terrain may take time", icon="INFO")
+
+    for title, fields in (
+        ("Fine Detail", ("detail_enabled", "detail_amplitude", "detail_wavelength", "detail_slope_influence")),
+        ("Thermal Erosion", ("erosion_enabled", "erosion_iterations", "erosion_strength", "erosion_angle")),
+        ("Surface", ("surface_mode", "sand_color", "grass_color", "rock_color", "snow_color", "surface_grain", "surface_normal_strength", "snow_height", "rock_slope", "surface_transition")),
+        ("Water Placeholder", ("water_enabled", "water_level", "water_color")),
+    ):
+        box = layout.box()
+        box.label(text=title)
+        for field in fields: box.prop(settings, "gen_" + field)
 
     row = layout.row(align=True)
     row.enabled = vertex_count <= 16_000_000
@@ -151,6 +163,11 @@ def _draw_import(layout, settings):
     options.prop(settings, "create_materials")
     options.prop(settings, "pack_images")
     options.prop(settings, "select_imported")
+    water = layout.box()
+    water.label(text="Water Placeholder")
+    for field in ("import_water_mode", "import_water_custom_level", "import_water_color"):
+        water.prop(settings, field)
+    if settings.import_water_custom_level: water.prop(settings, "import_water_level")
     if settings.mesh_resolution == "FULL":
         layout.label(text="Full 2K/4K grids may be very heavy", icon="ERROR")
     row = layout.row()
@@ -174,6 +191,15 @@ class PTRTERRAIN_PT_main(Panel):
             _draw_create(layout, settings)
         else:
             _draw_import(layout, settings)
+        from .water import collection_from_context
+        collection = collection_from_context(context)
+        if collection is not None and "ptr_water_level" in collection:
+            water = layout.box()
+            water.operator("ptrterrain.load_water")
+            fields = water.column()
+            fields.enabled = settings.live_water_collection == collection.name
+            for name in ("live_water_enabled", "live_water_level", "live_water_color"):
+                fields.prop(settings, name)
         _draw_status(layout, settings)
 
 
