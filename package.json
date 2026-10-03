@@ -5,7 +5,7 @@
   "author": "ZyFou",
   "main": "electron/main.cjs",
   "private": true,
-  "version": "1.9.5",
+  "version": "1.9.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
