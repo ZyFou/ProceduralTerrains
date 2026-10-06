@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -6,6 +7,7 @@ const PopupContext = createContext(null);
 const ICONS = { error: AlertTriangle, success: CheckCircle2, info: Info };
 
 function Notice({ notice, onDismiss }) {
+  useLanguage();
   const Icon = ICONS[notice.type] || Info;
 
   useEffect(() => {
@@ -18,10 +20,10 @@ function Notice({ notice, onDismiss }) {
     <div className={`app-popup-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
       <span className="app-popup-notice-icon"><Icon size={17} aria-hidden /></span>
       <span className="app-popup-notice-copy">
-        {notice.title && <strong>{notice.title}</strong>}
-        <span>{notice.message}</span>
+        {notice.title && <strong>{translateText(notice.title)}</strong>}
+        <span>{translateText(notice.message)}</span>
       </span>
-      <button type="button" onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification">
+      <button type="button" onClick={() => onDismiss(notice.id)} aria-label={translateText("Dismiss notification")}>
         <X size={14} aria-hidden />
       </button>
     </div>
@@ -29,6 +31,7 @@ function Notice({ notice, onDismiss }) {
 }
 
 function PopupDialog({ dialog, onClose }) {
+  useLanguage();
   const [value, setValue] = useState(dialog.initialValue ?? '');
   const inputRef = useRef(null);
   const cancelValue = dialog.kind === 'confirm' ? false : null;
@@ -60,14 +63,14 @@ function PopupDialog({ dialog, onClose }) {
             {dialog.danger ? <AlertTriangle size={18} aria-hidden /> : <Info size={18} aria-hidden />}
           </span>
           <span>
-            <h2 id="app-popup-title">{dialog.title}</h2>
-            {dialog.message && <p>{dialog.message}</p>}
+            <h2 id="app-popup-title">{translateText(dialog.title)}</h2>
+            {dialog.message && <p>{translateText(dialog.message)}</p>}
           </span>
-          <button type="button" className="app-popup-dialog-close" onClick={() => onClose(cancelValue)} aria-label="Close popup"><X size={15} aria-hidden /></button>
+          <button type="button" className="app-popup-dialog-close" onClick={() => onClose(cancelValue)} aria-label={translateText("Close popup")}><X size={15} aria-hidden /></button>
         </header>
         {dialog.kind === 'prompt' && (
           <label className="app-popup-dialog-field">
-            <span>{dialog.inputLabel || dialog.title}</span>
+            <span>{translateText(dialog.inputLabel || dialog.title)}</span>
             <input
               ref={inputRef}
               value={value}
@@ -80,18 +83,18 @@ function PopupDialog({ dialog, onClose }) {
         )}
         {dialog.kind === 'choice' ? (
           <footer>
-            <button type="button" className="app-popup-cancel" onClick={() => onClose(null)}>{dialog.cancelLabel || 'Cancel'}</button>
+            <button type="button" className="app-popup-cancel" onClick={() => onClose(null)}>{translateText(dialog.cancelLabel || 'Cancel')}</button>
             {(dialog.actions ?? []).map((action, index) => (
               <button key={action.value} ref={index === 0 ? inputRef : undefined} type="button" className={`app-popup-confirm${action.danger ? ' danger' : ''}`} onClick={() => onClose(action.value)}>
-                {action.label}
+                {translateText(action.label)}
               </button>
             ))}
           </footer>
         ) : (
           <footer>
-            <button type="button" className="app-popup-cancel" onClick={() => onClose(cancelValue)}>{dialog.cancelLabel || 'Cancel'}</button>
+            <button type="button" className="app-popup-cancel" onClick={() => onClose(cancelValue)}>{translateText(dialog.cancelLabel || 'Cancel')}</button>
             <button ref={dialog.kind === 'prompt' ? undefined : inputRef} type="submit" className={`app-popup-confirm${dialog.danger ? ' danger' : ''}`}>
-              {dialog.confirmLabel || (dialog.kind === 'prompt' ? 'Save' : 'Confirm')}
+              {translateText(dialog.confirmLabel || (dialog.kind === 'prompt' ? 'Save' : 'Confirm'))}
             </button>
           </footer>
         )}
@@ -101,6 +104,7 @@ function PopupDialog({ dialog, onClose }) {
 }
 
 export function PopupProvider({ children }) {
+  useLanguage();
   const [notices, setNotices] = useState([]);
   const [dialog, setDialog] = useState(null);
   const nextId = useRef(0);

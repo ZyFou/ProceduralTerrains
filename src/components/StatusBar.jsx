@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { GITHUB_REPO_URL } from '../constants/app.js';
 import { useLiveMetrics } from '../state/LiveMetricsStore.js';
 
@@ -18,35 +19,35 @@ export default function StatusBar({
   status, bgWork, gpu, liveMetrics, worldMode, qualityPreset, exploreMode, playerMode,
   perfOpen, onPerfToggle,
 }) {
+  useLanguage();
   const { stats, infiniteStats, playerState } = useLiveMetrics(liveMetrics);
   const exploring = playerMode || exploreMode === 'plane';
   return (
     <footer id="statusbar">
       <div className="sb-group sb-group-primary">
         <span className={`status-dot${status.busy ? ' busy' : ''}`} />
-        <span className="sb-status">{status.text}</span>
+        <span className="sb-status">{translateText(status.text)}</span>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-        <span className="sb-desktop-only">GPU: {gpu}</span>
+        <span className="sb-desktop-only">{translateText("GPU: ")}{translateText(gpu)}</span>
         {exploring && playerState && (
           <>
             <span className="sb-sep sb-desktop-only" aria-hidden="true" />
             <span className={`player-state player-state-${playerState} sb-desktop-only`}>
-              {PLAYER_STATE_LABELS[playerState] ?? playerState}
+              {translateText(PLAYER_STATE_LABELS[playerState] ?? playerState)}
             </span>
           </>
         )}
         {worldMode === 'infinite' && infiniteStats && (
           <>
             <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-            <span className="sb-desktop-only">
-              Visible: {infiniteStats.visibleChunks ?? infiniteStats.chunks} / {infiniteStats.chunks}
+            <span className="sb-desktop-only">{translateText("Visible: ")}{translateText(infiniteStats.visibleChunks ?? infiniteStats.chunks)} / {translateText(infiniteStats.chunks)}
             </span>
             <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-            <span className="sb-desktop-only">Speed: {infiniteStats.speed} u/s</span>
+            <span className="sb-desktop-only">{translateText("Speed: ")}{translateText(infiniteStats.speed)}{translateText(" u/s")}</span>
             {qualityPreset && (
               <>
                 <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-                <span className="sb-quality sb-desktop-only">{qualityPreset}</span>
+                <span className="sb-quality sb-desktop-only">{translateText(qualityPreset)}</span>
               </>
             )}
           </>
@@ -54,12 +55,11 @@ export default function StatusBar({
         {worldMode === 'planet' && (
           <>
             <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-            <span className="sb-desktop-only">Planet</span>
+            <span className="sb-desktop-only">{translateText("Planet")}</span>
             {infiniteStats && (
               <>
                 <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-                <span className="sb-desktop-only">
-                  Visible: {infiniteStats.visibleChunks} / {infiniteStats.chunks}
+                <span className="sb-desktop-only">{translateText("Visible: ")}{translateText(infiniteStats.visibleChunks)} / {translateText(infiniteStats.chunks)}
                 </span>
               </>
             )}
@@ -69,35 +69,34 @@ export default function StatusBar({
       <div className="sb-group sb-group-stats">
         {bgWork && (
           <>
-            <span className="sb-bgwork" title="Full-detail shaders are compiling in the background — brief hiccups are normal until this finishes">
+            <span className="sb-bgwork" title={translateText("Full-detail shaders are compiling in the background — brief hiccups are normal until this finishes")}>
               <span className="status-dot busy" />
-              {bgWork}
+              {translateText(bgWork)}
             </span>
             <span className="sb-sep" aria-hidden="true" />
           </>
         )}
-        <span className="sb-tris">Triangles: {fmtTris(stats.triangles)}</span>
+        <span className="sb-tris">{translateText("Triangles: ")}{translateText(fmtTris(stats.triangles))}</span>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
-        <span className="sb-desktop-only">Draw Calls: {stats.drawCalls}</span>
+        <span className="sb-desktop-only">{translateText("Draw Calls: ")}{translateText(stats.drawCalls)}</span>
         <span className="sb-sep" />
         <button
           type="button"
           className={`fps-badge fps-badge-btn${stats.fps > 0 && stats.fps < 30 ? ' low' : ''}${perfOpen ? ' is-open' : ''}`}
           onClick={onPerfToggle}
-          title="Performance details (Ctrl/Cmd+Shift+P)"
+          title={translateText("Performance details (Ctrl/Cmd+Shift+P)")}
           aria-expanded={!!perfOpen}
-          aria-label={`${stats.fps} FPS — open performance details`}
+          aria-label={translateText(`${stats.fps} FPS — open performance details`)}
         >
-          {stats.fps} FPS
-        </button>
+          {translateText(stats.fps)}{translateText(" FPS")}</button>
         <span className="sb-sep sb-desktop-only" aria-hidden="true" />
         <a
           className="sb-github-link"
           href={GITHUB_REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
-          title="View source on GitHub"
-          aria-label="View source on GitHub"
+          title={translateText("View source on GitHub")}
+          aria-label={translateText("View source on GitHub")}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path

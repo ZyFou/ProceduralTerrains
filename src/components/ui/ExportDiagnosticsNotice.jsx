@@ -1,7 +1,9 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useState } from 'react';
 import { saveBlob } from '../../platform/DesktopBridge.js';
 
 export default function ExportDiagnosticsNotice({ report }) {
+  useLanguage();
   const [dismissed, setDismissed] = useState(null);
   const [saveError, setSaveError] = useState('');
   if (!report) return null;
@@ -16,12 +18,12 @@ export default function ExportDiagnosticsNotice({ report }) {
     } catch (error) { setSaveError(error?.message || 'Could not save diagnostics. Logs are also available in the browser console.'); }
   };
   return <aside className="export-diagnostics-notice" role="alert">
-    <strong>{report.status === 'failed' ? 'Export failed' : report.status === 'interrupted' ? 'Previous export interrupted' : 'Export needs attention'}</strong>
-    <p>{report.message || warning?.message}</p>
-    <p>Last stage: {report.stage}</p>
-    {report.status === 'running' && <p>The export is still active. A slow stage does not confirm a crash.</p>}
-    {saveError && <p>{saveError}</p>}
-    <button type="button" onClick={download}>Save diagnostics</button>
-    <button type="button" onClick={() => setDismissed(key)}>Dismiss</button>
+    <strong>{translateText(report.status === 'failed' ? 'Export failed' : report.status === 'interrupted' ? 'Previous export interrupted' : 'Export needs attention')}</strong>
+    <p>{translateText(report.message || warning?.message)}</p>
+    <p>{translateText("Last stage: ")}{translateText(report.stage)}</p>
+    {report.status === 'running' && <p>{translateText("The export is still active. A slow stage does not confirm a crash.")}</p>}
+    {saveError && <p>{translateText(saveError)}</p>}
+    <button type="button" onClick={download}>{translateText("Save diagnostics")}</button>
+    <button type="button" onClick={() => setDismissed(key)}>{translateText("Dismiss")}</button>
   </aside>;
 }

@@ -1,8 +1,10 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronUp, Compass } from 'lucide-react';
 
 export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode }) {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
   const wrapRef = useRef(null);
@@ -43,45 +45,45 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
   };
 
   return (
-    <div className="viewport-camera-bar" role="toolbar" aria-label="Camera views">
+    <div className="viewport-camera-bar" role="toolbar" aria-label={translateText("Camera views")}>
       <button
         type="button"
         className={`camera-bar-btn${camMode === 'topdown' ? ' active' : ''}`}
         onClick={onTopDown}
-        aria-label="Top-down view"
-        title="Top-down view"
+        aria-label={translateText("Top-down view")}
+        title={translateText("Top-down view")}
       >
         <svg viewBox="0 0 16 16" fill="none">
           <rect x="3" y="3" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
           <path d="M3 7h10M7 3v10" stroke="currentColor" strokeWidth="0.8" opacity=".6" />
         </svg>
-        <span className="camera-bar-label">Top-down</span>
+        <span className="camera-bar-label">{translateText("Top-down")}</span>
       </button>
       <button
         type="button"
         className={`camera-bar-btn${camMode !== 'topdown' ? ' active' : ''}`}
         onClick={onAngled}
-        aria-label="Angled view"
-        title="Angled view"
+        aria-label={translateText("Angled view")}
+        title={translateText("Angled view")}
       >
         <svg viewBox="0 0 16 16" fill="none">
           <path d="M2 11 8 4l6 7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
           <path d="M2 11h12" stroke="currentColor" strokeWidth="1.2" />
         </svg>
-        <span className="camera-bar-label">Angled</span>
+        <span className="camera-bar-label">{translateText("Angled")}</span>
       </button>
       <button
         type="button"
         className="camera-bar-btn"
         onClick={onResetCamera}
-        aria-label="Reset camera"
-        title="Reset camera"
+        aria-label={translateText("Reset camera")}
+        title={translateText("Reset camera")}
       >
         <svg viewBox="0 0 16 16" fill="none">
           <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.2" />
           <circle cx="8" cy="8" r="1.6" fill="currentColor" />
         </svg>
-        <span className="camera-bar-label">Reset Camera</span>
+        <span className="camera-bar-label">{translateText("Reset Camera")}</span>
       </button>
 
       <div className="explore-menu-wrap" ref={wrapRef}>
@@ -90,13 +92,13 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
           type="button"
           className={`camera-bar-btn explore-menu-trigger${exploring ? ' active' : ''}`}
           onClick={() => setOpen((v) => !v)}
-          aria-label="Explore mode"
+          aria-label={translateText("Explore mode")}
           aria-haspopup="menu"
           aria-expanded={open}
-          title="Explore terrain by walking or flying a plane"
+          title={translateText("Explore terrain by walking or flying a plane")}
         >
           <Compass aria-hidden size={14} strokeWidth={1.9} />
-          <span className="camera-bar-label">Explore</span>
+          <span className="camera-bar-label">{translateText("Explore")}</span>
           <ChevronUp className={`explore-chevron${open ? ' open' : ''}`} aria-hidden size={12} strokeWidth={2} />
         </button>
         {open && menuStyle && createPortal(
@@ -105,24 +107,20 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
             className="explore-menu"
             style={{ left: menuStyle.left, bottom: menuStyle.bottom }}
             role="menu"
-            aria-label="Explore modes"
+            aria-label={translateText("Explore modes")}
           >
             <button
               type="button"
               className={`explore-menu-item${exploreMode === 'walk' ? ' active' : ''}`}
               onClick={() => select('walk')}
               role="menuitem"
-            >
-              Walk
-            </button>
+            >{translateText("Walk")}</button>
             <button
               type="button"
               className={`explore-menu-item${exploreMode === 'plane' ? ' active' : ''}`}
               onClick={() => select('plane')}
               role="menuitem"
-            >
-              Plane
-            </button>
+            >{translateText("Plane")}</button>
           </div>,
           document.body
         )}

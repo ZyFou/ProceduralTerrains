@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, Boxes, Check, Compass, Copy, Eye, FolderDown, Globe2, Hand,
@@ -62,6 +63,7 @@ function iconForProject(project) {
 }
 
 export default function CommunityPage({ onBack, onOpen, ready = true }) {
+  useLanguage();
   const { user } = useAuth();
   const { showPopup, showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
@@ -199,33 +201,33 @@ export default function CommunityPage({ onBack, onOpen, ready = true }) {
 
   return (
     <section className="community-page" aria-labelledby="community-title">
-      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} /> Back to projects</button>
+      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} />{translateText(" Back to projects")}</button>
       <header className="community-heading">
-        <span><Compass size={14} /> Explore</span>
-        <h1 id="community-title">Community terrains</h1>
-        <p>Discover public projects, copy an opening link, and find terrains by name, creator, or sharing code.</p>
+        <span><Compass size={14} />{translateText(" Explore")}</span>
+        <h1 id="community-title">{translateText("Community terrains")}</h1>
+        <p>{translateText("Discover public projects, copy an opening link, and find terrains by name, creator, or sharing code.")}</p>
       </header>
 
       <form className="community-search" onSubmit={search}>
         <Search size={14} aria-hidden />
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search names, creators, or sharing codes" aria-label="Search community projects" />
-        <button type="submit" className="lp-secondary sm">Search</button>
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={translateText("Search names, creators, or sharing codes")} aria-label={translateText("Search community projects")} />
+        <button type="submit" className="lp-secondary sm">{translateText("Search")}</button>
       </form>
 
-      <div className="community-filters" role="tablist" aria-label="Filter community terrains by editor">
-        <button type="button" role="tab" aria-selected={!activeType} className={!activeType ? 'active' : ''} onClick={() => selectType('')}>All terrains</button>
+      <div className="community-filters" role="tablist" aria-label={translateText("Filter community terrains by editor")}>
+        <button type="button" role="tab" aria-selected={!activeType} className={!activeType ? 'active' : ''} onClick={() => selectType('')}>{translateText("All terrains")}</button>
         {COMMUNITY_TYPES.map((option) => (
-          <button type="button" role="tab" key={option.id} aria-selected={activeType === option.id} className={activeType === option.id ? 'active' : ''} onClick={() => selectType(option.id)}>{option.label}</button>
+          <button type="button" role="tab" key={option.id} aria-selected={activeType === option.id} className={activeType === option.id ? 'active' : ''} onClick={() => selectType(option.id)}>{translateText(option.label)}</button>
         ))}
       </div>
 
       <div className="community-results-head">
-        <div><h2>{resultsTitle}</h2><span>{total} public project{total === 1 ? '' : 's'}</span></div>
-        {activeQuery && <button type="button" className="community-clear-search" onClick={() => { setQuery(''); setActiveQuery(''); setPage(1); }}><X size={12} /> Clear search</button>}
+        <div><h2>{translateText(resultsTitle)}</h2><span>{translateText(total)}{translateText(" public project")}{translateText(total === 1 ? '' : 's')}</span></div>
+        {activeQuery && <button type="button" className="community-clear-search" onClick={() => { setQuery(''); setActiveQuery(''); setPage(1); }}><X size={12} />{translateText(" Clear search")}</button>}
       </div>
 
-      {loading ? <div className="community-state"><Compass size={22} /><span>Loading community projects…</span></div> : projects.length === 0 ? (
-        <div className="community-state"><Globe2 size={24} /><strong>No terrains match these filters</strong><span>Try another search or browse all public terrains.</span></div>
+      {loading ? <div className="community-state"><Compass size={22} /><span>{translateText("Loading community projects…")}</span></div> : projects.length === 0 ? (
+        <div className="community-state"><Globe2 size={24} /><strong>{translateText("No terrains match these filters")}</strong><span>{translateText("Try another search or browse all public terrains.")}</span></div>
       ) : (
         <div className="community-grid">
           {projects.map((project) => {
@@ -237,13 +239,13 @@ export default function CommunityPage({ onBack, onOpen, ready = true }) {
               <article className={`community-card${isOwner ? ' is-owner' : ''}`} key={project.id}>
                 <div className={`community-card-art ${project.editorMode || 'procedural'}`}>
                   <span className="community-card-icon"><Icon size={30} aria-hidden /></span>
-                  <span className="community-card-type">{typeLabel(project.editorMode)}</span>
-                  <button type="button" className="community-share-link" onClick={() => copyShareLink(project.shareCode)} title="Copy opening link" aria-label={`Copy opening link for ${project.name}`}>
+                  <span className="community-card-type">{translateText(typeLabel(project.editorMode))}</span>
+                  <button type="button" className="community-share-link" onClick={() => copyShareLink(project.shareCode)} title={translateText("Copy opening link")} aria-label={translateText(`Copy opening link for ${project.name}`)}>
                     {copiedCode === project.shareCode ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}<code>{project.shareCode}</code>
                   </button>
                 </div>
                 <div className="community-card-body">
-                  <div className="community-card-title-row"><h3>{project.name}</h3>{isOwner && <span className="community-owner-badge">Your terrain</span>}</div>
+                  <div className="community-card-title-row"><h3>{project.name}</h3>{isOwner && <span className="community-owner-badge">{translateText("Your terrain")}</span>}</div>
                   <p>{project.description || `A shared ${typeLabel(project.editorMode)} Terrains project.`}</p>
                   <div className="community-author">
                     <span>{avatarUrl(project.author) ? <img src={avatarUrl(project.author)} alt="" /> : <UserRound size={13} />}</span>
@@ -251,17 +253,17 @@ export default function CommunityPage({ onBack, onOpen, ready = true }) {
                     <small>@{project.author.username}</small>
                   </div>
                   <div className="community-card-actions">
-                    <button type="button" className="lp-primary sm" onClick={() => importByCode(project.shareCode)} disabled={disabled || !ready}><FolderDown size={14} /> Import and open</button>
-                    {isOwner && <button type="button" className={`lp-secondary sm community-edit-button${editingId === project.id ? ' active' : ''}`} onClick={() => setEditingId((current) => current === project.id ? '' : project.id)} disabled={disabled}><Settings2 size={13} /> Edit</button>}
+                    <button type="button" className="lp-primary sm" onClick={() => importByCode(project.shareCode)} disabled={disabled || !ready}><FolderDown size={14} />{translateText(" Import and open")}</button>
+                    {isOwner && <button type="button" className={`lp-secondary sm community-edit-button${editingId === project.id ? ' active' : ''}`} onClick={() => setEditingId((current) => current === project.id ? '' : project.id)} disabled={disabled}><Settings2 size={13} />{translateText(" Edit")}</button>}
                   </div>
                   {isOwner && editingId === project.id && (
                     <div className="community-owner-panel">
-                      <div className="community-owner-panel-head"><strong>Manage terrain</strong><button type="button" onClick={() => setEditingId('')} aria-label="Close terrain settings"><X size={13} /></button></div>
+                      <div className="community-owner-panel-head"><strong>{translateText("Manage terrain")}</strong><button type="button" onClick={() => setEditingId('')} aria-label={translateText("Close terrain settings")}><X size={13} /></button></div>
                       <div className="community-owner-actions">
-                        <button type="button" className="lp-secondary sm" onClick={() => rename(project)} disabled={disabled}><Pencil size={13} /> Rename</button>
-                        <label className="community-visibility-select"><span>Visibility</span><span className="community-select-wrap">{project.visibility === 'public' ? <Globe2 size={12} /> : project.visibility === 'unlisted' ? <Eye size={12} /> : <Lock size={12} />}<select value={project.visibility} onChange={(event) => updateOwnerProject(project, { visibility: event.target.value }, `Visibility changed to ${event.target.value}.`)} disabled={disabled} aria-label={`Visibility for ${project.name}`}><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></span></label>
+                        <button type="button" className="lp-secondary sm" onClick={() => rename(project)} disabled={disabled}><Pencil size={13} />{translateText(" Rename")}</button>
+                        <label className="community-visibility-select"><span>{translateText("Visibility")}</span><span className="community-select-wrap">{project.visibility === 'public' ? <Globe2 size={12} /> : project.visibility === 'unlisted' ? <Eye size={12} /> : <Lock size={12} />}<select value={project.visibility} onChange={(event) => updateOwnerProject(project, { visibility: event.target.value }, `Visibility changed to ${event.target.value}.`)} disabled={disabled} aria-label={translateText(`Visibility for ${project.name}`)}><option value="private">{translateText("Private")}</option><option value="unlisted">{translateText("Unlisted")}</option><option value="public">{translateText("Public")}</option></select></span></label>
                       </div>
-                      <div className="community-icon-picker"><span>Card icon</span><div>{COMMUNITY_ICONS.map((option) => { const OptionIcon = option.Icon; return <button type="button" key={option.id} className={selectedCommunityIcon === option.id ? 'active' : ''} onClick={() => updateOwnerProject(project, { communityIcon: option.id }, `${option.label} icon selected.`)} disabled={disabled} title={option.label} aria-label={`Use ${option.label} icon`}><OptionIcon size={14} /></button>; })}</div></div>
+                      <div className="community-icon-picker"><span>{translateText("Card icon")}</span><div>{COMMUNITY_ICONS.map((option) => { const OptionIcon = option.Icon; return <button type="button" key={option.id} className={selectedCommunityIcon === option.id ? 'active' : ''} onClick={() => updateOwnerProject(project, { communityIcon: option.id }, `${option.label} icon selected.`)} disabled={disabled} title={translateText(option.label)} aria-label={translateText(`Use ${option.label} icon`)}><OptionIcon size={14} /></button>; })}</div></div>
                     </div>
                   )}
                 </div>
@@ -271,10 +273,10 @@ export default function CommunityPage({ onBack, onOpen, ready = true }) {
         </div>
       )}
 
-      {pages > 1 && <nav className="community-pagination" aria-label="Community pages">
-        <button type="button" className="lp-secondary sm" onClick={() => setPage((value) => value - 1)} disabled={page <= 1 || loading}><ArrowLeft size={13} /> Previous</button>
-        <span>Page {page} of {pages}</span>
-        <button type="button" className="lp-secondary sm" onClick={() => setPage((value) => value + 1)} disabled={page >= pages || loading}>Next <ArrowRight size={13} /></button>
+      {pages > 1 && <nav className="community-pagination" aria-label={translateText("Community pages")}>
+        <button type="button" className="lp-secondary sm" onClick={() => setPage((value) => value - 1)} disabled={page <= 1 || loading}><ArrowLeft size={13} />{translateText(" Previous")}</button>
+        <span>{translateText("Page ")}{translateText(page)}{translateText(" of ")}{translateText(pages)}</span>
+        <button type="button" className="lp-secondary sm" onClick={() => setPage((value) => value + 1)} disabled={page >= pages || loading}>{translateText("Next ")}<ArrowRight size={13} /></button>
       </nav>}
     </section>
   );

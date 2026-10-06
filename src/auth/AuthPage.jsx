@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useState } from 'react';
 import { ArrowLeft, LogIn, UserPlus } from 'lucide-react';
 import { APP_NAME } from '../constants/app.js';
@@ -8,6 +9,7 @@ import { usePopup } from '../components/ui/PopupProvider.jsx';
 const initialFields = { email: '', username: '', identifier: '', password: '', confirmPassword: '' };
 
 export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
+  useLanguage();
   const isRegister = mode === 'register';
   const { login, register } = useAuth();
   const { showPopup } = usePopup();
@@ -52,7 +54,7 @@ export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
 
   const input = (name, label, properties = {}) => (
     <label className={`auth-field${fieldErrors[name] ? ' has-error' : ''}`}>
-      <span>{label}</span>
+      <span>{translateText(label)}</span>
       <input
         name={name}
         value={fields[name]}
@@ -62,54 +64,54 @@ export default function AuthPage({ mode, onBack, onSwitch, onSuccess }) {
         disabled={busy}
         {...properties}
       />
-      {fieldErrors[name] && <small id={`${name}-error`}>{fieldErrors[name]}</small>}
+      {fieldErrors[name] && <small id={`${name}-error`}>{translateText(fieldErrors[name])}</small>}
     </label>
   );
 
   return (
     <section className="auth-page" aria-labelledby="auth-title">
-      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} /> Back to projects</button>
+      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} />{translateText(" Back to projects")}</button>
       <div className="auth-card">
         <header>
           <span className="auth-mark"><Logo size={25} /></span>
           <div>
-            <small>{APP_NAME}</small>
-            <h1 id="auth-title">{isRegister ? 'Create your account' : 'Welcome back'}</h1>
-            <p>{isRegister ? 'Keep your identity ready for cloud projects and sharing.' : 'Sign in to access your account. Local projects remain on this device.'}</p>
+            <small>{translateText(APP_NAME)}</small>
+            <h1 id="auth-title">{translateText(isRegister ? 'Create your account' : 'Welcome back')}</h1>
+            <p>{translateText(isRegister ? 'Keep your identity ready for cloud projects and sharing.' : 'Sign in to access your account. Local projects remain on this device.')}</p>
           </div>
         </header>
 
         <form onSubmit={submit} noValidate>
-          {isRegister && input('username', 'Username', {
+          {translateText(isRegister && input('username', 'Username', {
             type: 'text', autoComplete: 'username', minLength: 3, maxLength: 32,
             pattern: '[a-zA-Z0-9_]+', placeholder: 'terrain_creator', required: true,
-          })}
-          {isRegister
+          }))}
+          {translateText(isRegister
             ? input('email', 'Email', { type: 'email', autoComplete: 'email', maxLength: 320, placeholder: 'you@example.com', required: true })
-            : input('identifier', 'Email or username', { type: 'text', autoComplete: 'username', maxLength: 320, placeholder: 'you@example.com', required: true })}
-          {input('password', 'Password', {
+            : input('identifier', 'Email or username', { type: 'text', autoComplete: 'username', maxLength: 320, placeholder: 'you@example.com', required: true }))}
+          {translateText(input('password', 'Password', {
             type: 'password', autoComplete: isRegister ? 'new-password' : 'current-password',
             minLength: isRegister ? 10 : undefined, maxLength: 128, placeholder: '••••••••••', required: true,
-          })}
-          {isRegister && input('confirmPassword', 'Confirm password', {
+          }))}
+          {translateText(isRegister && input('confirmPassword', 'Confirm password', {
             type: 'password', autoComplete: 'new-password', minLength: 10, maxLength: 128,
             placeholder: '••••••••••', required: true,
-          })}
+          }))}
 
           <button type="submit" className="lp-primary auth-submit" disabled={busy}>
             {isRegister ? <UserPlus size={15} /> : <LogIn size={15} />}
-            {busy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'}
+            {translateText(busy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in')}
           </button>
         </form>
 
         <footer>
-          <span>{isRegister ? 'Already have an account?' : 'New to Procedural Terrains?'}</span>
+          <span>{translateText(isRegister ? 'Already have an account?' : 'New to Procedural Terrains?')}</span>
           <button type="button" className="lp-link" onClick={() => onSwitch(isRegister ? 'login' : 'register')}>
-            {isRegister ? 'Sign in' : 'Create an account'}
+            {translateText(isRegister ? 'Sign in' : 'Create an account')}
           </button>
         </footer>
       </div>
-      <p className="auth-local-note">An account is optional. You can keep creating and saving projects locally.</p>
+      <p className="auth-local-note">{translateText("An account is optional. You can keep creating and saving projects locally.")}</p>
     </section>
   );
 }

@@ -1,6 +1,8 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { LoadingBar } from './LoadingOverlay.jsx';
 
 export default function CompileProgressChip({ progress }) {
+  useLanguage();
   if (!progress) return null;
 
   const total = Number(progress.total);
@@ -15,10 +17,10 @@ export default function CompileProgressChip({ progress }) {
   return (
     <div className="compile-progress-chip" role="status" aria-live="polite">
       <div className="compile-progress-chip-main">
-        <span className="compile-progress-label">{label}</span>
+        <span className="compile-progress-label">{translateText(label)}</span>
         {hasTotal && (
           <span className="compile-progress-count">
-            {Math.round(done)} / {Math.round(total)}
+            {translateText(Math.round(done))} / {translateText(Math.round(total))}
           </span>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { SiBlender, SiUnity } from 'react-icons/si';
 import SupportDownloadModal from '../../components/support/SupportDownloadModal.jsx';
 import useSupportPrompt from '../../hooks/useSupportPrompt.js';
@@ -5,13 +6,14 @@ import BlenderPluginPage from './BlenderPluginPage.jsx';
 import UnityPluginPage from './UnityPluginPage.jsx';
 
 export default function PluginsPage({ activePlugin, onSelectPlugin, onOpenEditor }) {
+  useLanguage();
   const supportPrompt = useSupportPrompt();
   const active = activePlugin === 'blender' ? 'blender' : 'unity';
   return (
     <>
       <div className="plugins-page-shell">
-        <nav className="plugin-engine-tabs" aria-label="Engine plugins" role="tablist">
-          <span className="plugin-engine-tabs-label">Engine plugins</span>
+        <nav className="plugin-engine-tabs" aria-label={translateText("Engine plugins")} role="tablist">
+          <span className="plugin-engine-tabs-label">{translateText("Engine plugins")}</span>
           <div>
             <button
               type="button"
@@ -21,8 +23,7 @@ export default function PluginsPage({ activePlugin, onSelectPlugin, onOpenEditor
               className={active === 'unity' ? 'active unity' : ''}
               onClick={() => onSelectPlugin('unity')}
             >
-              <SiUnity size={15} aria-hidden /> Unity
-            </button>
+              <SiUnity size={15} aria-hidden />{translateText(" Unity")}</button>
             <button
               type="button"
               role="tab"
@@ -31,8 +32,7 @@ export default function PluginsPage({ activePlugin, onSelectPlugin, onOpenEditor
               className={active === 'blender' ? 'active blender' : ''}
               onClick={() => onSelectPlugin('blender')}
             >
-              <SiBlender size={15} aria-hidden /> Blender
-            </button>
+              <SiBlender size={15} aria-hidden />{translateText(" Blender")}</button>
           </div>
         </nav>
         <div

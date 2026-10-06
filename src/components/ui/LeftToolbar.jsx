@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from '../panels/panelMeta.js';
 import {
@@ -32,6 +33,7 @@ export default function LeftToolbar({
   panelIds = PANEL_ORDER,
   realTerrainMode = false,
 }) {
+  useLanguage();
   const railRef = useRef(null);
   const menuRef = useRef(null);
   const dragRef = useRef(null);
@@ -180,7 +182,7 @@ export default function LeftToolbar({
         ref={railRef}
         className={classNames}
         style={dragging && ghost ? { left: ghost.x, top: ghost.y, right: 'auto', bottom: 'auto' } : undefined}
-        aria-label="Tools"
+        aria-label={translateText("Tools")}
         data-tools-edge={edge}
         onPointerDown={startDrag}
         onContextMenu={onContextMenu}
@@ -198,13 +200,13 @@ export default function LeftToolbar({
               <button
                 type="button"
                 className={`toolbar-btn${activePanel === id ? ' active' : ''}`}
-                title={display.label}
-                aria-label={display.label}
+                title={translateText(display.label)}
+                aria-label={translateText(display.label)}
                 aria-pressed={activePanel === id}
                 onClick={() => onSelect(id)}
               >
                 {meta.icon}
-                {showLabels && <span className="toolbar-btn-label">{display.label}</span>}
+                {showLabels && <span className="toolbar-btn-label">{translateText(display.label)}</span>}
               </button>
             </React.Fragment>
           );
@@ -216,7 +218,7 @@ export default function LeftToolbar({
           className="panel-snap-menu"
           style={{ left: menu.x, top: menu.y }}
           role="menu"
-          aria-label="Tools panel position"
+          aria-label={translateText("Tools panel position")}
         >
           {TOOLS_RAIL_EDGES.map((id) => (
             <button
@@ -226,7 +228,7 @@ export default function LeftToolbar({
               className={edge === id ? 'active' : ''}
               onClick={() => commitEdge(id)}
             >
-              {EDGE_LABELS[id]}
+              {translateText(EDGE_LABELS[id])}
             </button>
           ))}
         </div>

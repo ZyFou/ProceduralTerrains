@@ -46,6 +46,13 @@
   <div class="bs-title">Terrain Studio</div>
   <div class="bs-sub">Loading…</div>
 </div>
+<script>
+  try {
+    const language = localStorage.getItem('terrain-studio.language') === 'fr' ? 'fr' : 'en';
+    document.documentElement.lang = language;
+    if (language === 'fr') document.querySelector('#boot-splash .bs-sub').textContent = 'Chargement…';
+  } catch { /* Storage can be unavailable in private browsing. */ }
+</script>
 <div id="root"></div>
 <script type="module" src="/src/main.jsx"></script>
 </body>

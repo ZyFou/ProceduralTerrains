@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useState } from 'react';
 import { SelectRow, SliderCtl } from '../controls.jsx';
 import SidePanel from '../panels/SidePanel.jsx';
@@ -79,6 +80,7 @@ function toolForPanel(id, state) {
 }
 
 export default function PaintPanel({ paintState, onSetting, onClear, onSetBaseMode, onStartEmpty, onExit }) {
+  useLanguage();
   const state = paintState ?? {};
   const set = (key) => (value) => onSetting(key, value);
   const [activeTool, setActiveTool] = useState(() => panelForTool(state.tool));
@@ -95,10 +97,10 @@ export default function PaintPanel({ paintState, onSetting, onClear, onSetBaseMo
     <>
       <PaintToolbar activeTool={activeTool} onSelect={selectTool} />
       <aside className="paint-panel side-drawer open">
-        <SidePanel title={meta.title} description={meta.description} onClose={onExit}>
+        <SidePanel title={translateText(meta.title)} description={translateText(meta.description)} onClose={onExit}>
           {activeTool === 'sculpt' && (
             <div className="paint-section">
-              <SelectRow label="Direction" value={state.tool === 'lower' ? 'lower' : 'raise'} options={SCULPT_DIRECTION_OPTIONS} onChange={set('tool')} />
+              <SelectRow label={translateText("Direction")} value={state.tool === 'lower' ? 'lower' : 'raise'} options={SCULPT_DIRECTION_OPTIONS} onChange={set('tool')} />
               <SliderCtl def={defs.strength} value={state.strength ?? 0.35} onChange={set('strength')} />
             </div>
           )}
@@ -126,14 +128,14 @@ export default function PaintPanel({ paintState, onSetting, onClear, onSetBaseMo
 
           {activeTool === 'biome' && (
             <div className="paint-section">
-              <SelectRow label="Biome" value={state.biome ?? 'desert'} options={BIOME_OPTIONS} onChange={set('biome')} />
+              <SelectRow label={translateText("Biome")} value={state.biome ?? 'desert'} options={BIOME_OPTIONS} onChange={set('biome')} />
               <SliderCtl def={defs.strength} value={state.strength ?? 0.35} onChange={set('strength')} />
             </div>
           )}
 
           {activeTool === 'mask' && (
             <div className="paint-section">
-              <SelectRow label="Mask" value={state.propType ?? 'mixed'} options={PROP_OPTIONS} onChange={set('propType')} />
+              <SelectRow label={translateText("Mask")} value={state.propType ?? 'mixed'} options={PROP_OPTIONS} onChange={set('propType')} />
               <SliderCtl def={defs.strength} value={state.strength ?? 0.35} onChange={set('strength')} />
             </div>
           )}
@@ -142,23 +144,21 @@ export default function PaintPanel({ paintState, onSetting, onClear, onSetBaseMo
             <>
               <div className="paint-section">
                 <SliderCtl def={defs.strength} value={state.strength ?? 0.35} onChange={set('strength')} />
-                <button className="wide-btn danger" type="button" onClick={onClear}>Clear Painted Layers</button>
+                <button className="wide-btn danger" type="button" onClick={onClear}>{translateText("Clear Painted Layers")}</button>
               </div>
               <div className="paint-section">
-                <div className="subsection-label">Terrain Base</div>
-                <SelectRow label="Base" value={state.baseMode ?? 'generated'} options={BASE_MODE_OPTIONS} onChange={onSetBaseMode} />
-                <button className="wide-btn danger" type="button" onClick={onStartEmpty}>Start Empty Terrain</button>
+                <div className="subsection-label">{translateText("Terrain Base")}</div>
+                <SelectRow label={translateText("Base")} value={state.baseMode ?? 'generated'} options={BASE_MODE_OPTIONS} onChange={onSetBaseMode} />
+                <button className="wide-btn danger" type="button" onClick={onStartEmpty}>{translateText("Start Empty Terrain")}</button>
                 <p className="section-hint">
-                  <b>Base</b> swaps what you're painting on top of without touching existing strokes.
-                  <b> Start Empty Terrain</b> flattens the board and clears all paint layers for a fresh start.
-                </p>
+                  <b>{translateText("Base")}</b>{translateText(" swaps what you're painting on top of without touching existing strokes.")}<b>{translateText(" Start Empty Terrain")}</b>{translateText(" flattens the board and clears all paint layers for a fresh start.")}</p>
               </div>
             </>
           )}
 
           {activeTool === 'brush' && (
             <div className="paint-section">
-              <SelectRow label="Brush Shape" value={state.brushShape ?? 'round'} options={BRUSH_SHAPE_OPTIONS} onChange={set('brushShape')} />
+              <SelectRow label={translateText("Brush Shape")} value={state.brushShape ?? 'round'} options={BRUSH_SHAPE_OPTIONS} onChange={set('brushShape')} />
               <SliderCtl def={defs.brushSize} value={state.brushSize ?? 90} onChange={set('brushSize')} />
               <SliderCtl def={defs.falloff} value={state.falloff ?? 0.75} onChange={set('falloff')} />
               {(state.brushShape === 'ellipse' || state.brushShape === 'ribbon') && (
@@ -169,7 +169,7 @@ export default function PaintPanel({ paintState, onSetting, onClear, onSetBaseMo
               )}
               <SliderCtl def={defs.brushSpacing} value={state.brushSpacing ?? 0.35} onChange={set('brushSpacing')} />
               <SliderCtl def={defs.layerOpacity} value={state.layerOpacity ?? 1} onChange={set('layerOpacity')} />
-              <p className="section-hint">Hold <b>Shift</b> and scroll to resize the brush. Right-click drag still orbits the Studio camera.</p>
+              <p className="section-hint">{translateText("Hold ")}<b>{translateText("Shift")}</b>{translateText(" and scroll to resize the brush. Right-click drag still orbits the Studio camera.")}</p>
             </div>
           )}
         </SidePanel>

@@ -1,3 +1,5 @@
+import { getLocale } from '../../i18n/language.js';
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crosshair, Download, Grip, LoaderCircle, Map, Search, X } from 'lucide-react';
@@ -27,15 +29,16 @@ function selectionBounds(spec) {
 }
 
 function SliderField({ label, value, min, max, step, unit = '', onChange }) {
+  useLanguage();
   return (
     <label className="realworld-map-slider">
       <span>
-        <span>{label}</span>
-        <output>{value}{unit}</output>
+        <span>{translateText(label)}</span>
+        <output>{value}{translateText(unit)}</output>
       </span>
       <input
         type="range"
-        aria-label={label}
+        aria-label={translateText(label)}
         min={min}
         max={max}
         step={step}
@@ -47,12 +50,13 @@ function SliderField({ label, value, min, max, step, unit = '', onChange }) {
 }
 
 function SelectField({ label, value, options, onChange }) {
+  useLanguage();
   return (
     <label className="realworld-map-select">
-      <span>{label}</span>
+      <span>{translateText(label)}</span>
       <select value={value} onChange={(event) => onChange(Number(event.target.value))}>
         {options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
+          <option key={option.value} value={option.value}>{translateText(option.label)}</option>
         ))}
       </select>
     </label>
@@ -60,9 +64,10 @@ function SelectField({ label, value, options, onChange }) {
 }
 
 function Stat({ label, children }) {
+  useLanguage();
   return (
     <div className="realworld-map-stat">
-      <span>{label}</span>
+      <span>{translateText(label)}</span>
       <strong>{children}</strong>
     </div>
   );
@@ -80,6 +85,7 @@ export default function RealWorldMapPicker({
   onLoad,
   onClose,
 }) {
+  useLanguage();
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const rectangleRef = useRef(null);
@@ -102,7 +108,7 @@ export default function RealWorldMapPicker({
     const worldSize = chunkCount * size;
     return {
       value: size,
-      label: `${worldSize.toLocaleString()} × ${worldSize.toLocaleString()} units`,
+      label: `${worldSize.toLocaleString(getLocale())} × ${worldSize.toLocaleString(getLocale())} units`,
     };
   });
 
@@ -365,18 +371,18 @@ export default function RealWorldMapPicker({
           <div>
             <span className="realworld-map-heading-icon"><Map size={17} aria-hidden /></span>
             <span>
-              <h2 id="realworld-map-title">Select a real-world area</h2>
-              <p>Move the map or click a location to position the terrain.</p>
+              <h2 id="realworld-map-title">{translateText("Select a real-world area")}</h2>
+              <p>{translateText("Move the map or click a location to position the terrain.")}</p>
             </span>
           </div>
-          <button type="button" onClick={onClose} disabled={busy} aria-label="Close map picker">
+          <button type="button" onClick={onClose} disabled={busy} aria-label={translateText("Close map picker")}>
             <X size={17} aria-hidden />
           </button>
         </header>
 
         <div className="realworld-map-layout">
           <div className="realworld-map-canvas-wrap">
-            <div ref={mapNodeRef} className="realworld-map-canvas" aria-label="Interactive world map" />
+            <div ref={mapNodeRef} className="realworld-map-canvas" aria-label={translateText("Interactive world map")} />
             <div className="realworld-map-search">
               <form onSubmit={searchPlaces} role="search">
                 <Search size={15} aria-hidden />
@@ -388,28 +394,28 @@ export default function RealWorldMapPicker({
                     setSearchResults([]);
                     setSearchError('');
                   }}
-                  placeholder="Search city or place…"
-                  aria-label="Search city or place"
+                  placeholder={translateText("Search city or place…")}
+                  aria-label={translateText("Search city or place")}
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <button type="submit" disabled={searchBusy || searchQuery.trim().length < 2} aria-label="Search map">
+                <button type="submit" disabled={searchBusy || searchQuery.trim().length < 2} aria-label={translateText("Search map")}>
                   {searchBusy ? <LoaderCircle size={15} className="tb-spin" aria-hidden /> : 'Search'}
                 </button>
               </form>
               {(searchResults.length > 0 || searchError) && (
-                <div className="realworld-map-search-results" role="listbox" aria-label="Place search results">
-                  {searchError && <p>{searchError}</p>}
+                <div className="realworld-map-search-results" role="listbox" aria-label={translateText("Place search results")}>
+                  {searchError && <p>{translateText(searchError)}</p>}
                   {searchResults.map((place) => {
                     const [name, ...rest] = place.label.split(',');
                     return (
                       <button key={place.id} type="button" role="option" aria-selected="false" onClick={() => selectSearchResult(place)}>
-                        <strong>{name}</strong>
-                        <span>{rest.join(',').trim() || place.type}</span>
+                        <strong>{translateText(name)}</strong>
+                        <span>{translateText(rest.join(',').trim() || place.type)}</span>
                       </button>
                     );
                   })}
-                  <small>Search data © OpenStreetMap contributors</small>
+                  <small>{translateText("Search data © OpenStreetMap contributors")}</small>
                 </div>
               )}
             </div>
@@ -417,9 +423,7 @@ export default function RealWorldMapPicker({
               <Crosshair size={24} strokeWidth={1.6} />
             </div>
             <div className="realworld-map-instruction">
-              <Grip size={14} aria-hidden />
-              Drag to move · Scroll to zoom · Click to center
-            </div>
+              <Grip size={14} aria-hidden />{translateText("Drag to move · Scroll to zoom · Click to center")}</div>
           </div>
 
           <aside className="realworld-map-sidebar">
@@ -427,53 +431,52 @@ export default function RealWorldMapPicker({
               event.preventDefault();
               if (!busy) commitSelectionCenter();
             }}>
-              <div className="realworld-center-heading"><Crosshair size={15} aria-hidden /><h3>Selection center</h3></div>
+              <div className="realworld-center-heading"><Crosshair size={15} aria-hidden /><h3>{translateText("Selection center")}</h3></div>
               <label className="realworld-map-select">
-                <span>Coordinate format</span>
-                <select aria-label="Selection center coordinate format" value={coordinateFormat}
+                <span>{translateText("Coordinate format")}</span>
+                <select aria-label={translateText("Selection center coordinate format")} value={coordinateFormat}
                   disabled={busy} onChange={(event) => changeCoordinateFormat(event.target.value)}>
-                  {COORDINATE_FORMATS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                  {COORDINATE_FORMATS.map(({ value, label }) => <option key={value} value={value}>{translateText(label)}</option>)}
                 </select>
               </label>
-              <label className="realworld-center-label" htmlFor="realworld-selection-center">Coordinates</label>
+              <label className="realworld-center-label" htmlFor="realworld-selection-center">{translateText("Coordinates")}</label>
               <div className={`realworld-center-field${coordinateError ? ' is-invalid' : ''}`}>
                 <Crosshair size={15} aria-hidden />
                 <input id="realworld-selection-center" type="text" value={coordinateText}
                 disabled={busy} spellCheck={false} autoComplete="off"
                 aria-describedby="realworld-selection-center-hint"
                 aria-invalid={!!coordinateError}
-                aria-label="Selection center"
+                aria-label={translateText("Selection center")}
                 onChange={(event) => { setCoordinateText(event.target.value); setCoordinateError(''); }} />
               </div>
               <small className="realworld-center-hint" id="realworld-selection-center-hint">
-                {['lambert93', 'mercator'].includes(coordinateFormat) ? 'Easting, northing in meters' : 'Latitude, longitude · decimal degrees or DMS'}
+                {translateText(['lambert93', 'mercator'].includes(coordinateFormat) ? 'Easting, northing in meters' : 'Latitude, longitude · decimal degrees or DMS')}
               </small>
-              {coordinateError && <p className="realworld-map-warning" role="alert">{coordinateError}</p>}
+              {coordinateError && <p className="realworld-map-warning" role="alert">{translateText(coordinateError)}</p>}
               <button type="submit" className="action-btn realworld-center-apply" disabled={busy}>
-                <Crosshair size={14} aria-hidden /> Center map
-              </button>
+                <Crosshair size={14} aria-hidden />{translateText(" Center map")}</button>
             </form>
 
             <div className="realworld-map-world-settings" aria-labelledby="realworld-world-settings-title">
-              <h3 id="realworld-world-settings-title">World settings</h3>
+              <h3 id="realworld-world-settings-title">{translateText("World settings")}</h3>
               <SelectField
-                label="3D world size"
+                label={translateText("3D world size")}
                 value={chunkSize}
                 options={worldSizeOptions}
                 onChange={(nextChunkSize) => onChunkSizeChange?.(nextChunkSize)}
               />
-              <p>{chunkCount} × {chunkCount} chunks · {chunkSize} units per chunk</p>
+              <p>{translateText(chunkCount)} × {translateText(chunkCount)}{translateText(" chunks · ")}{translateText(chunkSize)}{translateText(" units per chunk")}</p>
             </div>
 
             <SliderField
-              label="Area size"
+              label={translateText("Area size")}
               value={spec.sizeKm}
               unit=" km"
               {...CUSTOM_AREA_LIMITS.sizeKm}
               onChange={(sizeKm) => update({ sizeKm })}
             />
             <SliderField
-              label="Terrain detail"
+              label={translateText("Terrain detail")}
               value={spec.zoom}
               unit={` · z${info.zoom} effective`}
               {...CUSTOM_AREA_LIMITS.zoom}
@@ -481,20 +484,17 @@ export default function RealWorldMapPicker({
             />
 
             <div className="realworld-map-stats">
-              <Stat label="Selected area">{spec.sizeKm} × {spec.sizeKm} km</Stat>
-              <Stat label="Tiles fetched">{info.tilesX} × {info.tilesY}</Stat>
-              <Stat label="Output resolution">{info.outW} × {info.outH}</Stat>
-              <Stat label="Ground resolution">≈{groundResolution} m/px</Stat>
+              <Stat label={translateText("Selected area")}>{translateText(spec.sizeKm)} × {translateText(spec.sizeKm)}{translateText(" km")}</Stat>
+              <Stat label={translateText("Tiles fetched")}>{translateText(info.tilesX)} × {translateText(info.tilesY)}</Stat>
+              <Stat label={translateText("Output resolution")}>{translateText(info.outW)} × {translateText(info.outH)}</Stat>
+              <Stat label={translateText("Ground resolution")}>≈{translateText(groundResolution)}{translateText(" m/px")}</Stat>
             </div>
 
             {info.zoomClamped && (
-              <p className="realworld-map-warning">
-                Detail reduced to z{info.zoom} to stay within the 6 × 6 tile limit.
-                Reduce the area size for a sharper result.
-              </p>
+              <p className="realworld-map-warning">{translateText("Detail reduced to z")}{translateText(info.zoom)}{translateText(" to stay within the 6 × 6 tile limit. Reduce the area size for a sharper result.")}</p>
             )}
 
-            <p className="realworld-map-layer-credit">{style.attribution}</p>
+            <p className="realworld-map-layer-credit">{translateText(style.attribution)}</p>
 
             <button
               type="button"
@@ -506,7 +506,7 @@ export default function RealWorldMapPicker({
               }}
             >
               <Download size={16} aria-hidden />
-              <span>{busy ? `Loading terrain… ${Math.round(progress * 100)}%` : 'Load selected area'}</span>
+              <span>{translateText(busy ? `Loading terrain… ${Math.round(progress * 100)}%` : 'Load selected area')}</span>
             </button>
           </aside>
         </div>

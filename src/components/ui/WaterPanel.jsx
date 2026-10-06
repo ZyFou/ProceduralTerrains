@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useContext, useState } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
@@ -173,6 +174,7 @@ const LEGACY_SHADER_SLIDERS = [
 ];
 
 function PerfSlider({ perf, id, def, onPerfSetting, settingId }) {
+  useLanguage();
   return (
     <SliderCtl
       def={def}
@@ -199,6 +201,7 @@ export default function WaterPanelInner({
   settingsTarget,
   id = 'inspector-water',
 }) {
+  useLanguage();
   const flat = useContext(FlatPanelContext);
   const target = settingsTarget?.panelId === 'water' ? settingsTarget : null;
   const forceSection = (sectionId, sectionLabel, prefixes = []) =>
@@ -258,23 +261,22 @@ export default function WaterPanelInner({
   const content = (
     <>
       <div className={`water-mode-banner${effectiveRealistic ? ' realistic' : effectiveMode === 'legacy' ? ' legacy' : ''}`}>
-        <span className="water-mode-banner-label">{worldLabel} · Water</span>
+        <span className="water-mode-banner-label">{translateText(worldLabel)}{translateText(" · Water")}</span>
         <span className="water-mode-banner-value">
-          {downgraded ? `${modeLabel} → ${effectiveLabel}` : modeLabel}
+          {translateText(downgraded ? `${modeLabel} → ${effectiveLabel}` : modeLabel)}
         </span>
-        <p className="section-hint">{WORLD_MODE_WATER_HINTS[worldMode]}</p>
+        <p className="section-hint">{translateText(WORLD_MODE_WATER_HINTS[worldMode])}</p>
         {downgraded && (
-          <p className="section-hint warning">
-            Rendering as {effectiveLabel}
-            {isInfinite && val(params, 'waterAutoDowngradeInfinite') ? ' (auto-downgrade active)' : ''}
-            {isPlanet && selectedRealistic ? ' (planet spherical fallback)' : ''}
+          <p className="section-hint warning">{translateText("Rendering as ")}{translateText(effectiveLabel)}
+            {translateText(isInfinite && val(params, 'waterAutoDowngradeInfinite') ? ' (auto-downgrade active)' : '')}
+            {translateText(isPlanet && selectedRealistic ? ' (planet spherical fallback)' : '')}
           </p>
         )}
       </div>
 
       <ControlSection
         id={`${id}-mode`}
-        title="Water"
+        title={translateText("Water")}
         defaultOpen
         enabled={waterActive}
         onEnabledChange={setEnabled}
@@ -291,28 +293,28 @@ export default function WaterPanelInner({
             />
           )}
           <SelectRow
-            label="Water Mode"
+            label={translateText("Water Mode")}
             value={mode}
             options={WATER_MODES}
             onChange={setMode}
             settingId="water.waterMode"
-            info={MODE_HINTS[mode] ?? 'Select the water rendering pipeline.'}
+            info={translateText(MODE_HINTS[mode] ?? 'Select the water rendering pipeline.')}
           />
           {isInfinite && (
             <ToggleRow
-              label="Auto Downgrade in Infinite World"
+              label={translateText("Auto Downgrade in Infinite World")}
               value={!!val(params, 'waterAutoDowngradeInfinite')}
               onChange={(v) => onParam('waterAutoDowngradeInfinite', v)}
               settingId="water.waterAutoDowngradeInfinite"
-              info="Cap Volumetric/Cinematic to Realistic while exploring Infinite World."
+              info={translateText("Cap Volumetric/Cinematic to Realistic while exploring Infinite World.")}
             />
           )}
           <ToggleRow
-            label="Use Legacy on Low FPS"
+            label={translateText("Use Legacy on Low FPS")}
             value={!!val(params, 'waterLegacyOnLowFps')}
             onChange={(v) => onParam('waterLegacyOnLowFps', v)}
             settingId="water.waterLegacyOnLowFps"
-            info="Temporarily reduce expensive water effects when FPS drops below the threshold."
+            info={translateText("Temporarily reduce expensive water effects when FPS drops below the threshold.")}
           />
         </div>
       </ControlSection>
@@ -320,18 +322,18 @@ export default function WaterPanelInner({
       {enabled && mode !== 'off' && (
         <ControlSection
           id={`${id}-shader`}
-          title="Shader Quality"
+          title={translateText("Shader Quality")}
           defaultOpen
           settingId="water.section.shader"
           forceOpen={forceSection('water.section.shader', 'Shader Quality', ['performance.water'])}
         >
           <SelectRow
-            label="Water Quality"
+            label={translateText("Water Quality")}
             value={String(p.waterQuality ?? 2)}
             options={WATER_QUALITY_OPTIONS}
             onChange={(v) => onPerfSetting?.('waterQuality', parseInt(v, 10))}
             settingId="performance.waterQuality"
-            info="Legacy shader quality tier — applies in Tile, Infinite World, and Planet."
+            info={translateText("Legacy shader quality tier — applies in Tile, Infinite World, and Planet.")}
           />
           {LEGACY_SHADER_SLIDERS.map((def) => (
             <PerfSlider
@@ -357,21 +359,21 @@ export default function WaterPanelInner({
 
       <ControlSection
         id={`${id}-material`}
-        title="Material"
+        title={translateText("Material")}
         defaultOpen={enabled}
         settingId="water.section.material"
         forceOpen={forceSection('water.section.material', 'Material', ['water.waterAnim', 'planet.water', 'water.waterOpacity', 'water.waterRoughness', 'water.waterFresnel', 'water.waterRefraction', 'water.waterSpecular'])}
       >
         <ToggleRow
-          label="Water Animation"
+          label={translateText("Water Animation")}
           value={params.waterAnim}
           onChange={(v) => onParam('waterAnim', v)}
           settingId="water.waterAnim"
-          info="Animate surface ripples and foam in all world modes."
+          info={translateText("Animate surface ripples and foam in all world modes.")}
         />
         <ControlSection
           id={`${id}-water-colors`}
-          title="Water Colors"
+          title={translateText("Water Colors")}
           nested
           defaultOpen
           settingId="water.section.waterColors"
@@ -394,11 +396,11 @@ export default function WaterPanelInner({
                 settingId="water.waterNaturalColor"
               />
               <ToggleRow
-                label="Biome Color Variation"
+                label={translateText("Biome Color Variation")}
                 value={val(params, 'waterBiomeColorEnabled')}
                 onChange={(v) => onParam('waterBiomeColorEnabled', v)}
                 settingId="water.waterBiomeColorEnabled"
-                info="Smoothly adapts water tint to the local procedural biome while preserving the selected base colors."
+                info={translateText("Smoothly adapts water tint to the local procedural biome while preserving the selected base colors.")}
               />
               {val(params, 'waterBiomeColorEnabled') && (
                 <SliderCtl
@@ -420,9 +422,9 @@ export default function WaterPanelInner({
           {WATER_COLORS.map(({ key, label, icon, info }) => (
             <ColorField
               key={key}
-              label={label}
+              label={translateText(label)}
               icon={icon}
-              info={info}
+              info={translateText(info)}
               value={colorToHex(palette[key] ?? [0.05, 0.2, 0.35])}
               onChange={(e) => planetStyleProps.onColorChange(key, parseColor(e.target.value))}
             />
@@ -438,23 +440,20 @@ export default function WaterPanelInner({
           />
         ))}
         {legacy && enabled && (
-          <p className="section-hint">
-            Legacy shader uses the colors above plus Shader Quality settings. Switch to Realistic for depth, foam, and volumetric controls.
-          </p>
+          <p className="section-hint">{translateText("Legacy shader uses the colors above plus Shader Quality settings. Switch to Realistic for depth, foam, and volumetric controls.")}</p>
         )}
       </ControlSection>
 
       {selectedRealistic && (
         <ControlSection
           id={`${id}-depth`}
-          title="Depth"
+          title={translateText("Depth")}
           defaultOpen={isStudio}
           settingId="water.section.depth"
           forceOpen={forceSection('water.section.depth', 'Depth', ['water.waterDepth', 'water.waterMaxVisible', 'water.waterShallow', 'water.waterDeep', 'water.waterAbsorption'])}
         >
           {!effectiveRealistic && (
-            <p className="section-hint">
-              Stored for Tile / Infinite World. {isPlanet ? 'Planet currently renders Legacy water.' : 'Effective mode differs from selected mode.'}
+            <p className="section-hint">{translateText("Stored for Tile / Infinite World. ")}{translateText(isPlanet ? 'Planet currently renders Legacy water.' : 'Effective mode differs from selected mode.')}
             </p>
           )}
           {DEPTH_SLIDERS.map((def) => (
@@ -466,7 +465,7 @@ export default function WaterPanelInner({
       {enabled && (
         <ControlSection
           id={`${id}-waves`}
-          title="Waves"
+          title={translateText("Waves")}
           defaultOpen={false}
           settingId="water.section.waves"
           forceOpen={forceSection('water.section.waves', 'Waves', ['water.waterWave', 'water.waterSmall', 'water.waterLarge', 'water.waterNormal', 'water.waterAnimSpeed', 'performance.waterWaves'])}
@@ -484,7 +483,7 @@ export default function WaterPanelInner({
       {enabled && (
         <ControlSection
           id={`${id}-foam`}
-          title="Shoreline"
+          title={translateText("Shoreline")}
           defaultOpen={false}
           settingId="water.section.foam"
           forceOpen={forceSection('water.section.foam', 'Shoreline', ['water.waterFoam'])}
@@ -498,7 +497,7 @@ export default function WaterPanelInner({
           {selectedRealistic && (
             <>
               <ToggleRow
-                label="Enable Foam"
+                label={translateText("Enable Foam")}
                 value={!!val(params, 'waterFoamEnabled')}
                 onChange={(v) => onParam('waterFoamEnabled', v)}
                 settingId="water.waterFoamEnabled"
@@ -519,35 +518,35 @@ export default function WaterPanelInner({
         return (
           <ControlSection
             id={`${id}-underwater`}
-            title="Underwater"
+            title={translateText("Underwater")}
             defaultOpen={false}
             settingId="water.section.underwater"
             forceOpen={forceSection('water.section.underwater', 'Underwater', ['water.waterUnderwater', 'performance.underwater'])}
           >
             <ToggleRow
-              label="Enable Underwater Effect"
+              label={translateText("Enable Underwater Effect")}
               value={uwEnabled}
               onChange={(v) => {
                 onParam('waterUnderwaterEnabled', v);
                 onPerfSetting?.('underwaterEffect', v);
               }}
               settingId="water.waterUnderwaterEnabled"
-              info="Camera submersion fog, tint and caustics in Tile and Infinite World."
+              info={translateText("Camera submersion fog, tint and caustics in Tile and Infinite World.")}
             />
             <SelectRow
-              label="Underwater Mode"
+              label={translateText("Underwater Mode")}
               value={requested}
               options={UNDERWATER_MODES}
               onChange={(v) => onParam('waterUnderwaterMode', v)}
               settingId="water.waterUnderwaterMode"
-              info="Lite is cheap (any water). High is cinematic and needs the Realistic renderer. Auto picks High with Realistic water, Lite otherwise."
+              info={translateText("Lite is cheap (any water). High is cinematic and needs the Realistic renderer. Auto picks High with Realistic water, Lite otherwise.")}
             />
             {uwEnabled && (
               <p className={`section-hint${uwFellBack ? ' warning' : ''}`}>
-                {uwResolved === 'off'
+                {translateText(uwResolved === 'off'
                   ? 'Underwater effects are off.'
-                  : `Active mode: ${uwResolved === 'high' ? 'High' : 'Lite'}`}
-                {uwFellBack ? ' — High requires the Realistic renderer, falling back to Lite.' : ''}
+                  : `Active mode: ${uwResolved === 'high' ? 'High' : 'Lite'}`)}
+                {translateText(uwFellBack ? ' — High requires the Realistic renderer, falling back to Lite.' : '')}
               </p>
             )}
 
@@ -558,18 +557,18 @@ export default function WaterPanelInner({
             {uwEnabled && (
               <ControlSection
                 id={`${id}-caustics`}
-                title="Caustics"
+                title={translateText("Caustics")}
                 nested
                 defaultOpen={false}
                 settingId="water.section.caustics"
                 forceOpen={forceSection('water.section.caustics', 'Caustics', ['water.waterUnderwaterCaustics'])}
               >
                 <ToggleRow
-                  label="Caustics Enabled"
+                  label={translateText("Caustics Enabled")}
                   value={val(params, 'waterUnderwaterCausticsEnabled') !== false}
                   onChange={(v) => onParam('waterUnderwaterCausticsEnabled', v)}
                   settingId="water.waterUnderwaterCausticsEnabled"
-                  info="Animated dappled light projected on the submerged sea floor."
+                  info={translateText("Animated dappled light projected on the submerged sea floor.")}
                 />
                 {val(params, 'waterUnderwaterCausticsEnabled') !== false && CAUSTIC_SLIDERS.map((def) => (
                   <SliderCtl key={def.key} def={def} value={val(params, def.key)} onChange={(v) => onParam(def.key, v)} settingId={`water.${def.key}`} />
@@ -580,28 +579,28 @@ export default function WaterPanelInner({
             {uwEnabled && (
               <ControlSection
                 id={`${id}-high-extras`}
-                title="High Mode Extras"
+                title={translateText("High Mode Extras")}
                 nested
                 defaultOpen={false}
                 settingId="water.section.highExtras"
                 forceOpen={forceSection('water.section.highExtras', 'High Mode Extras', ['water.waterUnderwaterLight', 'water.waterUnderwaterParticles'])}
               >
                 <ToggleRow
-                  label="Light Shafts"
+                  label={translateText("Light Shafts")}
                   value={!!val(params, 'waterUnderwaterLightShafts')}
                   onChange={(v) => onParam('waterUnderwaterLightShafts', v)}
                   settingId="water.waterUnderwaterLightShafts"
-                  info="Volumetric sun rays through the water. High mode only."
+                  info={translateText("Volumetric sun rays through the water. High mode only.")}
                 />
                 <ToggleRow
-                  label="Suspended Particles"
+                  label={translateText("Suspended Particles")}
                   value={!!val(params, 'waterUnderwaterParticles')}
                   onChange={(v) => onParam('waterUnderwaterParticles', v)}
                   settingId="water.waterUnderwaterParticles"
-                  info="Sparse floating specks for immersion. High mode only."
+                  info={translateText("Sparse floating specks for immersion. High mode only.")}
                 />
                 {uwResolved !== 'high' && (val(params, 'waterUnderwaterLightShafts') || val(params, 'waterUnderwaterParticles')) && (
-                  <p className="section-hint">Light shafts and particles only render in High mode.</p>
+                  <p className="section-hint">{translateText("Light shafts and particles only render in High mode.")}</p>
                 )}
               </ControlSection>
             )}
@@ -610,24 +609,21 @@ export default function WaterPanelInner({
       })()}
 
       {enabled && isPlanet && (
-        <ControlSection id={`${id}-planet`} title="Planet Ocean" defaultOpen={false} settingId="water.section.planet">
-          <p className="section-hint">
-            Planet uses a spherical ocean shell at sea level. Water colors and animation apply immediately.
-            Underwater post-processing is disabled on the planet (curved surface). Realistic depth/foam settings are saved for other modes.
-          </p>
+        <ControlSection id={`${id}-planet`} title={translateText("Planet Ocean")} defaultOpen={false} settingId="water.section.planet">
+          <p className="section-hint">{translateText("Planet uses a spherical ocean shell at sea level. Water colors and animation apply immediately. Underwater post-processing is disabled on the planet (curved surface). Realistic depth/foam settings are saved for other modes.")}</p>
         </ControlSection>
       )}
 
       {selectedRealistic && (
         <ControlSection
           id={`${id}-performance`}
-          title="Performance"
+          title={translateText("Performance")}
           defaultOpen={false}
           settingId="water.section.performance"
           forceOpen={forceSection('water.section.performance', 'Performance', ['water.waterReflectionQuality', 'water.waterUpdateFrequency', 'water.waterRefractionQuality', 'water.waterRenderScale', 'water.waterFoamQuality', 'water.waterCausticsQuality', 'water.waterNormal', 'water.waterDisable'])}
         >
           {mode === 'cinematic' && isStudio && (
-            <p className="section-hint warning">Cinematic adds a mirrored scene render for planar reflection — best for Tile mode screenshots.</p>
+            <p className="section-hint warning">{translateText("Cinematic adds a mirrored scene render for planar reflection — best for Tile mode screenshots.")}</p>
           )}
           {REALISTIC_PERF_SLIDERS.map((def) => (
             <SliderCtl
@@ -657,12 +653,12 @@ export default function WaterPanelInner({
           ))}
           {selectedPlanarReflection && (
             <SelectRow
-              label="Reflection Updates"
+              label={translateText("Reflection Updates")}
               value={String(val(params, 'waterUpdateFrequency'))}
               options={REFLECTION_UPDATE_OPTIONS}
               onChange={(v) => onParam('waterUpdateFrequency', Number(v))}
               settingId="water.waterUpdateFrequency"
-              info="Reuse the planar reflection between updates to reduce its scene-render cost."
+              info={translateText("Reuse the planar reflection between updates to reduce its scene-render cost.")}
             />
           )}
         </ControlSection>
@@ -670,18 +666,18 @@ export default function WaterPanelInner({
 
       <ControlSection
         id={`${id}-debug`}
-        title="Debug"
+        title={translateText("Debug")}
         defaultOpen={false}
         settingId="water.section.debug"
         forceOpen={forceSection('water.section.debug', 'Debug', ['water.waterDebug', 'water.waterShow'])}
       >
         <SelectRow
-          label="Visual Baseline Scene"
+          label={translateText("Visual Baseline Scene")}
           value={baselineScene}
           options={WATER_BASELINE_SCENES}
           onChange={setBaselineScene}
           settingId="water.waterBaselineScene"
-          info="Load a fixed terrain, camera, water preset, and time of day for before/after comparisons."
+          info={translateText("Load a fixed terrain, camera, water preset, and time of day for before/after comparisons.")}
         />
         <button
           type="button"
@@ -689,7 +685,7 @@ export default function WaterPanelInner({
           disabled={!!baselineBusy}
           onClick={() => runBaselineAction(onApplyWaterBaselineScene, 'load')}
         >
-          {baselineBusy === 'load' ? 'Loading Baseline…' : 'Load Baseline Scene'}
+          {translateText(baselineBusy === 'load' ? 'Loading Baseline…' : 'Load Baseline Scene')}
         </button>
         <button
           type="button"
@@ -697,70 +693,56 @@ export default function WaterPanelInner({
           disabled={!!baselineBusy}
           onClick={() => runBaselineAction(onCaptureWaterBaseline, 'capture')}
         >
-          {baselineBusy === 'capture' ? 'Capturing Baseline…' : 'Capture PNG + Metrics (.zip)'}
+          {translateText(baselineBusy === 'capture' ? 'Capturing Baseline…' : 'Capture PNG + Metrics (.zip)')}
         </button>
-        <p className="section-hint">
-          Capture the same scene on each target GPU. The ZIP records FPS, frame time,
-          whole-frame GPU time when available, draw calls, triangles, and water shader compile time.
-        </p>
+        <p className="section-hint">{translateText("Capture the same scene on each target GPU. The ZIP records FPS, frame time, whole-frame GPU time when available, draw calls, triangles, and water shader compile time.")}</p>
         <SelectRow
-          label="Water Debug View"
+          label={translateText("Water Debug View")}
           value={val(params, 'waterDebugView')}
           options={WATER_DEBUG_VIEWS}
           onChange={(v) => onParam('waterDebugView', v)}
           settingId="water.waterDebugView"
-          info="Inspect water inputs and terms on the surface (requires effective Realistic mode)."
+          info={translateText("Inspect water inputs and terms on the surface (requires effective Realistic mode).")}
         />
         <ToggleRow
-          label="Show Water Mesh Bounds"
+          label={translateText("Show Water Mesh Bounds")}
           value={!!val(params, 'waterShowMeshBounds')}
           onChange={(v) => onParam('waterShowMeshBounds', v)}
           settingId="water.waterShowMeshBounds"
-          info="Outline the active water mesh for this world mode."
+          info={translateText("Outline the active water mesh for this world mode.")}
         />
         <ToggleRow
-          label="Show Water Performance Cost"
+          label={translateText("Show Water Performance Cost")}
           value={!!val(params, 'waterShowPerfCost')}
           onChange={(v) => onParam('waterShowPerfCost', v)}
           settingId="water.waterShowPerfCost"
         />
         {!!val(params, 'waterShowPerfCost') && waterCost && (
           <div className="section-hint">
-            <strong>Live water cost</strong><br />
-            Surface CPU submission: {fmtWaterCostMs(waterCost.surface?.surfaceSubmitAvgMs)}<br />
-            Surface GPU: individual timing unavailable · whole frame {gpu?.supported ? fmtWaterCostMs(gpu.frameMs) : 'unavailable'}<br />
-            Geometry: {waterCost.surface?.vertices ?? 0} vertices · {waterCost.surface?.triangles ?? 0} triangles<br />
-            Opaque refraction: {fmtWaterCostMs(waterCost.refraction?.captureMs)} · {fmtWaterResolution(waterCost.refraction)}<br />
-            Planar reflection: {fmtWaterCostMs(waterCost.reflection?.captureMs)} · {fmtWaterResolution(waterCost.reflection)}<br />
-            Targets: {fmtWaterMemory(waterCost.renderTargetMemoryBytes)} · {waterCost.additionalSceneRenders ?? 0} extra scene render(s)
-          </div>
+            <strong>{translateText("Live water cost")}</strong><br />{translateText("Surface CPU submission: ")}{translateText(fmtWaterCostMs(waterCost.surface?.surfaceSubmitAvgMs))}<br />{translateText("Surface GPU: individual timing unavailable · whole frame ")}{translateText(gpu?.supported ? fmtWaterCostMs(gpu.frameMs) : 'unavailable')}<br />{translateText("Geometry: ")}{translateText(waterCost.surface?.vertices ?? 0)}{translateText(" vertices · ")}{translateText(waterCost.surface?.triangles ?? 0)}{translateText(" triangles")}<br />{translateText("Opaque refraction: ")}{translateText(fmtWaterCostMs(waterCost.refraction?.captureMs))} · {translateText(fmtWaterResolution(waterCost.refraction))}<br />{translateText("Planar reflection: ")}{translateText(fmtWaterCostMs(waterCost.reflection?.captureMs))} · {translateText(fmtWaterResolution(waterCost.reflection))}<br />{translateText("Targets: ")}{translateText(fmtWaterMemory(waterCost.renderTargetMemoryBytes))} · {translateText(waterCost.additionalSceneRenders ?? 0)}{translateText(" extra scene render(s)")}</div>
         )}
         {!effectiveRealistic && (
-          <p className="section-hint">Shader debug views need an effective Realistic (or higher) mode.</p>
+          <p className="section-hint">{translateText("Shader debug views need an effective Realistic (or higher) mode.")}</p>
         )}
       </ControlSection>
 
-      <ControlSection id={`${id}-export`} title="Export" defaultOpen={false} settingId="water.section.export">
+      <ControlSection id={`${id}-export`} title={translateText("Export")} defaultOpen={false} settingId="water.section.export">
         <p className="section-hint">
-          {isStudio
+          {translateText(isStudio
             ? 'Export water masks from the tile height field, or use the Export panel for GLB output.'
             : isInfinite
               ? 'Mask export samples the current procedural height field at the board scale.'
-              : 'Mask export uses planet height sampling where available; GLB export includes the ocean shell.'}
+              : 'Mask export uses planet height sampling where available; GLB export includes the ocean shell.')}
         </p>
-        <button type="button" className="action-btn" onClick={() => onExportWaterMasks?.({ exportWaterMask: true, exportDepthMap: true })}>
-          Export Water + Depth Masks
-        </button>
-        <button type="button" className="action-btn" onClick={() => onExportWaterMasks?.({ exportShorelineMask: true, exportFoamMask: true })}>
-          Export Shoreline + Foam Masks
-        </button>
+        <button type="button" className="action-btn" onClick={() => onExportWaterMasks?.({ exportWaterMask: true, exportDepthMap: true })}>{translateText("Export Water + Depth Masks")}</button>
+        <button type="button" className="action-btn" onClick={() => onExportWaterMasks?.({ exportShorelineMask: true, exportFoamMask: true })}>{translateText("Export Shoreline + Foam Masks")}</button>
       </ControlSection>
 
-      <PanelResetButton label="Reset Water Settings" onClick={onResetWaterSettings} settingId="water.reset" />
+      <PanelResetButton label={translateText("Reset Water Settings")} onClick={onResetWaterSettings} settingId="water.reset" />
     </>
   );
 
   if (flat) return content;
 
-  return <div className="water-panel-inner">{content}</div>;
+  return <div className="water-panel-inner">{translateText(content)}</div>;
 }

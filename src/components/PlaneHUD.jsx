@@ -1,3 +1,5 @@
+import { getLocale } from '../i18n/language.js';
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 // Flight instruments overlay for plane explore mode — artificial horizon + throttle quadrant.
 
 import { useLiveMetrics } from '../state/LiveMetricsStore.js';
@@ -7,7 +9,7 @@ const PITCH_LADDER = [10, 20, 30, 40, 50];
 
 function fmtAlt(m) {
   if (!Number.isFinite(m)) return '—';
-  return Math.round(m).toLocaleString();
+  return Math.round(m).toLocaleString(getLocale());
 }
 
 function fmtVs(mps) {
@@ -17,11 +19,12 @@ function fmtVs(mps) {
 }
 
 function ArtificialHorizon({ pitch = 0, roll = 0, stall = false }) {
+  useLanguage();
   const pitchPx = pitch * PX_PER_DEG;
   const clipId = 'plane-ai-clip';
 
   return (
-    <div className={`plane-ai${stall ? ' plane-ai-stall' : ''}`} aria-label="Artificial horizon">
+    <div className={`plane-ai${stall ? ' plane-ai-stall' : ''}`} aria-label={translateText("Artificial horizon")}>
       <svg viewBox="0 0 140 140" className="plane-ai-svg">
         <defs>
           <clipPath id={clipId}>
@@ -51,7 +54,7 @@ function ArtificialHorizon({ pitch = 0, roll = 0, stall = false }) {
                   y={-deg * PX_PER_DEG + 3.5}
                   className="plane-ai-ladder-label"
                 >
-                  {deg}
+                  {translateText(deg)}
                 </text>
                 <line
                   x1={52}
@@ -65,7 +68,7 @@ function ArtificialHorizon({ pitch = 0, roll = 0, stall = false }) {
                   y={deg * PX_PER_DEG + 3.5}
                   className="plane-ai-ladder-label"
                 >
-                  {deg}
+                  {translateText(deg)}
                 </text>
               </g>
             ))}
@@ -84,12 +87,13 @@ function ArtificialHorizon({ pitch = 0, roll = 0, stall = false }) {
 }
 
 function ThrottleQuadrant({ throttle = 0 }) {
+  useLanguage();
   const pct = Math.round(throttle * 100);
   const leverBottom = `${throttle * 100}%`;
 
   return (
-    <div className="plane-throttle" aria-label={`Throttle ${pct} percent`}>
-      <div className="plane-throttle-header">THR</div>
+    <div className="plane-throttle" aria-label={translateText(`Throttle ${pct} percent`)}>
+      <div className="plane-throttle-header">{translateText("THR")}</div>
       <div className="plane-throttle-body">
         <div className="plane-throttle-track">
           <div className="plane-throttle-zone plane-throttle-zone-idle" />
@@ -103,7 +107,7 @@ function ThrottleQuadrant({ throttle = 0 }) {
             >
               <span className="plane-throttle-tick-mark" />
               {tick % 50 === 0 && (
-                <span className="plane-throttle-tick-label">{tick}</span>
+                <span className="plane-throttle-tick-label">{translateText(tick)}</span>
               )}
             </div>
           ))}
@@ -112,17 +116,18 @@ function ThrottleQuadrant({ throttle = 0 }) {
           </div>
         </div>
         <div className="plane-throttle-labels">
-          <span>MAX</span>
-          <span>CRZ</span>
-          <span>IDLE</span>
+          <span>{translateText("MAX")}</span>
+          <span>{translateText("CRZ")}</span>
+          <span>{translateText("IDLE")}</span>
         </div>
       </div>
-      <div className="plane-throttle-readout">{pct}%</div>
+      <div className="plane-throttle-readout">{translateText(pct)}%</div>
     </div>
   );
 }
 
 export default function PlaneHUD({ liveMetrics }) {
+  useLanguage();
   const { infiniteStats: stats } = useLiveMetrics(liveMetrics);
   const plane = stats?.plane;
   if (!plane) return null;
@@ -134,8 +139,8 @@ export default function PlaneHUD({ liveMetrics }) {
       <div className="plane-hud-left">
         <ArtificialHorizon pitch={plane.pitch} roll={plane.roll} stall={stall} />
         <div className="plane-heading">
-          <span className="plane-heading-label">HDG</span>
-          <span className="plane-heading-val">{Math.round(plane.heading).toString().padStart(3, '0')}°</span>
+          <span className="plane-heading-label">{translateText("HDG")}</span>
+          <span className="plane-heading-val">{translateText(Math.round(plane.heading).toString().padStart(3, '0'))}°</span>
         </div>
       </div>
 
@@ -153,29 +158,27 @@ export default function PlaneHUD({ liveMetrics }) {
         <ThrottleQuadrant throttle={plane.throttle} />
         <div className="plane-instruments">
           <div className="plane-gauge">
-            <span className="plane-gauge-label">IAS</span>
-            <span className="plane-gauge-val">{Math.round(plane.airspeed ?? plane.speed)}</span>
-            <span className="plane-gauge-unit">u/s</span>
+            <span className="plane-gauge-label">{translateText("IAS")}</span>
+            <span className="plane-gauge-val">{translateText(Math.round(plane.airspeed ?? plane.speed))}</span>
+            <span className="plane-gauge-unit">{translateText("u/s")}</span>
           </div>
           <div className="plane-gauge">
-            <span className="plane-gauge-label">ALT</span>
-            <span className="plane-gauge-val">{fmtAlt(plane.altitude)}</span>
-            <span className="plane-gauge-unit">m</span>
+            <span className="plane-gauge-label">{translateText("ALT")}</span>
+            <span className="plane-gauge-val">{translateText(fmtAlt(plane.altitude))}</span>
+            <span className="plane-gauge-unit">{translateText("m")}</span>
           </div>
           <div className="plane-gauge">
-            <span className="plane-gauge-label" title="Vertical speed — rate of climb or descent in metres per second">V/S</span>
+            <span className="plane-gauge-label" title={translateText("Vertical speed — rate of climb or descent in metres per second")}>{translateText("V/S")}</span>
             <span className={`plane-gauge-val${plane.verticalSpeed < -5 ? ' plane-gauge-warn' : ''}`}>
-              {fmtVs(plane.verticalSpeed)}
+              {translateText(fmtVs(plane.verticalSpeed))}
             </span>
-            <span className="plane-gauge-unit">m/s</span>
+            <span className="plane-gauge-unit">{translateText("m/s")}</span>
           </div>
         </div>
       </div>
 
       {stall && (
-        <div className="plane-stall-banner" role="status">
-          STALL
-        </div>
+        <div className="plane-stall-banner" role="status">{translateText("STALL")}</div>
       )}
     </div>
   );

@@ -1,5 +1,7 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useRef, useState, useEffect } from 'react';
 export default function SurfaceBranchPreview({graph,nodeId}) {
+  useLanguage();
   const [url,setUrl]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const revision=useRef(0),urlRef=useRef('');
   useEffect(()=>()=>{revision.current++;if(urlRef.current)URL.revokeObjectURL(urlRef.current);},[]);
@@ -25,5 +27,5 @@ export default function SurfaceBranchPreview({graph,nodeId}) {
       if(urlRef.current)URL.revokeObjectURL(urlRef.current);urlRef.current=URL.createObjectURL(blob);setUrl(urlRef.current);
     }catch(e){if(current===revision.current)setError(e.message);}finally{material?.dispose();geometry?.dispose();resources?.diffuse.dispose();resources?.props.dispose();renderer?.dispose();renderer?.forceContextLoss();if(current===revision.current)setBusy(false);}
   };
-  return <div><button type="button" disabled={busy} onClick={preview}>{busy?'Rendering…':'Preview surface branch'}</button>{error&&<p role="alert">{error}</p>}{url&&<img src={url} alt="Surface branch preview" width="256" height="256"/>}</div>;
+  return <div><button type="button" disabled={busy} onClick={preview}>{translateText(busy?'Rendering…':'Preview surface branch')}</button>{error&&<p role="alert">{translateText(error)}</p>}{url&&<img src={url} alt={translateText("Surface branch preview")} width="256" height="256"/>}</div>;
 }

@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import ControlSection from './ui/ControlSection.jsx';
 import { ToggleRow } from './controls.jsx';
@@ -15,6 +16,7 @@ function lodLabel(count) {
 }
 
 function LodDonut({ counts }) {
+  useLanguage();
   const ref = useRef(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -43,6 +45,7 @@ function LodDonut({ counts }) {
 }
 
 export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, embedded }) {
+  useLanguage();
   const [fov, setFov] = useState(45);
   const commitFov = () => {
     const v = Math.min(Math.max(parseFloat(fov) || 45, 20), 90);
@@ -53,14 +56,14 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
   const body = (
     <>
       <div className="row">
-        <div className="label-with-icon" data-tooltip="Camera movement style: Orbit around target or Top-down orthographic view">
+        <div className="label-with-icon" data-tooltip={translateText("Camera movement style: Orbit around target or Top-down orthographic view")}>
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.2" />
               <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Mode</span>
+          <span className="setting-label">{translateText("Mode")}</span>
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -69,18 +72,18 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
           </span>
         </div>
         <select value={camMode} onChange={(e) => onMode(e.target.value)}>
-          <option value="orbit">Orbit</option>
-          <option value="topdown">Top-down</option>
+          <option value="orbit">{translateText("Orbit")}</option>
+          <option value="topdown">{translateText("Top-down")}</option>
         </select>
       </div>
       <div className="row">
-        <div className="label-with-icon" data-tooltip="Field of view angle of the perspective camera (20-90°)">
+        <div className="label-with-icon" data-tooltip={translateText("Field of view angle of the perspective camera (20-90°)")}>
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M2 14l6-6-6-6M14 2v12" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">FOV</span>
+          <span className="setting-label">{translateText("FOV")}</span>
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -100,14 +103,14 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
         />
       </div>
       <div className="row">
-        <div className="label-with-icon" data-tooltip="Current camera orbit tilt angle">
+        <div className="label-with-icon" data-tooltip={translateText("Current camera orbit tilt angle")}>
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M14 8A6 6 0 0 0 2 8" stroke="currentColor" strokeWidth="1.2" />
               <path d="M8 8l4.5-4.5" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Angle</span>
+          <span className="setting-label">{translateText("Angle")}</span>
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -118,13 +121,13 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
         <input type="text" readOnly value={camInfo.angle} />
       </div>
       <div className="row">
-        <div className="label-with-icon" data-tooltip="Current distance from the camera focus center">
+        <div className="label-with-icon" data-tooltip={translateText("Current distance from the camera focus center")}>
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M1 8h14M3 5l-2 3 2 3M13 5l2 3-2 3" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Distance</span>
+          <span className="setting-label">{translateText("Distance")}</span>
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -134,13 +137,11 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
         </div>
         <input type="text" readOnly value={camInfo.distance} />
       </div>
-      <button type="button" className="action-btn" onClick={onFocusCenter} data-tooltip="Snap camera target back to the world coordinate origin">
+      <button type="button" className="action-btn" onClick={onFocusCenter} data-tooltip={translateText("Snap camera target back to the world coordinate origin")}>
         <svg viewBox="0 0 16 16" className="bic">
           <circle cx="8" cy="8" r="2" fill="currentColor" />
           <path d="M8 1.5v2.6M8 11.9v2.6M1.5 8h2.6M11.9 8h2.6" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-        Focus Center
-      </button>
+        </svg>{translateText("Focus Center")}</button>
     </>
   );
 
@@ -148,7 +149,7 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
     return (
       <ControlSection
         id="inspector-camera"
-        title="CAMERA"
+        title={translateText("CAMERA")}
         defaultOpen
         icon={(
           <svg viewBox="0 0 16 16" fill="none">
@@ -157,15 +158,15 @@ export function CameraPanel({ camInfo, camMode, onMode, onFov, onFocusCenter, em
           </svg>
         )}
       >
-        {body}
+        {translateText(body)}
       </ControlSection>
     );
   }
 
   return (
     <section className="panel" id="camera-panel">
-      <div className="panel-header"><span>CAMERA</span></div>
-      <div className="panel-body">{body}</div>
+      <div className="panel-header"><span>{translateText("CAMERA")}</span></div>
+      <div className="panel-body">{translateText(body)}</div>
     </section>
   );
 }
@@ -181,18 +182,19 @@ export function LodPanel({
   onBehindCameraCulling,
   embedded
 }) {
+  useLanguage();
   const total = lodCounts.reduce((a, b) => a + b, 0);
 
   const body = (
     <>
       {LOD_LEVELS.map((level, i) => (
-        <div className="lod-row" key={level.name} data-tooltip={`${level.name === 'LOD 0 High' ? 'Maximum geometric resolution for chunks close to the camera' : level.name === 'LOD 1 Medium' ? 'Balanced resolution for medium-distance terrain' : level.name === 'LOD 2 Low' ? 'Low resolution for far terrain chunks to save memory' : 'Minimal grid density for chunks near the horizon'}`}>
+        <div className="lod-row" key={level.name} data-tooltip={translateText(`${level.name === 'LOD 0 High' ? 'Maximum geometric resolution for chunks close to the camera' : level.name === 'LOD 1 Medium' ? 'Balanced resolution for medium-distance terrain' : level.name === 'LOD 2 Low' ? 'Low resolution for far terrain chunks to save memory' : 'Minimal grid density for chunks near the horizon'}`)}>
           <span className="lod-dot" style={{ background: level.color }} />
-          <span className="lod-name">{level.name}</span>
-          <span className="lod-count">{lodLabel(lodCounts[i])}</span>
+          <span className="lod-name">{translateText(level.name)}</span>
+          <span className="lod-count">{translateText(lodLabel(lodCounts[i]))}</span>
         </div>
       ))}
-      <div className="stat-row" data-tooltip="Number of chunks currently visible inside the camera view">
+      <div className="stat-row" data-tooltip={translateText("Number of chunks currently visible inside the camera view")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
@@ -200,54 +202,52 @@ export function LodPanel({
               <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Visible Chunks</span>
+          <span className="setting-label">{translateText("Visible Chunks")}</span>
         </div>
-        <span className="stat-value stat-mono">{visibleChunks} / {total}</span>
+        <span className="stat-value stat-mono">{translateText(visibleChunks)} / {translateText(total)}</span>
       </div>
-      <div className="stat-row" data-tooltip="Number of chunks culled (hidden) because they are outside the camera view or behind the camera">
+      <div className="stat-row" data-tooltip={translateText("Number of chunks culled (hidden) because they are outside the camera view or behind the camera")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M2.5 13.5l11-11M1.5 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Culled Chunks</span>
+          <span className="setting-label">{translateText("Culled Chunks")}</span>
         </div>
-        <span className={`stat-value stat-mono${culledChunks > 0 ? ' fps-info-culled' : ''}`}>{culledChunks}</span>
+        <span className={`stat-value stat-mono${culledChunks > 0 ? ' fps-info-culled' : ''}`}>{translateText(culledChunks)}</span>
       </div>
-      <div className="stat-row" data-tooltip="Current size of the rendered chunk grid">
+      <div className="stat-row" data-tooltip={translateText("Current size of the rendered chunk grid")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M2 2h4v4H2zM10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4z" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Active Grid</span>
+          <span className="setting-label">{translateText("Active Grid")}</span>
         </div>
-        <span className="stat-value stat-mono">{chunkCount} × {chunkCount}</span>
+        <span className="stat-value stat-mono">{translateText(chunkCount)} × {translateText(chunkCount)}</span>
       </div>
       <div className="lod-summary">
         <LodDonut counts={lodCounts} />
-        <div className="lod-total" data-tooltip="Total number of chunks loaded in memory">
-          <div className="lod-total-num">{total}</div>
-          <div className="lod-total-label">
-            Total Chunks
-            <span className="lod-grid-label">({chunkCount} × {chunkCount})</span>
+        <div className="lod-total" data-tooltip={translateText("Total number of chunks loaded in memory")}>
+          <div className="lod-total-num">{translateText(total)}</div>
+          <div className="lod-total-label">{translateText("Total Chunks")}<span className="lod-grid-label">({translateText(chunkCount)} × {translateText(chunkCount)})</span>
           </div>
         </div>
       </div>
       <div className="culling-controls" style={{ marginTop: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <ToggleRow
-          label="Frustum Culling"
+          label={translateText("Frustum Culling")}
           value={cullingEnabled}
           onChange={onCullingEnabled}
-          info="Hide chunks outside the camera's field of view to save performance"
+          info={translateText("Hide chunks outside the camera's field of view to save performance")}
         />
         <ToggleRow
-          label="Back Culling"
+          label={translateText("Back Culling")}
           value={behindCameraCulling}
           onChange={onBehindCameraCulling}
-          info="Hide chunks behind the camera view to boost performance"
+          info={translateText("Hide chunks behind the camera view to boost performance")}
         />
       </div>
     </>
@@ -257,7 +257,7 @@ export function LodPanel({
     return (
       <ControlSection
         id="inspector-lod"
-        title="LOD INFORMATION"
+        title={translateText("LOD INFORMATION")}
         defaultOpen={false}
         icon={(
           <svg viewBox="0 0 16 16" fill="none">
@@ -267,32 +267,31 @@ export function LodPanel({
           </svg>
         )}
       >
-        {body}
+        {translateText(body)}
       </ControlSection>
     );
   }
 
   return (
     <section className="panel" id="lod-panel">
-      <div className="panel-header"><span>LOD INFORMATION</span></div>
-      <div className="panel-body">{body}</div>
+      <div className="panel-header"><span>{translateText("LOD INFORMATION")}</span></div>
+      <div className="panel-body">{translateText(body)}</div>
     </section>
   );
 }
 
 export function MinimapPanel({ boardSize, baseRef, overlayRef, embedded }) {
+  useLanguage();
   const body = (
     <>
       <div className="minimap-wrap">
         <canvas className="minimap-base" width="256" height="256" ref={baseRef} />
         <canvas className="minimap-overlay" width="256" height="256" ref={overlayRef} />
       </div>
-      <div className="minimap-caption" data-tooltip="Total map dimensions in terrain coordinate units">
+      <div className="minimap-caption" data-tooltip={translateText("Total map dimensions in terrain coordinate units")}>
         <svg viewBox="0 0 16 16" fill="none" width="12" height="12" style={{ marginRight: '6px', verticalAlign: 'middle', color: 'var(--accent)' }}>
           <path d="M1 3l4.5-2v12L1 15V3zM5.5 1l5 2v12l-5-2V1zM10.5 3L15 1v12l-4.5 2V3z" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-        Board: {boardSize} × {boardSize} units
-      </div>
+        </svg>{translateText("Board: ")}{translateText(boardSize)} × {translateText(boardSize)}{translateText(" units")}</div>
     </>
   );
 
@@ -300,7 +299,7 @@ export function MinimapPanel({ boardSize, baseRef, overlayRef, embedded }) {
     return (
       <ControlSection
         id="inspector-minimap"
-        title="MINIMAP"
+        title={translateText("MINIMAP")}
         defaultOpen
         icon={(
           <svg viewBox="0 0 16 16" fill="none">
@@ -309,15 +308,15 @@ export function MinimapPanel({ boardSize, baseRef, overlayRef, embedded }) {
           </svg>
         )}
       >
-        {body}
+        {translateText(body)}
       </ControlSection>
     );
   }
 
   return (
     <section className="panel" id="minimap-panel">
-      <div className="panel-header"><span>MINIMAP</span></div>
-      <div className="panel-body">{body}</div>
+      <div className="panel-header"><span>{translateText("MINIMAP")}</span></div>
+      <div className="panel-body">{translateText(body)}</div>
     </section>
   );
 }

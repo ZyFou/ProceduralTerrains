@@ -1,3 +1,5 @@
+import { translateText } from '../../i18n/language.js';
+
 const SETTINGS_INDEX = [
   // Terrain — presets (shape preset also carries the cartoon palette/noise)
   { panelId: 'terrain', tabId: 'shape', sectionLabel: 'Shape', settingId: 'terrain.preset', label: 'Terrain Preset', keywords: 'preset style layout highlands alpine desert dunes canyon volcanic rolling archipelago cartoon', aliases: 'cartoon toon preset' },
@@ -271,7 +273,9 @@ const normalizeText = (value) => String(value ?? '')
 function scoreEntry(entry, q, tokens) {
   const haystack = normalizeText([
     entry.label,
+    translateText(entry.label),
     entry.sectionLabel,
+    translateText(entry.sectionLabel),
     entry.panelId,
     entry.keywords,
     entry.aliases,
@@ -281,8 +285,8 @@ function scoreEntry(entry, q, tokens) {
   }
 
   let score = 0;
-  const label = normalizeText(entry.label);
-  const section = normalizeText(entry.sectionLabel);
+  const label = normalizeText(translateText(entry.label));
+  const section = normalizeText(translateText(entry.sectionLabel));
   const aliases = normalizeText(entry.aliases);
 
   if (label === q) score += 1200;

@@ -1,9 +1,11 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { useEffect, useRef } from 'react';
 import { Download, Heart, X } from 'lucide-react';
 import KofiEmbed from './KofiEmbed.jsx';
 import SupportMessage from './SupportMessage.jsx';
 
 export default function SupportDownloadModal({ download, onContinue, onDownload, onClose }) {
+  useLanguage();
   const closeButtonRef = useRef(null);
 
   useEffect(() => {
@@ -44,10 +46,10 @@ export default function SupportDownloadModal({ download, onContinue, onDownload,
         <header className="support-download-header">
           <span className="support-download-icon"><Heart size={19} aria-hidden /></span>
           <div>
-            <span>Support Procedural Terrains</span>
-            <h2 id="support-download-title">Keep {download.pluginName} integration growing</h2>
+            <span>{translateText("Support Procedural Terrains")}</span>
+            <h2 id="support-download-title">{translateText("Keep ")}{translateText(download.pluginName)}{translateText(" integration growing")}</h2>
           </div>
-          <button ref={closeButtonRef} type="button" className="support-download-close" onClick={onClose} aria-label="Close support dialog">
+          <button ref={closeButtonRef} type="button" className="support-download-close" onClick={onClose} aria-label={translateText("Close support dialog")}>
             <X size={17} aria-hidden />
           </button>
         </header>
@@ -55,16 +57,13 @@ export default function SupportDownloadModal({ download, onContinue, onDownload,
         <div className="support-download-body">
           <SupportMessage plugin={download.plugin} />
           <KofiEmbed download={download} />
-          <p className="support-download-optional">Donations are completely optional. Your download is ready either way.</p>
+          <p className="support-download-optional">{translateText("Donations are completely optional. Your download is ready either way.")}</p>
         </div>
 
         <footer className="support-download-footer">
-          <button type="button" className="lp-secondary support-download-skip" onClick={onContinue}>
-            No thanks, continue to download
-          </button>
+          <button type="button" className="lp-secondary support-download-skip" onClick={onContinue}>{translateText("No thanks, continue to download")}</button>
           <button type="button" className="lp-primary" onClick={onDownload}>
-            <Download size={15} aria-hidden /> Download plugin
-          </button>
+            <Download size={15} aria-hidden />{translateText(" Download plugin")}</button>
         </footer>
       </section>
     </div>

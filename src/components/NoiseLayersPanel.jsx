@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useRef, useState } from 'react';
 import SidePanel, { PanelTabs } from './panels/SidePanel.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
@@ -79,6 +80,7 @@ function NoiseLayerItem({
   onUpdate, onUpdateParam, onDuplicate, onRemove, onSolo, soloActive,
   onDragStart, onDragEnter, onDragEnd,
 }) {
+  useLanguage();
   const def = getNoiseType(layer.type);
   if (!def) return null;
 
@@ -103,14 +105,14 @@ function NoiseLayerItem({
       {/* collapsed header */}
       <div className="nl-header" onClick={() => onToggleExpand(layer.id)}>
         <span className="nl-grip" onMouseDown={(e) => e.stopPropagation()}><GripIcon /></span>
-        <button type="button" className="nl-vis" title={layer.enabled ? 'Disable layer' : 'Enable layer'}
+        <button type="button" className="nl-vis" title={translateText(layer.enabled ? 'Disable layer' : 'Enable layer')}
           onClick={(e) => { e.stopPropagation(); onUpdate(layer.id, { enabled: !layer.enabled }); }}>
           <EyeIcon on={layer.enabled} />
         </button>
         <span className="nl-name" title={layer.name}>{layer.name}</span>
-        {def.badge && <span className={`nl-badge nl-badge-${def.badge.toLowerCase()}`}>{def.badge}</span>}
-        <span className="nl-type-tag">{def.label}</span>
-        <span className="nl-strength-compact">{Math.round(layer.strength * 100)}%</span>
+        {def.badge && <span className={`nl-badge nl-badge-${def.badge.toLowerCase()}`}>{translateText(def.badge)}</span>}
+        <span className="nl-type-tag">{translateText(def.label)}</span>
+        <span className="nl-strength-compact">{translateText(Math.round(layer.strength * 100))}%</span>
       </div>
 
       {/* expanded detail */}
@@ -118,20 +120,20 @@ function NoiseLayerItem({
         <div className="nl-body">
           {/* action bar */}
           <div className="nl-actions">
-            <button type="button" className={`nl-icon-btn${isSolo ? ' active' : ''}`} title="Solo preview" onClick={() => onSolo(isSolo ? null : layer.id)}><SoloIcon /></button>
-            <button type="button" className="nl-icon-btn" title="Duplicate" onClick={() => onDuplicate(layer.id)} disabled={total >= MAX_LAYERS}><DupIcon /></button>
-            <button type="button" className="nl-icon-btn danger" title="Delete" onClick={() => onRemove(layer.id)} disabled={total <= 0}><TrashIcon /></button>
+            <button type="button" className={`nl-icon-btn${isSolo ? ' active' : ''}`} title={translateText("Solo preview")} onClick={() => onSolo(isSolo ? null : layer.id)}><SoloIcon /></button>
+            <button type="button" className="nl-icon-btn" title={translateText("Duplicate")} onClick={() => onDuplicate(layer.id)} disabled={total >= MAX_LAYERS}><DupIcon /></button>
+            <button type="button" className="nl-icon-btn danger" title={translateText("Delete")} onClick={() => onRemove(layer.id)} disabled={total <= 0}><TrashIcon /></button>
           </div>
 
           {/* name */}
           <div className="nl-field">
-            <label className="nl-label">Name</label>
+            <label className="nl-label">{translateText("Name")}</label>
             <input className="nl-input" type="text" value={layer.name}
               onChange={(e) => onUpdate(layer.id, { name: e.target.value })} />
           </div>
 
           {/* blend mode */}
-          <SelectRow label="Blend Mode" value={layer.blendMode} options={BLEND_OPTIONS}
+          <SelectRow label={translateText("Blend Mode")} value={layer.blendMode} options={BLEND_OPTIONS}
             onChange={(v) => onUpdate(layer.id, { blendMode: v })} />
 
           {/* strength slider */}
@@ -152,7 +154,7 @@ function NoiseLayerItem({
           {def.params.map((p) => {
             if (p.type === 'enum') {
               return (
-                <SelectRow key={p.key} label={p.label}
+                <SelectRow key={p.key} label={translateText(p.label)}
                   value={layer.params[p.key] ?? p.default}
                   options={p.options}
                   settingId={p.settingId}
@@ -178,6 +180,7 @@ function NoiseLayerItem({
 
 // ---- masks -----------------------------------------------------------------
 function MaskSection({ layer, onUpdate }) {
+  useLanguage();
   const masks = layer.masks || [];
   const available = MASK_TYPES.filter((mt) => !mt.soon && !masks.some((m) => m.type === mt.id));
 
@@ -207,11 +210,11 @@ function MaskSection({ layer, onUpdate }) {
   return (
     <div className="nl-masks">
       <div className="nl-masks-header">
-        <span className="nl-label">Masks</span>
+        <span className="nl-label">{translateText("Masks")}</span>
         {available.length > 0 && (
           <select className="nl-mask-add" value="" onChange={(e) => { if (e.target.value) addMask(e.target.value); e.target.value = ''; }}>
-            <option value="">+ Add…</option>
-            {available.map((mt) => <option key={mt.id} value={mt.id}>{mt.label}</option>)}
+            <option value="">{translateText("+ Add…")}</option>
+            {available.map((mt) => <option key={mt.id} value={mt.id}>{translateText(mt.label)}</option>)}
           </select>
         )}
       </div>
@@ -219,12 +222,13 @@ function MaskSection({ layer, onUpdate }) {
         <MaskItem key={m.type} mask={m} onRemove={removeMask}
           onToggle={toggleMask} onInvert={toggleInvert} onParam={setMaskParam} />
       ))}
-      {masks.length === 0 && <span className="nl-hint">No masks — layer applies everywhere.</span>}
+      {masks.length === 0 && <span className="nl-hint">{translateText("No masks — layer applies everywhere.")}</span>}
     </div>
   );
 }
 
 function MaskItem({ mask, onRemove, onToggle, onInvert, onParam }) {
+  useLanguage();
   const label = MASK_TYPES.find((mt) => mt.id === mask.type)?.label ?? mask.type;
   return (
     <div className={`nl-mask${mask.enabled === false ? ' disabled' : ''}`}>
@@ -232,9 +236,9 @@ function MaskItem({ mask, onRemove, onToggle, onInvert, onParam }) {
         <button type="button" className="nl-vis" onClick={() => onToggle(mask.type)}>
           <EyeIcon on={mask.enabled !== false} />
         </button>
-        <span className="nl-mask-label">{label}</span>
-        <ToggleRow label="Invert" value={!!mask.invert} onChange={() => onInvert(mask.type)} />
-        <button type="button" className="nl-icon-btn danger" title="Remove mask" onClick={() => onRemove(mask.type)}>
+        <span className="nl-mask-label">{translateText(label)}</span>
+        <ToggleRow label={translateText("Invert")} value={!!mask.invert} onChange={() => onInvert(mask.type)} />
+        <button type="button" className="nl-icon-btn danger" title={translateText("Remove mask")} onClick={() => onRemove(mask.type)}>
           <TrashIcon />
         </button>
       </div>
@@ -286,18 +290,19 @@ function MaskItem({ mask, onRemove, onToggle, onInvert, onParam }) {
 
 // ---- add-layer flyout menu --------------------------------------------------
 function AddLayerMenu({ onAdd, onClose }) {
+  useLanguage();
   return (
     <div className="nl-add-menu">
       {TYPE_GROUPS.map((g) => (
         <div key={g.label}>
-          <div className="nl-add-group">{g.label}</div>
+          <div className="nl-add-group">{translateText(g.label)}</div>
           {g.items.map((id) => {
             const def = getNoiseType(id);
             return (
               <button key={id} type="button" className="nl-add-item" onClick={() => { onAdd(id); onClose(); }}>
-                <span className="nl-add-name">{def.label}</span>
-                {def.badge && <span className={`nl-badge nl-badge-${def.badge.toLowerCase()}`}>{def.badge}</span>}
-                <span className="nl-add-desc">{def.desc}</span>
+                <span className="nl-add-name">{translateText(def.label)}</span>
+                {def.badge && <span className={`nl-badge nl-badge-${def.badge.toLowerCase()}`}>{translateText(def.badge)}</span>}
+                <span className="nl-add-desc">{translateText(def.desc)}</span>
               </button>
             );
           })}
@@ -311,6 +316,7 @@ function AddLayerMenu({ onAdd, onClose }) {
 // NoiseLayersPanel — the full side drawer panel
 // ============================================================================
 export default function NoiseLayersPanel({ ctx, children }) {
+  useLanguage();
   const { params, onNoiseStack, onNoiseStackPreset, onSoloLayer } = ctx;
   const stack = params.noiseStack;
 
@@ -422,21 +428,21 @@ export default function NoiseLayersPanel({ ctx, children }) {
   const normalizeOutput = !!stack?.normalizeOutput;
 
   return (
-    <SidePanel title="Noise Layers" description="Stack noise layers to shape the terrain height." onClose={ctx.onClose}>
+    <SidePanel title={translateText("Noise Layers")} description={translateText("Stack noise layers to shape the terrain height.")} onClose={ctx.onClose}>
       {/* preset quick-select */}
-      <SelectRow label="Stack Preset" value="__custom" settingId="noise.stackPreset"
+      <SelectRow label={translateText("Stack Preset")} value="__custom" settingId="noise.stackPreset"
         options={[{ value: '__custom', label: '— Custom Stack —' }, ...NOISE_STACK_PRESET_KEYS.map((k) => ({ value: k, label: NOISE_STACK_PRESETS[k].label }))]}
         onChange={(v) => { if (v !== '__custom') handlePreset(v); }}
-        info="Load a preset noise stack. You can edit it freely afterwards." />
+        info={translateText("Load a preset noise stack. You can edit it freely afterwards.")} />
 
       <div className="nl-output-section" data-setting-id="noise.section.output">
-        <div className="nl-output-title">Output</div>
+        <div className="nl-output-title">{translateText("Output")}</div>
         <ToggleRow
-          label="Normalize Output"
+          label={translateText("Normalize Output")}
           value={normalizeOutput}
           onChange={(value) => handleStackOutput({ normalizeOutput: value })}
           settingId="noise.stackNormalize"
-          info="Remap the raw stack by Min and Max, then apply a soft ceiling instead of hard flattening peaks."
+          info={translateText("Remap the raw stack by Min and Max, then apply a soft ceiling instead of hard flattening peaks.")}
         />
         <SliderCtl
           def={OUTPUT_MIN_DEF}
@@ -455,7 +461,7 @@ export default function NoiseLayersPanel({ ctx, children }) {
       {/* layer list */}
       <div className="nl-stack">
         {layers.length === 0 && (
-          <div className="nl-empty">No noise layers — terrain will be flat.</div>
+          <div className="nl-empty">{translateText("No noise layers — terrain will be flat.")}</div>
         )}
         {layers.map((layer, i) => (
           <NoiseLayerItem
@@ -484,8 +490,7 @@ export default function NoiseLayersPanel({ ctx, children }) {
           onClick={() => setAddOpen(!addOpen)} disabled={layers.length >= MAX_LAYERS}>
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ marginRight: 6 }}>
             <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          Add Noise Layer {layers.length >= MAX_LAYERS && `(${MAX_LAYERS} max)`}
+          </svg>{translateText("Add Noise Layer ")}{translateText(layers.length >= MAX_LAYERS && `(${MAX_LAYERS} max)`)}
         </button>
         {addOpen && (
           <>
@@ -497,8 +502,7 @@ export default function NoiseLayersPanel({ ctx, children }) {
 
       {/* stack info */}
       <p className="section-hint" style={{ marginTop: 12 }}>
-        {layers.length} / {MAX_LAYERS} layers. Drag to reorder. The terrain is evaluated top → bottom.
-      </p>
+        {translateText(layers.length)} / {translateText(MAX_LAYERS)}{translateText(" layers. Drag to reorder. The terrain is evaluated top → bottom.")}</p>
       {children}
     </SidePanel>
   );

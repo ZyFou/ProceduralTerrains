@@ -1,6 +1,8 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { RotateCcw } from 'lucide-react';
 
 export default function PanelResetButton({ label = 'Reset Settings', onClick, settingId }) {
+  useLanguage();
   if (!onClick) return null;
   return (
     <div className="panel-reset-footer">
@@ -11,7 +13,7 @@ export default function PanelResetButton({ label = 'Reset Settings', onClick, se
         data-setting-id={settingId}
       >
         <RotateCcw size={14} strokeWidth={1.75} aria-hidden />
-        {label}
+        {translateText(label)}
       </button>
     </div>
   );

@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
@@ -120,6 +121,7 @@ const ATMOSPHERE_COLORS = [
 ];
 
 export default function EnvironmentPanel({ params, planetStyle, onParam, onTuning, settingsTarget }) {
+  useLanguage();
   const flat = useContext(FlatPanelContext);
   const style = planetStyle ?? {};
   const target = settingsTarget?.panelId === 'lighting' ? settingsTarget : null;
@@ -130,19 +132,19 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
     <>
       <ControlSection
         id="inspector-environment-sun"
-        title="Sun"
+        title={translateText("Sun")}
         defaultOpen
         settingId="lighting.section.sun"
         forceOpen={forceSection('lighting.section.sun', 'Sun', ['lighting.sun'])}
       >
         <div className="color-field" data-setting-id="lighting.sunColor">
-          <div className="label-with-icon" data-tooltip="Color tint of the direct sunlight">
+          <div className="label-with-icon" data-tooltip={translateText("Color tint of the direct sunlight")}>
             <span className="setting-icon">
               <svg viewBox="0 0 16 16" fill="none">
                 <path d="M8 2c-2.5 4-5 5-5 8a5 5 0 0 0 10 0c0-3-2.5-4-5-8z" stroke="currentColor" strokeWidth="1.2" />
               </svg>
             </span>
-            <span className="setting-label">Sun Color</span>
+            <span className="setting-label">{translateText("Sun Color")}</span>
             <span className="info-icon-trigger">
               <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -165,7 +167,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
 
       <ControlSection
         id="inspector-environment-cloud-light"
-        title="Clouds & Rays"
+        title={translateText("Clouds & Rays")}
         defaultOpen={false}
         settingId="lighting.section.clouds"
         forceOpen={forceSection(
@@ -175,10 +177,10 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         )}
       >
         <ToggleRow
-          label="Cloud Shadows"
+          label={translateText("Cloud Shadows")}
           value={!!params.cloudShadowsEnabled}
           onChange={(v) => onParam('cloudShadowsEnabled', v)}
-          info="Project the animated cloud field onto the terrain in real time. Tile mode only."
+          info={translateText("Project the animated cloud field onto the terrain in real time. Tile mode only.")}
           settingId="lighting.cloudShadowsEnabled"
         />
         {params.cloudShadowsEnabled && (
@@ -199,7 +201,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
 
       <ControlSection
         id="inspector-environment-atmosphere"
-        title="Atmosphere"
+        title={translateText("Atmosphere")}
         defaultOpen
         settingId="lighting.section.atmosphere"
         forceOpen={forceSection('lighting.section.atmosphere', 'Atmosphere', ['lighting.fog', 'lighting.skyAmbient', 'lighting.groundBounce'])}
@@ -212,9 +214,9 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         />
         {ATMOSPHERE_COLORS.map(({ key, label, icon, info }) => (
           <div className="color-field" key={key} data-setting-id={`lighting.${key}`}>
-            <div className="label-with-icon" data-tooltip={info}>
+            <div className="label-with-icon" data-tooltip={translateText(info)}>
               {icon && <span className="setting-icon">{icon}</span>}
-              <span className="setting-label">{label}</span>
+              <span className="setting-label">{translateText(label)}</span>
               {info && (
                 <span className="info-icon-trigger">
                   <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
@@ -234,7 +236,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
 
       <ControlSection
         id="inspector-environment-water-lighting"
-        title="Water Lighting"
+        title={translateText("Water Lighting")}
         defaultOpen={false}
         settingId="lighting.section.waterLighting"
         forceOpen={forceSection(
@@ -252,10 +254,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
             settingId={`lighting.${def.key}`}
           />
         ))}
-        <p className="section-hint">
-          Applies to Legacy, Realistic, Volumetric, Cinematic, Infinite World,
-          and the Planet ocean.
-        </p>
+        <p className="section-hint">{translateText("Applies to Legacy, Realistic, Volumetric, Cinematic, Infinite World, and the Planet ocean.")}</p>
       </ControlSection>
     </>
   );
@@ -265,7 +264,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
   return (
     <ControlSection
       id="inspector-environment"
-      title="ENVIRONMENT"
+      title={translateText("ENVIRONMENT")}
       defaultOpen
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
@@ -274,7 +273,7 @@ export default function EnvironmentPanel({ params, planetStyle, onParam, onTunin
         </svg>
       )}
     >
-      {sections}
+      {translateText(sections)}
     </ControlSection>
   );
 }

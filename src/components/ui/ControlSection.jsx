@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useContext, useEffect, useState } from 'react';
 import {
   Bookmark, Boxes, Bug, ChartNoAxesCombined, ChevronDown, CircleDot, Clock3,
@@ -127,6 +128,7 @@ export default function ControlSection({
   enabled,
   onEnabledChange,
 }) {
+  useLanguage();
   const flat = useContext(FlatPanelContext);
   const sectionKey = settingId ?? id ?? title;
   const [open, setOpen] = useState(() => getStoredOpenState(sectionKey, defaultOpen));
@@ -162,11 +164,11 @@ export default function ControlSection({
       >
         <div className="panel-group-header panel-group-toggle">
           <button type="button" className="panel-group-header-button" onClick={toggle} aria-expanded={open}>
-            <span className="panel-group-icon">{sectionIcon}</span>
-            <span className="panel-group-title">{title}</span>
+            <span className="panel-group-icon">{translateText(sectionIcon)}</span>
+            <span className="panel-group-title">{translateText(title)}</span>
             <span className={`panel-group-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
           </button>
-          {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+          {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={translateText(`${enabled ? 'Disable' : 'Enable'} ${title}`)} aria-pressed={!!enabled} />}
         </div>
         {open && <div className="panel-group-body">{children}</div>}
       </section>
@@ -178,12 +180,12 @@ export default function ControlSection({
       <div className="control-section-header">
         <button type="button" className="control-section-header-button" onClick={toggle} aria-expanded={open}>
           <span className="control-section-left">
-            <span className="control-section-icon">{sectionIcon}</span>
-            <span className="control-section-title">{title}</span>
+            <span className="control-section-icon">{translateText(sectionIcon)}</span>
+            <span className="control-section-title">{translateText(title)}</span>
           </span>
           <span className={`control-section-chevron${open ? ' open' : ''}`} aria-hidden><ChevronDown size={14} strokeWidth={2} /></span>
         </button>
-        {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={`${enabled ? 'Disable' : 'Enable'} ${title}`} aria-pressed={!!enabled} />}
+        {onEnabledChange && <button type="button" className={`toggle section-enable-toggle${enabled ? ' on' : ''}`} onClick={() => handleEnabledChange(!enabled)} aria-label={translateText(`${enabled ? 'Disable' : 'Enable'} ${title}`)} aria-pressed={!!enabled} />}
       </div>
       <div className={`control-section-body${open ? '' : ' collapsed'}`}>{children}</div>
     </section>

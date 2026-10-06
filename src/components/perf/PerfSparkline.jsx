@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 // Lightweight SVG sparkline — no deps, theme-aware via CSS variables.
 
 export default function PerfSparkline({
@@ -13,10 +14,11 @@ export default function PerfSparkline({
   unit = '',
   invert = false,
 }) {
+  useLanguage();
   if (!data.length) {
     return (
       <div className="perf-graph-empty" style={{ height }}>
-        <span>Collecting samples…</span>
+        <span>{translateText("Collecting samples…")}</span>
       </div>
     );
   }
@@ -86,10 +88,10 @@ export default function PerfSparkline({
       </svg>
       <div className="perf-graph-meta">
         <span className="perf-graph-latest" style={{ color }}>
-          {Number.isFinite(latest) ? (Number.isInteger(latest) ? latest : latest.toFixed(1)) : '–'}
-          {unit && <em>{unit}</em>}
+          {translateText(Number.isFinite(latest) ? (Number.isInteger(latest) ? latest : latest.toFixed(1)) : '–')}
+          {unit && <em>{translateText(unit)}</em>}
         </span>
-        {referenceLabel && <span className="perf-graph-ref-label">{referenceLabel}</span>}
+        {referenceLabel && <span className="perf-graph-ref-label">{translateText(referenceLabel)}</span>}
       </div>
     </div>
   );

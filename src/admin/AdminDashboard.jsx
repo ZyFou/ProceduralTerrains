@@ -1,3 +1,5 @@
+import { getLocale } from '../i18n/language.js';
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowLeft, BarChart3, CheckCircle2, ChevronLeft, ChevronRight, CircleUserRound,
@@ -16,9 +18,9 @@ const TABS = [
   { id: 'security', label: 'Security', icon: ShieldCheck },
 ];
 
-const number = new Intl.NumberFormat();
-const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-const dateTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const number = { format: (value) => new Intl.NumberFormat(getLocale()).format(value) };
+const shortDate = { format: (value) => new Intl.DateTimeFormat(getLocale(), { month: 'short', day: 'numeric' }).format(value) };
+const dateTime = { format: (value) => new Intl.DateTimeFormat(getLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(value) };
 
 const formatDate = (value, fallback = 'Never') => value ? dateTime.format(new Date(value)) : fallback;
 const actionLabel = (value = '') => value.split('.').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' · ');
@@ -30,32 +32,36 @@ const localDayKey = (value) => {
 };
 
 function LoadingState() {
-  return <div className="admin-loading" role="status"><span /><strong>Loading secure data</strong><small>Retrieving the latest administration records…</small></div>;
+  useLanguage();
+  return <div className="admin-loading" role="status"><span /><strong>{translateText("Loading secure data")}</strong><small>{translateText("Retrieving the latest administration records…")}</small></div>;
 }
 
 function ErrorState({ message, onRetry }) {
+  useLanguage();
   return (
     <div className="admin-error" role="alert">
       <ShieldAlert size={22} />
-      <strong>Couldn&apos;t load this view</strong>
-      <span>{message || 'The administration service did not respond.'}</span>
-      <button type="button" onClick={onRetry}><RefreshCw size={13} /> Try again</button>
+      <strong>{translateText("Couldn't load this view")}</strong>
+      <span>{translateText(message || 'The administration service did not respond.')}</span>
+      <button type="button" onClick={onRetry}><RefreshCw size={13} />{translateText(" Try again")}</button>
     </div>
   );
 }
 
 function Pagination({ page, pages, onPage }) {
+  useLanguage();
   if (pages <= 1) return null;
   return (
-    <nav className="admin-pagination" aria-label="Results pages">
-      <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1}><ChevronLeft size={14} /> Previous</button>
-      <span>Page <strong>{page}</strong> of {pages}</span>
-      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages}>Next <ChevronRight size={14} /></button>
+    <nav className="admin-pagination" aria-label={translateText("Results pages")}>
+      <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1}><ChevronLeft size={14} />{translateText(" Previous")}</button>
+      <span>{translateText("Page ")}<strong>{translateText(page)}</strong>{translateText(" of ")}{translateText(pages)}</span>
+      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages}>{translateText("Next ")}<ChevronRight size={14} /></button>
     </nav>
   );
 }
 
 function TrendChart({ data = [], valueKey = 'visits', days: requestedDays = 14, valueLabel: requestedValueLabel }) {
+  useLanguage();
   const days = Math.max(1, Number(requestedDays) || 14);
   const valueLabel = requestedValueLabel || valueKey.replace(/([A-Z])/g, ' $1').toLowerCase();
   const points = useMemo(() => {
@@ -73,7 +79,7 @@ function TrendChart({ data = [], valueKey = 'visits', days: requestedDays = 14, 
   const shouldLabel = (index) => index === 0 || index === points.length - 1 || index % labelStep === 0;
   const [activeIndex, setActiveIndex] = useState(null);
   return (
-    <div className="admin-chart" role="group" aria-label={`Daily ${valueLabel} over the last ${days} days`}>
+    <div className="admin-chart" role="group" aria-label={translateText(`Daily ${valueLabel} over the last ${days} days`)}>
       <div className="admin-chart-grid" aria-hidden="true"><i /><i /><i /></div>
       <div className="admin-chart-bars">
         {points.map((item, index) => (
@@ -81,16 +87,16 @@ function TrendChart({ data = [], valueKey = 'visits', days: requestedDays = 14, 
             className={`admin-chart-column ${activeIndex === index ? 'is-active' : ''}`}
             key={item.day.toISOString()}
             tabIndex="0"
-            aria-label={`${shortDate.format(item.day)}: ${number.format(item.value)} ${valueLabel}`}
+            aria-label={translateText(`${shortDate.format(item.day)}: ${number.format(item.value)} ${valueLabel}`)}
             onMouseEnter={() => setActiveIndex(index)}
             onMouseLeave={() => setActiveIndex(null)}
             onFocus={() => setActiveIndex(index)}
             onBlur={() => setActiveIndex(null)}
           >
             <span className="admin-chart-bar" style={{ height: `${Math.max(item.value ? 6 : 2, (item.value / max) * 100)}%` }}>
-              <span className="admin-chart-tooltip" role="status"><strong>{number.format(item.value)}</strong><small>{shortDate.format(item.day)}</small><em>{valueLabel}</em></span>
+              <span className="admin-chart-tooltip" role="status"><strong>{translateText(number.format(item.value))}</strong><small>{translateText(shortDate.format(item.day))}</small><em>{translateText(valueLabel)}</em></span>
             </span>
-            {shouldLabel(index) && <small>{shortDate.format(item.day)}</small>}
+            {shouldLabel(index) && <small>{translateText(shortDate.format(item.day))}</small>}
           </span>
         ))}
       </div>
@@ -105,11 +111,12 @@ const REPORTING_RANGES = [
 ];
 
 function RangeSelector({ value, onChange, label = 'Reporting period' }) {
+  useLanguage();
   return (
-    <div className="admin-range-selector" role="group" aria-label={label}>
+    <div className="admin-range-selector" role="group" aria-label={translateText(label)}>
       {REPORTING_RANGES.map((range) => (
         <button type="button" key={range.value} className={value === range.value ? 'active' : ''} onClick={() => onChange(range.value)} aria-pressed={value === range.value}>
-          {range.label}
+          {translateText(range.label)}
         </button>
       ))}
     </div>
@@ -117,6 +124,7 @@ function RangeSelector({ value, onChange, label = 'Reporting period' }) {
 }
 
 function Overview({ data, onNavigate, rangeDays, onRangeChange }) {
+  useLanguage();
   const rangeLabel = REPORTING_RANGES.find((range) => range.value === rangeDays)?.label.toLowerCase() || `${rangeDays} days`;
   const stats = [
     { label: 'Total users', value: data.counts.users, meta: `${number.format(data.counts.activeUsers)} active`, icon: UsersRound, tone: 'blue' },
@@ -126,46 +134,46 @@ function Overview({ data, onNavigate, rangeDays, onRangeChange }) {
   ];
   return (
     <div className="admin-overview">
-      <section className="admin-stat-grid" aria-label="Service overview">
+      <section className="admin-stat-grid" aria-label={translateText("Service overview")}>
         {stats.map(({ label, value, meta, icon: Icon, tone }) => (
           <article className={`admin-stat ${tone}`} key={label}>
             <span className="admin-stat-icon"><Icon size={18} /></span>
-            <span><small>{label}</small><strong>{number.format(value)}</strong><em>{meta}</em></span>
+            <span><small>{translateText(label)}</small><strong>{translateText(number.format(value))}</strong><em>{translateText(meta)}</em></span>
           </article>
         ))}
       </section>
 
       <section className="admin-panel admin-trend-panel">
         <header>
-          <div><span className="admin-eyebrow">Traffic</span><h2>Visits over the last {rangeDays} days</h2></div>
-          <div className="admin-panel-actions"><RangeSelector value={rangeDays} onChange={onRangeChange} /><button type="button" className="admin-text-button" onClick={() => onNavigate('visits')}>View visit log <ChevronRight size={13} /></button></div>
+          <div><span className="admin-eyebrow">{translateText("Traffic")}</span><h2>{translateText("Visits over the last ")}{translateText(rangeDays)}{translateText(" days")}</h2></div>
+          <div className="admin-panel-actions"><RangeSelector value={rangeDays} onChange={onRangeChange} /><button type="button" className="admin-text-button" onClick={() => onNavigate('visits')}>{translateText("View visit log ")}<ChevronRight size={13} /></button></div>
         </header>
         <TrendChart data={data.visitTrend} days={rangeDays} valueLabel="page visits" />
-        <div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="muted" /> Daily values · {rangeLabel}</span></div>
+        <div className="admin-chart-legend"><span><i className="blue" />{translateText(" Page visits")}</span><span><i className="muted" />{translateText(" Daily values · ")}{translateText(rangeLabel)}</span></div>
       </section>
 
       <div className="admin-overview-columns">
         <section className="admin-panel">
-          <header><div><span className="admin-eyebrow">Latest work</span><h2>Recent terrains</h2></div><button type="button" className="admin-icon-button" onClick={() => onNavigate('terrains')} aria-label="View all terrains"><ChevronRight size={15} /></button></header>
+          <header><div><span className="admin-eyebrow">{translateText("Latest work")}</span><h2>{translateText("Recent terrains")}</h2></div><button type="button" className="admin-icon-button" onClick={() => onNavigate('terrains')} aria-label={translateText("View all terrains")}><ChevronRight size={15} /></button></header>
           <div className="admin-compact-list">
-            {data.recentTerrains.length === 0 && <p className="admin-empty">No cloud terrains yet.</p>}
+            {data.recentTerrains.length === 0 && <p className="admin-empty">{translateText("No cloud terrains yet.")}</p>}
             {data.recentTerrains.map((terrain) => (
               <div key={terrain.id}>
                 <span className="admin-list-icon"><FolderKanban size={14} /></span>
-                <span><strong>{terrain.name}</strong><small>@{terrain.username} · {formatDate(terrain.updatedAt)}</small></span>
-                <span className={`admin-badge ${terrain.visibility}`}>{terrain.visibility}</span>
+                <span><strong>{terrain.name}</strong><small>@{terrain.username} · {translateText(formatDate(terrain.updatedAt))}</small></span>
+                <span className={`admin-badge ${terrain.visibility}`}>{translateText(terrain.visibility)}</span>
               </div>
             ))}
           </div>
         </section>
         <section className="admin-panel">
-          <header><div><span className="admin-eyebrow">Accountability</span><h2>Administrator activity</h2></div><button type="button" className="admin-icon-button" onClick={() => onNavigate('audit')} aria-label="View audit log"><ChevronRight size={15} /></button></header>
+          <header><div><span className="admin-eyebrow">{translateText("Accountability")}</span><h2>{translateText("Administrator activity")}</h2></div><button type="button" className="admin-icon-button" onClick={() => onNavigate('audit')} aria-label={translateText("View audit log")}><ChevronRight size={15} /></button></header>
           <div className="admin-compact-list audit">
-            {data.recentAudit.length === 0 && <p className="admin-empty">No administrator changes recorded yet.</p>}
+            {data.recentAudit.length === 0 && <p className="admin-empty">{translateText("No administrator changes recorded yet.")}</p>}
             {data.recentAudit.map((event) => (
               <div key={event.id}>
                 <span className="admin-list-icon"><FileClock size={14} /></span>
-                <span><strong>{actionLabel(event.action)}</strong><small>{event.actor} · {formatDate(event.createdAt)}</small></span>
+                <span><strong>{translateText(actionLabel(event.action))}</strong><small>{translateText(event.actor)} · {translateText(formatDate(event.createdAt))}</small></span>
               </div>
             ))}
           </div>
@@ -176,6 +184,7 @@ function Overview({ data, onNavigate, rangeDays, onRangeChange }) {
 }
 
 function UsersPanel({ currentUser }) {
+  useLanguage();
   const { showPopup, showConfirm } = usePopup();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -241,65 +250,65 @@ function UsersPanel({ currentUser }) {
   return (
     <section className="admin-panel admin-data-panel">
       <header className="admin-data-head">
-        <div><span className="admin-eyebrow">Accounts</span><h2>User management</h2><p>Review access, roles, account status, and sessions.</p></div>
-        <button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button>
+        <div><span className="admin-eyebrow">{translateText("Accounts")}</span><h2>{translateText("User management")}</h2><p>{translateText("Review access, roles, account status, and sessions.")}</p></div>
+        <button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} />{translateText(" Refresh")}</button>
       </header>
       <form className="admin-filters users-filters" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}>
-        <label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, username, or email" aria-label="Search users" /></label>
-        <select value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }} aria-label="Filter user status">
-          <option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option>
+        <label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={translateText("Search name, username, or email")} aria-label={translateText("Search users")} /></label>
+        <select value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }} aria-label={translateText("Filter user status")}>
+          <option value="">{translateText("All statuses")}</option><option value="active">{translateText("Active")}</option><option value="suspended">{translateText("Suspended")}</option>
         </select>
-        <select value={role} onChange={(event) => { setPage(1); setRole(event.target.value); }} aria-label="Filter user role">
-          <option value="">All roles</option><option value="admin">Administrators</option><option value="user">Members</option>
+        <select value={role} onChange={(event) => { setPage(1); setRole(event.target.value); }} aria-label={translateText("Filter user role")}>
+          <option value="">{translateText("All roles")}</option><option value="admin">{translateText("Administrators")}</option><option value="user">{translateText("Members")}</option>
         </select>
-        <select value={verified} onChange={(event) => { setPage(1); setVerified(event.target.value); }} aria-label="Filter email verification">
-          <option value="">All verification</option><option value="verified">Verified email</option><option value="unverified">Unverified email</option>
+        <select value={verified} onChange={(event) => { setPage(1); setVerified(event.target.value); }} aria-label={translateText("Filter email verification")}>
+          <option value="">{translateText("All verification")}</option><option value="verified">{translateText("Verified email")}</option><option value="unverified">{translateText("Unverified email")}</option>
         </select>
-        <select value={terrains} onChange={(event) => { setPage(1); setTerrains(event.target.value); }} aria-label="Filter terrain ownership">
-          <option value="">All terrain activity</option><option value="has">Has terrains</option><option value="none">No terrains</option>
+        <select value={terrains} onChange={(event) => { setPage(1); setTerrains(event.target.value); }} aria-label={translateText("Filter terrain ownership")}>
+          <option value="">{translateText("All terrain activity")}</option><option value="has">{translateText("Has terrains")}</option><option value="none">{translateText("No terrains")}</option>
         </select>
-        <select value={activity} onChange={(event) => { setPage(1); setActivity(event.target.value); }} aria-label="Filter recent activity">
-          <option value="">Any last seen</option><option value="7d">Seen in 7 days</option><option value="30d">Seen in 30 days</option><option value="never">Never seen</option>
+        <select value={activity} onChange={(event) => { setPage(1); setActivity(event.target.value); }} aria-label={translateText("Filter recent activity")}>
+          <option value="">{translateText("Any last seen")}</option><option value="7d">{translateText("Seen in 7 days")}</option><option value="30d">{translateText("Seen in 30 days")}</option><option value="never">{translateText("Never seen")}</option>
         </select>
-        <select value={sessions} onChange={(event) => { setPage(1); setSessions(event.target.value); }} aria-label="Filter active sessions">
-          <option value="">All sessions</option><option value="active">Has active sessions</option><option value="none">No active sessions</option>
+        <select value={sessions} onChange={(event) => { setPage(1); setSessions(event.target.value); }} aria-label={translateText("Filter active sessions")}>
+          <option value="">{translateText("All sessions")}</option><option value="active">{translateText("Has active sessions")}</option><option value="none">{translateText("No active sessions")}</option>
         </select>
-        <button type="submit">Search</button>
+        <button type="submit">{translateText("Search")}</button>
       </form>
       {!data && !error && <LoadingState />}
-      {error && <ErrorState message={error} onRetry={load} />}
+      {error && <ErrorState message={translateText(error)} onRetry={load} />}
       {data && (
         <>
           <div className="admin-table-wrap">
             <table className="admin-table">
-              <thead><tr><th>User</th><th>Status</th><th>Role</th><th>Terrains</th><th>Sessions</th><th>Last seen</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <thead><tr><th>{translateText("User")}</th><th>{translateText("Status")}</th><th>{translateText("Role")}</th><th>{translateText("Terrains")}</th><th>{translateText("Sessions")}</th><th>{translateText("Last seen")}</th><th><span className="sr-only">{translateText("Actions")}</span></th></tr></thead>
               <tbody>
                 {data.users.map((user) => (
                   <tr key={user.id}>
-                    <td><span className="admin-user-cell"><span className="admin-user-avatar">{(user.displayName || user.username).slice(0, 2).toUpperCase()}</span><span><strong>{user.displayName || user.username}{user.id === currentUser.id && <em>You</em>}</strong><small>@{user.username} · {user.email}</small></span></span></td>
-                    <td><span className={`admin-status ${user.status}`}><i />{user.status}</span></td>
-                    <td><span className={`admin-role ${user.role}`}><ShieldCheck size={12} /> {user.role}</span></td>
-                    <td>{number.format(user.projectCount)}</td>
-                    <td>{number.format(user.activeSessions)}</td>
-                    <td><span className="admin-muted">{formatDate(user.lastSeenAt)}</span></td>
+                    <td><span className="admin-user-cell"><span className="admin-user-avatar">{(user.displayName || user.username).slice(0, 2).toUpperCase()}</span><span><strong>{user.displayName || user.username}{user.id === currentUser.id && <em>{translateText("You")}</em>}</strong><small>@{user.username} · {user.email}</small></span></span></td>
+                    <td><span className={`admin-status ${user.status}`}><i />{translateText(user.status)}</span></td>
+                    <td><span className={`admin-role ${user.role}`}><ShieldCheck size={12} /> {translateText(user.role)}</span></td>
+                    <td>{translateText(number.format(user.projectCount))}</td>
+                    <td>{translateText(number.format(user.activeSessions))}</td>
+                    <td><span className="admin-muted">{translateText(formatDate(user.lastSeenAt))}</span></td>
                     <td>
                       <div className="admin-row-actions">
                         {user.status === 'active'
-                          ? <button type="button" className="danger" disabled={busy === user.id || user.id === currentUser.id} onClick={() => update(user, { status: 'suspended' })}><UserX size={13} /> Suspend</button>
-                          : <button type="button" disabled={busy === user.id} onClick={() => update(user, { status: 'active' })}><UserCheck size={13} /> Activate</button>}
+                          ? <button type="button" className="danger" disabled={busy === user.id || user.id === currentUser.id} onClick={() => update(user, { status: 'suspended' })}><UserX size={13} />{translateText(" Suspend")}</button>
+                          : <button type="button" disabled={busy === user.id} onClick={() => update(user, { status: 'active' })}><UserCheck size={13} />{translateText(" Activate")}</button>}
                         {user.role === 'admin'
-                          ? <button type="button" disabled={busy === user.id || user.id === currentUser.id} onClick={() => update(user, { role: 'user' })}><CircleUserRound size={13} /> Make member</button>
-                          : <button type="button" disabled={busy === user.id} onClick={() => update(user, { role: 'admin' })}><UserCog size={13} /> Make admin</button>}
-                        <button type="button" disabled={busy === user.id || user.id === currentUser.id || user.activeSessions === 0} onClick={() => revoke(user)}><KeyRound size={13} /> Revoke sessions</button>
+                          ? <button type="button" disabled={busy === user.id || user.id === currentUser.id} onClick={() => update(user, { role: 'user' })}><CircleUserRound size={13} />{translateText(" Make member")}</button>
+                          : <button type="button" disabled={busy === user.id} onClick={() => update(user, { role: 'admin' })}><UserCog size={13} />{translateText(" Make admin")}</button>}
+                        <button type="button" disabled={busy === user.id || user.id === currentUser.id || user.activeSessions === 0} onClick={() => revoke(user)}><KeyRound size={13} />{translateText(" Revoke sessions")}</button>
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {data.users.length === 0 && <p className="admin-empty">No users match these filters.</p>}
+            {data.users.length === 0 && <p className="admin-empty">{translateText("No users match these filters.")}</p>}
           </div>
-          <footer className="admin-results-footer"><span>{number.format(data.total)} user{data.total === 1 ? '' : 's'}</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer>
+          <footer className="admin-results-footer"><span>{translateText(number.format(data.total))}{translateText(" user")}{translateText(data.total === 1 ? '' : 's')}</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer>
         </>
       )}
     </section>
@@ -307,6 +316,7 @@ function UsersPanel({ currentUser }) {
 }
 
 function VisitsPanel() {
+  useLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
@@ -320,17 +330,18 @@ function VisitsPanel() {
   const DeviceIcon = ({ device }) => device === 'Mobile' ? <Smartphone size={13} /> : device === 'Tablet' ? <Tablet size={13} /> : <Laptop size={13} />;
   return (
     <div className="admin-stack">
-      {data && <section className="admin-panel admin-trend-panel"><header><div><span className="admin-eyebrow">Audience</span><h2>Visits and unique visitors</h2></div><RangeSelector value={days} onChange={(value) => { setPage(1); setDays(value); }} /></header><div className="admin-inline-metrics"><div><strong>{number.format(data.summary?.visits ?? data.total)}</strong><span>Total visits</span></div><div><strong>{number.format(data.summary?.uniqueVisitors ?? 0)}</strong><span>Unique visitors</span></div><div><strong>{number.format(data.summary?.averagePerDay ?? 0)}</strong><span>Average per day</span></div></div><TrendChart data={data.trend} days={days} valueLabel="page visits" /><div className="admin-chart-legend"><span><i className="blue" /> Page visits</span><span><i className="green" /> Hover a day for the exact count</span></div></section>}
+      {data && <section className="admin-panel admin-trend-panel"><header><div><span className="admin-eyebrow">{translateText("Audience")}</span><h2>{translateText("Visits and unique visitors")}</h2></div><RangeSelector value={days} onChange={(value) => { setPage(1); setDays(value); }} /></header><div className="admin-inline-metrics"><div><strong>{translateText(number.format(data.summary?.visits ?? data.total))}</strong><span>{translateText("Total visits")}</span></div><div><strong>{translateText(number.format(data.summary?.uniqueVisitors ?? 0))}</strong><span>{translateText("Unique visitors")}</span></div><div><strong>{translateText(number.format(data.summary?.averagePerDay ?? 0))}</strong><span>{translateText("Average per day")}</span></div></div><TrendChart data={data.trend} days={days} valueLabel="page visits" /><div className="admin-chart-legend"><span><i className="blue" />{translateText(" Page visits")}</span><span><i className="green" />{translateText(" Hover a day for the exact count")}</span></div></section>}
       <section className="admin-panel admin-data-panel">
-        <header className="admin-data-head"><div><span className="admin-eyebrow">Recent traffic</span><h2>Visit log</h2><p>Raw network addresses are never shown or stored.</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button></header>
-        {!data && !error && <LoadingState />}{error && <ErrorState message={error} onRetry={load} />}
-        {data && <><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Time</th><th>Path</th><th>Visitor</th><th>Device</th><th>Referrer</th></tr></thead><tbody>{data.visits.map((visit) => <tr key={visit.id}><td><span className="admin-muted">{formatDate(visit.createdAt)}</span></td><td><code>{visit.path}</code></td><td>{visit.username ? `@${visit.username}` : <span className="admin-muted">Anonymous</span>}</td><td><span className="admin-device"><DeviceIcon device={visit.device} />{visit.device}</span></td><td><span className="admin-muted">{visit.referrerHost || 'Direct'}</span></td></tr>)}</tbody></table>{data.visits.length === 0 && <p className="admin-empty">No visits in this period.</p>}</div><footer className="admin-results-footer"><span>{number.format(data.total)} visits</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
+        <header className="admin-data-head"><div><span className="admin-eyebrow">{translateText("Recent traffic")}</span><h2>{translateText("Visit log")}</h2><p>{translateText("Raw network addresses are never shown or stored.")}</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} />{translateText(" Refresh")}</button></header>
+        {!data && !error && <LoadingState />}{error && <ErrorState message={translateText(error)} onRetry={load} />}
+        {data && <><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{translateText("Time")}</th><th>{translateText("Path")}</th><th>{translateText("Visitor")}</th><th>{translateText("Device")}</th><th>{translateText("Referrer")}</th></tr></thead><tbody>{data.visits.map((visit) => <tr key={visit.id}><td><span className="admin-muted">{translateText(formatDate(visit.createdAt))}</span></td><td><code>{visit.path}</code></td><td>{visit.username ? `@${visit.username}` : <span className="admin-muted">{translateText("Anonymous")}</span>}</td><td><span className="admin-device"><DeviceIcon device={visit.device} />{translateText(visit.device)}</span></td><td><span className="admin-muted">{translateText(visit.referrerHost || 'Direct')}</span></td></tr>)}</tbody></table>{data.visits.length === 0 && <p className="admin-empty">{translateText("No visits in this period.")}</p>}</div><footer className="admin-results-footer"><span>{translateText(number.format(data.total))}{translateText(" visits")}</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
       </section>
     </div>
   );
 }
 
 function TerrainsPanel() {
+  useLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
@@ -345,15 +356,16 @@ function TerrainsPanel() {
   useEffect(() => { load(); }, [load]);
   return (
     <section className="admin-panel admin-data-panel">
-      <header className="admin-data-head"><div><span className="admin-eyebrow">Cloud library</span><h2>Recent terrains</h2><p>Metadata only; private terrain content is not exposed here.</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button></header>
-      <form className="admin-filters" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}><label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search terrain or owner" aria-label="Search terrains" /></label><select value={visibility} onChange={(event) => { setPage(1); setVisibility(event.target.value); }} aria-label="Filter terrain visibility"><option value="">All visibility</option><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select><button type="submit">Search</button></form>
-      {!data && !error && <LoadingState />}{error && <ErrorState message={error} onRetry={load} />}
-      {data && <><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Terrain</th><th>Owner</th><th>Visibility</th><th>Revision</th><th>Created</th><th>Last updated</th></tr></thead><tbody>{data.terrains.map((terrain) => <tr key={terrain.id}><td><span className="admin-terrain-cell"><span className="admin-list-icon"><FolderKanban size={14} /></span><span><strong>{terrain.name}</strong><small>{terrain.description || 'No description'}</small></span></span></td><td>@{terrain.owner.username}</td><td><span className={`admin-badge ${terrain.visibility}`}>{terrain.visibility}</span></td><td>v{terrain.contentRevision}</td><td><span className="admin-muted">{formatDate(terrain.createdAt)}</span></td><td><span className="admin-muted">{formatDate(terrain.updatedAt)}</span></td></tr>)}</tbody></table>{data.terrains.length === 0 && <p className="admin-empty">No terrains match these filters.</p>}</div><footer className="admin-results-footer"><span>{number.format(data.total)} terrains</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
+      <header className="admin-data-head"><div><span className="admin-eyebrow">{translateText("Cloud library")}</span><h2>{translateText("Recent terrains")}</h2><p>{translateText("Metadata only; private terrain content is not exposed here.")}</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} />{translateText(" Refresh")}</button></header>
+      <form className="admin-filters" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}><label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={translateText("Search terrain or owner")} aria-label={translateText("Search terrains")} /></label><select value={visibility} onChange={(event) => { setPage(1); setVisibility(event.target.value); }} aria-label={translateText("Filter terrain visibility")}><option value="">{translateText("All visibility")}</option><option value="private">{translateText("Private")}</option><option value="unlisted">{translateText("Unlisted")}</option><option value="public">{translateText("Public")}</option></select><button type="submit">{translateText("Search")}</button></form>
+      {!data && !error && <LoadingState />}{error && <ErrorState message={translateText(error)} onRetry={load} />}
+      {data && <><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{translateText("Terrain")}</th><th>{translateText("Owner")}</th><th>{translateText("Visibility")}</th><th>{translateText("Revision")}</th><th>{translateText("Created")}</th><th>{translateText("Last updated")}</th></tr></thead><tbody>{data.terrains.map((terrain) => <tr key={terrain.id}><td><span className="admin-terrain-cell"><span className="admin-list-icon"><FolderKanban size={14} /></span><span><strong>{terrain.name}</strong><small>{translateText(terrain.description || 'No description')}</small></span></span></td><td>@{translateText(terrain.owner.username)}</td><td><span className={`admin-badge ${terrain.visibility}`}>{translateText(terrain.visibility)}</span></td><td>{translateText("v")}{translateText(terrain.contentRevision)}</td><td><span className="admin-muted">{translateText(formatDate(terrain.createdAt))}</span></td><td><span className="admin-muted">{translateText(formatDate(terrain.updatedAt))}</span></td></tr>)}</tbody></table>{data.terrains.length === 0 && <p className="admin-empty">{translateText("No terrains match these filters.")}</p>}</div><footer className="admin-results-footer"><span>{translateText(number.format(data.total))}{translateText(" terrains")}</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
     </section>
   );
 }
 
 function AuditPanel() {
+  useLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
@@ -367,15 +379,16 @@ function AuditPanel() {
   useEffect(() => { load(); }, [load]);
   return (
     <section className="admin-panel admin-data-panel">
-      <header className="admin-data-head"><div><span className="admin-eyebrow">Accountability</span><h2>Administrator audit log</h2><p>Security-sensitive administrator actions are recorded with their actor and target.</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button></header>
-      <form className="admin-filters compact" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}><label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search action, actor, or target ID" aria-label="Search audit log" /></label><button type="submit">Search</button></form>
-      {!data && !error && <LoadingState />}{error && <ErrorState message={error} onRetry={load} />}
-      {data && <><div className="admin-audit-list">{data.events.map((event) => <article key={event.id}><span className="admin-audit-mark"><FileClock size={14} /></span><div><header><strong>{actionLabel(event.action)}</strong><span>{formatDate(event.createdAt)}</span></header><p><b>{event.actor}</b> changed {event.targetType}{event.targetId ? ` ${event.targetId}` : ''}.</p>{event.metadata?.changes && <div className="admin-change-chips">{Object.entries(event.metadata.changes).map(([key, value]) => <span key={key}>{key}: <strong>{String(value)}</strong></span>)}</div>}</div></article>)}{data.events.length === 0 && <p className="admin-empty">No audit events match this search.</p>}</div><footer className="admin-results-footer"><span>{number.format(data.total)} audit events</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
+      <header className="admin-data-head"><div><span className="admin-eyebrow">{translateText("Accountability")}</span><h2>{translateText("Administrator audit log")}</h2><p>{translateText("Security-sensitive administrator actions are recorded with their actor and target.")}</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} />{translateText(" Refresh")}</button></header>
+      <form className="admin-filters compact" onSubmit={(event) => { event.preventDefault(); setPage(1); setQuery(search); }}><label className="admin-search"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={translateText("Search action, actor, or target ID")} aria-label={translateText("Search audit log")} /></label><button type="submit">{translateText("Search")}</button></form>
+      {!data && !error && <LoadingState />}{error && <ErrorState message={translateText(error)} onRetry={load} />}
+      {data && <><div className="admin-audit-list">{data.events.map((event) => <article key={event.id}><span className="admin-audit-mark"><FileClock size={14} /></span><div><header><strong>{translateText(actionLabel(event.action))}</strong><span>{translateText(formatDate(event.createdAt))}</span></header><p><b>{translateText(event.actor)}</b>{translateText(" changed ")}{translateText(event.targetType)}{translateText(event.targetId ? ` ${event.targetId}` : '')}.</p>{event.metadata?.changes && <div className="admin-change-chips">{Object.entries(event.metadata.changes).map(([key, value]) => <span key={key}>{translateText(key)}: <strong>{translateText(String(value))}</strong></span>)}</div>}</div></article>)}{data.events.length === 0 && <p className="admin-empty">{translateText("No audit events match this search.")}</p>}</div><footer className="admin-results-footer"><span>{translateText(number.format(data.total))}{translateText(" audit events")}</span><Pagination page={data.page} pages={data.pages} onPage={setPage} /></footer></>}
     </section>
   );
 }
 
 function SecurityPanel() {
+  useLanguage();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
@@ -385,7 +398,7 @@ function SecurityPanel() {
   }, []);
   useEffect(() => { load(); }, [load]);
   if (!data && !error) return <LoadingState />;
-  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (error) return <ErrorState message={translateText(error)} onRetry={load} />;
   const stats = [
     { label: 'Failed sign-ins · 24h', value: data.summary.failedLogins, icon: ShieldAlert, danger: data.summary.failedLogins > 10 },
     { label: 'Open sessions', value: data.summary.openSessions, icon: KeyRound },
@@ -394,14 +407,15 @@ function SecurityPanel() {
   ];
   return (
     <div className="admin-stack">
-      <section className="admin-security-grid">{stats.map(({ label, value, icon: Icon, danger }) => <article className={danger ? 'danger' : ''} key={label}><Icon size={18} /><span><strong>{number.format(value)}</strong><small>{label}</small></span></article>)}</section>
-      <section className="admin-panel admin-security-note"><LockKeyhole size={19} /><div><strong>Security controls are active</strong><p>Server-side role checks, exact-origin enforcement, HTTP-only cookies, rate limits, privacy-safe identifiers, password hashing, and administrator audit events protect this area.</p></div></section>
-      <section className="admin-panel admin-data-panel"><header className="admin-data-head"><div><span className="admin-eyebrow">Authentication</span><h2>Recent security events</h2><p>Identifiers and network addresses are not exposed.</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} /> Refresh</button></header><div className="admin-security-events">{data.events.map((event) => <div key={event.id}><span className={`admin-event-icon ${event.outcome}`}>{event.outcome === 'success' ? <CheckCircle2 size={14} /> : <ShieldAlert size={14} />}</span><span><strong>{actionLabel(event.type)}</strong><small>{event.username ? `@${event.username}` : 'Unknown account'} · {formatDate(event.createdAt)}</small></span><span className={`admin-status ${event.outcome}`}><i />{event.outcome}</span></div>)}{data.events.length === 0 && <p className="admin-empty">No security events recorded yet.</p>}</div></section>
+      <section className="admin-security-grid">{stats.map(({ label, value, icon: Icon, danger }) => <article className={danger ? 'danger' : ''} key={label}><Icon size={18} /><span><strong>{translateText(number.format(value))}</strong><small>{translateText(label)}</small></span></article>)}</section>
+      <section className="admin-panel admin-security-note"><LockKeyhole size={19} /><div><strong>{translateText("Security controls are active")}</strong><p>{translateText("Server-side role checks, exact-origin enforcement, HTTP-only cookies, rate limits, privacy-safe identifiers, password hashing, and administrator audit events protect this area.")}</p></div></section>
+      <section className="admin-panel admin-data-panel"><header className="admin-data-head"><div><span className="admin-eyebrow">{translateText("Authentication")}</span><h2>{translateText("Recent security events")}</h2><p>{translateText("Identifiers and network addresses are not exposed.")}</p></div><button type="button" className="admin-refresh" onClick={load}><RefreshCw size={13} />{translateText(" Refresh")}</button></header><div className="admin-security-events">{data.events.map((event) => <div key={event.id}><span className={`admin-event-icon ${event.outcome}`}>{event.outcome === 'success' ? <CheckCircle2 size={14} /> : <ShieldAlert size={14} />}</span><span><strong>{translateText(actionLabel(event.type))}</strong><small>{translateText(event.username ? `@${event.username}` : 'Unknown account')} · {translateText(formatDate(event.createdAt))}</small></span><span className={`admin-status ${event.outcome}`}><i />{translateText(event.outcome)}</span></div>)}{data.events.length === 0 && <p className="admin-empty">{translateText("No security events recorded yet.")}</p>}</div></section>
     </div>
   );
 }
 
 export default function AdminDashboard({ user, onBack }) {
+  useLanguage();
   const [tab, setTab] = useState('overview');
   const [overview, setOverview] = useState(null);
   const [overviewDays, setOverviewDays] = useState(30);
@@ -421,26 +435,26 @@ export default function AdminDashboard({ user, onBack }) {
   return (
     <section className="admin-dashboard" aria-labelledby="admin-title">
       <aside className="admin-sidebar">
-        <div className="admin-sidebar-heading"><span className="admin-shield"><ShieldCheck size={18} /></span><span><strong>Admin console</strong><small>Three Terrain</small></span></div>
-        <nav aria-label="Administration">
-          {TABS.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} /><span>{label}</span></button>)}
+        <div className="admin-sidebar-heading"><span className="admin-shield"><ShieldCheck size={18} /></span><span><strong>{translateText("Admin console")}</strong><small>{translateText("Three Terrain")}</small></span></div>
+        <nav aria-label={translateText("Administration")}>
+          {TABS.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} /><span>{translateText(label)}</span></button>)}
         </nav>
-        <div className="admin-sidebar-account"><span>{(user.displayName || user.username).slice(0, 2).toUpperCase()}</span><div><strong>{user.displayName || user.username}</strong><small>Administrator</small></div></div>
+        <div className="admin-sidebar-account"><span>{(user.displayName || user.username).slice(0, 2).toUpperCase()}</span><div><strong>{user.displayName || user.username}</strong><small>{translateText("Administrator")}</small></div></div>
       </aside>
       <div className="admin-main">
         <header className="admin-topbar">
           <div className="admin-topbar-content">
             <div className="admin-topbar-title">
-              <button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={15} /> Exit admin</button>
-              <div><span>Three Terrain back office</span><h1 id="admin-title">{title}</h1></div>
+              <button type="button" className="admin-back" onClick={onBack}><ArrowLeft size={15} />{translateText(" Exit admin")}</button>
+              <div><span>{translateText("Three Terrain back office")}</span><h1 id="admin-title">{translateText(title)}</h1></div>
             </div>
-            <div className="admin-secure-indicator"><LockKeyhole size={13} /><span>Secure admin session</span></div>
+            <div className="admin-secure-indicator"><LockKeyhole size={13} /><span>{translateText("Secure admin session")}</span></div>
           </div>
         </header>
-        <div className="admin-mobile-tabs" role="tablist" aria-label="Administration sections">{TABS.map(({ id, label }) => <button type="button" role="tab" aria-selected={tab === id} key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
+        <div className="admin-mobile-tabs" role="tablist" aria-label={translateText("Administration sections")}>{TABS.map(({ id, label }) => <button type="button" role="tab" aria-selected={tab === id} key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{translateText(label)}</button>)}</div>
         <div className="admin-page">
           {tab === 'overview' && !overview && !error && <LoadingState />}
-          {tab === 'overview' && error && <ErrorState message={error} onRetry={loadOverview} />}
+          {tab === 'overview' && error && <ErrorState message={translateText(error)} onRetry={loadOverview} />}
           {tab === 'overview' && overview && <Overview data={overview} onNavigate={setTab} rangeDays={overviewDays} onRangeChange={changeOverviewRange} />}
           {tab === 'users' && <UsersPanel currentUser={user} />}
           {tab === 'visits' && <VisitsPanel />}

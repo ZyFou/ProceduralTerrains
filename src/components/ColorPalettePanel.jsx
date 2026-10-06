@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useRef, useState } from 'react';
 import {
   COLOR_PALETTE_PRESETS,
@@ -90,11 +91,12 @@ const TUNING_SCHEMA = [
 ];
 
 function PaletteSwatch({ colorKey, rgb, onChange, settingId }) {
+  useLanguage();
   const hex = colorToHex(rgb ?? [0.5, 0.5, 0.5]);
   return (
-    <label className="palette-color-row" title={COLOR_LABELS[colorKey]} data-setting-id={settingId}>
+    <label className="palette-color-row" title={translateText(COLOR_LABELS[colorKey])} data-setting-id={settingId}>
       <span className="palette-color-chip" style={{ background: hex }} />
-      <span className="palette-color-name">{COLOR_LABELS[colorKey]}</span>
+      <span className="palette-color-name">{translateText(COLOR_LABELS[colorKey])}</span>
       <ColorInput
         className="palette-color-input"
         value={hex}
@@ -105,6 +107,7 @@ function PaletteSwatch({ colorKey, rgb, onChange, settingId }) {
 }
 
 function PaletteGroup({ group, palette, open, onToggle, onColorChange, settingId, forceOpen = false }) {
+  useLanguage();
   const isOpen = forceOpen || open;
   return (
     <div className={`palette-group${isOpen ? ' open' : ''}`} data-setting-id={settingId}>
@@ -118,7 +121,7 @@ function PaletteGroup({ group, palette, open, onToggle, onColorChange, settingId
             />
           ))}
         </span>
-        <span className="palette-group-label">{group.label}</span>
+        <span className="palette-group-label">{translateText(group.label)}</span>
         <span className={`palette-group-chevron${isOpen ? ' open' : ''}`} aria-hidden>
           <svg viewBox="0 0 16 16" width="12" height="12">
             <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
@@ -154,6 +157,7 @@ export default function ColorPalettePanel({
   onImport,
   settingsTarget,
 }) {
+  useLanguage();
   const palette = planetStyle?.palette ?? {};
   const paletteGenRev = planetStyle?.paletteGenRev ?? 0;
   const seedInputRef = useRef(null);
@@ -221,16 +225,16 @@ export default function ColorPalettePanel({
       {/* Preview strip */}
       <div className="palette-preview-wrap">
         <div className="palette-preview" style={{ background: `linear-gradient(90deg, ${previewGradient})` }} />
-        <span className="palette-preview-hint">{PALETTE_KEYS.length} biomes</span>
+        <span className="palette-preview-hint">{translateText(PALETTE_KEYS.length)}{translateText(" biomes")}</span>
       </div>
 
       <section className="terrain-palette-picker" aria-labelledby="terrain-palette-title">
         <div className="terrain-palette-picker-head">
           <div>
-            <strong id="terrain-palette-title">Terrain palettes</strong>
-            <span>Same color presets as Nodes</span>
+            <strong id="terrain-palette-title">{translateText("Terrain palettes")}</strong>
+            <span>{translateText("Same color presets as Nodes")}</span>
           </div>
-          <span className="terrain-palette-picker-count">{TERRAIN_COLOR_PALETTE_OPTIONS.length}</span>
+          <span className="terrain-palette-picker-count">{translateText(TERRAIN_COLOR_PALETTE_OPTIONS.length)}</span>
         </div>
         <div className="terrain-palette-grid">
           {TERRAIN_COLOR_PALETTE_OPTIONS.map((option) => {
@@ -242,22 +246,22 @@ export default function ColorPalettePanel({
                 className={`terrain-palette-card${selected ? ' selected' : ''}`}
                 onClick={() => onPalettePreset(option.value)}
                 aria-pressed={selected}
-                title={TERRAIN_COLOR_PALETTE_PRESETS[option.value].description}
+                title={translateText(TERRAIN_COLOR_PALETTE_PRESETS[option.value].description)}
               >
                 <span
                   className="terrain-palette-card-swatch"
                   style={{ background: terrainGradientCss(option.nodePreset) }}
                   aria-hidden
                 />
-                <span className="terrain-palette-card-label">{option.label}</span>
+                <span className="terrain-palette-card-label">{translateText(option.label)}</span>
                 <span className="terrain-palette-card-check" aria-hidden>✓</span>
               </button>
             );
           })}
         </div>
         <p className="terrain-palette-description">
-          {activeTerrainPalette?.description
-            ?? 'Choose a terrain palette to recolor water, vegetation, rock, and snow together.'}
+          {translateText(activeTerrainPalette?.description
+            ?? 'Choose a terrain palette to recolor water, vegetation, rock, and snow together.')}
         </p>
       </section>
 
@@ -268,8 +272,8 @@ export default function ColorPalettePanel({
         aria-expanded={advancedVisible}
       >
         <span>
-          <strong>Advanced colors</strong>
-          <small>Generator, custom biomes &amp; legacy palettes</small>
+          <strong>{translateText("Advanced colors")}</strong>
+          <small>{translateText("Generator, custom biomes & legacy palettes")}</small>
         </span>
         <svg viewBox="0 0 16 16" aria-hidden>
           <path d="M4 6l4 4 4-4" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
@@ -280,17 +284,17 @@ export default function ColorPalettePanel({
       {/* Procedural generator */}
       <div className="palette-generator">
         <div className="palette-generator-head">
-          <span className="palette-generator-title">Procedural Generator</span>
+          <span className="palette-generator-title">{translateText("Procedural Generator")}</span>
         </div>
         <div className="row">
-          <div className="label-with-icon" data-tooltip="The style guidelines used by the procedural color generator (e.g. Desert, Lush, Toxic)">
+          <div className="label-with-icon" data-tooltip={translateText("The style guidelines used by the procedural color generator (e.g. Desert, Lush, Toxic)")}>
             <span className="setting-icon">
               <svg viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2" />
                 <ellipse cx="8" cy="8" rx="2.5" ry="5.5" stroke="currentColor" strokeWidth="0.9" />
               </svg>
             </span>
-            <span className="setting-label">Color Theme</span>
+            <span className="setting-label">{translateText("Color Theme")}</span>
             <span className="info-icon-trigger">
               <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -300,19 +304,19 @@ export default function ColorPalettePanel({
           </div>
           <select value={genType} onChange={(e) => setGenType(e.target.value)}>
             {PLANET_GEN_TYPES.map(({ key, label }) => (
-              <option key={key} value={key}>{label}</option>
+              <option key={key} value={key}>{translateText(label)}</option>
             ))}
           </select>
         </div>
         <div className="seed-row">
-          <div className="label-with-icon" data-tooltip="Input seed value for unique procedural color generation variations">
+          <div className="label-with-icon" data-tooltip={translateText("Input seed value for unique procedural color generation variations")}>
             <span className="setting-icon">
               <svg viewBox="0 0 16 16" fill="none">
                 <rect x="3" y="3" width="10" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
                 <path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.2" />
               </svg>
             </span>
-            <span className="setting-label">Color Seed</span>
+            <span className="setting-label">{translateText("Color Seed")}</span>
             <span className="info-icon-trigger">
               <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -326,9 +330,9 @@ export default function ColorPalettePanel({
               type="text"
               value={genSeed}
               onChange={(e) => handleSeedChange(e.target.value)}
-              placeholder="Seed"
+              placeholder={translateText("Seed")}
             />
-            <button type="button" className="icon-btn" onClick={randomizeSeed} title="Random seed">
+            <button type="button" className="icon-btn" onClick={randomizeSeed} title={translateText("Random seed")}>
               <svg viewBox="0 0 16 16" fill="none">
                 <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.2" />
                 <circle cx="5" cy="5" r="0.9" fill="currentColor" />
@@ -340,18 +344,16 @@ export default function ColorPalettePanel({
             </button>
           </div>
         </div>
-        <button type="button" className="action-btn primary palette-generate-btn" onClick={handleGenerate} data-tooltip="Procedurally create a new color scheme for all height bands based on the seed and theme">
+        <button type="button" className="action-btn primary palette-generate-btn" onClick={handleGenerate} data-tooltip={translateText("Procedurally create a new color scheme for all height bands based on the seed and theme")}>
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.2" />
-          </svg>
-          Generate Custom Palette
-        </button>
+          </svg>{translateText("Generate Custom Palette")}</button>
       </div>
 
       {/* Preset selector */}
       <div className="row palette-preset-row" data-setting-id="planet.palettePreset">
-        <div className="label-with-icon" data-tooltip="Select from pre-defined artist-designed color schemes">
+        <div className="label-with-icon" data-tooltip={translateText("Select from pre-defined artist-designed color schemes")}>
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M8 2a6 6 0 1 0 6 6c0-.8-.7-1.5-1.5-1.5h-1a1.5 1.5 0 0 1-1.5-1.5v-1A1.5 1.5 0 0 0 8 2z" stroke="currentColor" strokeWidth="1.2" />
@@ -360,7 +362,7 @@ export default function ColorPalettePanel({
               <circle cx="9.5" cy="9.5" r="1.1" fill="currentColor" />
             </svg>
           </span>
-          <span className="setting-label">Color Palette Preset</span>
+          <span className="setting-label">{translateText("Color Palette Preset")}</span>
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
@@ -369,17 +371,17 @@ export default function ColorPalettePanel({
           </span>
         </div>
         <select value={palettePreset} onChange={(e) => onPalettePreset(e.target.value)}>
-          <optgroup label="Terrain palettes">
+          <optgroup label={translateText("Terrain palettes")}>
             {TERRAIN_COLOR_PALETTE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
+              <option key={option.value} value={option.value}>{translateText(option.label)}</option>
             ))}
           </optgroup>
-          <optgroup label="Classic palettes">
+          <optgroup label={translateText("Classic palettes")}>
             {classicPalettePresets.map(([key, p]) => (
-              <option key={key} value={key}>{p.label}</option>
+              <option key={key} value={key}>{translateText(p.label)}</option>
             ))}
           </optgroup>
-          {palettePreset === 'custom' && <option value="custom">Custom</option>}
+          {palettePreset === 'custom' && <option value="custom">{translateText("Custom")}</option>}
         </select>
       </div>
 
@@ -414,20 +416,16 @@ export default function ColorPalettePanel({
 
       {/* Import / Export */}
       <div className="palette-io">
-        <button type="button" className="action-btn" onClick={onExport} data-tooltip="Save the current custom planet styling to a JSON file">
+        <button type="button" className="action-btn" onClick={onExport} data-tooltip={translateText("Save the current custom planet styling to a JSON file")}>
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M3 13h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
-          Export
-        </button>
-        <button type="button" className="action-btn" onClick={handleImport} data-tooltip="Load a planet styling configuration from a JSON file">
+          </svg>{translateText("Export")}</button>
+        <button type="button" className="action-btn" onClick={handleImport} data-tooltip={translateText("Load a planet styling configuration from a JSON file")}>
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 14V6M5 9l3-3 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M3 3h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
-          Import
-        </button>
+          </svg>{translateText("Import")}</button>
       </div>
       </div>}
     </div>

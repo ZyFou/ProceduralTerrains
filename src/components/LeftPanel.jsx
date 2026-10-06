@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useState } from 'react';
 import { PRESETS } from '../engine/presets.js';
 import { SliderCtl, ToggleRow, SelectRow } from './controls.jsx';
@@ -41,6 +42,7 @@ const CONTROL_SCHEMA = [
 ];
 
 export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, onRegenerate }) {
+  useLanguage();
   const [open, setOpen] = useState(true);
   const [seedText, setSeedText] = useState(String(params.seed));
   useEffect(() => { setSeedText(String(params.seed)); }, [params.seed]);
@@ -57,17 +59,17 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
   return (
     <aside id="left-panel" className="panel">
       <div className="panel-header">
-        <span>TERRAIN CONTROLS</span>
-        <button className="collapse-btn" onClick={() => setOpen(!open)}>{open ? '‹' : '›'}</button>
+        <span>{translateText("TERRAIN CONTROLS")}</span>
+        <button className="collapse-btn" onClick={() => setOpen(!open)}>{translateText(open ? '‹' : '›')}</button>
       </div>
       <div className={`panel-body${open ? '' : ' collapsed'}`} id="left-panel-body">
-        <div className="section-title">GENERATE</div>
+        <div className="section-title">{translateText("GENERATE")}</div>
 
         <div className="row">
-          <label>Preset</label>
+          <label>{translateText("Preset")}</label>
           <select value={params.preset} onChange={(e) => onPreset(e.target.value)}>
             {Object.entries(PRESETS).map(([key, preset]) => (
-              <option key={key} value={key}>{preset.label}</option>
+              <option key={key} value={key}>{translateText(preset.label)}</option>
             ))}
           </select>
         </div>
@@ -81,22 +83,20 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
             onBlur={commitSeed}
             onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
           />
-          <button title="Random seed" onClick={onRandomizeSeed}>⚄</button>
+          <button title={translateText("Random seed")} onClick={onRandomizeSeed}>⚄</button>
         </div>
 
         <button className="wide-btn primary" onClick={onRegenerate}>
           <svg viewBox="0 0 16 16">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" fill="none" strokeWidth="1.3" />
             <path d="M13.7 1.8v2.8h-2.8" stroke="currentColor" fill="none" strokeWidth="1.3" />
-          </svg>
-          Regenerate
-        </button>
+          </svg>{translateText("Regenerate")}</button>
 
         {CONTROL_SCHEMA.map((def, i) => {
           if (def.section) {
             return (
               <div key={i}>
-                <div className="section-title">{def.section}</div>
+                <div className="section-title">{translateText(def.section)}</div>
                 {def.section === 'NOISE' && !hasLegacy && (
                   <div className="section-hint info" style={{
                     margin: '6px 12px 10px',
@@ -115,7 +115,7 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
                       <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" fill="none" />
                       <path d="M8 11V8M8 5.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                     </svg>
-                    <span>Global parameters (Warp, Ridge, FBM) will automatically add or update layers in your custom Noise Stack.</span>
+                    <span>{translateText("Global parameters (Warp, Ridge, FBM) will automatically add or update layers in your custom Noise Stack.")}</span>
                   </div>
                 )}
               </div>
@@ -129,23 +129,23 @@ export default function LeftPanel({ params, onParam, onPreset, onRandomizeSeed, 
 
           if (def.type === 'toggle') {
             return (
-              <ToggleRow key={def.key} label={def.label} value={params[def.key]}
+              <ToggleRow key={def.key} label={translateText(def.label)} value={params[def.key]}
                 onChange={(v) => onParam(def.key, v)}
-                info={infoTooltip} />
+                info={translateText(infoTooltip)} />
             );
           }
           if (def.type === 'select') {
             return (
-              <SelectRow key={def.key} label={def.label} value={params[def.key]}
+              <SelectRow key={def.key} label={translateText(def.label)} value={params[def.key]}
                 options={def.options} format={def.format}
                 onChange={(v) => onParam(def.key, parseFloat(v))}
-                info={infoTooltip} />
+                info={translateText(infoTooltip)} />
             );
           }
           return (
             <SliderCtl key={def.key} def={def} value={params[def.key]}
               onChange={(v) => onParam(def.key, v)}
-              info={infoTooltip} />
+              info={translateText(infoTooltip)} />
           );
         })}
       </div>

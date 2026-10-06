@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 // ============================================================================
 // Minimal HUD overlay for Infinite World Mode.
 // Shows crosshair, position, speed, chunk stats, quality preset selector,
@@ -27,7 +28,7 @@ const DockBtn = ({ active, onClick, title, children }) => (
     type="button"
     className={`fps-dock-btn camera-bar-btn${active ? ' active' : ''}`}
     onClick={onClick}
-    title={title}
+    title={translateText(title)}
     aria-pressed={active}
   >
     {children}
@@ -43,6 +44,7 @@ export default function InfiniteHUD({
   planetPreset, onPlanetPreset, onGeneratePalette, onRandomPlanet,
   perf, rendererInfo, gpu, onPerfPreset, onPerfSetting, onPerfReset,
 }) {
+  useLanguage();
   const [perfOpen, setPerfOpen] = useState(false);
   const { infiniteStats: stats, stats: perfStats } = useLiveMetrics(liveMetrics);
   if (!stats) return null;
@@ -65,71 +67,65 @@ export default function InfiniteHUD({
 
       <div id="fps-info">
         <div className="fps-info-row">
-          <span className="fps-info-label">POS</span>
-          <span className="fps-info-val">{stats.x}, {stats.y}, {stats.z}</span>
+          <span className="fps-info-label">{translateText("POS")}</span>
+          <span className="fps-info-val">{translateText(stats.x)}, {translateText(stats.y)}, {translateText(stats.z)}</span>
         </div>
         <div className="fps-info-row">
-          <span className="fps-info-label">SPEED</span>
-          <span className="fps-info-val">{stats.speed} u/s</span>
+          <span className="fps-info-label">{translateText("SPEED")}</span>
+          <span className="fps-info-val">{translateText(stats.speed)}{translateText(" u/s")}</span>
         </div>
         <div className="fps-info-row">
-          <span className="fps-info-label">CHUNKS</span>
+          <span className="fps-info-label">{translateText("CHUNKS")}</span>
           <span className="fps-info-val">
-            {stats.visibleChunks ?? stats.chunks}
-            <span className="fps-info-dim"> / {stats.chunks}</span>
+            {translateText(stats.visibleChunks ?? stats.chunks)}
+            <span className="fps-info-dim"> / {translateText(stats.chunks)}</span>
           </span>
         </div>
         {exploring && stats.playerState && (
           <div className="fps-info-row">
-            <span className="fps-info-label">STATE</span>
+            <span className="fps-info-label">{translateText("STATE")}</span>
             <span className={`fps-info-val player-state player-state-${stats.playerState}`}>
-              {PLAYER_STATE_LABELS[stats.playerState] ?? stats.playerState}
+              {translateText(PLAYER_STATE_LABELS[stats.playerState] ?? stats.playerState)}
             </span>
           </div>
         )}
         {stats.culledChunks > 0 && (
           <div className="fps-info-row">
-            <span className="fps-info-label">CULLED</span>
-            <span className="fps-info-val fps-info-culled">{stats.culledChunks}</span>
+            <span className="fps-info-label">{translateText("CULLED")}</span>
+            <span className="fps-info-val fps-info-culled">{translateText(stats.culledChunks)}</span>
           </div>
         )}
       </div>
 
       <div id="fps-settings-panel">
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Explore</span>
-          <div className="fps-explore-select" role="group" aria-label="Explore mode">
+          <span className="fps-setting-label">{translateText("Explore")}</span>
+          <div className="fps-explore-select" role="group" aria-label={translateText("Explore mode")}>
             <button
               type="button"
               className={`fps-explore-option${exploreMode === 'walk' ? ' active' : ''}`}
               onClick={() => onExploreMode?.('walk')}
-              title="Walk on the terrain"
+              title={translateText("Walk on the terrain")}
             >
-              <Compass aria-hidden size={12} strokeWidth={1.8} />
-              Walk
-            </button>
+              <Compass aria-hidden size={12} strokeWidth={1.8} />{translateText("Walk")}</button>
             <button
               type="button"
               className={`fps-explore-option${exploreMode === 'plane' ? ' active' : ''}`}
               onClick={() => onExploreMode?.('plane')}
-              title="Fly with throttle, lift, gravity, and stalls"
-            >
-              Plane
-            </button>
+              title={translateText("Fly with throttle, lift, gravity, and stalls")}
+            >{translateText("Plane")}</button>
             {exploreMode === 'freecam' && (
               <button
                 type="button"
                 className="fps-explore-option active"
                 onClick={() => onExploreMode?.('freecam')}
-                title="Exit no-clip free camera"
-              >
-                Free Cam
-              </button>
+                title={translateText("Exit no-clip free camera")}
+              >{translateText("Free Cam")}</button>
             )}
           </div>
         </div>
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Quality</span>
+          <span className="fps-setting-label">{translateText("Quality")}</span>
           <select
             id="fps-quality-select"
             className="fps-select"
@@ -138,15 +134,15 @@ export default function InfiniteHUD({
           >
             {qualityKeys.map((key) => (
               <option key={key} value={key}>
-                {QUALITY_PRESETS[key].label}
+                {translateText(QUALITY_PRESETS[key].label)}
               </option>
             ))}
-            {quality === 'custom' && <option value="custom">Custom</option>}
+            {quality === 'custom' && <option value="custom">{translateText("Custom")}</option>}
           </select>
         </div>
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Time</span>
-          <span className="fps-setting-value">{formatTimeOfDay(timeOfDay)}</span>
+          <span className="fps-setting-label">{translateText("Time")}</span>
+          <span className="fps-setting-value">{translateText(formatTimeOfDay(timeOfDay))}</span>
         </div>
         <input
           id="fps-tod-slider"
@@ -160,27 +156,23 @@ export default function InfiniteHUD({
           onChange={(e) => onTimeOfDay(parseFloat(e.target.value))}
         />
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Planet</span>
+          <span className="fps-setting-label">{translateText("Planet")}</span>
           <select
             className="fps-select"
             value={planetPreset ?? 'earth'}
             onChange={(e) => onPlanetPreset?.(e.target.value)}
           >
             {Object.entries(PLANET_PRESETS).map(([key, p]) => (
-              <option key={key} value={key}>{p.label}</option>
+              <option key={key} value={key}>{translateText(p.label)}</option>
             ))}
           </select>
         </div>
         <div className="fps-planet-actions">
-          <button type="button" className="fps-mini-btn" onClick={() => onGeneratePalette?.()}>
-            Gen Palette
-          </button>
-          <button type="button" className="fps-mini-btn" onClick={() => onRandomPlanet?.()}>
-            Random
-          </button>
+          <button type="button" className="fps-mini-btn" onClick={() => onGeneratePalette?.()}>{translateText("Gen Palette")}</button>
+          <button type="button" className="fps-mini-btn" onClick={() => onRandomPlanet?.()}>{translateText("Random")}</button>
         </div>
         <div className="fps-setting-row">
-          <span className="fps-setting-label">Back culling</span>
+          <span className="fps-setting-label">{translateText("Back culling")}</span>
           <button
             type="button"
             className={`toggle${behindCameraCulling ? ' on' : ''}`}
@@ -195,18 +187,18 @@ export default function InfiniteHUD({
           <path d="M8 2v8M4 6l4-4 4 4" stroke="currentColor" fill="none" strokeWidth="1.3" strokeLinejoin="round" />
           <line x1="3" y1="13" x2="13" y2="13" stroke="currentColor" strokeWidth="1.3" />
         </svg>
-        <span>{stats.speed} u/s</span>
-        <span className="fps-speed-hint">Scroll to adjust</span>
+        <span>{translateText(stats.speed)}{translateText(" u/s")}</span>
+        <span className="fps-speed-hint">{translateText("Scroll to adjust")}</span>
       </div>
 
       {perf && (
         <div className="fps-mobile-dock">
-          <DockBtn active={perfOpen} onClick={togglePerf} title="Performance">
+          <DockBtn active={perfOpen} onClick={togglePerf} title={translateText("Performance")}>
             <svg viewBox="0 0 16 16" fill="none" width="14" height="14" aria-hidden>
               <path d="M2 12h12M4 9l2.5-4 2.5 3.2L13 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </DockBtn>
-          <span className="fps-dock-speed">{stats.speed} u/s</span>
+          <span className="fps-dock-speed">{translateText(stats.speed)}{translateText(" u/s")}</span>
         </div>
       )}
 
@@ -221,7 +213,7 @@ export default function InfiniteHUD({
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden>
               <path d="M2 12h12M4 9l2.5-4 2.5 3.2L13 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="fps-perf-title">Performance</span>
+            <span className="fps-perf-title">{translateText("Performance")}</span>
             <svg className="fps-perf-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden>
               <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -244,30 +236,13 @@ export default function InfiniteHUD({
       <div id="fps-controls-hint">
         {exploreMode === 'walk' ? (
           <>
-            <span>ZQSD</span> Move &nbsp;·&nbsp;
-            <span>Mouse</span> Look &nbsp;·&nbsp;
-            <span>Shift</span> Run &nbsp;·&nbsp;
-            <span>Space</span> Jump/Swim up &nbsp;·&nbsp;
-            <span>Ctrl/C</span> Swim down &nbsp;·&nbsp;
-            <span>Scroll</span> Speed &nbsp;·&nbsp;
-            Click to lock mouse
-          </>
+            <span>{translateText("ZQSD")}</span>{translateText(" Move  · ")}<span>{translateText("Mouse")}</span>{translateText(" Look  · ")}<span>{translateText("Shift")}</span>{translateText(" Run  · ")}<span>{translateText("Space")}</span>{translateText(" Jump/Swim up  · ")}<span>{translateText("Ctrl/C")}</span>{translateText(" Swim down  · ")}<span>{translateText("Scroll")}</span>{translateText(" Speed  ·  Click to lock mouse")}</>
         ) : exploreMode === 'plane' ? (
           <>
-            <span>Mouse</span> Pitch/bank &nbsp;/&nbsp;
-            <span>W/S</span> Throttle/brake &nbsp;/&nbsp;
-            <span>A/D</span> Bank &nbsp;/&nbsp;
-            <span>Scroll</span> Cruise speed &nbsp;/&nbsp;
-            Click to lock mouse
-          </>
+            <span>{translateText("Mouse")}</span>{translateText(" Pitch/bank  / ")}<span>{translateText("W/S")}</span>{translateText(" Throttle/brake  / ")}<span>{translateText("A/D")}</span>{translateText(" Bank  / ")}<span>{translateText("Scroll")}</span>{translateText(" Cruise speed  /  Click to lock mouse")}</>
         ) : (
           <>
-            <span>ZQSD</span> Move &nbsp;·&nbsp;
-            <span>Mouse</span> Look &nbsp;·&nbsp;
-            <span>Scroll</span> Speed &nbsp;·&nbsp;
-            <span>Space/Shift</span> Up/Down &nbsp;·&nbsp;
-            Click to lock mouse
-          </>
+            <span>{translateText("ZQSD")}</span>{translateText(" Move  · ")}<span>{translateText("Mouse")}</span>{translateText(" Look  · ")}<span>{translateText("Scroll")}</span>{translateText(" Speed  · ")}<span>{translateText("Space/Shift")}</span>{translateText(" Up/Down  ·  Click to lock mouse")}</>
         )}
       </div>
     </>

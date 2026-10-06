@@ -1,3 +1,5 @@
+import { matchesTranslatedSearch } from '../../i18n/language.js';
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useEffect, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { PanelTabs } from '../panels/SidePanel.jsx';
@@ -64,21 +66,23 @@ function val(params, key) {
 }
 
 function SliderList({ items, params, onParam, disabled, query = '' }) {
+  useLanguage();
   const normalized = query.trim().toLowerCase();
-  return items.filter((def) => !normalized || `${def.label} ${def.key}`.toLowerCase().includes(normalized)).map((def) => (
+  return items.filter((def) => !normalized || matchesTranslatedSearch(normalized, def.label, def.key)).map((def) => (
     <SliderCtl
       key={def.key}
       def={def}
       value={val(params, def.key)}
       onChange={(v) => onParam(def.key, v)}
       disabled={disabled}
-      disabledTooltip="Enable this visual group to edit its settings."
+      disabledTooltip={translateText("Enable this visual group to edit its settings.")}
       settingId={`visuals.${def.key}`}
     />
   ));
 }
 
 export default function VisualsPanel({ ctx }) {
+  useLanguage();
   const { params, onParam, settingsTarget } = ctx;
   const tint = val(params, 'visualsAtmosphereTint');
   const [tab, setTab] = useState('post');
@@ -89,7 +93,7 @@ export default function VisualsPanel({ ctx }) {
     if (targetTab && VISUALS_TABS.some((item) => item.id === targetTab)) setTab(targetTab);
   }, [settingsTarget]);
   const normalizedQuery = query.trim().toLowerCase();
-  const matches = (label, keywords = '') => !normalizedQuery || `${label} ${keywords}`.toLowerCase().includes(normalizedQuery);
+  const matches = (label, keywords = '') => !normalizedQuery || matchesTranslatedSearch(normalizedQuery, label, keywords);
   const group = (id, label, keywords, children, tabId = id) => {
     const settingKey = ({ post: 'visualsPostEnabled', pixelated: 'visualsPixelatedEnabled', dithering: 'visualsDitheringEnabled', crt: 'visualsCrtEnabled', chromatic: 'visualsChromaticAberrationEnabled' })[id];
     const active = settingKey ? !!val(params, settingKey) : enabled[id] !== false;
@@ -97,7 +101,7 @@ export default function VisualsPanel({ ctx }) {
       ? (value) => onParam(settingKey, value)
       : (value) => setEnabled((current) => ({ ...current, [id]: value }));
     return tab === tabId && matches(label, keywords) && (
-    <ControlSection id={`visuals-${id}`} title={label} defaultOpen={id === 'post' || id === 'pixelated'} enabled={active} onEnabledChange={setActive}>
+    <ControlSection id={`visuals-${id}`} title={translateText(label)} defaultOpen={id === 'post' || id === 'pixelated'} enabled={active} onEnabledChange={setActive}>
       <div className={!active ? 'visuals-section-disabled' : ''}>{children}</div>
     </ControlSection>
     );
@@ -107,8 +111,8 @@ export default function VisualsPanel({ ctx }) {
     <>
       <div className="visuals-search-wrap">
         <Search size={14} aria-hidden />
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search visual settings…" aria-label="Search visual settings" />
-        {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear visual settings search"><X size={13} /></button>}
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={translateText("Search visual settings…")} aria-label={translateText("Search visual settings")} />
+        {query && <button type="button" onClick={() => setQuery('')} aria-label={translateText("Clear visual settings search")}><X size={13} /></button>}
       </div>
 
       <PanelTabs active={tab} onChange={setTab} tabs={VISUALS_TABS} />
@@ -123,8 +127,8 @@ export default function VisualsPanel({ ctx }) {
         <>
           <SliderList items={SKY_SLIDERS} params={params} onParam={onParam} disabled={enabled.sky === false} query={query} />
           <div className="color-field" data-setting-id="visuals.visualsAtmosphereTint">
-            <div className="label-with-icon" data-tooltip="Tint applied to the procedural sky environment.">
-              <span className="setting-label">Atmosphere Tint</span>
+            <div className="label-with-icon" data-tooltip={translateText("Tint applied to the procedural sky environment.")}>
+              <span className="setting-label">{translateText("Atmosphere Tint")}</span>
             </div>
             <ColorInput
               value={colorToHex(tint)}
@@ -138,7 +142,7 @@ export default function VisualsPanel({ ctx }) {
         <>
           <SliderList items={TERRAIN_SLIDERS} params={params} onParam={onParam} disabled={enabled.terrain === false} query={query} />
           {RENDER_SLIDERS.map((def) => (
-            (!normalizedQuery || `${def.label} ${def.key}`.toLowerCase().includes(normalizedQuery)) && <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} disabled={enabled.terrain === false} disabledTooltip="Enable this visual group to edit its settings." settingId={`visuals.${def.key}`} />
+            (!normalizedQuery || matchesTranslatedSearch(normalizedQuery, def.label, def.key)) && <SliderCtl key={def.key} def={def} value={params[def.key]} onChange={(v) => onParam(def.key, v)} disabled={enabled.terrain === false} disabledTooltip={translateText("Enable this visual group to edit its settings.")} settingId={`visuals.${def.key}`} />
           ))}
         </>
       ))}
@@ -162,11 +166,11 @@ export default function VisualsPanel({ ctx }) {
           {group('dithering', 'Dithering', 'dither pattern color levels strength scale', (
             <>
           <ToggleRow
-            label="Dithering"
+            label={translateText("Dithering")}
             value={!!val(params, 'visualsDitheringEnabled')}
             onChange={(v) => onParam('visualsDitheringEnabled', v)}
             settingId="visuals.visualsDitheringEnabled"
-            info="Applies visible ordered 4×4 dithering with adjustable color depth and pattern size."
+            info={translateText("Applies visible ordered 4×4 dithering with adjustable color depth and pattern size.")}
           />
           <SliderCtl
             def={CAMERA_SLIDERS.ditheringStrength}
@@ -191,11 +195,11 @@ export default function VisualsPanel({ ctx }) {
           {group('crt', 'CRT', 'crt scanline lens bend analog noise', (
             <>
           <ToggleRow
-            label="CRT"
+            label={translateText("CRT")}
             value={!!val(params, 'visualsCrtEnabled')}
             onChange={(v) => onParam('visualsCrtEnabled', v)}
             settingId="visuals.visualsCrtEnabled"
-            info="Adds adjustable scanlines, RGB mask, lens curvature, analog noise, and edge falloff."
+            info={translateText("Adds adjustable scanlines, RGB mask, lens curvature, analog noise, and edge falloff.")}
           />
           <SliderCtl
             def={CAMERA_SLIDERS.crtStrength}
@@ -220,11 +224,11 @@ export default function VisualsPanel({ ctx }) {
           {group('chromatic', 'Chromatic Aberration', 'chromatic offset rgb channels lens edges', (
             <>
           <ToggleRow
-            label="Chromatic Aberration"
+            label={translateText("Chromatic Aberration")}
             value={!!val(params, 'visualsChromaticAberrationEnabled')}
             onChange={(v) => onParam('visualsChromaticAberrationEnabled', v)}
             settingId="visuals.visualsChromaticAberrationEnabled"
-            info="Separates red and blue channels toward the lens edges and combines with every other camera shader."
+            info={translateText("Separates red and blue channels toward the lens edges and combines with every other camera shader.")}
           />
           <SliderCtl
             def={CAMERA_SLIDERS.chromaticStrength}
@@ -237,7 +241,7 @@ export default function VisualsPanel({ ctx }) {
         </>
       )}
 
-      <PanelResetButton label="Reset Visual Settings" onClick={() => ctx.onResetPanel?.('visuals')} settingId="visuals.reset" />
+      <PanelResetButton label={translateText("Reset Visual Settings")} onClick={() => ctx.onResetPanel?.('visuals')} settingId="visuals.reset" />
     </>
   );
 }

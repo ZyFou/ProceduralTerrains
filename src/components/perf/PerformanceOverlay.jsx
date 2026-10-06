@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 // ============================================================================
 // PerformanceOverlay — expanded engine diagnostics panel.
 // Reads a merged snapshot from usePerfOverlay; purely presentational.
@@ -24,22 +25,24 @@ function fpsTone(fps) {
 }
 
 function Row({ label, value, warn }) {
+  useLanguage();
   return (
     <div className="perf-row">
-      <span className="perf-row-label">{label}</span>
-      <span className={`perf-row-value${warn ? ' warn' : ''}`}>{value}</span>
+      <span className="perf-row-label">{translateText(label)}</span>
+      <span className={`perf-row-value${warn ? ' warn' : ''}`}>{translateText(value)}</span>
     </div>
   );
 }
 
 function Section({ id, title, collapsed, onToggle, children }) {
+  useLanguage();
   return (
     <div className="perf-section">
       <button type="button" className="perf-section-head" onClick={() => onToggle(id)}>
         <span className={`perf-caret${collapsed ? ' closed' : ''}`}>
           <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         </span>
-        {title}
+        {translateText(title)}
       </button>
       {!collapsed && <div className="perf-section-body">{children}</div>}
     </div>
@@ -47,11 +50,12 @@ function Section({ id, title, collapsed, onToggle, children }) {
 }
 
 function GraphCard({ label, hint, children }) {
+  useLanguage();
   return (
     <div className="perf-graph-card">
       <div className="perf-graph-card-head">
-        <span className="perf-graph-card-label">{label}</span>
-        {hint && <span className="perf-graph-card-hint">{hint}</span>}
+        <span className="perf-graph-card-label">{translateText(label)}</span>
+        {hint && <span className="perf-graph-card-hint">{translateText(hint)}</span>}
       </div>
       {children}
     </div>
@@ -61,18 +65,17 @@ function GraphCard({ label, hint, children }) {
 export default function PerformanceOverlay({
   snapshot, history, settings, onClose, onToggleSection, onSetShowWarnings,
 }) {
+  useLanguage();
   const [copied, setCopied] = useState('');
   if (!snapshot) {
     return (
-      <div className="perf-overlay perf-overlay-loading" role="dialog" aria-label="Performance overlay">
+      <div className="perf-overlay perf-overlay-loading" role="dialog" aria-label={translateText("Performance overlay")}>
         <div className="perf-overlay-head">
-          <span className="perf-title">Performance</span>
-          <button type="button" className="perf-x" onClick={onClose} aria-label="Close">✕</button>
+          <span className="perf-title">{translateText("Performance")}</span>
+          <button type="button" className="perf-x" onClick={onClose} aria-label={translateText("Close")}>✕</button>
         </div>
         <div className="perf-loading-body">
-          <span className="perf-loading-dot" />
-          Collecting metrics…
-        </div>
+          <span className="perf-loading-dot" />{translateText("Collecting metrics…")}</div>
       </div>
     );
   }
@@ -98,17 +101,17 @@ export default function PerformanceOverlay({
   const lod = diag?.lod?.counts || [];
 
   return (
-    <div className="perf-overlay" role="dialog" aria-label="Performance overlay">
+    <div className="perf-overlay" role="dialog" aria-label={translateText("Performance overlay")}>
       <div className="perf-overlay-head">
-        <span className="perf-title">Performance</span>
+        <span className="perf-title">{translateText("Performance")}</span>
         <div className="perf-head-actions">
           <button type="button" className={`perf-chip${copied === 'text' ? ' ok' : ''}`} onClick={() => copy('text')}>
-            {copied === 'text' ? 'Copied' : 'Copy'}
+            {translateText(copied === 'text' ? 'Copied' : 'Copy')}
           </button>
           <button type="button" className={`perf-chip${copied === 'json' ? ' ok' : ''}`} onClick={() => copy('json')}>
-            {copied === 'json' ? 'Copied' : 'JSON'}
+            {translateText(copied === 'json' ? 'Copied' : 'JSON')}
           </button>
-          <button type="button" className="perf-x" onClick={onClose} aria-label="Close">✕</button>
+          <button type="button" className="perf-x" onClick={onClose} aria-label={translateText("Close")}>✕</button>
         </div>
       </div>
 
@@ -117,26 +120,26 @@ export default function PerformanceOverlay({
         <div className="perf-hero">
           <div className="perf-hero-metrics">
             <div className={`perf-hero-fps perf-hero-${tone}`}>
-              <span className="perf-hero-value">{fps}</span>
-              <span className="perf-hero-unit">fps</span>
+              <span className="perf-hero-value">{translateText(fps)}</span>
+              <span className="perf-hero-unit">{translateText("fps")}</span>
             </div>
             <div className="perf-hero-secondary">
               <div className="perf-hero-stat">
-                <span className="perf-hero-stat-label">Frame</span>
-                <span className={`perf-hero-stat-value${frame?.avg > 22 ? ' warn' : ''}`}>{fmtMs(frame?.avg)}</span>
+                <span className="perf-hero-stat-label">{translateText("Frame")}</span>
+                <span className={`perf-hero-stat-value${frame?.avg > 22 ? ' warn' : ''}`}>{translateText(fmtMs(frame?.avg))}</span>
               </div>
               <div className="perf-hero-stat">
-                <span className="perf-hero-stat-label">Draws</span>
-                <span className="perf-hero-stat-value">{render?.calls ?? '–'}</span>
+                <span className="perf-hero-stat-label">{translateText("Draws")}</span>
+                <span className="perf-hero-stat-value">{translateText(render?.calls ?? '–')}</span>
               </div>
               <div className="perf-hero-stat">
-                <span className="perf-hero-stat-label">Tris</span>
-                <span className="perf-hero-stat-value">{fmtNum(render?.triangles)}</span>
+                <span className="perf-hero-stat-label">{translateText("Tris")}</span>
+                <span className="perf-hero-stat-value">{translateText(fmtNum(render?.triangles))}</span>
               </div>
             </div>
           </div>
 
-          <GraphCard label="Frame rate" hint="~24 s">
+          <GraphCard label={translateText("Frame rate")} hint={translateText("~24 s")}>
             <PerfSparkline
               data={history?.fps}
               color="var(--success)"
@@ -149,7 +152,7 @@ export default function PerformanceOverlay({
             />
           </GraphCard>
 
-          <GraphCard label="Frame time" hint="CPU ms">
+          <GraphCard label={translateText("Frame time")} hint={translateText("CPU ms")}>
             <PerfSparkline
               data={history?.frameMs}
               color="var(--accent)"
@@ -163,7 +166,7 @@ export default function PerformanceOverlay({
           </GraphCard>
 
           <div className="perf-graph-duo">
-            <GraphCard label="Draw calls">
+            <GraphCard label={translateText("Draw calls")}>
               <PerfSparkline
                 data={history?.drawCalls}
                 color="var(--accent)"
@@ -171,7 +174,7 @@ export default function PerformanceOverlay({
                 minY={0}
               />
             </GraphCard>
-            <GraphCard label="Triangles" hint="×1000">
+            <GraphCard label={translateText("Triangles")} hint="×1000">
               <PerfSparkline
                 data={history?.triangles}
                 color="var(--text-muted)"
@@ -183,137 +186,137 @@ export default function PerformanceOverlay({
           </div>
         </div>
 
-        <Section id="summary" title="Summary" collapsed={collapsed.summary} onToggle={onToggleSection}>
-          <Row label="FPS" value={fps} warn={fps > 0 && fps < 45} />
-          <Row label="Avg FPS" value={snapshot.fpsAvg} />
-          <Row label="Frame" value={fmtMs(frame?.avg)} warn={frame?.avg > 22} />
-          <Row label="Frame min/max" value={`${fmtMs(frame?.min)} / ${fmtMs(frame?.max)}`} />
-          <Row label="Mode" value={diag?.mode || '–'} />
-          <Row label="State" value={diag?.state || '–'} />
-          <Row label="Quality" value={diag?.qualityPreset || '–'} />
-          <Row label="Pixel ratio" value={diag?.pixelRatio?.toFixed(2) ?? '–'} warn={diag?.pixelRatio > 2.5} />
-          <Row label="Render size" value={diag?.drawingBuffer ? `${diag.drawingBuffer.w}×${diag.drawingBuffer.h}` : '–'} />
-          <Row label="Camera" value={cam ? `${cam.x.toFixed(0)}, ${cam.y.toFixed(0)}, ${cam.z.toFixed(0)}` : '–'} />
+        <Section id="summary" title={translateText("Summary")} collapsed={collapsed.summary} onToggle={onToggleSection}>
+          <Row label={translateText("FPS")} value={fps} warn={fps > 0 && fps < 45} />
+          <Row label={translateText("Avg FPS")} value={snapshot.fpsAvg} />
+          <Row label={translateText("Frame")} value={fmtMs(frame?.avg)} warn={frame?.avg > 22} />
+          <Row label={translateText("Frame min/max")} value={`${fmtMs(frame?.min)} / ${fmtMs(frame?.max)}`} />
+          <Row label={translateText("Mode")} value={diag?.mode || '–'} />
+          <Row label={translateText("State")} value={diag?.state || '–'} />
+          <Row label={translateText("Quality")} value={diag?.qualityPreset || '–'} />
+          <Row label={translateText("Pixel ratio")} value={diag?.pixelRatio?.toFixed(2) ?? '–'} warn={diag?.pixelRatio > 2.5} />
+          <Row label={translateText("Render size")} value={diag?.drawingBuffer ? `${diag.drawingBuffer.w}×${diag.drawingBuffer.h}` : '–'} />
+          <Row label={translateText("Camera")} value={cam ? `${cam.x.toFixed(0)}, ${cam.y.toFixed(0)}, ${cam.z.toFixed(0)}` : '–'} />
         </Section>
 
-        <Section id="rendering" title="Rendering" collapsed={collapsed.rendering} onToggle={onToggleSection}>
+        <Section id="rendering" title={translateText("Rendering")} collapsed={collapsed.rendering} onToggle={onToggleSection}>
           {render ? (
             <>
-              <Row label="Draw calls" value={render.calls} warn={render.calls > 1500} />
-              <Row label="Triangles" value={fmtNum(render.triangles)} warn={render.triangles > 3e6} />
-              <Row label="Points" value={render.points} />
-              <Row label="Lines" value={render.lines} />
-              <Row label="Geometries" value={render.geometries} />
-              <Row label="Textures" value={render.textures} warn={render.textures > 120} />
-              <Row label="Programs" value={render.programs} />
-              <Row label="Shadows" value={diag?.shadowsEnabled ? 'on' : 'off'} />
-              <Row label="Underwater pass" value={diag?.postProcessing?.underwater ? 'active' : 'inactive'} />
+              <Row label={translateText("Draw calls")} value={render.calls} warn={render.calls > 1500} />
+              <Row label={translateText("Triangles")} value={fmtNum(render.triangles)} warn={render.triangles > 3e6} />
+              <Row label={translateText("Points")} value={render.points} />
+              <Row label={translateText("Lines")} value={render.lines} />
+              <Row label={translateText("Geometries")} value={render.geometries} />
+              <Row label={translateText("Textures")} value={render.textures} warn={render.textures > 120} />
+              <Row label={translateText("Programs")} value={render.programs} />
+              <Row label={translateText("Shadows")} value={diag?.shadowsEnabled ? 'on' : 'off'} />
+              <Row label={translateText("Underwater pass")} value={diag?.postProcessing?.underwater ? 'active' : 'inactive'} />
             </>
-          ) : <Row label="Renderer" value="collecting…" />}
+          ) : <Row label={translateText("Renderer")} value="collecting…" />}
         </Section>
 
-        <Section id="timing" title="Frame timing (CPU)" collapsed={collapsed.timing} onToggle={onToggleSection}>
+        <Section id="timing" title={translateText("Frame timing (CPU)")} collapsed={collapsed.timing} onToggle={onToggleSection}>
           {sections && sections.length ? sections.map((s) => (
-            <Row key={s.name} label={s.name} value={`${s.avg.toFixed(2)} ms (max ${s.max.toFixed(1)})`} warn={s.avg > 8} />
-          )) : <Row label="No section data yet" value="…" />}
+            <Row key={s.name} label={translateText(s.name)} value={`${s.avg.toFixed(2)} ms (max ${s.max.toFixed(1)})`} warn={s.avg > 8} />
+          )) : <Row label={translateText("No section data yet")} value="…" />}
         </Section>
 
-        <Section id="gpu" title="GPU / Renderer" collapsed={collapsed.gpu} onToggle={onToggleSection}>
-          <Row label="Renderer backend" value={diag?.renderer?.requestedBackendLabel || 'â€“'} />
-          <Row label="Active renderer" value={diag?.renderer?.activeBackendLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
-          <Row label="GPU preference" value={diag?.renderer?.requestedGpuPreferenceLabel || 'â€“'} />
-          <Row label="Applied preference" value={diag?.renderer?.activeGpuPreferenceLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
-          <Row label="Detected GPU" value={diag?.renderer?.capabilities?.detectedGpu || diag?.gpuName || 'â€“'} warn={diag?.renderer?.capabilities?.gpuInfoAvailable === false} />
-          <Row label="WebGPU support" value={diag?.renderer?.capabilities?.webgpu?.supported ? 'available' : 'unavailable'} />
+        <Section id="gpu" title={translateText("GPU / Renderer")} collapsed={collapsed.gpu} onToggle={onToggleSection}>
+          <Row label={translateText("Renderer backend")} value={diag?.renderer?.requestedBackendLabel || 'â€“'} />
+          <Row label={translateText("Active renderer")} value={diag?.renderer?.activeBackendLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
+          <Row label={translateText("GPU preference")} value={diag?.renderer?.requestedGpuPreferenceLabel || 'â€“'} />
+          <Row label={translateText("Applied preference")} value={diag?.renderer?.activeGpuPreferenceLabel || 'â€“'} warn={diag?.renderer?.reloadRequired} />
+          <Row label={translateText("Detected GPU")} value={diag?.renderer?.capabilities?.detectedGpu || diag?.gpuName || 'â€“'} warn={diag?.renderer?.capabilities?.gpuInfoAvailable === false} />
+          <Row label={translateText("WebGPU support")} value={diag?.renderer?.capabilities?.webgpu?.supported ? 'available' : 'unavailable'} />
           {gpu && gpu.supported ? (
             <>
-              <Row label="Frame GPU" value={fmtMs(gpu.frameMs)} />
-              <Row label="Per-pass" value="whole-frame only" />
-              {gpu.disjoint && <Row label="Note" value="disjoint — result unreliable" warn />}
+              <Row label={translateText("Frame GPU")} value={fmtMs(gpu.frameMs)} />
+              <Row label={translateText("Per-pass")} value="whole-frame only" />
+              {gpu.disjoint && <Row label={translateText("Note")} value="disjoint — result unreliable" warn />}
             </>
-          ) : <Row label="GPU timing" value="unavailable on this browser/device" />}
-          {diag?.renderer?.reloadRequired && <Row label="Apply required" value="reload renderer" warn />}
+          ) : <Row label={translateText("GPU timing")} value="unavailable on this browser/device" />}
+          {diag?.renderer?.reloadRequired && <Row label={translateText("Apply required")} value="reload renderer" warn />}
         </Section>
 
-        <Section id="memory" title="Memory" collapsed={collapsed.memory} onToggle={onToggleSection}>
+        <Section id="memory" title={translateText("Memory")} collapsed={collapsed.memory} onToggle={onToggleSection}>
           {memory && memory.supported ? (
             <>
-              <Row label="JS heap used" value={mb(memory.usedJSHeap)} warn={memory.usedJSHeap / memory.jsHeapLimit > 0.85} />
-              <Row label="JS heap total" value={mb(memory.totalJSHeap)} />
-              <Row label="JS heap limit" value={mb(memory.jsHeapLimit)} />
+              <Row label={translateText("JS heap used")} value={mb(memory.usedJSHeap)} warn={memory.usedJSHeap / memory.jsHeapLimit > 0.85} />
+              <Row label={translateText("JS heap total")} value={mb(memory.totalJSHeap)} />
+              <Row label={translateText("JS heap limit")} value={mb(memory.jsHeapLimit)} />
             </>
-          ) : <Row label="Memory API" value="unavailable" />}
-          <Row label="Textures" value={render?.textures ?? '–'} />
-          <Row label="Geometries" value={render?.geometries ?? '–'} />
+          ) : <Row label={translateText("Memory API")} value="unavailable" />}
+          <Row label={translateText("Textures")} value={render?.textures ?? '–'} />
+          <Row label={translateText("Geometries")} value={render?.geometries ?? '–'} />
         </Section>
 
-        <Section id="loading" title="Loading" collapsed={collapsed.loading} onToggle={onToggleSection}>
+        <Section id="loading" title={translateText("Loading")} collapsed={collapsed.loading} onToggle={onToggleSection}>
           {tasks && tasks.length ? tasks.map((t) => (
             <Row
               key={t.id}
-              label={t.name}
+              label={translateText(t.name)}
               value={`${t.status}${t.progress != null ? ` ${Math.round(t.progress * 100)}%` : ''}${t.elapsed ? ` · ${(t.elapsed / 1000).toFixed(1)}s` : ''}`}
               warn={t.status === 'failed'}
             />
-          )) : <Row label="No active tasks" value="idle" />}
+          )) : <Row label={translateText("No active tasks")} value="idle" />}
         </Section>
 
-        <Section id="terrain" title="Terrain" collapsed={collapsed.terrain} onToggle={onToggleSection}>
-          {diag && renderTerrain(diag)}
+        <Section id="terrain" title={translateText("Terrain")} collapsed={collapsed.terrain} onToggle={onToggleSection}>
+          {translateText(diag && renderTerrain(diag))}
         </Section>
 
-        <Section id="culling" title="Culling & LOD" collapsed={collapsed.culling} onToggle={onToggleSection}>
-          <Row label="Total chunks" value={cull.total ?? '–'} />
-          <Row label="Visible" value={cull.visible ?? '–'} />
-          <Row label="Culled" value={cull.culled ?? '–'} />
-          {lod.map((c, i) => <Row key={i} label={`LOD${i}`} value={c} />)}
+        <Section id="culling" title={translateText("Culling & LOD")} collapsed={collapsed.culling} onToggle={onToggleSection}>
+          <Row label={translateText("Total chunks")} value={cull.total ?? '–'} />
+          <Row label={translateText("Visible")} value={cull.visible ?? '–'} />
+          <Row label={translateText("Culled")} value={cull.culled ?? '–'} />
+          {lod.map((c, i) => <Row key={i} label={translateText(`LOD${i}`)} value={c} />)}
         </Section>
 
-        <Section id="props" title="Terrain Props" collapsed={collapsed.props} onToggle={onToggleSection}>
+        <Section id="props" title={translateText("Terrain Props")} collapsed={collapsed.props} onToggle={onToggleSection}>
           {diag?.props ? (
             <>
-              <Row label="Quality tier" value={diag.props.quality ?? '–'} />
-              <Row label="Grass / flowers" value={`${fmtNum(diag.props.instances?.grass || 0)} / ${fmtNum(diag.props.instances?.flowers || 0)}`} />
-              <Row label="Rocks / trees" value={`${fmtNum(diag.props.instances?.rocks || 0)} / ${fmtNum(diag.props.instances?.trees || 0)}`} />
-              <Row label="Draw calls" value={diag.props.drawCalls ?? 0} warn={diag.props.drawCalls > 9} />
-              <Row label="Triangles" value={fmtNum(diag.props.triangles || 0)} warn={diag.props.triangles > 65000} />
-              <Row label="Sectors / queued" value={`${diag.props.sectors || 0} / ${diag.props.queuedSectors || 0}`} />
-              <Row label="Last update" value={fmtMs(diag.props.buildMs)} warn={diag.props.buildMs > 8} />
-              <Row label="Surface readbacks" value={diag.props.surfaceReadbacks || 0} />
+              <Row label={translateText("Quality tier")} value={diag.props.quality ?? '–'} />
+              <Row label={translateText("Grass / flowers")} value={`${fmtNum(diag.props.instances?.grass || 0)} / ${fmtNum(diag.props.instances?.flowers || 0)}`} />
+              <Row label={translateText("Rocks / trees")} value={`${fmtNum(diag.props.instances?.rocks || 0)} / ${fmtNum(diag.props.instances?.trees || 0)}`} />
+              <Row label={translateText("Draw calls")} value={diag.props.drawCalls ?? 0} warn={diag.props.drawCalls > 9} />
+              <Row label={translateText("Triangles")} value={fmtNum(diag.props.triangles || 0)} warn={diag.props.triangles > 65000} />
+              <Row label={translateText("Sectors / queued")} value={`${diag.props.sectors || 0} / ${diag.props.queuedSectors || 0}`} />
+              <Row label={translateText("Last update")} value={fmtMs(diag.props.buildMs)} warn={diag.props.buildMs > 8} />
+              <Row label={translateText("Surface readbacks")} value={diag.props.surfaceReadbacks || 0} />
             </>
-          ) : <Row label="Props" value="unavailable" />}
+          ) : <Row label={translateText("Props")} value="unavailable" />}
         </Section>
 
-        <Section id="clouds" title="Clouds" collapsed={collapsed.clouds} onToggle={onToggleSection}>
+        <Section id="clouds" title={translateText("Clouds")} collapsed={collapsed.clouds} onToggle={onToggleSection}>
           {diag?.clouds && (
             <>
-              <Row label="Enabled" value={diag.clouds.enabled ? 'yes' : 'no'} />
-              <Row label="Mode" value={diag.clouds.mode} />
-              <Row label="Layers" value={diag.clouds.layers} />
-              <Row label="Raymarch steps" value={diag.clouds.steps} warn={diag.clouds.steps > 64} />
-              <Row label="Light steps" value={diag.clouds.lightSteps} />
-              <Row label="Octaves" value={`${diag.clouds.octaves} + ${diag.clouds.detailOctaves} detail`} />
-              <Row label="Coverage" value={fmtMaybe(diag.clouds.coverage)} />
-              <Row label="Density" value={fmtMaybe(diag.clouds.density)} />
-              <Row label="Wind / evolve" value={`${fmtMaybe(diag.clouds.windSpeed)} / ${fmtMaybe(diag.clouds.evolveSpeed)}`} />
-              <Row label="Culling" value={diag.clouds.cullingMode} />
-              <Row label="LOD" value={diag.clouds.lod} />
-              <Row label="Update time" value={fmtMs(diag.clouds.time)} />
+              <Row label={translateText("Enabled")} value={diag.clouds.enabled ? 'yes' : 'no'} />
+              <Row label={translateText("Mode")} value={diag.clouds.mode} />
+              <Row label={translateText("Layers")} value={diag.clouds.layers} />
+              <Row label={translateText("Raymarch steps")} value={diag.clouds.steps} warn={diag.clouds.steps > 64} />
+              <Row label={translateText("Light steps")} value={diag.clouds.lightSteps} />
+              <Row label={translateText("Octaves")} value={`${diag.clouds.octaves} + ${diag.clouds.detailOctaves} detail`} />
+              <Row label={translateText("Coverage")} value={fmtMaybe(diag.clouds.coverage)} />
+              <Row label={translateText("Density")} value={fmtMaybe(diag.clouds.density)} />
+              <Row label={translateText("Wind / evolve")} value={`${fmtMaybe(diag.clouds.windSpeed)} / ${fmtMaybe(diag.clouds.evolveSpeed)}`} />
+              <Row label={translateText("Culling")} value={diag.clouds.cullingMode} />
+              <Row label={translateText("LOD")} value={diag.clouds.lod} />
+              <Row label={translateText("Update time")} value={fmtMs(diag.clouds.time)} />
             </>
           )}
         </Section>
 
-        <Section id="water" title="Water" collapsed={collapsed.water} onToggle={onToggleSection}>
+        <Section id="water" title={translateText("Water")} collapsed={collapsed.water} onToggle={onToggleSection}>
           {diag?.water && (
             <>
-              <Row label="Enabled" value={diag.water.enabled ? 'yes' : 'no'} />
-              <Row label="Mode" value={diag.water.mode} />
-              <Row label="Quality" value={diag.water.quality} />
-              <Row label="Reflection" value={fmtMaybe(diag.water.reflection)} />
-              <Row label="Detail" value={fmtMaybe(diag.water.detail)} />
-              <Row label="Waves" value={fmtMaybe(diag.water.waves)} />
-              <Row label="Sea level" value={fmtMaybe(diag.water.seaLevel)} />
-              <Row label="Underwater" value={diag.water.underwater ? 'active' : 'inactive'} />
+              <Row label={translateText("Enabled")} value={diag.water.enabled ? 'yes' : 'no'} />
+              <Row label={translateText("Mode")} value={diag.water.mode} />
+              <Row label={translateText("Quality")} value={diag.water.quality} />
+              <Row label={translateText("Reflection")} value={fmtMaybe(diag.water.reflection)} />
+              <Row label={translateText("Detail")} value={fmtMaybe(diag.water.detail)} />
+              <Row label={translateText("Waves")} value={fmtMaybe(diag.water.waves)} />
+              <Row label={translateText("Sea level")} value={fmtMaybe(diag.water.seaLevel)} />
+              <Row label={translateText("Underwater")} value={diag.water.underwater ? 'active' : 'inactive'} />
               {diag.water.performanceCost && (() => {
                 const cost = diag.water.performanceCost;
                 const surface = cost.surface || {};
@@ -322,33 +325,33 @@ export default function PerformanceOverlay({
                 return (
                   <>
                     <Row
-                      label="Surface geometry"
+                      label={translateText("Surface geometry")}
                       value={`${surface.mode || '–'} · ${fmtNum(surface.vertices || 0)} verts · ${fmtNum(surface.triangles || 0)} tris`}
                     />
                     <Row
-                      label="Surface CPU submit"
+                      label={translateText("Surface CPU submit")}
                       value={fmtMs(surface.surfaceSubmitAvgMs)}
                     />
                     <Row
-                      label="Surface GPU"
+                      label={translateText("Surface GPU")}
                       value={gpu?.supported
                         ? `${fmtMs(gpu.frameMs)} whole frame`
                         : 'whole-frame timer unavailable'}
                     />
                     <Row
-                      label="Opaque refraction"
+                      label={translateText("Opaque refraction")}
                       value={`${fmtMs(refraction.captureMs)} · ${fmtPassResolution(refraction)}`}
                     />
                     <Row
-                      label="Planar reflection"
+                      label={translateText("Planar reflection")}
                       value={`${fmtMs(reflectionPass.captureMs)} · ${fmtPassResolution(reflectionPass)}`}
                     />
                     <Row
-                      label="Water target memory"
+                      label={translateText("Water target memory")}
                       value={mb(cost.renderTargetMemoryBytes || 0)}
                     />
                     <Row
-                      label="Extra scene renders"
+                      label={translateText("Extra scene renders")}
                       value={cost.additionalSceneRenders ?? 0}
                     />
                   </>
@@ -358,43 +361,43 @@ export default function PerformanceOverlay({
           )}
         </Section>
 
-        <Section id="underwater" title="Underwater" collapsed={collapsed.underwater} onToggle={onToggleSection}>
+        <Section id="underwater" title={translateText("Underwater")} collapsed={collapsed.underwater} onToggle={onToggleSection}>
           {diag?.underwater && (
             <>
-              <Row label="Active" value={diag.underwater.active ? 'yes' : 'no'} />
-              <Row label="Mode" value={diag.underwater.mode} />
+              <Row label={translateText("Active")} value={diag.underwater.active ? 'yes' : 'no'} />
+              <Row label={translateText("Mode")} value={diag.underwater.mode} />
               {diag.underwater.fellBackToLite && (
-                <Row label="Requested" value={`${diag.underwater.requestedMode} → lite`} />
+                <Row label={translateText("Requested")} value={`${diag.underwater.requestedMode} → lite`} />
               )}
-              <Row label="Blend" value={fmtMaybe(diag.underwater.blend, 2)} />
-              <Row label="Depth below" value={fmtMaybe(diag.underwater.depth, 1)} />
-              <Row label="Caustics" value={diag.underwater.causticsEnabled ? 'on' : 'off'} />
-              <Row label="Light shafts" value={diag.underwater.lightShaftsEnabled ? 'on' : 'off'} />
-              <Row label="Particles" value={diag.underwater.particlesEnabled ? 'on' : 'off'} />
-              <Row label="Cost estimate" value={diag.underwater.costEstimate} />
+              <Row label={translateText("Blend")} value={fmtMaybe(diag.underwater.blend, 2)} />
+              <Row label={translateText("Depth below")} value={fmtMaybe(diag.underwater.depth, 1)} />
+              <Row label={translateText("Caustics")} value={diag.underwater.causticsEnabled ? 'on' : 'off'} />
+              <Row label={translateText("Light shafts")} value={diag.underwater.lightShaftsEnabled ? 'on' : 'off'} />
+              <Row label={translateText("Particles")} value={diag.underwater.particlesEnabled ? 'on' : 'off'} />
+              <Row label={translateText("Cost estimate")} value={diag.underwater.costEstimate} />
               {diag.underwater.postProcessApplies === false && (
-                <Row label="Post-process" value="n/a (planet)" />
+                <Row label={translateText("Post-process")} value="n/a (planet)" />
               )}
               {diag.underwater.depthTextureAvailable === false && (
-                <Row label="Depth texture" value="unavailable" />
+                <Row label={translateText("Depth texture")} value="unavailable" />
               )}
             </>
           )}
         </Section>
 
         {settings.showWarnings && (
-          <Section id="warnings" title={`Warnings (${warnings.length})`} collapsed={collapsed.warnings} onToggle={onToggleSection}>
+          <Section id="warnings" title={translateText(`Warnings (${warnings.length})`)} collapsed={collapsed.warnings} onToggle={onToggleSection}>
             {warnings.length ? warnings.map((w, i) => (
               <div key={i} className={`perf-warn perf-warn-${w.level}`}>
-                <span className="perf-warn-level">{w.level}</span>
-                <span className="perf-warn-label">{w.label}</span>
+                <span className="perf-warn-level">{translateText(w.level)}</span>
+                <span className="perf-warn-label">{translateText(w.label)}</span>
               </div>
-            )) : <Row label="No warnings" value="all clear" />}
+            )) : <Row label={translateText("No warnings")} value="all clear" />}
           </Section>
         )}
 
         <div className="perf-prefs">
-          <label><input type="checkbox" checked={!!settings.showWarnings} onChange={(e) => onSetShowWarnings(e.target.checked)} /> Warnings</label>
+          <label><input type="checkbox" checked={!!settings.showWarnings} onChange={(e) => onSetShowWarnings(e.target.checked)} />{translateText(" Warnings")}</label>
         </div>
       </div>
     </div>
@@ -418,34 +421,34 @@ function renderTerrain(diag) {
   if (diag.mode === 'infinite') {
     return (
       <>
-        <Row label="Chunk size" value={fmtMaybe(t.chunkSize)} />
-        <Row label="View radius" value={fmtMaybe(t.viewRadius)} />
-        <Row label="Render distance" value={fmtMaybe(t.renderDistance)} />
-        <Row label="LOD thresholds" value={(t.lodThresholds || []).map((x) => x.toFixed(0)).join(', ') || '–'} />
-        <Row label="Last chunk gen" value={t.lastChunkGenMs != null ? `${t.lastChunkGenMs.toFixed(1)} ms` : '–'} />
+        <Row label={translateText("Chunk size")} value={fmtMaybe(t.chunkSize)} />
+        <Row label={translateText("View radius")} value={fmtMaybe(t.viewRadius)} />
+        <Row label={translateText("Render distance")} value={fmtMaybe(t.renderDistance)} />
+        <Row label={translateText("LOD thresholds")} value={(t.lodThresholds || []).map((x) => x.toFixed(0)).join(', ') || '–'} />
+        <Row label={translateText("Last chunk gen")} value={t.lastChunkGenMs != null ? `${t.lastChunkGenMs.toFixed(1)} ms` : '–'} />
       </>
     );
   }
   if (diag.mode === 'planet') {
     return (
       <>
-        <Row label="Planet radius" value={fmtMaybe(t.planetRadius)} />
-        <Row label="Face grid" value={fmtMaybe(t.faceGrid)} />
-        <Row label="Baked height tex" value={t.bakedHeightTex ? 'yes' : 'no'} />
-        <Row label="Last rebuild" value={t.lastRebuildMs != null ? `${t.lastRebuildMs.toFixed(1)} ms` : '–'} />
+        <Row label={translateText("Planet radius")} value={fmtMaybe(t.planetRadius)} />
+        <Row label={translateText("Face grid")} value={fmtMaybe(t.faceGrid)} />
+        <Row label={translateText("Baked height tex")} value={t.bakedHeightTex ? 'yes' : 'no'} />
+        <Row label={translateText("Last rebuild")} value={t.lastRebuildMs != null ? `${t.lastRebuildMs.toFixed(1)} ms` : '–'} />
       </>
     );
   }
   return (
     <>
-      <Row label="Resolution" value={fmtMaybe(t.resolution)} />
-      <Row label="Board size" value={fmtMaybe(t.boardSize)} />
-      <Row label="Tiles" value={fmtMaybe(t.tiles)} />
-      <Row label="Height scale" value={fmtMaybe(t.heightScale)} />
-      <Row label="Octaves" value={fmtMaybe(t.octaves)} />
-      <Row label="Noise layers" value={fmtMaybe(t.noiseLayers)} />
-      <Row label="Baked height tex" value={t.bakedHeightTex ? 'yes' : 'no'} />
-      <Row label="Last bake" value={t.lastBakeMs != null ? `${t.lastBakeMs.toFixed(1)} ms` : '–'} />
+      <Row label={translateText("Resolution")} value={fmtMaybe(t.resolution)} />
+      <Row label={translateText("Board size")} value={fmtMaybe(t.boardSize)} />
+      <Row label={translateText("Tiles")} value={fmtMaybe(t.tiles)} />
+      <Row label={translateText("Height scale")} value={fmtMaybe(t.heightScale)} />
+      <Row label={translateText("Octaves")} value={fmtMaybe(t.octaves)} />
+      <Row label={translateText("Noise layers")} value={fmtMaybe(t.noiseLayers)} />
+      <Row label={translateText("Baked height tex")} value={t.bakedHeightTex ? 'yes' : 'no'} />
+      <Row label={translateText("Last bake")} value={t.lastBakeMs != null ? `${t.lastBakeMs.toFixed(1)} ms` : '–'} />
     </>
   );
 }

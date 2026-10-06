@@ -1,0 +1,16 @@
+.language-switch {
+  flex-shrink: 0;
+  min-width: 36px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle, #354052);
+  border-radius: 6px;
+  color: var(--text-primary, #edf2fa);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.language-switch:hover { background: var(--bg-hover, #263247); }
+.language-switch:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 3px; }

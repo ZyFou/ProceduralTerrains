@@ -1,3 +1,5 @@
+import { formatRelativeTime } from '../i18n/language.js';
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, CheckCircle2, Clock, Cloud, CloudDownload, CloudUpload, Copy, EllipsisVertical, HardDrive,
@@ -11,16 +13,7 @@ import { buildUnifiedProjectIndex, syncBindingFor } from './projectSync.js';
 
 const visibilityIcons = { private: Lock, unlisted: Eye, public: Globe2 };
 
-function relativeTime(value) {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return 'unknown time';
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 45) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value));
-}
+const relativeTime = formatRelativeTime;
 
 async function copyText(value) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
@@ -57,6 +50,7 @@ export default function ProjectLibrary({
   projectActionBusy,
   onSignIn,
 }) {
+  useLanguage();
   const { user, status: authStatus } = useAuth();
   const { showChoice, showConfirm, showPopup } = usePopup();
   const [cloudProjects, setCloudProjects] = useState([]);
@@ -266,35 +260,35 @@ export default function ProjectLibrary({
   const empty = visibleEntries.length === 0;
 
   return (
-    <section className="project-library" aria-label="Projects">
+    <section className="project-library" aria-label={translateText("Projects")}>
       <div className="project-library-head">
         <div className="lp-search project-library-search">
           <Search size={14} aria-hidden />
-          <input type="search" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects" />
+          <input type="search" placeholder={translateText("Search projects…")} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={translateText("Search projects")} />
         </div>
         <div className="lp-head-actions">
-          <button type="button" className="lp-secondary sm" onClick={() => fileInputRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} /> Import</button>
-          <button type="button" className="lp-primary sm" onClick={onCreate} disabled={!bootReady || exiting}><Plus size={14} /> New terrain</button>
+          <button type="button" className="lp-secondary sm" onClick={() => fileInputRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} />{translateText(" Import")}</button>
+          <button type="button" className="lp-primary sm" onClick={onCreate} disabled={!bootReady || exiting}><Plus size={14} />{translateText(" New terrain")}</button>
         </div>
       </div>
 
       {!user && authStatus !== 'loading' && (
         <div className="project-cloud-note">
           <Cloud size={16} aria-hidden />
-          <span>{authStatus === 'unavailable' ? 'Cloud sync is unavailable right now. Your local projects are safe on this device.' : 'Sign in to sync projects, download cloud copies, and manage sharing visibility.'}</span>
-          {authStatus !== 'unavailable' && <button type="button" onClick={onSignIn}>Sign in</button>}
+          <span>{translateText(authStatus === 'unavailable' ? 'Cloud sync is unavailable right now. Your local projects are safe on this device.' : 'Sign in to sync projects, download cloud copies, and manage sharing visibility.')}</span>
+          {authStatus !== 'unavailable' && <button type="button" onClick={onSignIn}>{translateText("Sign in")}</button>}
         </div>
       )}
-      {user && cloudStatus === 'loading' && <div className="project-cloud-note checking"><RefreshCw size={15} className="spin" aria-hidden /><span>Checking your cloud projects…</span></div>}
-      {user && cloudStatus === 'error' && <div className="project-cloud-note error"><AlertTriangle size={16} aria-hidden /><span>Cloud projects could not be checked. Local projects remain available.</span><button type="button" onClick={refreshCloud}>Try again</button></div>}
+      {user && cloudStatus === 'loading' && <div className="project-cloud-note checking"><RefreshCw size={15} className="spin" aria-hidden /><span>{translateText("Checking your cloud projects…")}</span></div>}
+      {user && cloudStatus === 'error' && <div className="project-cloud-note error"><AlertTriangle size={16} aria-hidden /><span>{translateText("Cloud projects could not be checked. Local projects remain available.")}</span><button type="button" onClick={refreshCloud}>{translateText("Try again")}</button></div>}
 
       {empty ? (
-        query.trim() ? <p className="lp-no-results">No project matches “{query.trim()}”.</p> : (
+        query.trim() ? <p className="lp-no-results">{translateText("No project matches “")}{query.trim()}”.</p> : (
           <div className="lp-empty project-library-empty">
             <FolderOpen size={24} />
-            <strong>No projects yet</strong>
-            <span>Create a terrain, import a project file, or download a project from the cloud.</span>
-            <button type="button" className="lp-primary" onClick={onCreate} disabled={!bootReady || exiting}><Plus size={15} /> Create terrain</button>
+            <strong>{translateText("No projects yet")}</strong>
+            <span>{translateText("Create a terrain, import a project file, or download a project from the cloud.")}</span>
+            <button type="button" className="lp-primary" onClick={onCreate} disabled={!bootReady || exiting}><Plus size={15} />{translateText(" Create terrain")}</button>
           </div>
         )
       ) : (
@@ -314,39 +308,39 @@ export default function ProjectLibrary({
                   <span className="project-library-thumb">
                     {localProject?.metadata.thumbnail ? <img src={localProject.metadata.thumbnail} alt="" /> : localProject ? <LayoutTemplate size={28} /> : <Cloud size={28} />}
                   </span>
-                  {localProject && <span className={`lp-template-kind-badge ${localProject.terrain.workspacePreset === 'real-terrain' ? 'real' : localProject.terrain.editorMode}`}>{localProject.terrain.workspacePreset === 'real-terrain' ? 'Real terrain' : localProject.terrain.editorMode === 'nodes' ? 'Nodes' : localProject.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural'}</span>}
-                  {cloudProject && <span className={`project-library-cloud-badge ${cloudProject.visibility}`} title={`In the cloud · ${cloudProject.visibility}`} aria-label={`In the cloud · ${cloudProject.visibility}`}><Cloud size={12} /><VisibilityIcon size={12} /></span>}
+                  {localProject && <span className={`lp-template-kind-badge ${localProject.terrain.workspacePreset === 'real-terrain' ? 'real' : localProject.terrain.editorMode}`}>{translateText(localProject.terrain.workspacePreset === 'real-terrain' ? 'Real terrain' : localProject.terrain.editorMode === 'nodes' ? 'Nodes' : localProject.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural')}</span>}
+                  {cloudProject && <span className={`project-library-cloud-badge ${cloudProject.visibility}`} title={translateText(`In the cloud · ${cloudProject.visibility}`)} aria-label={translateText(`In the cloud · ${cloudProject.visibility}`)}><Cloud size={12} /><VisibilityIcon size={12} /></span>}
                   <span className="project-library-copy">
                     <strong>{name}</strong>
-                    <small className="project-library-time"><Clock size={11} aria-hidden /> Updated {relativeTime(modified)}</small>
+                    <small className="project-library-time"><Clock size={11} aria-hidden />{translateText(" Updated ")}{translateText(relativeTime(modified))}</small>
                   </span>
                 </button>
                 <div className="project-library-footer">
-                  <span className={`project-library-status icon-only${isConflict ? ' attention' : ''}`} title={statusLabel} aria-label={statusLabel}><span className="project-library-status-icon">{isConflict ? <AlertTriangle size={14} aria-hidden /> : entry.state === 'synced' ? <CheckCircle2 size={14} aria-hidden /> : localProject && !cloudProject ? <HardDrive size={14} aria-hidden /> : <Cloud size={14} aria-hidden />}</span></span>
+                  <span className={`project-library-status icon-only${isConflict ? ' attention' : ''}`} title={translateText(statusLabel)} aria-label={translateText(statusLabel)}><span className="project-library-status-icon">{isConflict ? <AlertTriangle size={14} aria-hidden /> : entry.state === 'synced' ? <CheckCircle2 size={14} aria-hidden /> : localProject && !cloudProject ? <HardDrive size={14} aria-hidden /> : <Cloud size={14} aria-hidden />}</span></span>
                   <div className="project-library-actions">
-                    <button type="button" className="project-library-sync" onClick={() => sync(entry)} disabled={isBusy || !isCloudUsable} aria-label={`${entry.action} ${name}`}>
+                    <button type="button" className="project-library-sync" onClick={() => sync(entry)} disabled={isBusy || !isCloudUsable} aria-label={translateText(`${entry.action} ${name}`)}>
                       {isBusy ? <RefreshCw size={13} className="spin" /> : entry.state === 'cloud-only' || entry.state === 'cloud-changes' ? <CloudDownload size={13} /> : <CloudUpload size={13} />}
-                      {entry.action}
+                      {translateText(entry.action)}
                     </button>
-                    <button type="button" className="project-library-menu-button" aria-label={`Actions for ${name}`} aria-expanded={menuFor === entry.id} onPointerDown={(event) => event.stopPropagation()} onClick={() => setMenuFor((current) => current === entry.id ? null : entry.id)}><EllipsisVertical size={16} /></button>
+                    <button type="button" className="project-library-menu-button" aria-label={translateText(`Actions for ${name}`)} aria-expanded={menuFor === entry.id} onPointerDown={(event) => event.stopPropagation()} onClick={() => setMenuFor((current) => current === entry.id ? null : entry.id)}><EllipsisVertical size={16} /></button>
                   </div>
                 </div>
                 {menuFor === entry.id && (
                   <div className="project-library-menu" role="menu" onPointerDown={(event) => event.stopPropagation()}>
                     {localProject && <>
-                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openEntry(entry); }} disabled={!bootReady || exiting}><FolderOpen size={13} /> Open</button>
-                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onRename(localProject); }} disabled={projectActionBusy}><Pencil size={13} /> Rename</button>
-                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onDuplicate(localProject); }} disabled={projectActionBusy}><Copy size={13} /> Duplicate</button>
+                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openEntry(entry); }} disabled={!bootReady || exiting}><FolderOpen size={13} />{translateText(" Open")}</button>
+                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onRename(localProject); }} disabled={projectActionBusy}><Pencil size={13} />{translateText(" Rename")}</button>
+                      <button type="button" role="menuitem" onClick={() => { setMenuFor(null); onDuplicate(localProject); }} disabled={projectActionBusy}><Copy size={13} />{translateText(" Duplicate")}</button>
                     </>}
                     {cloudProject && <>
-                      <span className="project-library-menu-label">Cloud visibility</span>
-                      <div className="project-library-visibility-actions" role="group" aria-label={`Cloud visibility for ${name}`}>
-                        {Object.entries(visibilityIcons).map(([visibility, Icon]) => <button key={visibility} type="button" className={cloudProject.visibility === visibility ? 'active' : ''} onClick={() => changeVisibility(entry, visibility)} disabled={isBusy} title={visibility}><Icon size={13} /><span>{visibility}</span></button>)}
+                      <span className="project-library-menu-label">{translateText("Cloud visibility")}</span>
+                      <div className="project-library-visibility-actions" role="group" aria-label={translateText(`Cloud visibility for ${name}`)}>
+                        {Object.entries(visibilityIcons).map(([visibility, Icon]) => <button key={visibility} type="button" className={cloudProject.visibility === visibility ? 'active' : ''} onClick={() => changeVisibility(entry, visibility)} disabled={isBusy} title={translateText(visibility)}><Icon size={13} /><span>{translateText(visibility)}</span></button>)}
                       </div>
-                      {cloudProject.visibility !== 'private' && <button type="button" role="menuitem" onClick={() => copyText(cloudProject.shareCode).then(() => showPopup(`Copied ${cloudProject.shareCode}.`, { type: 'success' })).catch((error) => showPopup(error.message, { type: 'error' }))}><Copy size={13} /> Copy sharing code</button>}
-                      <button type="button" role="menuitem" className="danger" onClick={() => removeCloudCopy(entry)} disabled={isBusy}><Cloud size={13} /> Remove cloud copy</button>
+                      {cloudProject.visibility !== 'private' && <button type="button" role="menuitem" onClick={() => copyText(cloudProject.shareCode).then(() => showPopup(`Copied ${cloudProject.shareCode}.`, { type: 'success' })).catch((error) => showPopup(error.message, { type: 'error' }))}><Copy size={13} />{translateText(" Copy sharing code")}</button>}
+                      <button type="button" role="menuitem" className="danger" onClick={() => removeCloudCopy(entry)} disabled={isBusy}><Cloud size={13} />{translateText(" Remove cloud copy")}</button>
                     </>}
-                    {localProject && <button type="button" role="menuitem" className="danger" onClick={() => { setMenuFor(null); onDelete(localProject); }} disabled={projectActionBusy}><Trash2 size={13} /> Delete local project</button>}
+                    {localProject && <button type="button" role="menuitem" className="danger" onClick={() => { setMenuFor(null); onDelete(localProject); }} disabled={projectActionBusy}><Trash2 size={13} />{translateText(" Delete local project")}</button>}
                   </div>
                 )}
               </article>

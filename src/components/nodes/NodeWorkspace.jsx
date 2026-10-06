@@ -1,3 +1,5 @@
+import { matchesTranslatedSearch } from '../../i18n/language.js';
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import SurfaceBranchPreview from '../ui/SurfaceBranchPreview.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -53,6 +55,7 @@ function editingTarget(target) { return target?.matches?.('input, textarea, sele
 const GROUP_TONE_HEX = { slate: '#788392', green: '#58b889', cyan: '#35c8d0', amber: '#d8a34f', violet: '#9b7be8' };
 
 function GraphNodeIcon({ definition, size = 14 }) {
+  useLanguage();
   const category = definition?.category;
   const Icon = category === 'Landforms' ? Mountain
     : category === 'Simulate' ? Waves
@@ -92,6 +95,7 @@ function NodePalette({
   detached = false, side = 'left', style, graphMode, definitions, paletteGroups,
   paletteQuery, onPaletteQuery, resultCount, onAdd, onCollapse, onModeChange, onHeaderPointerDown,
 }) {
+  useLanguage();
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const toggleGroup = (category) => {
     const groupKey = `${graphMode}:${category}`;
@@ -99,21 +103,21 @@ function NodePalette({
   };
 
   return (
-    <aside className={`node-quick-palette${detached ? ` detached detached-${side}` : ''}`} style={style} aria-label={`${graphMode === 'terrain' ? 'Terrain' : 'Noise'} nodes`}>
-      <header className="node-palette-drag-header" onPointerDown={onHeaderPointerDown} title="Drag to attach the node list to the graph or dock it to either side">
-        <span>{graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes'}</span>
-        <small>{definitions.length}</small>
+    <aside className={`node-quick-palette${detached ? ` detached detached-${side}` : ''}`} style={style} aria-label={translateText(`${graphMode === 'terrain' ? 'Terrain' : 'Noise'} nodes`)}>
+      <header className="node-palette-drag-header" onPointerDown={onHeaderPointerDown} title={translateText("Drag to attach the node list to the graph or dock it to either side")}>
+        <span>{translateText(graphMode === 'terrain' ? 'Terrain nodes' : 'Noise nodes')}</span>
+        <small>{translateText(definitions.length)}</small>
         <GripVertical className="node-palette-drag-cue" size={14} aria-hidden />
-        {!detached ? <button type="button" onClick={onCollapse} title="Collapse node list"><ChevronLeft size={14} /></button> : null}
+        {!detached ? <button type="button" onClick={onCollapse} title={translateText("Collapse node list")}><ChevronLeft size={14} /></button> : null}
       </header>
-      <div className="node-mode-switch node-palette-mode-switch" role="tablist" aria-label="Node editor sub-mode">
-        <button type="button" role="tab" aria-selected={graphMode === 'noise'} className={graphMode === 'noise' ? 'active' : ''} onClick={() => onModeChange('noise')}>Noise nodes</button>
-        <button type="button" role="tab" aria-selected={graphMode === 'terrain'} className={graphMode === 'terrain' ? 'active' : ''} onClick={() => onModeChange('terrain')}>Terrain nodes</button>
+      <div className="node-mode-switch node-palette-mode-switch" role="tablist" aria-label={translateText("Node editor sub-mode")}>
+        <button type="button" role="tab" aria-selected={graphMode === 'noise'} className={graphMode === 'noise' ? 'active' : ''} onClick={() => onModeChange('noise')}>{translateText("Noise nodes")}</button>
+        <button type="button" role="tab" aria-selected={graphMode === 'terrain'} className={graphMode === 'terrain' ? 'active' : ''} onClick={() => onModeChange('terrain')}>{translateText("Terrain nodes")}</button>
       </div>
       <label className="node-palette-filter">
         <Search size={12} aria-hidden />
-        <input value={paletteQuery} onChange={(event) => onPaletteQuery(event.target.value)} placeholder="Find a node…" aria-label={`Find ${graphMode} nodes`} />
-        {paletteQuery ? <button type="button" onClick={() => onPaletteQuery('')} title="Clear node filter"><X size={11} /></button> : null}
+        <input value={paletteQuery} onChange={(event) => onPaletteQuery(event.target.value)} placeholder={translateText("Find a node…")} aria-label={translateText(`Find ${graphMode} nodes`)} />
+        {paletteQuery ? <button type="button" onClick={() => onPaletteQuery('')} title={translateText("Clear node filter")}><X size={11} /></button> : null}
       </label>
       <div className="node-palette-scroll">
         {[...paletteGroups].map(([category, items]) => {
@@ -126,26 +130,27 @@ function NodePalette({
                 aria-expanded={!collapsed}
                 onClick={() => toggleGroup(category)}
               >
-                <span className="node-palette-group-title">{category}</span>
-                <span className="node-palette-group-count">{items.length}</span>
+                <span className="node-palette-group-title">{translateText(category)}</span>
+                <span className="node-palette-group-count">{translateText(items.length)}</span>
                 <ChevronDown size={12} aria-hidden />
               </button>
               {!collapsed ? <div className="node-palette-group-body">{items.map((definition) => (
-                <button key={definition.id} type="button" draggable title={`${definition.description} Click to add or drag onto the graph.`} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
-                  <span className={`node-palette-icon tone-${definition.color || 'blue'}`}><GraphNodeIcon definition={definition} size={12} /></span><span>{definition.label}</span><Plus size={12} />
+                <button key={definition.id} type="button" draggable title={translateText(`${definition.description} Click to add or drag onto the graph.`)} onDragStart={(event) => { event.dataTransfer.setData('application/x-terrain-node', definition.id); event.dataTransfer.effectAllowed = 'copy'; }} onClick={() => onAdd(definition.id)}>
+                  <span className={`node-palette-icon tone-${definition.color || 'blue'}`}><GraphNodeIcon definition={definition} size={12} /></span><span>{translateText(definition.label)}</span><Plus size={12} />
                 </button>
               ))}</div> : null}
             </section>
           );
         })}
-        {!resultCount ? <div className="node-palette-empty"><Search size={16} /><span>No nodes match “{paletteQuery}”</span></div> : null}
+        {!resultCount ? <div className="node-palette-empty"><Search size={16} /><span>{translateText("No nodes match “")}{paletteQuery}”</span></div> : null}
       </div>
-      <footer><span>{resultCount} shown</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>all nodes</span></footer>
+      <footer><span>{translateText(resultCount)}{translateText(" shown")}</span><span className="node-palette-footer-spacer" aria-hidden /> <kbd>Shift</kbd><span>+</span><kbd>A</kbd><span>{translateText("all nodes")}</span></footer>
     </aside>
   );
 }
 
 function TerrainNode({ data, selected }) {
+  useLanguage();
   const { node, invalid, compiling } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
   const outputKind = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? 'Color' : 'Height';
@@ -159,37 +164,38 @@ function TerrainNode({ data, selected }) {
       <div className="terrain-flow-node__header">
         <span className="terrain-flow-node__icon"><GraphNodeIcon definition={definition} size={15} /></span>
         <span className="terrain-flow-node__heading">
-          <span className="terrain-flow-node__eyebrow">{definition.category || 'Node'}</span>
-          <span className="terrain-flow-node__title">{node.label}</span>
+          <span className="terrain-flow-node__eyebrow">{translateText(definition.category || 'Node')}</span>
+          <span className="terrain-flow-node__title">{node.label === definition.label ? translateText(definition.label) : node.label}</span>
         </span>
-        {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={`${node.label} is compiling`} title="Compiling shader"><LoaderCircle size={12} aria-hidden /></span> : null}
-        <span className="terrain-flow-node__kind">{definition.permanent ? 'Output' : outputKind}</span>
+        {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={translateText(`${node.label} is compiling`)} title={translateText("Compiling shader")}><LoaderCircle size={12} aria-hidden /></span> : null}
+        <span className="terrain-flow-node__kind">{translateText(definition.permanent ? 'Output' : outputKind)}</span>
       </div>
       <div className="terrain-flow-node__ports">
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
             <div className={`terrain-flow-port input${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} title={`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`} />
-              <span>{port.label}</span>
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={translateText(`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`)} title={translateText(`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`)} />
+              <span>{translateText(port.label)}</span>
             </div>
           ))}
         </div>
         <div className="terrain-flow-node__port-column outputs">
           {definition.outputs.map((port, index) => (
             <div className={`terrain-flow-port output${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
-              <span>{port.label}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} title={`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`} />
+              <span>{translateText(port.label)}</span>
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={translateText(`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`)} title={translateText(`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`)} />
             </div>
           ))}
         </div>
       </div>
-      {definition.preview === 'gradient' ? <div className="terrain-flow-node__gradient" style={{ background: terrainGradientCss(node.params?.preset) }} aria-label={`${node.params?.preset || 'alpine'} terrain gradient`} /> : null}
-      {definition.preview === 'color' && node.params?.rockColor ? <div className="terrain-flow-node__color-chip"><span style={{ background: node.params.rockColor }} /><small>Rock tint</small></div> : null}
+      {definition.preview === 'gradient' ? <div className="terrain-flow-node__gradient" style={{ background: terrainGradientCss(node.params?.preset) }} aria-label={translateText(`${node.params?.preset || 'alpine'} terrain gradient`)} /> : null}
+      {definition.preview === 'color' && node.params?.rockColor ? <div className="terrain-flow-node__color-chip"><span style={{ background: node.params.rockColor }} /><small>{translateText("Rock tint")}</small></div> : null}
     </div>
   );
 }
 
 function TerrainGroup({ data, selected }) {
+  useLanguage();
   const { group } = data;
   const customColor = /^#[0-9a-f]{6}$/i.test(group.color || '');
   return (
@@ -211,11 +217,11 @@ function TerrainGroup({ data, selected }) {
         <span className="terrain-flow-group__icon"><Layers3 size={13} aria-hidden /></span>
         <span className="terrain-flow-group__heading">
           <strong>{group.label}</strong>
-          <small>{group.nodeIds.length} {group.nodeIds.length === 1 ? 'stage' : 'stages'}</small>
+          <small>{translateText(group.nodeIds.length)} {translateText(group.nodeIds.length === 1 ? 'stage' : 'stages')}</small>
         </span>
         <button type="button" className="nodrag" onClick={(event) => { event.stopPropagation(); data.onToggle(group.id); }}>
           <ChevronDown size={13} className={group.collapsed ? 'collapsed' : ''} aria-hidden />
-          <span>{group.collapsed ? 'Expand' : 'Collapse'}</span>
+          <span>{translateText(group.collapsed ? 'Expand' : 'Collapse')}</span>
         </button>
       </div>
     </div>
@@ -225,16 +231,17 @@ function TerrainGroup({ data, selected }) {
 const nodeTypes = { terrainNode: TerrainNode, terrainGroup: TerrainGroup };
 
 function InspectorField({ field, value, onChange }) {
-  const help = field.help ? <small className="node-inspector-field-help">{field.help}</small> : null;
-  if (field.type === 'text') return <label className="node-inspector-field"><span>{field.label}</span><input value={value||''} onChange={e=>onChange(e.target.value,!!field.structural)}/></label>;
+  useLanguage();
+  const help = field.help ? <small className="node-inspector-field-help">{translateText(field.help)}</small> : null;
+  if (field.type === 'text') return <label className="node-inspector-field"><span>{translateText(field.label)}</span><input value={value||''} onChange={e=>onChange(e.target.value,!!field.structural)}/></label>;
   if (field.type === 'boolean') {
     return (
       <div className="node-inspector-field-wrap">
         <label className="node-inspector-toggle">
-          <span>{field.label}</span>
+          <span>{translateText(field.label)}</span>
           <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked, !!field.structural)} />
         </label>
-        {help}
+        {translateText(help)}
       </div>
     );
   }
@@ -242,8 +249,8 @@ function InspectorField({ field, value, onChange }) {
     if (field.control === 'segmented') {
       return (
         <div className="node-inspector-field node-inspector-segmented-field">
-          <span>{field.label}</span>
-          <div className="node-inspector-segmented" role="radiogroup" aria-label={field.label}>
+          <span>{translateText(field.label)}</span>
+          <div className="node-inspector-segmented" role="radiogroup" aria-label={translateText(field.label)}>
             {(field.options || []).map((option) => (
               <button
                 key={option.value}
@@ -253,57 +260,57 @@ function InspectorField({ field, value, onChange }) {
                 className={String(option.value) === String(value) ? 'active' : ''}
                 onClick={() => onChange(option.value, true)}
               >
-                {option.label}
+                {translateText(option.label)}
               </button>
             ))}
           </div>
-          {help}
+          {translateText(help)}
         </div>
       );
     }
     return (
       <label className="node-inspector-field">
-        <span>{field.label}</span>
+        <span>{translateText(field.label)}</span>
         <select value={value} onChange={(event) => {
           const option = (field.options || []).find((item) => String(item.value) === event.target.value);
           onChange(option?.value ?? event.target.value, true);
         }}>
-          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{translateText(option.label)}</option>)}
         </select>
-        {help}
+        {translateText(help)}
       </label>
     );
   }
   if (field.type === 'color') {
     return (
       <label className="node-inspector-field node-inspector-color-field">
-        <span><span>{field.label}</span><output>{String(value || field.default).toUpperCase()}</output></span>
+        <span><span>{translateText(field.label)}</span><output>{translateText(String(value || field.default).toUpperCase())}</output></span>
         <span className="node-inspector-color-row">
           <span className="node-inspector-color-swatch" style={{ background: value || field.default }} />
           <input type="color" value={value || field.default} onChange={(event) => onChange(event.target.value, false)} />
         </span>
-        {help}
+        {translateText(help)}
       </label>
     );
   }
   const numeric = Number.isFinite(Number(value)) ? Number(value) : field.default;
   return (
     <div className="node-inspector-field">
-      <span><span>{field.label}</span><output>{Number(numeric).toFixed(field.digits ?? (field.step >= 1 ? 0 : 2))}{field.unit ? ` ${field.unit}` : ''}</output></span>
+      <span><span>{translateText(field.label)}</span><output>{translateText(Number(numeric).toFixed(field.digits ?? (field.step >= 1 ? 0 : 2)))}{translateText(field.unit ? ` ${field.unit}` : '')}</output></span>
       <div className="node-inspector-number-row">
         <input
           type="range" min={field.min} max={field.max} step={field.step} value={numeric}
           onChange={(event) => onChange(Number(event.target.value), !!field.structural)}
           onDoubleClick={() => onChange(field.default, !!field.structural)}
-          aria-label={field.label}
-          title="Double-click to reset"
+          aria-label={translateText(field.label)}
+          title={translateText("Double-click to reset")}
         />
         <input type="number" min={field.min} max={field.max} step={field.step} value={numeric} onChange={(event) => onChange(Number(event.target.value), !!field.structural)} />
         {field.control === 'seed' || field.key === 'seed' ? (
-          <button type="button" className="node-inspector-randomize" onClick={() => onChange(Math.floor(Math.random() * 1000000), true)} title="Generate another deterministic seed"><Sparkles size={13} /><span>New seed</span></button>
+          <button type="button" className="node-inspector-randomize" onClick={() => onChange(Math.floor(Math.random() * 1000000), true)} title={translateText("Generate another deterministic seed")}><Sparkles size={13} /><span>{translateText("New seed")}</span></button>
         ) : null}
       </div>
-      {help}
+      {translateText(help)}
     </div>
   );
 }
@@ -312,6 +319,7 @@ function NodeInspector({
   node, group, graphState, graph, onRename, onParam, onDelete, onReset, onInsertAfter,
   onGroupPatch, onUngroup, onHeaderPointerDown,
 }) {
+  useLanguage();
   const [propertyQuery, setPropertyQuery] = useState('');
   const [openSections, setOpenSections] = useState({});
   const definition = node ? (getGraphNodeDefinition(node.type) || {
@@ -327,52 +335,52 @@ function NodeInspector({
   const normalizedPropertyQuery = propertyQuery.trim().toLowerCase();
   const visibleSections = inspectorSections.map((section) => ({
     ...section,
-    fields: section.fields.filter((field) => !normalizedPropertyQuery || `${field.label} ${field.key} ${field.section || ''} ${field.keywords || ''} ${field.help || ''}`.toLowerCase().includes(normalizedPropertyQuery)),
+    fields: section.fields.filter((field) => !normalizedPropertyQuery || matchesTranslatedSearch(normalizedPropertyQuery, field.label, field.key, field.section, field.keywords, field.help)),
   })).filter((section) => section.fields.length);
   const resultCount = visibleSections.reduce((sum, section) => sum + section.fields.length, 0);
   const suggestion = node ? NEXT_NODE_SUGGESTIONS[node.type] : null;
   const suggestedDefinition = suggestion ? getGraphNodeDefinition(suggestion.type) : null;
   const title = group ? 'Group' : definition?.label || 'Nothing selected';
   return (
-    <aside className="node-inspector" aria-label="Selected node properties">
+    <aside className="node-inspector" aria-label={translateText("Selected node properties")}>
       <header className="node-dock-header node-inspector__header node-dock-header--draggable" onPointerDown={onHeaderPointerDown}>
         <div className="node-dock-heading">
-          <span className="node-dock-kicker">Properties</span>
-          <strong>{title}</strong>
+          <span className="node-dock-kicker">{translateText("Properties")}</span>
+          <strong>{translateText(title)}</strong>
         </div>
         <GripVertical className="node-dock-drag-cue" size={15} aria-hidden />
-        {node && definition ? <button type="button" className="node-inspector-reset" onClick={onReset} title="Reset this node to its defaults"><RotateCcw size={14} /><span>Reset</span></button> : null}
+        {node && definition ? <button type="button" className="node-inspector-reset" onClick={onReset} title={translateText("Reset this node to its defaults")}><RotateCcw size={14} /><span>{translateText("Reset")}</span></button> : null}
       </header>
       {group ? (
         <div className="node-inspector__body">
           <label className="node-inspector-field node-name-field">
-            <span>Name</span>
+            <span>{translateText("Name")}</span>
             <input value={group.label} onChange={(event) => onGroupPatch({ label: event.target.value })} />
           </label>
-          <p className="node-inspector-description">A visual frame for moving, collapsing, and organizing related terrain operations.</p>
+          <p className="node-inspector-description">{translateText("A visual frame for moving, collapsing, and organizing related terrain operations.")}</p>
           <div className="node-inspector-section">
-            <h4>Organization</h4>
+            <h4>{translateText("Organization")}</h4>
             <label className="node-inspector-field">
-              <span>Frame color</span>
+              <span>{translateText("Frame color")}</span>
               <select value={group.color || 'slate'} onChange={(event) => onGroupPatch({ color: event.target.value })}>
-                <option value="slate">Slate</option><option value="green">Green</option><option value="cyan">Cyan</option><option value="amber">Amber</option><option value="violet">Violet</option>
-                {/^(#[0-9a-f]{6})$/i.test(group.color || '') ? <option value={group.color}>Custom</option> : null}
+                <option value="slate">{translateText("Slate")}</option><option value="green">{translateText("Green")}</option><option value="cyan">{translateText("Cyan")}</option><option value="amber">{translateText("Amber")}</option><option value="violet">{translateText("Violet")}</option>
+                {/^(#[0-9a-f]{6})$/i.test(group.color || '') ? <option value={group.color}>{translateText("Custom")}</option> : null}
               </select>
             </label>
             <label className="node-inspector-field node-group-color-field">
-              <span>Custom color</span>
+              <span>{translateText("Custom color")}</span>
               <span className="node-inspector-color-row">
                 <span className="node-inspector-color-swatch" style={{ background: GROUP_TONE_HEX[group.color] || group.color }} />
                 <input type="color" value={GROUP_TONE_HEX[group.color] || group.color || GROUP_TONE_HEX.slate} onChange={(event) => onGroupPatch({ color: event.target.value })} />
               </span>
             </label>
             <label className="node-inspector-toggle">
-              <span>Collapsed</span>
+              <span>{translateText("Collapsed")}</span>
               <input type="checkbox" checked={group.collapsed === true} onChange={(event) => onGroupPatch({ collapsed: event.target.checked })} />
             </label>
-            <div className="node-group-summary"><strong>{group.nodeIds.length}</strong><span>nodes in this group</span></div>
+            <div className="node-group-summary"><strong>{translateText(group.nodeIds.length)}</strong><span>{translateText("nodes in this group")}</span></div>
           </div>
-          <button type="button" className="node-danger-button node-ungroup-button" onClick={onUngroup}><Ungroup size={14} /> Remove group frame</button>
+          <button type="button" className="node-danger-button node-ungroup-button" onClick={onUngroup}><Ungroup size={14} />{translateText(" Remove group frame")}</button>
         </div>
       ) : node && definition ? (
         <>
@@ -381,32 +389,32 @@ function NodeInspector({
             <input
               type="search" value={propertyQuery}
               onChange={(event) => setPropertyQuery(event.target.value)}
-              placeholder="Search settings…" aria-label={`Search ${title} settings`}
+              placeholder={translateText("Search settings…")} aria-label={translateText(`Search ${title} settings`)}
             />
-            {propertyQuery ? <button type="button" onClick={() => setPropertyQuery('')} title="Clear settings search"><X size={14} /></button> : null}
+            {propertyQuery ? <button type="button" onClick={() => setPropertyQuery('')} title={translateText("Clear settings search")}><X size={14} /></button> : null}
           </div>
           <div className="node-inspector__body">
             <label className="node-inspector-field node-name-field">
-              <span>Name</span>
+              <span>{translateText("Name")}</span>
               <input value={node.label} onChange={(event) => onRename(event.target.value)} />
             </label>
-            <p className="node-inspector-description">{definition.description}</p>
+            <p className="node-inspector-description">{translateText(definition.description)}</p>
             {suggestedDefinition ? (
               <div className="node-inspector-recommendation">
-                <span><Sparkles size={13} /> Recommended next</span>
-                <strong>{suggestedDefinition.label}</strong>
-                <p>{suggestion.reason}</p>
-                <button type="button" onClick={() => onInsertAfter(suggestion.type)}><Plus size={13} /> Add and connect</button>
+                <span><Sparkles size={13} />{translateText(" Recommended next")}</span>
+                <strong>{translateText(suggestedDefinition.label)}</strong>
+                <p>{translateText(suggestion.reason)}</p>
+                <button type="button" onClick={() => onInsertAfter(suggestion.type)}><Plus size={13} />{translateText(" Add and connect")}</button>
               </div>
             ) : null}
             {node.type === 'currentTerrain' ? (
               <div className="node-inspector-snapshot">
-                <span>Compatibility snapshot</span>
-                <strong>{node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0} active layers</strong>
-                <small>Its Noise Stack is frozen so first entry preserves the current terrain.</small>
+                <span>{translateText("Compatibility snapshot")}</span>
+                <strong>{translateText(node.params?.stack?.layers?.filter((layer) => layer.enabled).length || 0)}{translateText(" active layers")}</strong>
+                <small>{translateText("Its Noise Stack is frozen so first entry preserves the current terrain.")}</small>
               </div>
             ) : null}
-            {normalizedPropertyQuery ? <div className="node-inspector-search-count">{resultCount} {resultCount === 1 ? 'setting' : 'settings'} found</div> : null}
+            {normalizedPropertyQuery ? <div className="node-inspector-search-count">{translateText(resultCount)} {translateText(resultCount === 1 ? 'setting' : 'settings')}{translateText(" found")}</div> : null}
             {visibleSections.map((section, index) => {
               const sectionKey = `${node.type}:${section.label}`;
               const defaultOpen = section.label === 'Essentials' || index === 0 || section.fields.some((field) => field.defaultOpen);
@@ -417,7 +425,7 @@ function NodeInspector({
                     type="button" className="node-inspector-section-toggle" aria-expanded={expanded}
                     onClick={() => setOpenSections((current) => ({ ...current, [sectionKey]: !expanded }))}
                   >
-                    <span>{section.label}</span><small>{section.fields.length}</small><ChevronDown size={15} aria-hidden />
+                    <span>{translateText(section.label)}</span><small>{translateText(section.fields.length)}</small><ChevronDown size={15} aria-hidden />
                   </button>
                   {expanded ? <div className="node-inspector-section-body">{section.fields.map((field) => (
                     <InspectorField key={field.key} field={field} value={node.params?.[field.key] ?? field.default} onChange={(value, structural) => onParam(field.key, value, structural)} />
@@ -426,24 +434,24 @@ function NodeInspector({
               );
             })}
             {!visibleSections.length && normalizedPropertyQuery ? (
-              <div className="node-inspector-no-results"><Search size={20} /><strong>No matching settings</strong><span>Try a parameter name such as “seed”, “talus”, or “scale”.</span></div>
+              <div className="node-inspector-no-results"><Search size={20} /><strong>{translateText("No matching settings")}</strong><span>{translateText("Try a parameter name such as “seed”, “talus”, or “scale”.")}</span></div>
             ) : null}
             {node.type==='surfacePreview' && <SurfaceBranchPreview graph={graph} nodeId={node.id} />}
             {!definition.permanent ? (
-              <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} /> Delete node</button>
+              <button type="button" className="node-danger-button" onClick={onDelete}><Trash2 size={14} />{translateText(" Delete node")}</button>
             ) : null}
           </div>
         </>
       ) : (
         <div className="node-inspector-empty">
           <Boxes size={26} />
-          <strong>Select a node or group</strong>
-          <span>Its settings will appear here.</span>
+          <strong>{translateText("Select a node or group")}</strong>
+          <span>{translateText("Its settings will appear here.")}</span>
         </div>
       )}
       <footer className={`node-graph-health${graphState?.valid === false ? ' invalid' : ''}`}>
         {graphState?.valid === false ? <CircleAlert size={13} /> : <CheckCircle2 size={13} />}
-        <span>{graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 height · ${graphState?.colorSlotCount || 0} / 8 color`}</span>
+        <span>{translateText(graphState?.valid === false ? graphState.diagnostics?.[0]?.message : `${graphState?.slotCount || 0} / 12 height · ${graphState?.colorSlotCount || 0} / 8 color`)}</span>
       </footer>
     </aside>
   );
@@ -458,6 +466,7 @@ export default function NodeWorkspace({
   onRequestInspector, preview = null, onPreviewVisibilityChange,
   toolsRailVisible = false, toolsRailEdge = 'left', onPaletteDockChange,
 }) {
+  const { language } = useLanguage();
   const [localGraph, setLocalGraph] = useState(graph);
   const graphRef = useRef(graph);
   const [selectedNodes, setSelectedNodes] = useState(new Set());
@@ -516,14 +525,14 @@ export default function NodeWorkspace({
     const query = paletteQuery.trim().toLowerCase();
     if (!query) return grouped;
     return new Map([...grouped].map(([category, items]) => [category, items.filter((definition) => (
-      `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query)
+      matchesTranslatedSearch(query, definition.label, definition.category, definition.description)
     ))]).filter(([, items]) => items.length));
-  }, [grouped, paletteQuery]);
+  }, [grouped, paletteQuery, language]);
   const paletteResultCount = useMemo(() => [...paletteGroups.values()].reduce((total, items) => total + items.length, 0), [paletteGroups]);
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return definitions.filter((definition) => !query || `${definition.label} ${definition.category} ${definition.description}`.toLowerCase().includes(query));
-  }, [definitions, searchQuery]);
+    return definitions.filter((definition) => !query || matchesTranslatedSearch(query, definition.label, definition.category, definition.description));
+  }, [definitions, searchQuery, language]);
 
   const invalidNodes = useMemo(() => new Set((graphState?.diagnostics || []).map((diagnostic) => diagnostic.nodeId).filter(Boolean)), [graphState]);
   const compilingNodes = useMemo(() => new Set(graphState?.compilingNodeIds || []), [graphState?.compilingNodeIds]);
@@ -849,35 +858,35 @@ export default function NodeWorkspace({
   );
 
   return (
-    <section ref={rootRef} className={`nodes-workspace graph-edge-${layout.graphEdge} inspector-${layout.inspectorSide}${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Terrain Nodes workspace">
+    <section ref={rootRef} className={`nodes-workspace graph-edge-${layout.graphEdge} inspector-${layout.inspectorSide}${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label={translateText("Terrain Nodes workspace")}>
       {draggingDock ? (
         <div className={`panel-snap-layer node-panel-snap-layer${draggingDock === 'inspector' ? ' panel-snap-layer--drawer' : ''}`} aria-hidden>
           {(draggingDock === 'graph' ? GRAPH_EDGES : ['left', 'right']).map((edge) => <div key={edge} className={`panel-snap-zone panel-snap-zone--${edge}${snapHint === edge ? ' active' : ''}`} />)}
           {draggingDock === 'palette' ? <div className={`panel-snap-zone node-palette-snap-zone--attached${snapHint === 'attached' ? ' active' : ''}`} style={dockStyle} /> : null}
         </div>
       ) : null}
-      {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: sideOffset(layout.inspectorSide) + 14 }}>{preview}</div> : null}
-      {layout.paletteDetached ? React.cloneElement(palette, { style: paletteStyle }) : null}
+      {layout.previewVisible ? <div className={`nodes-map-preview inspector-${layout.inspectorSide}`} style={{ [layout.inspectorSide]: sideOffset(layout.inspectorSide) + 14 }}>{translateText(preview)}</div> : null}
+      {translateText(layout.paletteDetached ? React.cloneElement(palette, { style: paletteStyle }) : null)}
       <div ref={graphDockRef} className="node-graph-dock" style={dockStyle} onPointerMove={(event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={(event) => {
         event.preventDefault(); const type = event.dataTransfer.getData('application/x-terrain-node'); if (!type || !instance) return;
         addNodeAt(type, instance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
       }}>
         <div className="node-graph-resizer" onPointerDown={beginGraphResize}><GripVertical size={14} /></div>
         <header className="node-dock-header node-graph-toolbar node-dock-header--draggable" onPointerDown={(event) => beginDockDrag('graph', event)}>
-          <div className="node-dock-heading"><span className="node-dock-kicker">Nodes</span><strong>{graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise'}</strong></div>
+          <div className="node-dock-heading"><span className="node-dock-kicker">{translateText("Nodes")}</span><strong>{translateText(graphMode === 'terrain' ? 'Terrain Graph' : 'Procedural Noise')}</strong></div>
           <div className={`node-graph-summary${graphState?.valid === false ? ' invalid' : ''}`}>
-            <span className="node-graph-summary__status"><span aria-hidden />{graphState?.valid === false ? 'Needs attention' : 'Live graph'}</span>
-            <span>{flowNodes.filter((node) => node.type === 'terrainNode').length} nodes</span>
-            <span>{flowEdges.length} links</span>
+            <span className="node-graph-summary__status"><span aria-hidden />{translateText(graphState?.valid === false ? 'Needs attention' : 'Live graph')}</span>
+            <span>{translateText(flowNodes.filter((node) => node.type === 'terrainNode').length)}{translateText(" nodes")}</span>
+            <span>{translateText(flowEdges.length)}{translateText(" links")}</span>
           </div>
           <div className="node-toolbar-actions">
             {graphMode === 'terrain' && onApplyTemplate ? (
-              <label className="node-template-picker" title="Replace the graph with an authored terrain recipe">
+              <label className="node-template-picker" title={translateText("Replace the graph with an authored terrain recipe")}>
                 <Sparkles size={13} aria-hidden />
-                <select value={applyingTemplateId} onChange={applyTemplate} disabled={!!applyingTemplateId} aria-label="Load terrain node recipe">
-                  <option value="">Recipes</option>
+                <select value={applyingTemplateId} onChange={applyTemplate} disabled={!!applyingTemplateId} aria-label={translateText("Load terrain node recipe")}>
+                  <option value="">{translateText("Recipes")}</option>
                   {NODE_PROJECT_TEMPLATES.filter((template) => template.id !== 'nodes-blank').map((template) => (
-                    <option key={template.id} value={template.id}>{template.name}</option>
+                    <option key={template.id} value={template.id}>{translateText(template.name)}</option>
                   ))}
                 </select>
                 <ChevronDown size={11} aria-hidden />
@@ -890,32 +899,32 @@ export default function NodeWorkspace({
                   className="node-color-toggle"
                   aria-pressed={colorConfiguration.enabled}
                   onClick={toggleGraphColors}
-                  title={colorConfiguration.enabled ? 'Disable node colors and use the project palette' : 'Apply node colors to this terrain'}
+                  title={translateText(colorConfiguration.enabled ? 'Disable node colors and use the project palette' : 'Apply node colors to this terrain')}
                 >
                   <Palette size={13} aria-hidden />
-                  <span>Colors</span>
+                  <span>{translateText("Colors")}</span>
                   {colorConfiguration.enabled ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}
                 </button>
-                <label className="node-color-preset" title="Apply a terrain color preset and enable node colors">
+                <label className="node-color-preset" title={translateText("Apply a terrain color preset and enable node colors")}>
                   <span className="node-color-preset-swatch" style={{ background: terrainGradientCss(colorConfiguration.preset) }} aria-hidden />
-                  <select value={colorConfiguration.preset} onChange={applyColorPreset} aria-label="Node terrain color preset">
-                    {TERRAIN_GRADIENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  <select value={colorConfiguration.preset} onChange={applyColorPreset} aria-label={translateText("Node terrain color preset")}>
+                    {TERRAIN_GRADIENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{translateText(option.label)}</option>)}
                   </select>
                   <ChevronDown size={11} aria-hidden />
                 </label>
               </div>
             ) : null}
-            <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} /> Add</button>
-            <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title="Group selected nodes (G)"><FolderPlus size={13} /> Group</button>
-            <button type="button" className="node-icon-button" onClick={() => ungroupSelection()} disabled={!selectedGroups.size} title="Remove selected group frame (Shift+G)"><Ungroup size={13} /></button>
-            <button type="button" className="node-icon-button" onClick={() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 280 })} title="Fit graph"><Maximize2 size={14} /></button>
-            <button type="button" className={`node-icon-button${layout.previewVisible ? ' active' : ''}`} onClick={() => updateLayout({ previewVisible: !layout.previewVisible })} title="Toggle 2D preview">{layout.previewVisible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-            <button type="button" className="node-toolbar-button subtle" onClick={() => onStartBlank?.(graphMode)}>Clear graph</button>
+            <button type="button" className="node-toolbar-button" onClick={openSearch}><Plus size={14} />{translateText(" Add")}</button>
+            <button type="button" className="node-toolbar-button" onClick={createGroupFromSelection} disabled={!selectedNodes.size} title={translateText("Group selected nodes (G)")}><FolderPlus size={13} />{translateText(" Group")}</button>
+            <button type="button" className="node-icon-button" onClick={() => ungroupSelection()} disabled={!selectedGroups.size} title={translateText("Remove selected group frame (Shift+G)")}><Ungroup size={13} /></button>
+            <button type="button" className="node-icon-button" onClick={() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 280 })} title={translateText("Fit graph")}><Maximize2 size={14} /></button>
+            <button type="button" className={`node-icon-button${layout.previewVisible ? ' active' : ''}`} onClick={() => updateLayout({ previewVisible: !layout.previewVisible })} title={translateText("Toggle 2D preview")}>{layout.previewVisible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
+            <button type="button" className="node-toolbar-button subtle" onClick={() => onStartBlank?.(graphMode)}>{translateText("Clear graph")}</button>
           </div>
         </header>
 
-        {!layout.paletteDetached && !layout.paletteCollapsed ? palette : null}
-        {!layout.paletteDetached && layout.paletteCollapsed ? <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title="Show quick nodes"><ChevronRight size={15} /></button> : null}
+        {translateText(!layout.paletteDetached && !layout.paletteCollapsed ? palette : null)}
+        {!layout.paletteDetached && layout.paletteCollapsed ? <button type="button" className="node-palette-expand" onClick={() => updateLayout({ paletteCollapsed: false })} title={translateText("Show quick nodes")}><ChevronRight size={15} /></button> : null}
 
         <div className="node-flow-frame" data-edge-count={flowEdges.length}>
         <ReactFlow
@@ -996,7 +1005,7 @@ export default function NodeWorkspace({
 
         {searchState ? (
           <div className="node-search-popover" style={{ left: searchState.left, top: searchState.top }}>
-            <div className="node-search-input"><Search size={15} /><input value={searchQuery} placeholder="Search terrain nodes…" onChange={(event) => { setSearchQuery(event.target.value); setSearchIndex(0); }} onKeyDown={(event) => {
+            <div className="node-search-input"><Search size={15} /><input value={searchQuery} placeholder={translateText("Search terrain nodes…")} onChange={(event) => { setSearchQuery(event.target.value); setSearchIndex(0); }} onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); setSearchIndex((index) => Math.min(searchResults.length - 1, index + 1)); }
               else if (event.key === 'ArrowUp') { event.preventDefault(); setSearchIndex((index) => Math.max(0, index - 1)); }
               else if (event.key === 'Enter' && searchResults[searchIndex]) { event.preventDefault(); addNodeAt(searchResults[searchIndex].id, searchState.flowPosition); }
@@ -1006,7 +1015,7 @@ export default function NodeWorkspace({
               {searchResults.map((definition, index) => (
                 <button key={definition.id} type="button" className={searchIndex === index ? 'active' : ''} onMouseEnter={() => setSearchIndex(index)} onClick={() => addNodeAt(definition.id, searchState.flowPosition)}>
                   <span className={`node-search-icon tone-${definition.color || 'blue'}`}><Boxes size={13} /></span>
-                  <span><strong>{definition.label}</strong><small>{definition.category}</small></span><span>{definition.description}</span>
+                  <span><strong>{translateText(definition.label)}</strong><small>{translateText(definition.category)}</small></span><span>{translateText(definition.description)}</span>
                 </button>
               ))}
             </div>
