@@ -3533,5 +3533,7 @@
   "×). This shortcut sets a scale at or below native; the main Render Scale control retains the full range.": "×). Ce raccourci limite l’échelle à la résolution native ; le contrôle principal conserve la plage complète.",
   "— Custom Stack —": "— Pile personnalisée —",
   "— High requires the Realistic renderer, falling back to Lite.": "— Élevé nécessite le moteur Réaliste ; utilisation de Léger.",
-  "● Unsaved": "● Non enregistré"
+  "● Unsaved": "● Non enregistré",
+  "Open menu": "Ouvrir le menu",
+  "Close menu": "Fermer le menu"
 }

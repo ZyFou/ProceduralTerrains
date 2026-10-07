@@ -2,7 +2,7 @@ import { matchesTranslatedSearch } from '../i18n/language.js';
 import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import SurfacePackCredits from '../components/ui/SurfacePackCredits.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Menu, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaDiscord, FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
@@ -114,6 +114,9 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   const [syncBindings, setSyncBindings] = useState([]);
   const [cloudRefreshToken, setCloudRefreshToken] = useState(0);
   const [view, setView] = useState(() => viewFromHash() ?? 'home');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const navRef = useRef(null);
+  const menuToggleRef = useRef(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [templateKind, setTemplateKind] = useState('procedural');
   const [nodeColorsEnabled, setNodeColorsEnabled] = useState(false);
@@ -210,6 +213,43 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   }, [menuFor]);
 
   useEffect(() => { setQuery(''); }, [view]);
+  useEffect(() => { setMobileMenuOpen(false); }, [view]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    const closeOutside = (event) => {
+      if (!navRef.current?.contains(event.target)) setMobileMenuOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Tab') {
+        const controls = [...navRef.current.querySelectorAll('button:not(:disabled), a[href]')]
+          .filter((element) => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      setMobileMenuOpen(false);
+      menuToggleRef.current?.focus();
+    };
+    const desktop = window.matchMedia('(min-width: 921px)');
+    const closeOnDesktop = () => { if (desktop.matches) setMobileMenuOpen(false); };
+    window.addEventListener('pointerdown', closeOutside);
+    window.addEventListener('keydown', closeOnEscape);
+    desktop.addEventListener('change', closeOnDesktop);
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside);
+      window.removeEventListener('keydown', closeOnEscape);
+      desktop.removeEventListener('change', closeOnDesktop);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     const syncAuthView = () => {
@@ -230,6 +270,7 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   const template = templateKind === 'nodes' ? getNodeProjectTemplate(selectedTemplateId) : getProjectTemplate(selectedTemplateId);
   const dispatch = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
   const showView = (nextView) => {
+    setMobileMenuOpen(false);
     if (HASH_VIEWS.has(nextView)) {
       const nextHash = `#/${nextView}`;
       if (window.location.hash !== nextHash) window.location.hash = `/${nextView}`;
@@ -433,17 +474,28 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
         </div>
       )}
 
-      <header className="lp-nav">
+      <header className="lp-nav" ref={navRef}>
         <button type="button" className="lp-brand" onClick={goHome} title={translateText("Return to home")}><Logo size={24} /><strong>{translateText(APP_NAME)}</strong></button>
+        <button type="button" ref={menuToggleRef} className="lp-secondary sm lp-menu-toggle" aria-label={translateText(mobileMenuOpen ? 'Close menu' : 'Open menu')} aria-expanded={mobileMenuOpen} aria-controls="lp-navigation" onClick={() => setMobileMenuOpen((open) => !open)}>
+          {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
+        </button>
+        <div id="lp-navigation" className={`lp-nav-menu${mobileMenuOpen ? ' is-open' : ''}`} onClick={(event) => {
+          if (event.target.closest('button, a')) {
+            setMobileMenuOpen(false);
+            if (mobileMenuOpen) menuToggleRef.current?.focus();
+          }
+        }} onBlur={(event) => {
+          if (event.relatedTarget && !navRef.current?.contains(event.relatedTarget)) setMobileMenuOpen(false);
+        }}>
         <nav className="lp-nav-links" aria-label={translateText("Main navigation")}>
           <button type="button" className={view === 'projects' ? 'active' : ''} onClick={() => showView('projects')}>{translateText("Projects")}</button>
           <button type="button" className={view === 'templates' ? 'active' : ''} onClick={() => openTemplates()}>{translateText("Templates")}</button>
           <button type="button" className={view === 'community' ? 'active' : ''} onClick={() => showView('community')}>{translateText("Community")}</button>
           <button type="button" className={PLUGIN_VIEWS.has(view) ? 'active' : ''} onClick={() => showView('plugins')}>{translateText("Plugins")}</button>
           <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">{translateText("Docs")}</a>
+          <a href="https://procedural-planets.com" target="_blank" rel="noopener noreferrer">Procedural Planets</a>
         </nav>
         <div className="lp-nav-actions">
-          <LanguageSwitch />
           <button type="button" className="lp-nav-credits" onClick={() => setCreditsOpen(true)} aria-label={translateText("Open credits and links")} title={translateText("Credits and links")}><CircleHelp size={17} /></button>
           {user ? <>
             {user.role === 'admin' && <button type="button" className={`lp-admin-chip${view === 'admin' ? ' active' : ''}`} title={translateText("Open administration")} onClick={() => showView('admin')}><ShieldCheck size={14} /><span>{translateText("Admin")}</span></button>}
@@ -456,12 +508,14 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
             <button type="button" className="lp-secondary sm lp-auth-login" onClick={() => showView('login')} disabled={authStatus === 'loading'}><LogIn size={13} /> <span>{translateText("Sign in")}</span></button>
             <button type="button" className="lp-primary sm lp-auth-register" onClick={() => showView('register')} disabled={authStatus === 'loading'}><UserPlus size={13} /> <span>{translateText("Create account")}</span></button>
           </>}
+          <LanguageSwitch className="lp-secondary sm lp-language-switch" />
 
           {/* <button type="button" className="lp-secondary sm" onClick={openApp} disabled={!bootReady || exiting}><SquareArrowOutUpRight size={14} /> Open App</button> */}
         </div>
+        </div>
       </header>
 
-      <div className="lp-scroll">
+      <div className="lp-scroll" inert={mobileMenuOpen ? '' : undefined}>
         <main className="lp-content">
           <div key={view} className="lp-content-scroll">
           {AUTH_VIEWS.has(view) && (
