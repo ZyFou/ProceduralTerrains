@@ -1,3 +1,5 @@
+import { matchesTranslatedSearch } from '../../i18n/language.js';
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ImageUp, Mountain, Palette, Waves, Globe, Download, Crosshair, Map, MapPinned } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
@@ -31,6 +33,7 @@ const MAP_META = {
 };
 
 function FilePicker({ fileName, onPick }) {
+  useLanguage();
   const inputRef = useRef(null);
   const label = fileName ? 'Replace file' : 'Choose file';
 
@@ -42,7 +45,7 @@ function FilePicker({ fileName, onPick }) {
         onClick={() => inputRef.current?.click()}
       >
         <ImageUp size={15} strokeWidth={1.75} aria-hidden />
-        <span>{label}</span>
+        <span>{translateText(label)}</span>
       </button>
       <input
         ref={inputRef}
@@ -55,28 +58,30 @@ function FilePicker({ fileName, onPick }) {
           e.target.value = '';
         }}
       />
-      {fileName && <span className="file-picker-name">{fileName}</span>}
+      {fileName && <span className="file-picker-name">{translateText(fileName)}</span>}
     </div>
   );
 }
 
 function ImageryStyleSelect({ ctx }) {
+  useLanguage();
   const styleId = ctx.realWorldImageryStyle || 'satellite';
   const style = resolveImageryStyle(styleId);
   return (
     <>
       <SelectRow
-        label="Texture Style"
+        label={translateText("Texture Style")}
         value={style.id}
         options={IMAGERY_STYLE_OPTIONS}
         onChange={(v) => ctx.onRealWorldImageryStyle?.(v)}
       />
-      <p className="section-hint realworld-attribution">{style.attribution}</p>
+      <p className="section-hint realworld-attribution">{translateText(style.attribution)}</p>
     </>
   );
 }
 
 function ImportMapSection({ type, map, ctx, forceOpen = false }) {
+  useLanguage();
   const meta = MAP_META[type];
   const settings = map?.settings ?? {
     mode: 'disabled',
@@ -91,7 +96,7 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
 
   return (
     <CollapsibleGroup
-      title={meta.label}
+      title={translateText(meta.label)}
       icon={meta.icon}
       defaultOpen={meta.defaultOpen || !!map}
       forceOpen={forceOpen}
@@ -106,25 +111,25 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
         <ImageryStyleSelect ctx={ctx} />
       )}
       {map?.fileName && !meta.filePick && (
-        <span className="file-picker-name">{map.fileName}</span>
+        <span className="file-picker-name">{translateText(map.fileName)}</span>
       )}
       {map?.preview && (
         <img
           src={map.preview}
-          alt={`${meta.label} preview`}
+          alt={translateText(`${meta.label} preview`)}
           className="import-map-preview"
         />
       )}
       <div className="stat-row">
-        <span className="stat-label">Resolution</span>
+        <span className="stat-label">{translateText("Resolution")}</span>
         <span className="stat-value stat-mono">
-          {map ? `${map.width}×${map.height}` : '—'}
+          {translateText(map ? `${map.width}×${map.height}` : '—')}
         </span>
       </div>
-      {map?.error && <p className="section-hint import-map-error">{map.error}</p>}
-      {map?.warning && <p className="section-hint">{map.warning}</p>}
+      {map?.error && <p className="section-hint import-map-error">{translateText(map.error)}</p>}
+      {map?.warning && <p className="section-hint">{translateText(map.warning)}</p>}
       <SelectRow
-        label="Usage Mode"
+        label={translateText("Usage Mode")}
         value={settings.mode}
         options={IMPORT_MODE_OPTIONS}
         onChange={(v) => set('mode', v)}
@@ -138,8 +143,8 @@ function ImportMapSection({ type, map, ctx, forceOpen = false }) {
       )}
       {!isImagery && (
         <>
-          <ToggleRow label="Invert" value={!!settings.invert} onChange={(v) => set('invert', v)} />
-          <ToggleRow label="Normalize" value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
+          <ToggleRow label={translateText("Invert")} value={!!settings.invert} onChange={(v) => set('invert', v)} />
+          <ToggleRow label={translateText("Normalize")} value={!!settings.normalize} onChange={(v) => set('normalize', v)} />
         </>
       )}
       {type === 'height' && (
@@ -165,13 +170,12 @@ function filterLocations(query) {
   if (!q) return CURATED_LOCATIONS;
   return CURATED_LOCATIONS.filter(
     (loc) =>
-      loc.name.toLowerCase().includes(q)
-      || loc.blurb.toLowerCase().includes(q)
-      || loc.id.toLowerCase().includes(q),
+      matchesTranslatedSearch(q, loc.name, loc.blurb, loc.id),
   );
 }
 
 function RealWorldBrowser({ ctx }) {
+  useLanguage();
   const [busyId, setBusyId] = useState(null);
   const [progress, setProgress] = useState(0);
   const [search, setSearch] = useState('');
@@ -191,7 +195,7 @@ function RealWorldBrowser({ ctx }) {
 
   return (
     <CollapsibleGroup
-      title="Real-World Locations"
+      title={translateText("Real-World Locations")}
       icon={<Globe size={15} strokeWidth={1.75} />}
       defaultOpen={false}
     >
@@ -204,7 +208,7 @@ function RealWorldBrowser({ ctx }) {
         <input
           type="search"
           className="settings-search-input"
-          placeholder="Search locations…"
+          placeholder={translateText("Search locations…")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -213,7 +217,7 @@ function RealWorldBrowser({ ctx }) {
             type="button"
             className="settings-search-clear"
             onClick={() => setSearch('')}
-            aria-label="Clear search"
+            aria-label={translateText("Clear search")}
           >
             ✕
           </button>
@@ -221,7 +225,7 @@ function RealWorldBrowser({ ctx }) {
       </div>
       <div className="realworld-list">
         {filtered.length === 0 ? (
-          <p className="settings-search-empty">No locations match &ldquo;{search.trim()}&rdquo;</p>
+          <p className="settings-search-empty">{translateText("No locations match “")}{translateText(search.trim())}&rdquo;</p>
         ) : filtered.map((loc) => {
           const isBusy = busyId === loc.id;
           return (
@@ -233,17 +237,17 @@ function RealWorldBrowser({ ctx }) {
               onClick={() => load(loc)}
             >
               <span className="realworld-text">
-                <span className="realworld-name">{loc.name}</span>
-                <span className="realworld-blurb">{loc.blurb}</span>
+                <span className="realworld-name">{translateText(loc.name)}</span>
+                <span className="realworld-blurb">{translateText(loc.blurb)}</span>
               </span>
               {isBusy
-                ? <span className="realworld-progress">{Math.round(progress * 100)}%</span>
+                ? <span className="realworld-progress">{translateText(Math.round(progress * 100))}%</span>
                 : <Download size={14} strokeWidth={1.75} aria-hidden />}
             </button>
           );
         })}
       </div>
-      <p className="section-hint realworld-attribution">{ELEVATION_SOURCE}</p>
+      <p className="section-hint realworld-attribution">{translateText(ELEVATION_SOURCE)}</p>
     </CollapsibleGroup>
   );
 }
@@ -268,6 +272,7 @@ const CUSTOM_AREA_SLIDERS = {
 };
 
 function CustomAreaPicker({ ctx }) {
+  useLanguage();
   const [spec, setSpec] = useState(() => ({ ...customAreaDraft.spec }));
   const [coordText, setCoordText] = useState(() => customAreaDraft.coordText);
   const [coordFormat, setCoordFormat] = useState(() => customAreaDraft.format);
@@ -351,13 +356,13 @@ function CustomAreaPicker({ ctx }) {
 
   return (
     <CollapsibleGroup
-      title="Custom Area"
+      title={translateText("Custom Area")}
       icon={<Crosshair size={15} strokeWidth={1.75} />}
       defaultOpen={!!ctx.realTerrainMode}
       forceOpen={mapOpen}
       settingId="terrain.realWorldCustom"
     >
-      <SelectRow label="Coordinate format" value={coordFormat} options={COORDINATE_FORMATS} onChange={(format) => {
+      <SelectRow label={translateText("Coordinate format")} value={coordFormat} options={COORDINATE_FORMATS} onChange={(format) => {
         const committed = commitCoordText();
         if (!committed) return;
         const next = formatCoordinateDisplay(committed, format);
@@ -370,7 +375,7 @@ function CustomAreaPicker({ ctx }) {
         setCoordText(next); syncCustomAreaDraft(committed, next);
       }} />
       <div className="stat-row">
-        <span className="stat-label">Coordinates</span>
+        <span className="stat-label">{translateText("Coordinates")}</span>
       </div>
       <div className="seed-input-wrap">
         <input
@@ -389,49 +394,47 @@ function CustomAreaPicker({ ctx }) {
               load();
             }
           }}
-          placeholder={coordFormat === 'lambert93' ? '700000, 6600000' : coordFormat === 'mercator' ? '333958.47, 5860839.83' : '46.07621°N, 6.96224°E'}
-          aria-label={coordFormat === 'lambert93' || coordFormat === 'mercator' ? 'Easting and northing' : 'Latitude and longitude'}
+          placeholder={translateText(coordFormat === 'lambert93' ? '700000, 6600000' : coordFormat === 'mercator' ? '333958.47, 5860839.83' : '46.07621°N, 6.96224°E')}
+          aria-label={translateText(coordFormat === 'lambert93' || coordFormat === 'mercator' ? 'Easting and northing' : 'Latitude and longitude')}
           spellCheck={false}
         />
       </div>
-      {coordError && <p className="section-hint import-map-error">{coordError}</p>}
+      {coordError && <p className="section-hint import-map-error">{translateText(coordError)}</p>}
       <button type="button" className="realworld-map-open" onClick={() => setMapOpen(true)}>
         <MapPinned size={15} strokeWidth={1.75} aria-hidden />
-        <span>Select Area on Map</span>
+        <span>{translateText("Select Area on Map")}</span>
       </button>
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lat} value={spec.lat} onChange={set('lat')} settingId="terrain.realWorldLat" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.lon} value={spec.lon} onChange={set('lon')} settingId="terrain.realWorldLon" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.sizeKm} value={spec.sizeKm} onChange={set('sizeKm')} settingId="terrain.realWorldSize" />
       <SliderCtl def={CUSTOM_AREA_SLIDERS.zoom} value={spec.zoom} onChange={set('zoom')} settingId="terrain.realWorldZoom" />
       <div className="stat-row">
-        <span className="stat-label">Effective zoom</span>
-        <span className="stat-value stat-mono">z{info.zoom}</span>
+        <span className="stat-label">{translateText("Effective zoom")}</span>
+        <span className="stat-value stat-mono">{translateText("z")}{translateText(info.zoom)}</span>
       </div>
       <div className="stat-row">
-        <span className="stat-label">Tiles fetched</span>
-        <span className="stat-value stat-mono">{info.tilesX}×{info.tilesY}</span>
+        <span className="stat-label">{translateText("Tiles fetched")}</span>
+        <span className="stat-value stat-mono">{translateText(info.tilesX)}×{translateText(info.tilesY)}</span>
       </div>
       <div className="stat-row">
-        <span className="stat-label">Output resolution</span>
-        <span className="stat-value stat-mono">{info.outW}×{info.outH}</span>
+        <span className="stat-label">{translateText("Output resolution")}</span>
+        <span className="stat-value stat-mono">{translateText(info.outW)}×{translateText(info.outH)}</span>
       </div>
       <div className="stat-row">
-        <span className="stat-label">Ground resolution</span>
-        <span className="stat-value stat-mono">≈{info.metersPerPixel < 10 ? info.metersPerPixel.toFixed(1) : Math.round(info.metersPerPixel)} m/px</span>
+        <span className="stat-label">{translateText("Ground resolution")}</span>
+        <span className="stat-value stat-mono">≈{info.metersPerPixel < 10 ? info.metersPerPixel.toFixed(1) : Math.round(info.metersPerPixel)}{translateText(" m/px")}</span>
       </div>
       {info.zoomClamped && (
-        <p className="section-hint">
-          Zoom reduced to z{info.zoom} so this area stays under the tile-fetch cap. Shrink the area size to get more detail.
-        </p>
+        <p className="section-hint">{translateText("Zoom reduced to z")}{translateText(info.zoom)}{translateText(" so this area stays under the tile-fetch cap. Shrink the area size to get more detail.")}</p>
       )}
       <button type="button" className="file-picker-btn" disabled={busy} onClick={() => load()}>
         <Download size={15} strokeWidth={1.75} aria-hidden />
-        <span>{busy ? `Loading… ${Math.round(progress * 100)}%` : 'Load This Area'}</span>
+        <span>{translateText(busy ? `Loading… ${Math.round(progress * 100)}%` : 'Load This Area')}</span>
       </button>
       {mapOpen && (
         <Suspense fallback={(
           <div className="realworld-map-backdrop">
-            <div className="realworld-map-loading" role="status">Loading interactive map…</div>
+            <div className="realworld-map-loading" role="status">{translateText("Loading interactive map…")}</div>
           </div>
         )}
         >
@@ -454,19 +457,20 @@ function CustomAreaPicker({ ctx }) {
 }
 
 export default function ImportMapsContent({ ctx }) {
+  useLanguage();
   const targetId = ctx.settingsTarget?.settingId ?? null;
   return (
     <>
       <p className="section-hint">
-        {ctx.realTerrainMode
+        {translateText(ctx.realTerrainMode
           ? 'Select a real-world area to import geographic elevation and imagery. Buildings are optional.'
-          : 'Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.'}
+          : 'Tile Mode only. Imported height maps in Replace or Blend mode deform the real terrain mesh and GLB export.')}
       </p>
       <ToggleRow
-        label="Fetch Buildings"
+        label={translateText("Fetch Buildings")}
         value={ctx.realWorldBuildingsVisible === true}
         onChange={(visible) => ctx.onRealWorldBuildingsVisible?.(visible)}
-        info="Fetch and show OpenStreetMap building volumes. Disabled by default to avoid public API rate limits."
+        info={translateText("Fetch and show OpenStreetMap building volumes. Disabled by default to avoid public API rate limits.")}
         settingId="terrain.realWorldBuildings"
       />
       <RealWorldBrowser ctx={ctx} />

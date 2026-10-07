@@ -1,3 +1,5 @@
+import { getLocale } from '../i18n/language.js';
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Cloud, CloudUpload, Copy, Eye, FolderOpen, Globe2, KeyRound, Lock, Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -22,6 +24,7 @@ async function copyText(value) {
 }
 
 export default function CloudProjectsPanel({ localProjects, onOpen, refreshToken = 0 }) {
+  useLanguage();
   const { user } = useAuth();
   const { showPopup, showConfirm, showPrompt } = usePopup();
   const [projects, setProjects] = useState([]);
@@ -166,20 +169,20 @@ export default function CloudProjectsPanel({ localProjects, onOpen, refreshToken
   };
 
   if (!user) {
-    return <section className="cloud-projects-panel"><div className="cloud-projects-guest"><Cloud size={20} /><strong>Your cloud projects</strong><span>Sign in to sync terrains and share them with a code.</span></div></section>;
+    return <section className="cloud-projects-panel"><div className="cloud-projects-guest"><Cloud size={20} /><strong>{translateText("Your cloud projects")}</strong><span>{translateText("Sign in to sync terrains and share them with a code.")}</span></div></section>;
   }
 
   return (
-    <section className="cloud-projects-panel" aria-label="Cloud projects">
+    <section className="cloud-projects-panel" aria-label={translateText("Cloud projects")}>
       <div className="cloud-sync-bar">
-        <select value={selectedLocalId} onChange={(event) => setSelectedLocalId(event.target.value)} disabled={!localProjects.length || !!busy} aria-label="Local project to sync">
-          {!localProjects.length && <option value="">No local projects</option>}
+        <select value={selectedLocalId} onChange={(event) => setSelectedLocalId(event.target.value)} disabled={!localProjects.length || !!busy} aria-label={translateText("Local project to sync")}>
+          {!localProjects.length && <option value="">{translateText("No local projects")}</option>}
           {localProjects.map((project) => <option key={project.id} value={project.id}>{project.metadata.name}</option>)}
         </select>
-        <button type="button" className="lp-primary sm" onClick={sync} disabled={!selectedLocal || !!busy}><CloudUpload size={14} /> {selectedCloud ? 'Update cloud copy' : 'Sync to cloud'}</button>
+        <button type="button" className="lp-primary sm" onClick={sync} disabled={!selectedLocal || !!busy}><CloudUpload size={14} /> {translateText(selectedCloud ? 'Update cloud copy' : 'Sync to cloud')}</button>
       </div>
 
-      {loading ? <p className="cloud-loading">Loading cloud projects…</p> : projects.length === 0 ? <div className="cloud-empty"><Cloud size={20} /><span>No cloud projects yet. Sync one of your local terrains above.</span></div> : (
+      {loading ? <p className="cloud-loading">{translateText("Loading cloud projects…")}</p> : projects.length === 0 ? <div className="cloud-empty"><Cloud size={20} /><span>{translateText("No cloud projects yet. Sync one of your local terrains above.")}</span></div> : (
         <div className="cloud-project-list">
           {projects.map((project) => {
             const VisibilityIcon = visibilityIcon[project.visibility] || Lock;
@@ -188,18 +191,18 @@ export default function CloudProjectsPanel({ localProjects, onOpen, refreshToken
               <article className="cloud-project-row" key={project.id}>
                 <button type="button" className="cloud-project-main" onClick={() => openCloud(project)} disabled={disabled}>
                   <span className={`cloud-visibility-icon ${project.visibility}`}><VisibilityIcon size={15} /></span>
-                  <span><strong>{project.name}</strong><small>Updated {new Date(project.updatedAt).toLocaleDateString()}</small></span>
+                  <span><strong>{project.name}</strong><small>{translateText("Updated ")}{translateText(new Date(project.updatedAt).toLocaleDateString(getLocale()))}</small></span>
                 </button>
-                <select value={project.visibility} onChange={(event) => updateVisibility(project, event.target.value)} disabled={disabled} aria-label={`Visibility for ${project.name}`}>
-                  <option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option>
+                <select value={project.visibility} onChange={(event) => updateVisibility(project, event.target.value)} disabled={disabled} aria-label={translateText(`Visibility for ${project.name}`)}>
+                  <option value="private">{translateText("Private")}</option><option value="unlisted">{translateText("Unlisted")}</option><option value="public">{translateText("Public")}</option>
                 </select>
-                <code title="Sharing code">{project.shareCode}</code>
+                <code title={translateText("Sharing code")}>{project.shareCode}</code>
                 <div className="cloud-project-actions">
-                  <button type="button" onClick={() => openCloud(project)} disabled={disabled} title="Open as a local copy" aria-label={`Open ${project.name}`}><FolderOpen size={13} /></button>
-                  <button type="button" onClick={() => copyText(project.shareCode).then(() => showPopup(`Copied ${project.shareCode}.`, { type: 'success' })).catch((copyError) => showPopup(copyError.message, { type: 'error' }))} disabled={disabled || project.visibility === 'private'} title={project.visibility === 'private' ? 'Make the project unlisted or public to share it' : 'Copy sharing code'} aria-label={`Copy sharing code for ${project.name}`}><Copy size={13} /></button>
-                  <button type="button" onClick={() => rotateCode(project)} disabled={disabled} title="Replace sharing code" aria-label={`Replace sharing code for ${project.name}`}><KeyRound size={13} /></button>
-                  <button type="button" onClick={() => rename(project)} disabled={disabled} title="Rename" aria-label={`Rename ${project.name}`}><Pencil size={13} /></button>
-                  <button type="button" className="danger" onClick={() => remove(project)} disabled={disabled} title="Delete cloud project" aria-label={`Delete ${project.name}`}><Trash2 size={13} /></button>
+                  <button type="button" onClick={() => openCloud(project)} disabled={disabled} title={translateText("Open as a local copy")} aria-label={translateText(`Open ${project.name}`)}><FolderOpen size={13} /></button>
+                  <button type="button" onClick={() => copyText(project.shareCode).then(() => showPopup(`Copied ${project.shareCode}.`, { type: 'success' })).catch((copyError) => showPopup(copyError.message, { type: 'error' }))} disabled={disabled || project.visibility === 'private'} title={translateText(project.visibility === 'private' ? 'Make the project unlisted or public to share it' : 'Copy sharing code')} aria-label={translateText(`Copy sharing code for ${project.name}`)}><Copy size={13} /></button>
+                  <button type="button" onClick={() => rotateCode(project)} disabled={disabled} title={translateText("Replace sharing code")} aria-label={translateText(`Replace sharing code for ${project.name}`)}><KeyRound size={13} /></button>
+                  <button type="button" onClick={() => rename(project)} disabled={disabled} title={translateText("Rename")} aria-label={translateText(`Rename ${project.name}`)}><Pencil size={13} /></button>
+                  <button type="button" className="danger" onClick={() => remove(project)} disabled={disabled} title={translateText("Delete cloud project")} aria-label={translateText(`Delete ${project.name}`)}><Trash2 size={13} /></button>
                 </div>
               </article>
             );

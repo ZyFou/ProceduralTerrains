@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { Map } from 'lucide-react';
 import CollapsibleGroup from './CollapsibleGroup.jsx';
 import { ToggleRow, SelectRow } from '../controls.jsx';
@@ -17,12 +18,13 @@ const BIOME_LEGEND = [
 ];
 
 function BiomeLegend() {
+  useLanguage();
   return (
     <div className="biome-legend">
       {BIOME_LEGEND.map(([color, label]) => (
         <div className="biome-legend-row" key={label}>
           <span className="biome-legend-swatch" style={{ background: color }} />
-          <span>{label}</span>
+          <span>{translateText(label)}</span>
         </div>
       ))}
     </div>
@@ -30,26 +32,25 @@ function BiomeLegend() {
 }
 
 export default function TileMapDebugSection({ tileDebug, onTileDebug }) {
+  useLanguage();
   const dbg = tileDebug ?? { view: 'off', showLegend: true, opacity: 1, showPreview: true };
 
   return (
     <CollapsibleGroup
-      title="Map Overlays"
+      title={translateText("Map Overlays")}
       icon={<Map size={15} strokeWidth={1.75} />}
       defaultOpen={dbg.view !== 'off'}
     >
-      <p className="section-hint">
-        Preview internal terrain maps on the Tile surface without changing saved terrain data.
-      </p>
+      <p className="section-hint">{translateText("Preview internal terrain maps on the Tile surface without changing saved terrain data.")}</p>
       <SelectRow
-        label="Debug View"
+        label={translateText("Debug View")}
         value={dbg.view}
         options={DEBUG_VIEW_OPTIONS}
         onChange={(v) => onTileDebug({ view: v })}
-        info="Overlays noise, height or biome data directly on the terrain mesh."
+        info={translateText("Overlays noise, height or biome data directly on the terrain mesh.")}
       />
       <ToggleRow
-        label="Show Legend"
+        label={translateText("Show Legend")}
         value={!!dbg.showLegend}
         onChange={(v) => onTileDebug({ showLegend: v })}
       />

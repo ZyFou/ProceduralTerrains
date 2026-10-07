@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { ColorInput } from '../controls.jsx';
 
 // Shared control definitions used across drawer panels (moved out of the old
@@ -147,6 +148,7 @@ export const WATER_COLORS = [
 
 // Shared info-dot used next to labels.
 export function InfoDot() {
+  useLanguage();
   return (
     <span className="info-icon-trigger">
       <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
@@ -159,11 +161,12 @@ export function InfoDot() {
 
 // A labelled colour field (matches the existing .color-field markup).
 export function ColorField({ label, icon, info, value, onChange }) {
+  useLanguage();
   return (
     <div className="color-field">
-      <div className="label-with-icon" data-tooltip={info}>
+      <div className="label-with-icon" data-tooltip={translateText(info)}>
         {icon && <span className="setting-icon">{icon}</span>}
-        <span className="setting-label">{label}</span>
+        <span className="setting-label">{translateText(label)}</span>
         {info && <InfoDot />}
       </div>
       <ColorInput value={value} onChange={(hex) => onChange({ target: { value: hex } })} />

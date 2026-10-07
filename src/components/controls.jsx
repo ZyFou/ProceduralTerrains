@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useState } from 'react';
 
 export function fmt(def, v) {
@@ -6,6 +7,7 @@ export function fmt(def, v) {
 }
 
 export function SliderCtl({ def, value, onChange, icon, info, disabled, disabledTooltip, settingId }) {
+  useLanguage();
   const [text, setText] = useState(fmt(def, value));
   useEffect(() => { setText(fmt(def, value)); }, [value, def]);
 
@@ -26,9 +28,9 @@ export function SliderCtl({ def, value, onChange, icon, info, disabled, disabled
       style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
     >
       <div className="ctl-top">
-        <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : tooltipText}>
+        <div className="label-with-icon" data-tooltip={translateText(disabled ? disabledTooltip : tooltipText)}>
           {itemIcon && <span className="setting-icon">{itemIcon}</span>}
-          <span className="setting-label">{def.label}</span>
+          <span className="setting-label">{translateText(def.label)}</span>
           {tooltipText && (
             <span className="info-icon-trigger">
               <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
@@ -65,15 +67,16 @@ export function SliderCtl({ def, value, onChange, icon, info, disabled, disabled
 }
 
 export function ToggleRow({ label, value, onChange, icon, info, disabled, disabledTooltip, settingId }) {
+  useLanguage();
   return (
     <div
       className={`toggle-row${disabled ? ' disabled' : ''}`}
       data-setting-id={settingId}
       style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
     >
-      <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
+      <div className="label-with-icon" data-tooltip={translateText(disabled ? disabledTooltip : info)}>
         {icon && <span className="setting-icon">{icon}</span>}
-        <span className="setting-label">{label}</span>
+        <span className="setting-label">{translateText(label)}</span>
         {(info || disabledTooltip) && (
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
@@ -94,15 +97,16 @@ export function ToggleRow({ label, value, onChange, icon, info, disabled, disabl
 }
 
 export function SelectRow({ label, value, options, format, onChange, icon, info, disabled, disabledTooltip, settingId }) {
+  useLanguage();
   return (
     <div
       className={`row${disabled ? ' disabled' : ''}`}
       data-setting-id={settingId}
       style={disabled ? { opacity: 0.45, pointerEvents: 'none' } : null}
     >
-      <div className="label-with-icon" data-tooltip={disabled ? disabledTooltip : info}>
+      <div className="label-with-icon" data-tooltip={translateText(disabled ? disabledTooltip : info)}>
         {icon && <span className="setting-icon">{icon}</span>}
-        <span className="setting-label">{label}</span>
+        <span className="setting-label">{translateText(label)}</span>
         {(info || disabledTooltip) && (
           <span className="info-icon-trigger">
             <svg viewBox="0 0 16 16" fill="none" width="10" height="10" style={{ marginLeft: '4px' }}>
@@ -115,7 +119,7 @@ export function SelectRow({ label, value, options, format, onChange, icon, info,
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => (
           <option key={String(opt.value ?? opt)} value={opt.value ?? opt} disabled={!!opt.disabled}>
-            {opt.label ?? (format ? format(opt) : String(opt))}
+            {translateText(opt.label ?? (format ? format(opt) : String(opt)))}
           </option>
         ))}
       </select>
@@ -125,6 +129,7 @@ export function SelectRow({ label, value, options, format, onChange, icon, info,
 
 // Native color input that stays mounted while dragging in the picker.
 export function ColorInput({ value, onChange, className }) {
+  useLanguage();
   const commit = (e) => onChange(e.target.value);
   return (
     <input
@@ -138,13 +143,14 @@ export function ColorInput({ value, onChange, className }) {
 }
 
 export function Panel({ id, title, className = '', children }) {
+  useLanguage();
   const [open, setOpen] = useState(true);
   return (
     <section className={`panel ${className}`} id={id}>
       <div className="panel-header">
-        <span>{title}</span>
+        <span>{translateText(title)}</span>
         <button type="button" className="collapse-btn" onClick={() => setOpen(!open)}>
-          {open ? '‹' : '›'}
+          {translateText(open ? '‹' : '›')}
         </button>
       </div>
       <div className={`panel-body${open ? '' : ' collapsed'}`}>{children}</div>

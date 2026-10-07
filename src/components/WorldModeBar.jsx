@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { Globe2, Grid2x2, Map } from 'lucide-react';
 
 const MODES = [
@@ -17,6 +18,7 @@ export default function WorldModeBar({
   modeDisplay = 'both',
   visible = true,
 }) {
+  useLanguage();
   if (!visible) return null;
 
   const showIcons = modeDisplay === 'both' || modeDisplay === 'icons';
@@ -26,7 +28,7 @@ export default function WorldModeBar({
     <div
       className="viewport-mode-bar"
       role="group"
-      aria-label="World mode"
+      aria-label={translateText("World mode")}
     >
       {MODES.map((m) => {
         const Icon = m.Icon;
@@ -38,10 +40,10 @@ export default function WorldModeBar({
             onClick={() => onSetWorldMode(m.id)}
             disabled={modeLocked}
             aria-pressed={worldMode === m.id}
-            title={m.label}
+            title={translateText(m.label)}
           >
             {showIcons && <Icon size={14} strokeWidth={1.75} aria-hidden />}
-            {showLabels && <span className="mode-bar-label">{m.label}</span>}
+            {showLabels && <span className="mode-bar-label">{translateText(m.label)}</span>}
           </button>
         );
       })}

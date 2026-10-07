@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import ControlSection from './ControlSection.jsx';
 
 export default function CollapsibleGroup({
@@ -9,9 +10,10 @@ export default function CollapsibleGroup({
   onToggle,
   children,
 }) {
+  useLanguage();
   return (
     <ControlSection
-      title={title}
+      title={translateText(title)}
       icon={icon}
       defaultOpen={defaultOpen}
       forceOpen={forceOpen}

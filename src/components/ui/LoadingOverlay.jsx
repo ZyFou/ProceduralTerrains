@@ -1,7 +1,9 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 // Blocking loading overlay shown above the viewport for heavy actions
 // (mode switch, export, heavy generation). The app stays visually alive —
 // the viewport remains behind a light scrim.
 export function LoadingBar({ progress }) {
+  useLanguage();
   const indeterminate = progress == null || Number.isNaN(progress);
   return (
     <div className="loading-bar">
@@ -25,6 +27,7 @@ const LOADING_STAGE_LABELS = {
 };
 
 export default function LoadingOverlay({ task }) {
+  useLanguage();
   if (!task) return null;
   const iconProgress = task.progress == null ? (task.id === 'export' ? 0 : 0.15) : Math.max(0, Math.min(1, task.progress));
   const stepLabel = LOADING_STAGE_LABELS[task.stage] ?? task.stage ?? 'Working';
@@ -33,7 +36,7 @@ export default function LoadingOverlay({ task }) {
     <div
       className={`loading-overlay${task.opaque ? ' opaque' : ''}`}
       role="status"
-      aria-label={task.label}
+      aria-label={translateText(task.label)}
       aria-live="polite"
     >
       <div className="loading-card">
@@ -48,12 +51,12 @@ export default function LoadingOverlay({ task }) {
             <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
             <path className="landing-boot-terrain-fill" clipPath="url(#loading-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
           </svg>
-          <span className="landing-boot-progress-step">{stepLabel}</span>
+          <span className="landing-boot-progress-step">{translateText(stepLabel)}</span>
           <span className="loading-activity-spinner" aria-hidden="true" />
         </div>
         {task.id === 'export' && <div className="export-loading-detail">
-          <strong>{task.label}</strong>
-          <p>{task.detail}</p>
+          <strong>{translateText(task.label)}</strong>
+          <p>{translateText(task.detail)}</p>
           <LoadingBar progress={task.progress} />
         </div>}
       </div>

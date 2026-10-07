@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import SurfacePackPanel from './SurfacePackPanel.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageUp, RefreshCw, RotateCcw } from 'lucide-react';
@@ -105,6 +106,7 @@ async function importDroppedTextures({ files, role, mapSlots, variantIndex }) {
 }
 
 function FileSlotRow({ role, variantIndex, slot, onChanged }) {
+  useLanguage();
   const inputRef = useRef(null);
   const [status, setStatus] = useState('checking');
   const [dragOver, setDragOver] = useState(false);
@@ -152,14 +154,14 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
         pick(files[0]);
       }}
     >
-      <span className="surface-slot-label">{MAP_SLOT_LABELS[slot]}</span>
+      <span className="surface-slot-label">{translateText(MAP_SLOT_LABELS[slot])}</span>
       <span className={`surface-slot-status surface-slot-status-${status}`}>
-        {STATUS_LABEL[status] ?? status}
+        {translateText(STATUS_LABEL[status] ?? status)}
       </span>
       <div className="file-picker surface-slot-picker">
         <button type="button" className="file-picker-btn" onClick={() => inputRef.current?.click()}>
           <ImageUp size={13} strokeWidth={1.75} aria-hidden />
-          <span>{directOverride || resolved ? 'Replace' : 'Upload'}</span>
+          <span>{translateText(directOverride || resolved ? 'Replace' : 'Upload')}</span>
         </button>
         <input
           ref={inputRef}
@@ -173,7 +175,7 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
           }}
         />
         {resolved && (
-          <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title="Clear upload">
+          <button type="button" className="file-picker-btn surface-slot-reset" onClick={reset} title={translateText("Clear upload")}>
             <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
           </button>
         )}
@@ -183,6 +185,7 @@ function FileSlotRow({ role, variantIndex, slot, onChanged }) {
 }
 
 function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialChanged }) {
+  useLanguage();
   const [dropSummary, setDropSummary] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -225,10 +228,10 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
       onDrop={onBatchDrop}
     >
       <div className="surface-variant-head">
-        <span className="surface-variant-title">Variant {variantIndex + 1}</span>
-        <span className="surface-variant-drop-chip">{importing ? 'Importing' : 'Drop ZIP / maps'}</span>
+        <span className="surface-variant-title">{translateText("Variant ")}{translateText(variantIndex + 1)}</span>
+        <span className="surface-variant-drop-chip">{translateText(importing ? 'Importing' : 'Drop ZIP / maps')}</span>
         <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
-          {statusLabel}
+          {translateText(statusLabel)}
         </span>
       </div>
       <div className="surface-material-body">
@@ -244,9 +247,9 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
               <span
                 key={slot}
                 className={`surface-map-badge${urls[slot] ? ' filled' : ''}`}
-                title={MAP_SLOT_LABELS[slot]}
+                title={translateText(MAP_SLOT_LABELS[slot])}
               >
-                {MAP_SLOT_LABELS[slot]}
+                {translateText(MAP_SLOT_LABELS[slot])}
               </span>
             ))}
           </div>
@@ -265,8 +268,8 @@ function VariantBlock({ role, variantIndex, mapSlots, atlasVariant, onMaterialCh
       </div>
       {dropSummary && (
         <p className="section-hint surface-drop-summary">
-          {dropSummary.matched.length > 0 && <>Matched: {dropSummary.matched.join(', ')}. </>}
-          {dropSummary.unmatched.length > 0 && <span className="warning">Skipped: {dropSummary.unmatched.join(', ')}.</span>}
+          {dropSummary.matched.length > 0 && <>{translateText("Matched: ")}{translateText(dropSummary.matched.join(', '))}. </>}
+          {dropSummary.unmatched.length > 0 && <span className="warning">{translateText("Skipped: ")}{translateText(dropSummary.unmatched.join(', '))}.</span>}
         </p>
       )}
     </div>
@@ -287,6 +290,7 @@ function firstAvailableVariantIndex(role, mapSlots) {
 }
 
 function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialChanged }) {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const [activeVariant, setActiveVariant] = useState(() => variantFromTarget(targetId, role.id));
   const [forceOpenAfterDrop, setForceOpenAfterDrop] = useState(false);
@@ -339,7 +343,7 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
       }}
     >
       <CollapsibleGroup
-        title={role.label}
+        title={translateText(role.label)}
         defaultOpen={false}
         forceOpen={targetId?.startsWith(`surface.${role.id}.`) || forceOpenAfterDrop}
         settingId={`surface.${role.id}`}
@@ -353,21 +357,20 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
             <div className="surface-role-head">
               <span className="surface-role-swatch" style={{ background: paletteHex }} />
               <span className={`surface-layer-status surface-slot-status-${layerStatusClass(layerStatus)}`}>
-                {statusLabel}
+                {translateText(statusLabel)}
               </span>
               <span className="surface-role-count">
-                {atlasLayer?.readyVariants ?? 0}/{SURFACE_TEXTURE_VARIANT_COUNT} variants
-              </span>
+                {translateText(atlasLayer?.readyVariants ?? 0)}/{translateText(SURFACE_TEXTURE_VARIANT_COUNT)}{translateText(" variants")}</span>
               <button
                 type="button"
                 className="file-picker-btn surface-card-reset"
                 onClick={resetMaterial}
-                title="Clear this role's custom uploads"
+                title={translateText("Clear this role's custom uploads")}
               >
                 <RotateCcw size={13} strokeWidth={1.8} aria-hidden />
               </button>
             </div>
-            <div className="surface-variant-tabs" role="tablist" aria-label={`${role.label} variants`}>
+            <div className="surface-variant-tabs" role="tablist" aria-label={translateText(`${role.label} variants`)}>
               {Array.from({ length: SURFACE_TEXTURE_VARIANT_COUNT }, (_, variantIndex) => {
                 const variant = atlasLayer?.variants?.[variantIndex];
                 const ready = variant?.hasDiffuse;
@@ -381,8 +384,8 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
                     className={`surface-variant-tab${active ? ' active' : ''}${ready ? ' ready' : ''}`}
                     onClick={() => setActiveVariant(variantIndex)}
                   >
-                    <span>V{variantIndex + 1}</span>
-                    <small>{ready ? 'Ready' : 'Empty'}</small>
+                    <span>{translateText("V")}{translateText(variantIndex + 1)}</span>
+                    <small>{translateText(ready ? 'Ready' : 'Empty')}</small>
                   </button>
                 );
               })}
@@ -400,8 +403,8 @@ function RoleCard({ role, mapSlots, targetId, atlasLayer, palette, onMaterialCha
       </CollapsibleGroup>
       {roleDropSummary && (
         <p className="section-hint surface-drop-summary" role="status">
-          {roleDropSummary.matched.length > 0 && <>Imported: {roleDropSummary.matched.join(', ')}. </>}
-          {roleDropSummary.unmatched.length > 0 && <span className="warning">Skipped: {roleDropSummary.unmatched.join(', ')}.</span>}
+          {roleDropSummary.matched.length > 0 && <>{translateText("Imported: ")}{translateText(roleDropSummary.matched.join(', '))}. </>}
+          {roleDropSummary.unmatched.length > 0 && <span className="warning">{translateText("Skipped: ")}{translateText(roleDropSummary.unmatched.join(', '))}.</span>}
         </p>
       )}
     </div>
@@ -421,6 +424,7 @@ const SURFACE_MODE_SLIDERS = [
 ];
 
 function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
+  useLanguage();
   const { params, onParam } = ctx;
   const textureMode = sourceUsesTextureAtlas(source);
   const coverage = status?.coverage;
@@ -433,7 +437,7 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
   return (
     <div className="surface-mode-bar">
       <SelectRow
-        label="Surface Source"
+        label={translateText("Surface Source")}
         value={source}
         options={[
           { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL, label: 'Procedural' },
@@ -442,28 +446,28 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
         ]}
         onChange={(value) => onParam('surfaceTextureSource', value)}
         settingId="surface.mode"
-        info="Procedural uses shader colours. Custom Materials uses only uploaded maps and shows missing layers in the viewport."
+        info={translateText("Procedural uses shader colours. Custom Materials uses only uploaded maps and shows missing layers in the viewport.")}
       />
       {textureMode && (
         <>
           <div className="surface-apply-row">
             <button type="button" className="action-btn primary" onClick={() => onBake({ source, force: true })} disabled={applying}>
               <RefreshCw size={13} strokeWidth={1.8} aria-hidden />
-              {applying ? 'Baking...' : source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials'}
+              {translateText(applying ? 'Baking...' : source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials')}
             </button>
             <span className={`surface-apply-status ${coverageClass}`}>
-              {applying ? 'Building atlas' : status?.error ? 'Bake failed' : coverageText(coverage, source)}
+              {translateText(applying ? 'Building atlas' : status?.error ? 'Bake failed' : coverageText(coverage, source))}
             </span>
           </div>
-          {status?.error && <p className="section-hint warning" role="alert">{status.error} Use {source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials'} to retry.</p>}
-          <p className="section-hint">One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads are stored locally and included in portable project exports.</p>
+          {status?.error && <p className="section-hint warning" role="alert">{translateText(status.error)}{translateText(" Use ")}{translateText(source === SURFACE_TEXTURE_SOURCE.PBR ? 'Load PBR Materials' : 'Bake Custom Materials')}{translateText(" to retry.")}</p>}
+          <p className="section-hint">{translateText("One diffuse map per material role is enough; extra variants and other maps are optional. Drop named sets onto the intended role to fill up to four variants. Uploads are stored locally and included in portable project exports.")}</p>
           {source === SURFACE_TEXTURE_SOURCE.CUSTOM && (
             <ToggleRow
-              label="Original Texture Colors"
+              label={translateText("Original Texture Colors")}
               value={params.surfaceTextureRawColor !== false}
               onChange={(v) => onParam('surfaceTextureRawColor', v)}
               settingId="surface.surfaceTextureRawColor"
-              info="Keep uploaded albedo unchanged. Turn off to intentionally recolor it with the biome palette."
+              info={translateText("Keep uploaded albedo unchanged. Turn off to intentionally recolor it with the biome palette.")}
             />
           )}
           {SURFACE_MODE_SLIDERS.filter((def) => def.key !== 'surfaceTexturePaletteInfluence'
@@ -479,11 +483,11 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
             />
           ))}
           <ToggleRow
-            label="Triplanar Projection"
+            label={translateText("Triplanar Projection")}
             value={params.surfaceTextureTriplanar !== false}
             onChange={(v) => onParam('surfaceTextureTriplanar', v)}
             settingId="surface.surfaceTextureTriplanar"
-            info="Blends X/Y/Z projections so cliffs don't stretch. Off = cheaper planar world-XZ."
+            info={translateText("Blends X/Y/Z projections so cliffs don't stretch. Off = cheaper planar world-XZ.")}
           />
         </>
       )}
@@ -492,6 +496,7 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
 }
 
 export default function SurfaceLibraryPanel({ ctx }) {
+  useLanguage();
   const settingsTarget = ctx?.settingsTarget;
   const source = normalizeSurfaceTextureSource(ctx?.params || {});
   const palette = ctx?.planetStyleProps?.planetStyle?.palette || {};
@@ -586,8 +591,8 @@ export default function SurfaceLibraryPanel({ ctx }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [libraryRevision]);
 
-  if (error) return <p className="section-hint warning">Could not load the surface material manifest ({error}).</p>;
-  if (!manifest) return <p className="section-hint">Loading surface library...</p>;
+  if (error) return <p className="section-hint warning">{translateText("Could not load the surface material manifest (")}{translateText(error)}).</p>;
+  if (!manifest) return <p className="section-hint">{translateText("Loading surface library...")}</p>;
 
   const mapSlots = manifest.mapSlots.filter((slot) => RENDERED_SLOTS.has(slot));
   const layersById = new Map((status?.layers || []).map((layer) => [layer.id, layer]));
@@ -599,7 +604,7 @@ export default function SurfaceLibraryPanel({ ctx }) {
       {source === SURFACE_TEXTURE_SOURCE.PBR && <SurfacePackPanel ctx={ctx} />}
       {showMaterials && source !== SURFACE_TEXTURE_SOURCE.PBR && SURFACE_TEXTURE_ROLE_GROUPS.map((group) => (
         <div key={group.id} className="surface-role-group">
-          <div className="surface-role-group-title">{group.label}</div>
+          <div className="surface-role-group-title">{translateText(group.label)}</div>
           {group.roles.map((role) => (
             <RoleCard
               key={`${source}-${role.id}`}

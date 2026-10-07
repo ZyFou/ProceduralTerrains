@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Clock3,
@@ -24,6 +25,7 @@ import { APP_NAME, APP_VERSION } from '../constants/app.js';
 import { EDITOR_SHORTCUTS, matchesShortcut, SEARCH_SETTINGS_SHORTCUT, shortcutText } from '../keyboardShortcuts.js';
 import NotificationCenter from './ui/Toast.jsx';
 import ShortcutHint from './ui/ShortcutHint.jsx';
+import LanguageSwitch from '../i18n/LanguageSwitch.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
   <svg viewBox={viewBox}>
@@ -63,6 +65,7 @@ export default function TopBar({
   onClearNotifications,
   onToggleNotificationLogging,
 }) {
+  useLanguage();
   const fileRef = useRef(null);
   const fileMenuRef = useRef(null);
   const editMenuRef = useRef(null);
@@ -165,12 +168,12 @@ export default function TopBar({
   return (
     <header id="topbar" className={anyMenuOpen ? 'file-menu-open' : ''}>
       <div className="tb-group tb-left">
-        <button type="button" className="tb-group tb-brand tb-brand-button tb-btn" onClick={onOpenProjects} title="Return to main menu">
+        <button type="button" className="tb-group tb-brand tb-brand-button tb-btn" onClick={onOpenProjects} title={translateText("Return to main menu")}>
           <svg className="logo" viewBox="0 0 24 24" fill="none">
             <path d="M3 18 L9 7 L13 13 L16 9 L21 18 Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <circle cx="17.5" cy="5.5" r="1.6" fill="currentColor" />
           </svg>
-          <span className="app-name">{APP_NAME}</span>
+          <span className="app-name">{translateText(APP_NAME)}</span>
         </button>
 
         <div className="tb-dropdown" ref={fileMenuRef}>
@@ -178,21 +181,21 @@ export default function TopBar({
             type="button"
             className={`tb-btn tb-menu-btn${fileMenuOpen ? ' active' : ''}`}
             onClick={() => openOnly(fileMenuOpen ? null : 'file')}
-            title="File"
+            title={translateText("File")}
             aria-haspopup="menu"
             aria-expanded={fileMenuOpen}
           >
-            <span className="tb-text">File</span>
+            <span className="tb-text">{translateText("File")}</span>
             <Caret />
           </button>
-          <div className={`tb-menu tb-menu-with-shortcuts${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label="File">
+          <div className={`tb-menu tb-menu-with-shortcuts${fileMenuOpen ? ' open' : ''}`} role="menu" aria-label={translateText("File")}>
             <label className="tb-project-name-field">
-              <span>Project name</span>
+              <span>{translateText("Project name")}</span>
               <input
                 type="text"
                 value={projectName}
                 maxLength={120}
-                aria-label="Project name"
+                aria-label={translateText("Project name")}
                 onChange={(event) => onProjectNameChange?.(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter') return;
@@ -203,55 +206,47 @@ export default function TopBar({
             </label>
             <div className="tb-menu-divider" role="separator" />
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onNew)}>
-              <FileText size={14} strokeWidth={1.75} aria-hidden /> New terrain
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.newTerrain} className="tb-menu-shortcut" />
+              <FileText size={14} strokeWidth={1.75} aria-hidden />{translateText(" New terrain")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.newTerrain} className="tb-menu-shortcut" />
             </button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenProjects)}>
-              <FolderOpen size={14} strokeWidth={1.75} aria-hidden /> Projects
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.projects} className="tb-menu-shortcut" />
+              <FolderOpen size={14} strokeWidth={1.75} aria-hidden />{translateText(" Projects")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.projects} className="tb-menu-shortcut" />
             </button>
             <div className="tb-menu-divider" role="separator" />
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onSave)}>
-              <Save size={14} strokeWidth={1.75} aria-hidden /> Save
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.save} className="tb-menu-shortcut" />
+              <Save size={14} strokeWidth={1.75} aria-hidden />{translateText(" Save")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.save} className="tb-menu-shortcut" />
             </button>
             {onSaveAs && <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onSaveAs)}>
-              <Save size={14} strokeWidth={1.75} aria-hidden /> Save as…
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.saveAs} className="tb-menu-shortcut" />
+              <Save size={14} strokeWidth={1.75} aria-hidden />{translateText(" Save as…")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.saveAs} className="tb-menu-shortcut" />
             </button>}
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenDocument || (() => fileRef.current?.click()))}>
-              <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} /> Load
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.load} className="tb-menu-shortcut" />
+              <Icon d={['M2 4h4l1.5 2H14v7H2z', 'M8 12V8M8 8l-1.7 1.7M8 8l1.7 1.7']} />{translateText(" Load")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.load} className="tb-menu-shortcut" />
             </button>
             {recentDocuments.length > 0 && <>
               <div className="tb-menu-divider" role="separator" />
-              <div className="tb-menu-section-label">Recent files</div>
+              <div className="tb-menu-section-label">{translateText("Recent files")}</div>
               {recentDocuments.slice(0, 6).map((entry) => (
-                <button key={entry.path} type="button" role="menuitem" title={entry.path} onClick={() => runMenuAction(setFileMenuOpen, () => onOpenRecentDocument?.(entry.path))}>
+                <button key={entry.path} type="button" role="menuitem" title={translateText(entry.path)} onClick={() => runMenuAction(setFileMenuOpen, () => onOpenRecentDocument?.(entry.path))}>
                   <FolderOpen size={14} strokeWidth={1.75} aria-hidden /> {entry.name}
                 </button>
               ))}
             </>}
             <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onDownload)}>
-              <Download size={14} strokeWidth={1.75} aria-hidden /> Download
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.download} className="tb-menu-shortcut" />
+              <Download size={14} strokeWidth={1.75} aria-hidden />{translateText(" Download")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.download} className="tb-menu-shortcut" />
             </button>
             {canOpenInManual ? <>
               <div className="tb-menu-divider" role="separator" />
               <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onOpenInManual)}>
-                <Mountain size={14} strokeWidth={1.75} aria-hidden /> Open in Manual Terrain
-              </button>
+                <Mountain size={14} strokeWidth={1.75} aria-hidden />{translateText(" Open in Manual Terrain")}</button>
             </> : null}
             {canImportTerrain ? <>
               <div className="tb-menu-divider" role="separator" />
               <button type="button" role="menuitem" onClick={() => runMenuAction(setFileMenuOpen, onImportTerrain)}>
-                <FolderInput size={14} strokeWidth={1.75} aria-hidden /> Import terrain…
-              </button>
+                <FolderInput size={14} strokeWidth={1.75} aria-hidden />{translateText(" Import terrain…")}</button>
             </> : null}
           </div>
         </div>
-        {documentPath && <span className={`tb-document-state${documentDirty ? ' dirty' : ''}`} title={documentPath}>
-          {documentDirty ? '● Unsaved' : 'Saved'}
+        {documentPath && <span className={`tb-document-state${documentDirty ? ' dirty' : ''}`} title={translateText(documentPath)}>
+          {translateText(documentDirty ? '● Unsaved' : 'Saved')}
         </span>}
 
         <div className="tb-dropdown" ref={editMenuRef}>
@@ -259,29 +254,26 @@ export default function TopBar({
             type="button"
             className={`tb-btn tb-menu-btn${editMenuOpen ? ' active' : ''}`}
             onClick={() => openOnly(editMenuOpen ? null : 'edit')}
-            title="Edit"
+            title={translateText("Edit")}
             aria-haspopup="menu"
             aria-expanded={editMenuOpen}
           >
-            <span className="tb-text">Edit</span>
+            <span className="tb-text">{translateText("Edit")}</span>
             <Caret />
           </button>
-          <div className={`tb-menu tb-menu-with-shortcuts${editMenuOpen ? ' open' : ''}`} role="menu" aria-label="Edit">
-            <div className="tb-menu-section-label">Layout</div>
-            <button type="button" role="menuitem" disabled title="Preset options will be added next">
-              <LayoutTemplate size={14} strokeWidth={1.75} aria-hidden /> Default layout
-            </button>
-            <button type="button" role="menuitem" disabled title="Preset options will be added next">
-              <LayoutTemplate size={14} strokeWidth={1.75} aria-hidden /> Modular layout
-            </button>
+          <div className={`tb-menu tb-menu-with-shortcuts${editMenuOpen ? ' open' : ''}`} role="menu" aria-label={translateText("Edit")}>
+            <div className="tb-menu-section-label">{translateText("Layout")}</div>
+            <button type="button" role="menuitem" disabled title={translateText("Preset options will be added next")}>
+              <LayoutTemplate size={14} strokeWidth={1.75} aria-hidden />{translateText(" Default layout")}</button>
+            <button type="button" role="menuitem" disabled title={translateText("Preset options will be added next")}>
+              <LayoutTemplate size={14} strokeWidth={1.75} aria-hidden />{translateText(" Modular layout")}</button>
             <div className="tb-menu-divider" role="separator" />
             <button
               type="button"
               role="menuitem"
               onClick={() => runMenuAction(setEditMenuOpen, () => onOpenUiSettings?.())}
             >
-              <Settings size={14} strokeWidth={1.75} aria-hidden /> Settings
-              <ShortcutHint shortcut={EDITOR_SHORTCUTS.settings} className="tb-menu-shortcut" />
+              <Settings size={14} strokeWidth={1.75} aria-hidden />{translateText(" Settings")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.settings} className="tb-menu-shortcut" />
             </button>
             {projectMode === 'procedural' ? <>
               <div className="tb-menu-divider" role="separator" />
@@ -290,8 +282,7 @@ export default function TopBar({
                 role="menuitem"
                 onClick={() => runMenuAction(setEditMenuOpen, onRandomize)}
               >
-                <Dices size={14} strokeWidth={1.75} aria-hidden /> Random seed
-                <ShortcutHint shortcut={EDITOR_SHORTCUTS.randomSeed} className="tb-menu-shortcut" />
+                <Dices size={14} strokeWidth={1.75} aria-hidden />{translateText(" Random seed")}<ShortcutHint shortcut={EDITOR_SHORTCUTS.randomSeed} className="tb-menu-shortcut" />
               </button>
             </> : null}
           </div>
@@ -302,31 +293,29 @@ export default function TopBar({
             type="button"
             className={`tb-btn tb-menu-btn${viewMenuOpen ? ' active' : ''}`}
             onClick={() => openOnly(viewMenuOpen ? null : 'view')}
-            title="View"
+            title={translateText("View")}
             aria-haspopup="menu"
             aria-expanded={viewMenuOpen}
           >
-            <span className="tb-text">View</span>
+            <span className="tb-text">{translateText("View")}</span>
             <Caret />
           </button>
-          <div className={`tb-menu${viewMenuOpen ? ' open' : ''}`} role="menu" aria-label="View">
+          <div className={`tb-menu${viewMenuOpen ? ' open' : ''}`} role="menu" aria-label={translateText("View")}>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setViewMenuOpen, onResetView)}>
-              <RotateCcw size={14} strokeWidth={1.75} aria-hidden /> Reset camera
-            </button>
+              <RotateCcw size={14} strokeWidth={1.75} aria-hidden />{translateText(" Reset camera")}</button>
             <button
               type="button"
               role="menuitemcheckbox"
               aria-checked={cameraAutoRotate}
               className={cameraAutoRotate ? 'active' : ''}
-              title="Slowly rotate the camera around the terrain"
+              title={translateText("Slowly rotate the camera around the terrain")}
               onClick={() => runMenuAction(setViewMenuOpen, () => onCameraAutoRotate?.(!cameraAutoRotate))}
             >
-              <Orbit size={14} strokeWidth={1.75} aria-hidden /> Auto Rotate
-            </button>
+              <Orbit size={14} strokeWidth={1.75} aria-hidden />{translateText(" Auto Rotate")}</button>
             <button type="button" role="menuitem" onClick={() => runMenuAction(setViewMenuOpen, onTogglePreview)}>
               {previewMode
-                ? <><Eye size={14} strokeWidth={1.75} aria-hidden /> Show UI</>
-                : <><EyeOff size={14} strokeWidth={1.75} aria-hidden /> Hide UI</>}
+                ? <><Eye size={14} strokeWidth={1.75} aria-hidden />{translateText(" Show UI")}</>
+                : <><EyeOff size={14} strokeWidth={1.75} aria-hidden />{translateText(" Hide UI")}</>}
             </button>
             {projectMode === 'nodes' || projectMode === 'manual' ? <>
               <div className="tb-menu-divider" role="separator" />
@@ -335,29 +324,27 @@ export default function TopBar({
                 role="menuitemcheckbox"
                 aria-checked={nodeToolsVisible}
                 className={nodeToolsVisible ? 'active' : ''}
-                title="Show water, colors, clouds, lighting, export, and other standard tools"
+                title={translateText("Show water, colors, clouds, lighting, export, and other standard tools")}
                 onClick={() => runMenuAction(setViewMenuOpen, onToggleNodeTools)}
               >
-                {nodeToolsVisible ? <Eye size={14} strokeWidth={1.75} aria-hidden /> : <EyeOff size={14} strokeWidth={1.75} aria-hidden />}
-                Other tools
-              </button>
+                {nodeToolsVisible ? <Eye size={14} strokeWidth={1.75} aria-hidden /> : <EyeOff size={14} strokeWidth={1.75} aria-hidden />}{translateText("Other tools")}</button>
             </> : null}
           </div>
         </div>
 
-        <div className="tb-history" role="group" aria-label="History">
-          <button className="tb-btn tb-icon-btn" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+        <div className="tb-history" role="group" aria-label={translateText("History")}>
+          <button className="tb-btn tb-icon-btn" onClick={onUndo} disabled={!canUndo} title={translateText("Undo (Ctrl+Z)")} aria-label={translateText("Undo")}>
             <Undo2 size={14} strokeWidth={1.75} aria-hidden />
           </button>
           <button
             className={`tb-btn tb-icon-btn${activePanel === 'history' ? ' active' : ''}`}
             onClick={onOpenHistory}
-            title="Creator history"
-            aria-label="Creator history"
+            title={translateText("Creator history")}
+            aria-label={translateText("Creator history")}
           >
             <Clock3 size={14} strokeWidth={1.75} aria-hidden />
           </button>
-          <button className="tb-btn tb-icon-btn" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)" aria-label="Redo">
+          <button className="tb-btn tb-icon-btn" onClick={onRedo} disabled={!canRedo} title={translateText("Redo (Ctrl+Y)")} aria-label={translateText("Redo")}>
             <Redo2 size={14} strokeWidth={1.75} aria-hidden />
           </button>
         </div>
@@ -365,40 +352,41 @@ export default function TopBar({
 
       <div className="tb-group tb-center">
         {loading && (
-          <span className="tb-loading" title={loading.detail || loading.label}>
+          <span className="tb-loading" title={translateText(loading.detail || loading.label)}>
             <svg viewBox="0 0 24 24" width="14" height="14" className="tb-spin" aria-hidden>
               <circle cx="12" cy="12" r="9" fill="none" stroke="var(--border-subtle)" strokeWidth="2.5" />
               <path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
-            <span className="tb-text">{loading.label}</span>
+            <span className="tb-text">{translateText(loading.label)}</span>
           </span>
         )}
         {projectMode === 'manual' && manualBaseSource ? (
-          <div className="tb-workspace-switch" role="tablist" aria-label="Manual Terrain workspace">
-            <span><Mountain size={13} aria-hidden /> Manual · {manualBaseSource === 'nodes' ? 'Nodes' : 'Procedural'}</span>
-            <button type="button" role="tab" aria-selected={manualWorkspace === 'base'} className={manualWorkspace === 'base' ? 'active' : ''} onClick={() => onManualWorkspace?.('base')}>Base</button>
-            <button type="button" role="tab" aria-selected={manualWorkspace === 'manual'} className={manualWorkspace === 'manual' ? 'active' : ''} onClick={() => onManualWorkspace?.('manual')}>Manual</button>
+          <div className="tb-workspace-switch" role="tablist" aria-label={translateText("Manual Terrain workspace")}>
+            <span><Mountain size={13} aria-hidden />{translateText(" Manual · ")}{translateText(manualBaseSource === 'nodes' ? 'Nodes' : 'Procedural')}</span>
+            <button type="button" role="tab" aria-selected={manualWorkspace === 'base'} className={manualWorkspace === 'base' ? 'active' : ''} onClick={() => onManualWorkspace?.('base')}>{translateText("Base")}</button>
+            <button type="button" role="tab" aria-selected={manualWorkspace === 'manual'} className={manualWorkspace === 'manual' ? 'active' : ''} onClick={() => onManualWorkspace?.('manual')}>{translateText("Manual")}</button>
           </div>
         ) : projectMode === 'nodes' ? (
-          <span className="tb-workspace-pill"><Boxes size={13} aria-hidden /> Nodes workspace</span>
+          <span className="tb-workspace-pill"><Boxes size={13} aria-hidden />{translateText(" Nodes workspace")}</span>
         ) : projectMode === 'manual' ? (
-          <span className="tb-workspace-pill"><Mountain size={13} aria-hidden /> Manual Terrain</span>
+          <span className="tb-workspace-pill"><Mountain size={13} aria-hidden />{translateText(" Manual Terrain")}</span>
         ) : (
           <button
             type="button"
             className={`tb-btn tb-search-btn${settingsSearchOpen ? ' active' : ''}`}
             onClick={onOpenSettingsSearch}
-            title={`Search settings (${shortcutText(SEARCH_SETTINGS_SHORTCUT)})`}
+            title={translateText(`Search settings (${shortcutText(SEARCH_SETTINGS_SHORTCUT)})`)}
             aria-pressed={settingsSearchOpen}
           >
             <Search size={13} strokeWidth={1.75} aria-hidden />
-            <span className="tb-text">Search settings</span>
+            <span className="tb-text">{translateText("Search settings")}</span>
             <ShortcutHint shortcut={SEARCH_SETTINGS_SHORTCUT} className="tb-shortcut" />
           </button>
         )}
       </div>
 
       <div className="tb-group tb-right">
+        <LanguageSwitch />
         <NotificationCenter
           recent={recentNotifications}
           notificationsIgnored={notificationsIgnored}
@@ -408,15 +396,15 @@ export default function TopBar({
         <button
           className={`tb-btn primary${activePanel === 'export' ? ' active' : ''}`}
           onClick={() => onOpenPanel('export')}
-          title="Export the scene"
+          title={translateText("Export the scene")}
         >
           <Download size={14} strokeWidth={1.75} aria-hidden />
-          <span className="tb-text">Export</span>
+          <span className="tb-text">{translateText("Export")}</span>
         </button>
-        <button className="tb-btn tb-icon-btn" onClick={onToggleHelp} title="Show controls help" aria-label="Help">
+        <button className="tb-btn tb-icon-btn" onClick={onToggleHelp} title={translateText("Show controls help")} aria-label={translateText("Help")}>
           <HelpCircle size={14} strokeWidth={1.75} aria-hidden />
         </button>
-        <span className="app-version">v{APP_VERSION}</span>
+        <span className="app-version">{translateText("v")}{translateText(APP_VERSION)}</span>
       </div>
 
       <input type="file" ref={fileRef} accept=".ptrterrain,application/json" hidden onChange={onFile} />

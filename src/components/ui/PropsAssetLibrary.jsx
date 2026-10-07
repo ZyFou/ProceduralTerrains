@@ -1,3 +1,5 @@
+import { matchesTranslatedSearch } from '../../i18n/language.js';
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
@@ -29,6 +31,7 @@ const PROP_TYPE_ICONS = {
 const propTypeLabel = (type) => PROP_ASSET_TYPES.find((entry) => entry.id === type)?.label || type;
 
 function PropTypeIcon({ type, color, compact = false }) {
+  useLanguage();
   const Icon = PROP_TYPE_ICONS[type] || Sprout;
   return (
     <span className={`prop-type-icon${compact ? ' compact' : ''}`} style={{ color }} aria-hidden>
@@ -84,6 +87,7 @@ function uniqueId(assets, prefix) {
 }
 
 function Preview({ asset }) {
+  useLanguage();
   const hostRef = useRef(null);
   const sceneRef = useRef(null);
 
@@ -203,8 +207,8 @@ function Preview({ asset }) {
   };
 
   return (
-    <div ref={hostRef} className="prop-asset-preview" aria-label={`3D preview of ${asset?.name || 'prop'}`}>
-      <button type="button" className="prop-preview-reset" onClick={resetView} title="Reset preview rotation" aria-label="Reset preview rotation">
+    <div ref={hostRef} className="prop-asset-preview" aria-label={translateText(`3D preview of ${asset?.name || 'prop'}`)}>
+      <button type="button" className="prop-preview-reset" onClick={resetView} title={translateText("Reset preview rotation")} aria-label={translateText("Reset preview rotation")}>
         <RotateCcw size={14} strokeWidth={1.8} aria-hidden />
       </button>
     </div>
@@ -212,9 +216,10 @@ function Preview({ asset }) {
 }
 
 function MiniSlider({ label, value, min, max, step, onChange }) {
+  useLanguage();
   return (
     <label className="prop-asset-slider">
-      <span>{label}<output>{Number(value).toFixed(2)}</output></span>
+      <span>{translateText(label)}<output>{translateText(Number(value).toFixed(2))}</output></span>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={(event) => onChange(Number(event.target.value))} />
     </label>
@@ -231,6 +236,7 @@ function fileAsDataUrl(file) {
 }
 
 export default function PropsAssetLibrary({ value, onChange }) {
+  const { language } = useLanguage();
   const assets = useMemo(() => normalizePropAssetLibrary(value), [value]);
   const [selectedId, setSelectedId] = useState(assets[0]?.id || null);
   const [pickerMode, setPickerMode] = useState(null);
@@ -246,8 +252,8 @@ export default function PropsAssetLibrary({ value, onChange }) {
   const filteredAssets = useMemo(() => {
     const query = assetQuery.trim().toLowerCase();
     if (!query) return assets;
-    return assets.filter((asset) => `${asset.name} ${asset.type} ${propTypeLabel(asset.type)}`.toLowerCase().includes(query));
-  }, [assetQuery, assets]);
+    return assets.filter((asset) => matchesTranslatedSearch(query, asset.name, asset.type, propTypeLabel(asset.type)));
+  }, [assetQuery, assets, language]);
   const selectedFilteredIndex = filteredAssets.findIndex((asset) => asset.id === selected?.id);
   const visibleAssets = useMemo(() => {
     const firstPage = filteredAssets.slice(0, visibleAssetCount);
@@ -260,8 +266,8 @@ export default function PropsAssetLibrary({ value, onChange }) {
   const filteredPresets = useMemo(() => {
     const query = presetQuery.trim().toLowerCase();
     if (!query) return PROP_ASSET_PRESETS;
-    return PROP_ASSET_PRESETS.filter((preset) => `${preset.name} ${preset.type} ${propTypeLabel(preset.type)}`.toLowerCase().includes(query));
-  }, [presetQuery]);
+    return PROP_ASSET_PRESETS.filter((preset) => matchesTranslatedSearch(query, preset.name, preset.type, propTypeLabel(preset.type)));
+  }, [presetQuery, language]);
 
   useEffect(() => {
     if (!selected && assets[0]) setSelectedId(assets[0].id);
@@ -347,21 +353,21 @@ export default function PropsAssetLibrary({ value, onChange }) {
     <div className="prop-asset-library" data-setting-id="props.assetLibrary">
       <div className="prop-library-toolbar">
         <button type="button" className="action-btn primary" onClick={() => togglePicker('add')}>
-          {pickerMode === 'add' ? 'Close' : <><Plus size={13} aria-hidden /> Add preset</>}
+          {pickerMode === 'add' ? 'Close' : <><Plus size={13} aria-hidden />{translateText(" Add preset")}</>}
         </button>
         <button type="button" className="action-btn prop-import-button" disabled={importing}
           onClick={() => fileInputRef.current?.click()}>
-          <Upload size={13} aria-hidden /> {importing ? 'Importing…' : 'Import 3D'}
+          <Upload size={13} aria-hidden /> {translateText(importing ? 'Importing…' : 'Import 3D')}
         </button>
         <input ref={fileInputRef} className="prop-model-file-input" type="file"
           accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" onChange={importModel} />
-        <button type="button" className="icon-btn" disabled={!selected} onClick={() => togglePicker('replace')} title="Replace selected asset">
+        <button type="button" className="icon-btn" disabled={!selected} onClick={() => togglePicker('replace')} title={translateText("Replace selected asset")}>
           <RefreshCw size={14} aria-hidden />
         </button>
-        <button type="button" className="icon-btn" disabled={!selected} onClick={duplicate} title="Duplicate selected asset">
+        <button type="button" className="icon-btn" disabled={!selected} onClick={duplicate} title={translateText("Duplicate selected asset")}>
           <Copy size={14} aria-hidden />
         </button>
-        <button type="button" className="icon-btn danger" disabled={!selected} onClick={remove} title="Remove selected asset">
+        <button type="button" className="icon-btn danger" disabled={!selected} onClick={remove} title={translateText("Remove selected asset")}>
           <Trash2 size={14} aria-hidden />
         </button>
       </div>
@@ -369,7 +375,7 @@ export default function PropsAssetLibrary({ value, onChange }) {
       {pickerMode && (
         <div className="prop-preset-picker">
           <div className="prop-preset-picker-head">
-            <strong>{pickerMode === 'replace' ? 'Replace asset' : 'Add asset'}</strong>
+            <strong>{translateText(pickerMode === 'replace' ? 'Replace asset' : 'Add asset')}</strong>
           </div>
           <label className="prop-search-field prop-preset-search">
             <Search size={13} aria-hidden />
@@ -377,32 +383,32 @@ export default function PropsAssetLibrary({ value, onChange }) {
               type="search"
               value={presetQuery}
               onChange={(event) => setPresetQuery(event.target.value)}
-              placeholder="Search asset presets…"
-              aria-label="Search asset presets"
+              placeholder={translateText("Search asset presets…")}
+              aria-label={translateText("Search asset presets")}
             />
           </label>
           <div className="prop-preset-grid">
             {filteredPresets.map((preset) => (
               <button key={preset.id} type="button" onClick={() => choosePreset(preset)}>
                 <PropTypeIcon type={preset.type} color={preset.color} compact />
-                <span>{preset.name}</span>
-                <small>{propTypeLabel(preset.type)}</small>
+                <span>{translateText(preset.name)}</span>
+                <small>{translateText(propTypeLabel(preset.type))}</small>
               </button>
             ))}
-            {!filteredPresets.length && <p className="prop-library-empty">No matching presets.</p>}
+            {!filteredPresets.length && <p className="prop-library-empty">{translateText("No matching presets.")}</p>}
           </div>
         </div>
       )}
 
       <div className="prop-library-list-header">
-        <span>Library</span>
-        <small>{assetCountLabel}</small>
+        <span>{translateText("Library")}</span>
+        <small>{translateText(assetCountLabel)}</small>
       </div>
 
       {importError && (
         <div className="prop-import-error" role="alert">
-          <span>{importError}</span>
-          <button type="button" onClick={() => setImportError('')} aria-label="Dismiss import error"><X size={12} /></button>
+          <span>{translateText(importError)}</span>
+          <button type="button" onClick={() => setImportError('')} aria-label={translateText("Dismiss import error")}><X size={12} /></button>
         </div>
       )}
       <label className="prop-search-field">
@@ -411,71 +417,70 @@ export default function PropsAssetLibrary({ value, onChange }) {
           type="search"
           value={assetQuery}
           onChange={(event) => setAssetQuery(event.target.value)}
-          placeholder="Search your assets…"
-          aria-label="Search your prop assets"
+          placeholder={translateText("Search your assets…")}
+          aria-label={translateText("Search your prop assets")}
         />
       </label>
-      <div className="prop-asset-strip" role="listbox" aria-label="Terrain prop assets">
+      <div className="prop-asset-strip" role="listbox" aria-label={translateText("Terrain prop assets")}>
         {visibleAssets.map((asset) => (
           <button key={asset.id} type="button" role="option" aria-selected={asset.id === selected?.id}
             className={`prop-asset-card${asset.id === selected?.id ? ' active' : ''}${asset.enabled ? '' : ' disabled'}`}
             onClick={() => setSelectedId(asset.id)}>
             <PropTypeIcon type={asset.type} color={asset.color} />
             <span>{asset.name}</span>
-            <small>{asset.model ? `Imported · ${propTypeLabel(asset.type)}` : propTypeLabel(asset.type)}</small>
+            <small>{translateText(asset.model ? `Imported · ${propTypeLabel(asset.type)}` : propTypeLabel(asset.type))}</small>
           </button>
         ))}
-        {!assets.length && <p className="prop-library-empty">No assets. Add a preset to populate the terrain.</p>}
-        {!!assets.length && !filteredAssets.length && <p className="prop-library-empty">No matching assets.</p>}
+        {!assets.length && <p className="prop-library-empty">{translateText("No assets. Add a preset to populate the terrain.")}</p>}
+        {!!assets.length && !filteredAssets.length && <p className="prop-library-empty">{translateText("No matching assets.")}</p>}
       </div>
       {hasMoreAssets && (
         <button
           type="button"
           className="action-btn prop-load-more"
           onClick={() => setVisibleAssetCount((count) => count + 80)}
-        >
-          Show more <span>({filteredAssets.length - visibleAssetCount} remaining)</span>
+        >{translateText("Show more ")}<span>({translateText(filteredAssets.length - visibleAssetCount)}{translateText(" remaining)")}</span>
         </button>
       )}
 
       {selected && (
         <>
           <Preview asset={selected} />
-          <p className="prop-preview-hint"><Move3D size={11} aria-hidden /> Drag vertically and horizontally to rotate</p>
+          <p className="prop-preview-hint"><Move3D size={11} aria-hidden />{translateText(" Drag vertically and horizontally to rotate")}</p>
           <div className="prop-asset-editor">
             {selected.model && (
               <div className="prop-model-source">
-                <span><strong>3D model</strong><small title={selected.model.name}>{selected.model.name}</small></span>
-                <button type="button" className="icon-btn danger" title="Use the built-in mesh instead"
-                  aria-label="Remove imported model" onClick={() => patchSelected({ model: null })}>
+                <span><strong>{translateText("3D model")}</strong><small title={selected.model.name}>{selected.model.name}</small></span>
+                <button type="button" className="icon-btn danger" title={translateText("Use the built-in mesh instead")}
+                  aria-label={translateText("Remove imported model")} onClick={() => patchSelected({ model: null })}>
                   <Trash2 size={13} aria-hidden />
                 </button>
               </div>
             )}
             <label className="prop-asset-name">
-              <span>Name</span>
+              <span>{translateText("Name")}</span>
               <input value={nameDraft} maxLength={48} onChange={(event) => setNameDraft(event.target.value)}
                 onBlur={commitName} onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()} />
             </label>
             <label className="prop-asset-name">
-              <span>Category</span>
+              <span>{translateText("Category")}</span>
               <select value={selected.type} onChange={(event) => patchSelected({ type: event.target.value })}>
-                {PROP_ASSET_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
+                {PROP_ASSET_TYPES.map((type) => <option key={type.id} value={type.id}>{translateText(type.label)}</option>)}
               </select>
             </label>
             <label className="prop-asset-enabled">
               <input type="checkbox" checked={selected.enabled} onChange={(event) => patchSelected({ enabled: event.target.checked })} />
-              <span>Use in terrain scattering</span>
+              <span>{translateText("Use in terrain scattering")}</span>
             </label>
             <label className="prop-asset-color">
-              <span>Tint</span>
+              <span>{translateText("Tint")}</span>
               <input type="color" value={selected.color} onChange={(event) => patchSelected({ color: event.target.value })} />
               <code>{selected.color.toUpperCase()}</code>
             </label>
-            <MiniSlider label="Mix weight" value={selected.density} min={0} max={2} step={0.05} onChange={(density) => patchSelected({ density })} />
-            <MiniSlider label="Overall scale" value={selected.scale} min={0.25} max={2.5} step={0.05} onChange={(scale) => patchSelected({ scale })} />
-            <MiniSlider label="Width" value={selected.width} min={0.5} max={1.6} step={0.01} onChange={(width) => patchSelected({ width })} />
-            <MiniSlider label="Height" value={selected.height} min={0.5} max={1.6} step={0.01} onChange={(height) => patchSelected({ height })} />
+            <MiniSlider label={translateText("Mix weight")} value={selected.density} min={0} max={2} step={0.05} onChange={(density) => patchSelected({ density })} />
+            <MiniSlider label={translateText("Overall scale")} value={selected.scale} min={0.25} max={2.5} step={0.05} onChange={(scale) => patchSelected({ scale })} />
+            <MiniSlider label={translateText("Width")} value={selected.width} min={0.5} max={1.6} step={0.01} onChange={(width) => patchSelected({ width })} />
+            <MiniSlider label={translateText("Height")} value={selected.height} min={0.5} max={1.6} step={0.01} onChange={(height) => patchSelected({ height })} />
           </div>
         </>
       )}

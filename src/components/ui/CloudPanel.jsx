@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useContext } from 'react';
 import ControlSection from './ControlSection.jsx';
 import { FlatPanelContext } from '../panels/PanelContext.js';
@@ -81,6 +82,7 @@ export default function CloudPanel({
   id = 'inspector-clouds',
   defaultOpen = false,
 }) {
+  useLanguage();
   const flat = useContext(FlatPanelContext);
   const enabled = !!params.cloudsEnabled;
   const distInfo = worldMode === 'planet'
@@ -115,10 +117,10 @@ export default function CloudPanel({
   const content = (
     <>
       <ToggleRow
-        label="Enable Clouds"
+        label={translateText("Enable Clouds")}
         value={enabled}
         onChange={(v) => onParam('cloudsEnabled', v)}
-        info={enableInfo}
+        info={translateText(enableInfo)}
         settingId="clouds.cloudsEnabled"
       />
 
@@ -126,7 +128,7 @@ export default function CloudPanel({
         <>
           <ControlSection
             id={`${id}-shape`}
-            title="Shape"
+            title={translateText("Shape")}
             defaultOpen
             settingId="clouds.section.shape"
             forceOpen={forceSection('clouds.section.shape', 'Shape', ['clouds.cloudCoverage', 'clouds.cloudDensity', 'clouds.cloudSoftness'])}
@@ -138,7 +140,7 @@ export default function CloudPanel({
 
           <ControlSection
             id={`${id}-shell`}
-            title="Shell"
+            title={translateText("Shell")}
             defaultOpen={false}
             settingId="clouds.section.shell"
             forceOpen={forceSection('clouds.section.shell', 'Shell', ['clouds.cloudAltitude', 'clouds.cloudThickness'])}
@@ -150,7 +152,7 @@ export default function CloudPanel({
 
           <ControlSection
             id={`${id}-noise`}
-            title="Noise"
+            title={translateText("Noise")}
             defaultOpen={false}
             settingId="clouds.section.noise"
             forceOpen={forceSection('clouds.section.noise', 'Noise', ['clouds.cloudScale', 'clouds.cloudDetail', 'clouds.cloudErosion'])}
@@ -162,7 +164,7 @@ export default function CloudPanel({
 
           <ControlSection
             id={`${id}-motion`}
-            title="Motion"
+            title={translateText("Motion")}
             defaultOpen={false}
             settingId="clouds.section.motion"
             forceOpen={forceSection('clouds.section.motion', 'Motion', ['clouds.cloudWind', 'clouds.cloudRotation', 'clouds.cloudEvolve'])}
@@ -174,7 +176,7 @@ export default function CloudPanel({
 
           <ControlSection
             id={`${id}-lighting`}
-            title="Lighting"
+            title={translateText("Lighting")}
             defaultOpen={false}
             settingId="clouds.section.lighting"
             forceOpen={forceSection('clouds.section.lighting', 'Lighting', ['clouds.cloudLight', 'clouds.cloudShadow', 'clouds.cloudScattering', 'clouds.cloudColor', 'performance.cloudSelfShadow'])}
@@ -184,8 +186,8 @@ export default function CloudPanel({
             ))}
             {COLOR_FIELDS.map(({ key, label, info, def }) => (
               <div className="color-field" key={key} data-setting-id={`clouds.${key}`}>
-                <div className="label-with-icon" data-tooltip={info}>
-                  <span className="setting-label">{label}</span>
+                <div className="label-with-icon" data-tooltip={translateText(info)}>
+                  <span className="setting-label">{translateText(label)}</span>
                 </div>
                 <ColorInput
                   value={colorToHex(val(params, key) ?? def)}
@@ -194,43 +196,43 @@ export default function CloudPanel({
               </div>
             ))}
             <ToggleRow
-              label="Self Shadowing"
+              label={translateText("Self Shadowing")}
               value={p.cloudSelfShadow !== false}
               onChange={(v) => onPerfSetting('cloudSelfShadow', v)}
-              info="Secondary sun-direction march for soft self-shadowing (costlier). Shared with Performance settings."
+              info={translateText("Secondary sun-direction march for soft self-shadowing (costlier). Shared with Performance settings.")}
               settingId="performance.cloudSelfShadow"
             />
           </ControlSection>
 
           <ControlSection
             id={`${id}-performance`}
-            title="Performance"
+            title={translateText("Performance")}
             defaultOpen={false}
             settingId="clouds.section.performance"
             forceOpen={forceSection('clouds.section.performance', 'Performance', ['performance.cloudSteps', 'performance.cloudFallback', 'performance.cloudMaxDistance'])}
           >
             <SelectRow
-              label="Resolution"
+              label={translateText("Resolution")}
               value={resolutionName}
               options={RESOLUTION_OPTIONS}
               onChange={handleResolutionChange}
-              info="Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings."
+              info={translateText("Raymarch step count. Higher = smoother clouds, lower FPS. Shared with Performance settings.")}
               settingId="performance.cloudSteps"
             />
             <SelectRow
-              label="Render Scale"
+              label={translateText("Render Scale")}
               value={String(p.cloudRenderScale ?? 1)}
               options={RENDER_SCALE_OPTIONS}
               onChange={(v) => onPerfSetting('cloudRenderScale', parseFloat(v))}
-              info="Render clouds at lower resolution, then upscale with a depth-aware (bilateral) filter. Big FPS win since clouds are fill-rate bound; edges stay crisp against terrain and noise is smoothed. Shared with Performance settings."
+              info={translateText("Render clouds at lower resolution, then upscale with a depth-aware (bilateral) filter. Big FPS win since clouds are fill-rate bound; edges stay crisp against terrain and noise is smoothed. Shared with Performance settings.")}
               settingId="performance.cloudRenderScale"
             />
             <SelectRow
-              label="Fallback Mode"
+              label={translateText("Fallback Mode")}
               value={p.cloudFallback ?? 'none'}
               options={FALLBACK_OPTIONS}
               onChange={(v) => onPerfSetting('cloudFallback', v)}
-              info="Safe modes for weaker devices: Lite caps steps and disables self-shadowing; Off hides clouds."
+              info={translateText("Safe modes for weaker devices: Lite caps steps and disables self-shadowing; Off hides clouds.")}
               settingId="performance.cloudFallback"
             />
             {worldMode !== 'infinite' && (
@@ -252,7 +254,7 @@ export default function CloudPanel({
   return (
     <ControlSection
       id={id}
-      title="CLOUDS"
+      title={translateText("CLOUDS")}
       defaultOpen={defaultOpen}
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
@@ -260,7 +262,7 @@ export default function CloudPanel({
         </svg>
       )}
     >
-      {content}
+      {translateText(content)}
     </ControlSection>
   );
 }

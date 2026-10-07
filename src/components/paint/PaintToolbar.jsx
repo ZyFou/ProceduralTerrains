@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { Mountain, Waves, Minus, Droplet, Palette, Sprout, Eraser, SlidersHorizontal } from 'lucide-react';
 
 const ICON_SIZE = 19;
@@ -18,20 +19,21 @@ export const PAINT_TOOLS = [
 // toolbar-btn visual language, but drives the paint-specific tool tabs
 // instead of the global panel registry.
 export default function PaintToolbar({ activeTool, onSelect }) {
+  useLanguage();
   return (
-    <nav className="paint-toolbar" aria-label="Paint Tools">
+    <nav className="paint-toolbar" aria-label={translateText("Paint Tools")}>
       {PAINT_TOOLS.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
           type="button"
           className={`toolbar-btn${activeTool === id ? ' active' : ''}`}
-          title={label}
-          aria-label={label}
+          title={translateText(label)}
+          aria-label={translateText(label)}
           aria-pressed={activeTool === id}
           onClick={() => onSelect(id)}
         >
           <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden />
-          <span className="toolbar-btn-label">{label}</span>
+          <span className="toolbar-btn-label">{translateText(label)}</span>
         </button>
       ))}
     </nav>

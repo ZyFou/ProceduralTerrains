@@ -2,15 +2,18 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import Root from './Root.jsx';
 import { LoadingProvider } from './state/loading.jsx';
+import { LanguageProvider } from './i18n/LanguageContext.jsx';
 import './cursors.css';
 import './styles.css';
 
 // No StrictMode on purpose: its dev double-mount would create (and tear down)
 // a second WebGL context + full terrain board on every load.
 createRoot(document.getElementById('root')).render(
-  <LoadingProvider>
-    <Root />
-  </LoadingProvider>,
+  <LanguageProvider>
+    <LoadingProvider>
+      <Root />
+    </LoadingProvider>
+  </LanguageProvider>,
 );
 
 // Fade out the instant first-paint splash (index.html) once React has mounted.

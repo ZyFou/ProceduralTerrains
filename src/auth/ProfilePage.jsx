@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Camera, Eye, Globe2, KeyRound, Lock, Save, Trash2, UserRound } from 'lucide-react';
 import { avatarUrl } from './authApi.js';
@@ -8,6 +9,7 @@ const MAX_AVATAR_BYTES = 1_048_576;
 const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export default function ProfilePage({ onBack }) {
+  useLanguage();
   const { user, updateProfile, updateAvatar, removeAvatar, changePassword } = useAuth();
   const { showPopup } = usePopup();
   const fileRef = useRef(null);
@@ -118,17 +120,17 @@ export default function ProfilePage({ onBack }) {
 
   const field = (name, label, props = {}) => (
     <label className={`auth-field${detailsErrors[name] ? ' has-error' : ''}`}>
-      <span>{label}</span>
+      <span>{translateText(label)}</span>
       <input name={name} value={details[name]} onChange={changeDetails} disabled={busy === 'details'} aria-invalid={!!detailsErrors[name]} {...props} />
-      {detailsErrors[name] && <small>{detailsErrors[name]}</small>}
+      {detailsErrors[name] && <small>{translateText(detailsErrors[name])}</small>}
     </label>
   );
 
   const passwordField = (name, label, autoComplete) => (
     <label className={`auth-field${passwordErrors[name] ? ' has-error' : ''}`}>
-      <span>{label}</span>
+      <span>{translateText(label)}</span>
       <input type="password" name={name} value={passwords[name]} onChange={changePasswords} autoComplete={autoComplete} minLength={name === 'currentPassword' ? undefined : 10} maxLength={128} required disabled={busy === 'password'} aria-invalid={!!passwordErrors[name]} />
-      {passwordErrors[name] && <small>{passwordErrors[name]}</small>}
+      {passwordErrors[name] && <small>{translateText(passwordErrors[name])}</small>}
     </label>
   );
 
@@ -137,55 +139,55 @@ export default function ProfilePage({ onBack }) {
 
   return (
     <section className="profile-page" aria-labelledby="profile-title">
-      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} /> Back to projects</button>
+      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft size={14} />{translateText(" Back to projects")}</button>
       <header className="profile-heading">
-        <div><span>Account settings</span><h1 id="profile-title">Your profile</h1><p>Manage how you appear and set defaults for projects you create.</p></div>
+        <div><span>{translateText("Account settings")}</span><h1 id="profile-title">{translateText("Your profile")}</h1><p>{translateText("Manage how you appear and set defaults for projects you create.")}</p></div>
       </header>
 
       <div className="profile-grid">
         <section className="profile-card profile-avatar-card">
-          <header><Camera size={16} /><div><h2>Profile picture</h2><p>PNG, JPEG or WebP, up to 1 MB.</p></div></header>
+          <header><Camera size={16} /><div><h2>{translateText("Profile picture")}</h2><p>{translateText("PNG, JPEG or WebP, up to 1 MB.")}</p></div></header>
           <div className="profile-avatar-row">
-            <span className="profile-avatar">{picture ? <img src={picture} alt="Your profile" /> : initials}</span>
+            <span className="profile-avatar">{picture ? <img src={picture} alt={translateText("Your profile")} /> : initials}</span>
             <div className="profile-avatar-actions">
-              <button type="button" className="lp-primary sm" onClick={() => fileRef.current?.click()} disabled={busy === 'avatar'}><Camera size={13} /> {picture ? 'Replace' : 'Upload'}</button>
-              {picture && <button type="button" className="profile-danger-button" onClick={deleteAvatar} disabled={busy === 'avatar'}><Trash2 size={13} /> Remove</button>}
+              <button type="button" className="lp-primary sm" onClick={() => fileRef.current?.click()} disabled={busy === 'avatar'}><Camera size={13} /> {translateText(picture ? 'Replace' : 'Upload')}</button>
+              {picture && <button type="button" className="profile-danger-button" onClick={deleteAvatar} disabled={busy === 'avatar'}><Trash2 size={13} />{translateText(" Remove")}</button>}
             </div>
             <input ref={fileRef} className="profile-file-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseAvatar} />
           </div>
         </section>
 
         <section className="profile-card profile-details-card">
-          <header><UserRound size={16} /><div><h2>Profile information</h2><p>Your public identity and project defaults.</p></div></header>
+          <header><UserRound size={16} /><div><h2>{translateText("Profile information")}</h2><p>{translateText("Your public identity and project defaults.")}</p></div></header>
           <form onSubmit={saveDetails} noValidate>
             <div className="profile-field-grid">
-              {field('username', 'Username', { type: 'text', autoComplete: 'username', minLength: 3, maxLength: 32, required: true })}
-              {field('displayName', 'Display name', { type: 'text', autoComplete: 'name', maxLength: 80, placeholder: 'Terrain artist' })}
+              {translateText(field('username', 'Username', { type: 'text', autoComplete: 'username', minLength: 3, maxLength: 32, required: true }))}
+              {translateText(field('displayName', 'Display name', { type: 'text', autoComplete: 'name', maxLength: 80, placeholder: 'Terrain artist' }))}
             </div>
-            <label className="auth-field"><span>Email</span><input value={user?.email ?? ''} type="email" readOnly aria-readonly="true" /><small className="profile-field-note">Email changes are not available yet.</small></label>
-            {field('websiteUrl', 'Website', { type: 'url', autoComplete: 'url', maxLength: 2048, placeholder: 'https://example.com' })}
+            <label className="auth-field"><span>{translateText("Email")}</span><input value={user?.email ?? ''} type="email" readOnly aria-readonly="true" /><small className="profile-field-note">{translateText("Email changes are not available yet.")}</small></label>
+            {translateText(field('websiteUrl', 'Website', { type: 'url', autoComplete: 'url', maxLength: 2048, placeholder: 'https://example.com' }))}
             <fieldset className={`profile-visibility${detailsErrors.defaultProjectVisibility ? ' has-error' : ''}`}>
-              <legend>Default project visibility</legend>
+              <legend>{translateText("Default project visibility")}</legend>
               <div className="profile-visibility-options">
-                <label><input type="radio" name="defaultProjectVisibility" value="private" checked={details.defaultProjectVisibility === 'private'} onChange={changeDetails} disabled={busy === 'details'} /><Lock size={14} /><span><strong>Private</strong><small>Only you can access it.</small></span></label>
-                <label><input type="radio" name="defaultProjectVisibility" value="unlisted" checked={details.defaultProjectVisibility === 'unlisted'} onChange={changeDetails} disabled={busy === 'details'} /><Eye size={14} /><span><strong>Unlisted</strong><small>Anyone with its link can open it.</small></span></label>
-                <label><input type="radio" name="defaultProjectVisibility" value="public" checked={details.defaultProjectVisibility === 'public'} onChange={changeDetails} disabled={busy === 'details'} /><Globe2 size={14} /><span><strong>Public</strong><small>Visible to everyone.</small></span></label>
+                <label><input type="radio" name="defaultProjectVisibility" value="private" checked={details.defaultProjectVisibility === 'private'} onChange={changeDetails} disabled={busy === 'details'} /><Lock size={14} /><span><strong>{translateText("Private")}</strong><small>{translateText("Only you can access it.")}</small></span></label>
+                <label><input type="radio" name="defaultProjectVisibility" value="unlisted" checked={details.defaultProjectVisibility === 'unlisted'} onChange={changeDetails} disabled={busy === 'details'} /><Eye size={14} /><span><strong>{translateText("Unlisted")}</strong><small>{translateText("Anyone with its link can open it.")}</small></span></label>
+                <label><input type="radio" name="defaultProjectVisibility" value="public" checked={details.defaultProjectVisibility === 'public'} onChange={changeDetails} disabled={busy === 'details'} /><Globe2 size={14} /><span><strong>{translateText("Public")}</strong><small>{translateText("Visible to everyone.")}</small></span></label>
               </div>
-              {detailsErrors.defaultProjectVisibility && <small>{detailsErrors.defaultProjectVisibility}</small>}
+              {detailsErrors.defaultProjectVisibility && <small>{translateText(detailsErrors.defaultProjectVisibility)}</small>}
             </fieldset>
-            <button type="submit" className="lp-primary profile-save" disabled={busy === 'details'}><Save size={14} /> {busy === 'details' ? 'Saving...' : 'Save profile'}</button>
+            <button type="submit" className="lp-primary profile-save" disabled={busy === 'details'}><Save size={14} /> {translateText(busy === 'details' ? 'Saving...' : 'Save profile')}</button>
           </form>
         </section>
 
         <section className="profile-card profile-security-card">
-          <header><KeyRound size={16} /><div><h2>Password</h2><p>Changing it signs out your other active sessions.</p></div></header>
+          <header><KeyRound size={16} /><div><h2>{translateText("Password")}</h2><p>{translateText("Changing it signs out your other active sessions.")}</p></div></header>
           <form onSubmit={savePassword} noValidate>
-            {passwordField('currentPassword', 'Current password', 'current-password')}
+            {translateText(passwordField('currentPassword', 'Current password', 'current-password'))}
             <div className="profile-field-grid">
-              {passwordField('newPassword', 'New password', 'new-password')}
-              {passwordField('confirmPassword', 'Confirm new password', 'new-password')}
+              {translateText(passwordField('newPassword', 'New password', 'new-password'))}
+              {translateText(passwordField('confirmPassword', 'Confirm new password', 'new-password'))}
             </div>
-            <button type="submit" className="lp-secondary profile-save" disabled={busy === 'password'}><KeyRound size={14} /> {busy === 'password' ? 'Changing...' : 'Change password'}</button>
+            <button type="submit" className="lp-secondary profile-save" disabled={busy === 'password'}><KeyRound size={14} /> {translateText(busy === 'password' ? 'Changing...' : 'Change password')}</button>
           </form>
         </section>
       </div>

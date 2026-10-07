@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DrawerChromeContext, FlatPanelContext } from '../panels/PanelContext.js';
 import { renderPanel } from '../panels/index.jsx';
@@ -19,6 +20,7 @@ export default function SideDrawer({
   shellRef,
   toolsRailEdge = 'left',
 }) {
+  useLanguage();
   const [tooltip, setTooltip] = useState(null);
   const [desktop, setDesktop] = useState(isToolsRailDesktopLayout);
   const [dragging, setDragging] = useState(false);
@@ -197,7 +199,7 @@ export default function SideDrawer({
           <DrawerChromeContext.Provider value={chromeValue}>
             {open && (
               <div className="side-drawer-panel-transition">
-                {renderPanel(activePanel, { ...ctx, onClose })}
+                {translateText(renderPanel(activePanel, { ...ctx, onClose }))}
               </div>
             )}
           </DrawerChromeContext.Provider>
@@ -210,7 +212,7 @@ export default function SideDrawer({
           className="panel-snap-menu"
           style={{ left: menu.x, top: menu.y }}
           role="menu"
-          aria-label="Properties panel position"
+          aria-label={translateText("Properties panel position")}
         >
           {DRAWER_EDGES.map((id) => (
             <button
@@ -220,7 +222,7 @@ export default function SideDrawer({
               className={side === id ? 'active' : ''}
               onClick={() => commitSide(id)}
             >
-              {SIDE_LABELS[id]}
+              {translateText(SIDE_LABELS[id])}
             </button>
           ))}
         </div>
@@ -230,13 +232,13 @@ export default function SideDrawer({
         <div className="global-tooltip" style={tooltipStyle}>
           {popLeft ? (
             <>
-              <div className="global-tooltip-content">{tooltip.text}</div>
+              <div className="global-tooltip-content">{translateText(tooltip.text)}</div>
               <div className="global-tooltip-arrow right" />
             </>
           ) : (
             <>
               <div className="global-tooltip-arrow left" />
-              <div className="global-tooltip-content">{tooltip.text}</div>
+              <div className="global-tooltip-content">{translateText(tooltip.text)}</div>
             </>
           )}
         </div>

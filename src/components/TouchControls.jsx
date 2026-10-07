@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useRef } from 'react';
 
 const RADIUS = 52;
@@ -78,6 +79,7 @@ function useJoystick(onChange) {
 }
 
 export default function TouchControls({ onInput, mode = 'none' }) {
+  useLanguage();
   const stateRef = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, throttle: 0.65 });
   const throttleRef = useRef(null);
   const throttleFillRef = useRef(null);
@@ -165,7 +167,7 @@ export default function TouchControls({ onInput, mode = 'none' }) {
         onPointerCancel={move.onPointerUp}
       >
         <div ref={move.knobRef} className="touch-joystick-knob" />
-        <span className="touch-joystick-label">Move</span>
+        <span className="touch-joystick-label">{translateText("Move")}</span>
       </div>
       <div
         ref={look.baseRef}
@@ -176,7 +178,7 @@ export default function TouchControls({ onInput, mode = 'none' }) {
         onPointerCancel={look.onPointerUp}
       >
         <div ref={look.knobRef} className="touch-joystick-knob" />
-        <span className="touch-joystick-label">Look</span>
+        <span className="touch-joystick-label">{translateText("Look")}</span>
       </div>
       {mode === 'plane' && (
         <div
@@ -186,10 +188,10 @@ export default function TouchControls({ onInput, mode = 'none' }) {
           onPointerMove={onThrottleMove}
           onPointerUp={onThrottleUp}
           onPointerCancel={onThrottleUp}
-          aria-label="Plane throttle"
+          aria-label={translateText("Plane throttle")}
         >
           <div ref={throttleFillRef} className="touch-throttle-fill" style={{ height: `${stateRef.current.throttle * 100}%` }} />
-          <span className="touch-throttle-label">Throttle</span>
+          <span className="touch-throttle-label">{translateText("Throttle")}</span>
         </div>
       )}
     </div>

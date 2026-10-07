@@ -1,3 +1,5 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
+import { matchesTranslatedSearch } from '../../i18n/language.js';
 // Performance settings content (search + sub-tabs + body), shared by the
 // Performance drawer panel. Extracted from the old SettingsModal so the same
 // controls live in one place.
@@ -85,6 +87,7 @@ const TABS = [
 ];
 
 function LodMultiSlider({ segments, onChange }) {
+  useLanguage();
   const trackRef = useRef(null);
   const segmentsRef = useRef(segments);
   segmentsRef.current = segments;
@@ -115,8 +118,8 @@ function LodMultiSlider({ segments, onChange }) {
   return (
     <div className="ctl">
       <div className="ctl-top">
-        <label>LOD Resolutions</label>
-        <span className="ctl-val lod-multi-val">{segments.join(' / ')}</span>
+        <label>{translateText("LOD Resolutions")}</label>
+        <span className="ctl-val lod-multi-val">{translateText(segments.join(' / '))}</span>
       </div>
       <div className="lod-multi-track" ref={trackRef}>
         {segments.map((seg, i) => (
@@ -125,9 +128,9 @@ function LodMultiSlider({ segments, onChange }) {
             className="lod-multi-thumb"
             style={{ left: `${toPos(seg)}%` }}
             onPointerDown={(e) => startDrag(e, i)}
-            title={`LOD${i}: ${seg} segments`}
+            title={translateText(`LOD${i}: ${seg} segments`)}
           >
-            <span className="lod-multi-tag">L{i}</span>
+            <span className="lod-multi-tag">{translateText("L")}{translateText(i)}</span>
           </div>
         ))}
       </div>
@@ -136,39 +139,43 @@ function LodMultiSlider({ segments, onChange }) {
 }
 
 function PerfSlider({ perf, id, onPerfSetting, settingId }) {
+  useLanguage();
   const def = PERF_SLIDERS[id];
   return <SliderCtl def={def} value={perf[def.key]} onChange={(v) => onPerfSetting(def.key, v)} settingId={settingId} />;
 }
 
 function SettingGroup({ tab, label, keywords, search, activeTab, settingId, children }) {
-  const haystack = `${label} ${keywords} ${tab}`.toLowerCase();
+  useLanguage();
   const q = search.trim().toLowerCase();
-  const visible = q ? haystack.includes(q) : tab === activeTab;
+  const visible = q ? matchesTranslatedSearch(q, label, keywords, tab) : tab === activeTab;
   if (!visible) return null;
   return (
     <div className="settings-field" data-setting-tab={tab} data-setting-label={label} data-setting-id={settingId}>
-      {q && <span className="settings-field-tab">{TABS.find((t) => t.id === tab)?.label}</span>}
+      {q && <span className="settings-field-tab">{translateText(TABS.find((t) => t.id === tab)?.label)}</span>}
       {children}
     </div>
   );
 }
 
 function SettingNote({ tab, text, search, activeTab }) {
+  useLanguage();
   const q = search.trim().toLowerCase();
   if (q || tab !== activeTab) return null;
-  return <p className="settings-note">{text}</p>;
+  return <p className="settings-note">{translateText(text)}</p>;
 }
 
 function CapabilityRow({ label, value, title }) {
+  useLanguage();
   return (
     <div className="gpu-cap-row">
-      <span>{label}</span>
-      <strong title={title || String(value)}>{value}</strong>
+      <span>{translateText(label)}</span>
+      <strong title={translateText(title || String(value))}>{translateText(value)}</strong>
     </div>
   );
 }
 
 function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
+  useLanguage();
   const fallbackCaps = useMemo(() => detectRendererCapabilities(), []);
   const caps = rendererInfo?.capabilities || fallbackCaps;
   const webgpuSupported = !!caps.webgpu?.supported;
@@ -190,53 +197,51 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
   return (
     <ControlSection
       id="perf-gpu-renderer"
-      title="GPU / Renderer"
+      title={translateText("GPU / Renderer")}
       defaultOpen
       settingId="performance.section.gpu"
     >
       <div className="gpu-renderer-section">
         <SelectRow
-          label="Renderer Backend"
+          label={translateText("Renderer Backend")}
           value={perf.rendererBackend}
           options={backendOptions}
           onChange={(v) => onPerfSetting('rendererBackend', v)}
-          info="Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build."
+          info={translateText("Auto uses the safest available renderer. WebGPU requires browser support and may fall back in this build.")}
           settingId="performance.rendererBackend"
         />
         <SelectRow
-          label="GPU Preference"
+          label={translateText("GPU Preference")}
           value={perf.gpuPreference}
           options={GPU_PREFERENCE_OPTIONS}
           onChange={(v) => onPerfSetting('gpuPreference', v)}
-          info="A browser hint only. The browser or OS may ignore this preference."
+          info={translateText("A browser hint only. The browser or OS may ignore this preference.")}
           settingId="performance.gpuPreference"
         />
         <ToggleRow
-          label="Worker Renderer"
+          label={translateText("Worker Renderer")}
           value={!!perf.useWorker}
           onChange={(v) => onPerfSetting('useWorker', v)}
-          info="Keeps shader compilation and rendering off the UI thread when OffscreenCanvas is supported. Disable only for compatibility diagnostics; reloading is required."
+          info={translateText("Keeps shader compilation and rendering off the UI thread when OffscreenCanvas is supported. Disable only for compatibility diagnostics; reloading is required.")}
           settingId="performance.useWorker"
         />
         <div className="gpu-cap-list">
-          <CapabilityRow label="Detected Renderer" value={rendererInfo?.activeBackendLabel || caps.detectedRenderer} />
-          <CapabilityRow label="Detected GPU" value={gpuInfo} title={caps.detectedGpu} />
-          <CapabilityRow label="GPU Timing" value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
-          <CapabilityRow label="Power Preference" value={labelGpuPreference(activeGpuPreference)} />
-          <CapabilityRow label="Worker Renderer" value={rendererInfo?.workerActive ? 'Active' : 'Inactive'} />
+          <CapabilityRow label={translateText("Detected Renderer")} value={rendererInfo?.activeBackendLabel || caps.detectedRenderer} />
+          <CapabilityRow label={translateText("Detected GPU")} value={gpuInfo} title={translateText(caps.detectedGpu)} />
+          <CapabilityRow label={translateText("GPU Timing")} value={caps.gpuTiming?.supported ? 'Available' : 'Unavailable'} />
+          <CapabilityRow label={translateText("Power Preference")} value={labelGpuPreference(activeGpuPreference)} />
+          <CapabilityRow label={translateText("Worker Renderer")} value={rendererInfo?.workerActive ? 'Active' : 'Inactive'} />
           {perf.rendererBackend === 'webgpu' && !webgpuSupported && (
-            <CapabilityRow label="WebGPU" value={caps.webgpu?.reason || 'Unavailable'} />
+            <CapabilityRow label={translateText("WebGPU")} value={caps.webgpu?.reason || 'Unavailable'} />
           )}
         </div>
         {reloadRequired ? (
           <div className="gpu-apply-row">
-            <span>Reload required to apply GPU changes</span>
-            <button type="button" className="action-btn gpu-apply-btn" onClick={() => window.location.reload()}>
-              Reload &amp; Apply
-            </button>
+            <span>{translateText("Reload required to apply GPU changes")}</span>
+            <button type="button" className="action-btn gpu-apply-btn" onClick={() => window.location.reload()}>{translateText("Reload & Apply")}</button>
           </div>
         ) : (
-          <p className="gpu-footnote">Browser may ignore GPU preference hints.</p>
+          <p className="gpu-footnote">{translateText("Browser may ignore GPU preference hints.")}</p>
         )}
       </div>
     </ControlSection>
@@ -247,52 +252,53 @@ function GpuRendererSection({ perf, rendererInfo, onPerfSetting }) {
 // panel's Surface > Properties tab (extracted from the old Performance
 // panel's "Terrain" tab, since these describe material look, not budget).
 export function SurfacePropertiesSettings({ perf, onPerfSetting }) {
-  if (!perf) return <p className="settings-empty">Performance settings are loading…</p>;
+  useLanguage();
+  if (!perf) return <p className="settings-empty">{translateText("Performance settings are loading…")}</p>;
   const groupProps = { search: '', activeTab: 'terrain' };
 
   return (
     <div className="perf-settings">
       <div className="perf-settings-body">
-        <SettingGroup tab="terrain" label="Terrain Detail Quality" keywords="terrain material detail close walk first person texture quality" {...groupProps}>
-          <SelectRow label="Terrain Detail Quality" value={perf.terrainDetailQuality} options={TERRAIN_DETAIL_OPTIONS} onChange={(v) => onPerfSetting('terrainDetailQuality', parseInt(v, 10))} settingId="performance.terrainDetailQuality" />
+        <SettingGroup tab="terrain" label={translateText("Terrain Detail Quality")} keywords="terrain material detail close walk first person texture quality" {...groupProps}>
+          <SelectRow label={translateText("Terrain Detail Quality")} value={perf.terrainDetailQuality} options={TERRAIN_DETAIL_OPTIONS} onChange={(v) => onPerfSetting('terrainDetailQuality', parseInt(v, 10))} settingId="performance.terrainDetailQuality" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Detail Opacity" keywords="terrain detail opacity master mix amount overall fade blend close" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Detail Opacity")} keywords="terrain detail opacity master mix amount overall fade blend close" {...groupProps}>
           <PerfSlider perf={perf} id="terrainDetailOpacity" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailOpacity" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Detail Texture Scale" keywords="terrain close texture scale grain noise world space" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Detail Texture Scale")} keywords="terrain close texture scale grain noise world space" {...groupProps}>
           <PerfSlider perf={perf} id="terrainDetailScale" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailScale" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Detail Strength" keywords="terrain albedo biome detail close strength" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Detail Strength")} keywords="terrain albedo biome detail close strength" {...groupProps}>
           <PerfSlider perf={perf} id="terrainDetailStrength" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailStrength" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Detail Normal Strength" keywords="terrain normal material lighting bump close" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Detail Normal Strength")} keywords="terrain normal material lighting bump close" {...groupProps}>
           <PerfSlider perf={perf} id="terrainDetailNormal" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailNormal" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Micro & Macro Detail" keywords="terrain micro grain macro variation weathering patches biome speckle close up" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Micro & Macro Detail")} keywords="terrain micro grain macro variation weathering patches biome speckle close up" {...groupProps}>
           <PerfSlider perf={perf} id="terrainMicroDetail" onPerfSetting={onPerfSetting} settingId="performance.terrainMicroDetail" />
           <PerfSlider perf={perf} id="terrainMacroVariation" onPerfSetting={onPerfSetting} settingId="performance.terrainMacroVariation" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Distance Detail Fade" keywords="terrain detail fade near far walk distance shimmer" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Distance Detail Fade")} keywords="terrain detail fade near far walk distance shimmer" {...groupProps}>
           <PerfSlider perf={perf} id="terrainDetailNear" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailNear" />
           <PerfSlider perf={perf} id="terrainDetailFar" onPerfSetting={onPerfSetting} settingId="performance.terrainDetailFar" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Slope Rock Blending" keywords="terrain slope rock cliff material blend" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Slope Rock Blending")} keywords="terrain slope rock cliff material blend" {...groupProps}>
           <PerfSlider perf={perf} id="terrainRockSlope" onPerfSetting={onPerfSetting} settingId="performance.terrainRockSlope" />
           <PerfSlider perf={perf} id="terrainRockSharpness" onPerfSetting={onPerfSetting} settingId="performance.terrainRockSharpness" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Triplanar Detail" keywords="terrain triplanar cliff steep stretch projection" {...groupProps}>
-          <ToggleRow label="Triplanar Detail" value={perf.terrainTriplanar !== false} onChange={(v) => onPerfSetting('terrainTriplanar', v)} settingId="performance.terrainTriplanar" />
+        <SettingGroup tab="terrain" label={translateText("Triplanar Detail")} keywords="terrain triplanar cliff steep stretch projection" {...groupProps}>
+          <ToggleRow label={translateText("Triplanar Detail")} value={perf.terrainTriplanar !== false} onChange={(v) => onPerfSetting('terrainTriplanar', v)} settingId="performance.terrainTriplanar" />
         </SettingGroup>
 
-        <SettingGroup tab="terrain" label="Shoreline Detail" keywords="terrain shoreline shore wet sand mud coast water edge" {...groupProps}>
+        <SettingGroup tab="terrain" label={translateText("Shoreline Detail")} keywords="terrain shoreline shore wet sand mud coast water edge" {...groupProps}>
           <PerfSlider perf={perf} id="terrainShoreRange" onPerfSetting={onPerfSetting} settingId="performance.terrainShoreRange" />
           <PerfSlider perf={perf} id="terrainShoreWetness" onPerfSetting={onPerfSetting} settingId="performance.terrainShoreWetness" />
         </SettingGroup>
@@ -302,6 +308,7 @@ export function SurfacePropertiesSettings({ perf, onPerfSetting }) {
 }
 
 export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfSetting, onPerfReset, settingsTarget, onSettingsTargetHandled }) {
+  useLanguage();
   const [activeTab, setActiveTab] = useState('overview');
   const [search, setSearch] = useState('');
 
@@ -310,7 +317,7 @@ export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfS
     { value: 'custom', label: 'Custom' },
   ], []);
 
-  if (!perf) return <p className="settings-empty">Performance settings are loading…</p>;
+  if (!perf) return <p className="settings-empty">{translateText("Performance settings are loading…")}</p>;
 
   const segments = resolveLodSegments(perf);
   const distances = resolveLodDistances(perf);
@@ -354,12 +361,12 @@ export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfS
         <input
           type="search"
           className="settings-search-input"
-          placeholder="Search settings…"
+          placeholder={translateText("Search settings…")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         {search && (
-          <button type="button" className="settings-search-clear" onClick={() => setSearch('')} aria-label="Clear search">✕</button>
+          <button type="button" className="settings-search-clear" onClick={() => setSearch('')} aria-label={translateText("Clear search")}>✕</button>
         )}
       </div>
 
@@ -374,15 +381,15 @@ export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfS
               className={`panel-tab${activeTab === tab.id ? ' active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
             >
-              {tab.label}
+              {translateText(tab.label)}
             </button>
           ))}
         </div>
       )}
 
       <div className="perf-settings-body">
-        {isSearching && <p className="settings-search-hint">Search results</p>}
-        {body}
+        {isSearching && <p className="settings-search-hint">{translateText("Search results")}</p>}
+        {translateText(body)}
       </div>
     </div>
   );
@@ -394,32 +401,32 @@ function renderSettings({
 }) {
   return (
     <>
-      <SettingGroup tab="overview" label="Performance Preset" keywords="preset quality profile" {...groupProps}>
-        <SelectRow label="Preset" value={perf.preset} options={presetOptions} onChange={onPerfPreset} settingId="performance.preset" />
+      <SettingGroup tab="overview" label={translateText("Performance Preset")} keywords="preset quality profile" {...groupProps}>
+        <SelectRow label={translateText("Preset")} value={perf.preset} options={presetOptions} onChange={onPerfPreset} settingId="performance.preset" />
       </SettingGroup>
 
-      <SettingGroup tab="overview" label="GPU Renderer" keywords="gpu renderer backend webgl webgpu power preference dedicated low power timing" {...groupProps}>
+      <SettingGroup tab="overview" label={translateText("GPU Renderer")} keywords="gpu renderer backend webgl webgpu power preference dedicated low power timing" {...groupProps}>
         <GpuRendererSection perf={perf} rendererInfo={rendererInfo} onPerfSetting={onPerfSetting} />
       </SettingGroup>
 
-      <SettingGroup tab="overview" label="Auto Performance Mode" keywords="automatic dynamic fps" {...groupProps}>
-        <ToggleRow label="Auto Performance Mode" value={perf.autoPerf} onChange={(v) => onPerfSetting('autoPerf', v)} settingId="performance.autoPerf" />
+      <SettingGroup tab="overview" label={translateText("Auto Performance Mode")} keywords="automatic dynamic fps" {...groupProps}>
+        <ToggleRow label={translateText("Auto Performance Mode")} value={perf.autoPerf} onChange={(v) => onPerfSetting('autoPerf', v)} settingId="performance.autoPerf" />
       </SettingGroup>
 
-      <SettingGroup tab="overview" label="Pause When Idle" keywords="on demand static studio redraw idle battery heat power" {...groupProps}>
-        <ToggleRow label="Pause When Idle" value={perf.onDemandStudio} onChange={(v) => onPerfSetting('onDemandStudio', v)} settingId="performance.onDemandStudio" />
+      <SettingGroup tab="overview" label={translateText("Pause When Idle")} keywords="on demand static studio redraw idle battery heat power" {...groupProps}>
+        <ToggleRow label={translateText("Pause When Idle")} value={perf.onDemandStudio} onChange={(v) => onPerfSetting('onDemandStudio', v)} settingId="performance.onDemandStudio" />
       </SettingGroup>
 
       <SettingNote tab="overview" text="Pause When Idle stops redrawing the studio board when nothing moves — big GPU/battery/heat saving on weak machines." {...groupProps} />
 
 
-      <SettingGroup tab="overview" label="Render Scale" keywords="resolution pixel dpr scale" {...groupProps}>
+      <SettingGroup tab="overview" label={translateText("Render Scale")} keywords="resolution pixel dpr scale" {...groupProps}>
         <PerfSlider perf={perf} id="renderScale" onPerfSetting={onPerfSetting} settingId="performance.renderScale" />
       </SettingGroup>
 
-      <SettingGroup tab="overview" label="Resolution Reconstruction" keywords="resolution upscale denoise clean pixelated nearest ps1" {...groupProps}>
+      <SettingGroup tab="overview" label={translateText("Resolution Reconstruction")} keywords="resolution upscale denoise clean pixelated nearest ps1" {...groupProps}>
         <SelectRow
-          label="Resolution Reconstruction"
+          label={translateText("Resolution Reconstruction")}
           value={perf.resolutionDenoiseMode || 'clean'}
           options={RESOLUTION_DENOISE_OPTIONS}
           onChange={(v) => onPerfSetting('resolutionDenoiseMode', v)}
@@ -431,15 +438,15 @@ function renderSettings({
 
       <SettingNote tab="overview" text={`Worst-case visible triangles: ~${(estTris / 1e6).toFixed(2)}M`} {...groupProps} />
 
-      <SettingGroup tab="lod" label="Terrain Resolution" keywords="mesh detail segments" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("Terrain Resolution")} keywords="mesh detail segments" {...groupProps}>
         <PerfSlider perf={perf} id="resolutionScale" onPerfSetting={onPerfSetting} settingId="performance.resolutionScale" />
       </SettingGroup>
 
-      <SettingGroup tab="lod" label="LOD Distance Scale" keywords="level detail distance" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("LOD Distance Scale")} keywords="level detail distance" {...groupProps}>
         <PerfSlider perf={perf} id="lodDistanceScale" onPerfSetting={onPerfSetting} settingId="performance.lodDistanceScale" />
       </SettingGroup>
 
-      <SettingGroup tab="lod" label="LOD Resolutions" keywords="segments mesh lod0 lod1 lod2 lod3" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("LOD Resolutions")} keywords="segments mesh lod0 lod1 lod2 lod3" {...groupProps}>
         <div data-setting-id="performance.lodSegments">
           <LodMultiSlider segments={perf.lodSegments} onChange={(next) => onPerfSetting('lodSegments', next)} />
         </div>
@@ -448,7 +455,7 @@ function renderSettings({
       <SettingNote tab="lod" text={`Effective segments: ${segments.join(' / ')}`} {...groupProps} />
 
       {perf.lodDistances.map((d, i) => (
-        <SettingGroup key={`lod-dist-${i}`} tab="lod" label={`LOD ${i} → ${i + 1} Distance`} keywords={`lod distance threshold chunk level ${i}`} {...groupProps}>
+        <SettingGroup key={`lod-dist-${i}`} tab="lod" label={translateText(`LOD ${i} → ${i + 1} Distance`)} keywords={`lod distance threshold chunk level ${i}`} {...groupProps}>
           <SliderCtl
             def={{ label: `LOD${i}→${i + 1} Distance`, min: PERF_LIMITS.lodDistance.min, max: PERF_LIMITS.lodDistance.max, step: 0.5, digits: 1, unit: '× chunk' }}
             value={d}
@@ -460,17 +467,17 @@ function renderSettings({
 
       <SettingNote tab="lod" text={`Effective distances: ${distances.map((d) => d.toFixed(1)).join(' / ')} × chunk size`} {...groupProps} />
 
-      <SettingGroup tab="lod" label="Chunk Merging" keywords="merge chunk group draw call batch far distant tile macro proxy combine" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("Chunk Merging")} keywords="merge chunk group draw call batch far distant tile macro proxy combine" {...groupProps}>
         <ToggleRow
-          label="Chunk Merging"
+          label={translateText("Chunk Merging")}
           value={perf.terrainMerge !== false}
           onChange={(v) => onPerfSetting('terrainMerge', v)}
-          info="Collapses far Tile-mode chunks into fewer larger meshes once they pass the lowest LOD band. Cuts draw calls / CPU with no change to the silhouette."
+          info={translateText("Collapses far Tile-mode chunks into fewer larger meshes once they pass the lowest LOD band. Cuts draw calls / CPU with no change to the silhouette.")}
           settingId="performance.terrainMerge"
         />
       </SettingGroup>
 
-      <SettingGroup tab="lod" label="Merge Distance" keywords="merge fold distance quadtree aggressiveness near far block size threshold" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("Merge Distance")} keywords="merge fold distance quadtree aggressiveness near far block size threshold" {...groupProps}>
         <SliderCtl
           def={{ label: 'Merge Distance', min: PERF_LIMITS.terrainMergeDistance.min, max: PERF_LIMITS.terrainMergeDistance.max, step: 0.5, digits: 1, unit: '× block' }}
           value={perf.terrainMergeDistance ?? 4}
@@ -481,7 +488,7 @@ function renderSettings({
 
       <SettingNote tab="lod" text="A quadtree block folds into one mesh once the camera is farther than its width × this. Higher = keep detail (split) longer; lower = fold sooner for more savings." {...groupProps} />
 
-      <SettingGroup tab="lod" label="Merge Density" keywords="merge density resolution quads detail far mesh quality" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("Merge Density")} keywords="merge density resolution quads detail far mesh quality" {...groupProps}>
         <SliderCtl
           def={{ label: 'Merge Density', min: PERF_LIMITS.terrainMergeQuads.min, max: PERF_LIMITS.terrainMergeQuads.max, step: 1, unit: 'quads/chunk' }}
           value={perf.terrainMergeQuads ?? 8}
@@ -492,25 +499,25 @@ function renderSettings({
 
       <SettingNote tab="lod" text="Merge Density 8 matches the lowest chunk LOD. Lower it for extra savings at the cost of a slightly coarser folded silhouette." {...groupProps} />
 
-      <SettingGroup tab="lod" label="Full Board Merge" keywords="macro proxy single mesh whole tile board zoom out far extreme distance root fold" {...groupProps}>
+      <SettingGroup tab="lod" label={translateText("Full Board Merge")} keywords="macro proxy single mesh whole tile board zoom out far extreme distance root fold" {...groupProps}>
         <ToggleRow
-          label="Full Board Merge"
+          label={translateText("Full Board Merge")}
           value={perf.terrainMacroProxy !== false}
           onChange={(v) => onPerfSetting('terrainMacroProxy', v)}
-          info="Allow the whole board to fold into a single mesh at extreme distance (the top of the quadtree). Off keeps it split one level below."
+          info={translateText("Allow the whole board to fold into a single mesh at extreme distance (the top of the quadtree). Off keeps it split one level below.")}
           settingId="performance.terrainMacroProxy"
         />
       </SettingGroup>
 
-      <SettingGroup tab="streaming" label="Chunk Load Radius" keywords="view radius streaming load" {...groupProps}>
+      <SettingGroup tab="streaming" label={translateText("Chunk Load Radius")} keywords="view radius streaming load" {...groupProps}>
         <PerfSlider perf={perf} id="viewRadius" onPerfSetting={onPerfSetting} settingId="performance.viewRadius" />
       </SettingGroup>
 
-      <SettingGroup tab="streaming" label="Chunk Builds Per Frame" keywords="create spawn streaming budget tile new cells add chunks" {...groupProps}>
+      <SettingGroup tab="streaming" label={translateText("Chunk Builds Per Frame")} keywords="create spawn streaming budget tile new cells add chunks" {...groupProps}>
         <PerfSlider perf={perf} id="maxCreatesPerFrame" onPerfSetting={onPerfSetting} settingId="performance.maxCreatesPerFrame" />
       </SettingGroup>
 
-      <SettingGroup tab="streaming" label="Triangle Budget" keywords="triangles limit budget mesh" {...groupProps}>
+      <SettingGroup tab="streaming" label={translateText("Triangle Budget")} keywords="triangles limit budget mesh" {...groupProps}>
         <SliderCtl
           def={{ label: 'Triangle Budget', min: 0.1, max: 3, step: 0.1, digits: 1, unit: 'M' }}
           value={perf.triangleBudget / 1e6}
@@ -519,80 +526,80 @@ function renderSettings({
         />
       </SettingGroup>
 
-      <SettingGroup tab="streaming" label="Culling Aggressiveness" keywords="frustum behind camera cull" {...groupProps}>
+      <SettingGroup tab="streaming" label={translateText("Culling Aggressiveness")} keywords="frustum behind camera cull" {...groupProps}>
         <PerfSlider perf={perf} id="cullingAggressiveness" onPerfSetting={onPerfSetting} settingId="performance.cullingAggressiveness" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Water Quality" keywords="shader reflection detail waves" {...groupProps}>
-        <SelectRow label="Water Quality" value={perf.waterQuality} options={WATER_QUALITY_OPTIONS} onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))} settingId="performance.waterQuality" />
+      <SettingGroup tab="water" label={translateText("Water Quality")} keywords="shader reflection detail waves" {...groupProps}>
+        <SelectRow label={translateText("Water Quality")} value={perf.waterQuality} options={WATER_QUALITY_OPTIONS} onChange={(v) => onPerfSetting('waterQuality', parseInt(v, 10))} settingId="performance.waterQuality" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Water Reflection" keywords="specular glint sun" {...groupProps}>
+      <SettingGroup tab="water" label={translateText("Water Reflection")} keywords="specular glint sun" {...groupProps}>
         <PerfSlider perf={perf} id="waterReflection" onPerfSetting={onPerfSetting} settingId="performance.waterReflection" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Water Detail" keywords="ripple octave shader" {...groupProps}>
+      <SettingGroup tab="water" label={translateText("Water Detail")} keywords="ripple octave shader" {...groupProps}>
         <PerfSlider perf={perf} id="waterDetail" onPerfSetting={onPerfSetting} settingId="performance.waterDetail" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Wave Complexity" keywords="waves animation ocean" {...groupProps}>
+      <SettingGroup tab="water" label={translateText("Wave Complexity")} keywords="waves animation ocean" {...groupProps}>
         <PerfSlider perf={perf} id="waterWaves" onPerfSetting={onPerfSetting} settingId="performance.waterWaves" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Underwater Effect" keywords="underwater submerged camera dive fog tint" {...groupProps}>
-        <ToggleRow label="Underwater Effect" value={perf.underwaterEffect !== false} onChange={(v) => onPerfSetting('underwaterEffect', v)} settingId="performance.underwaterEffect" />
+      <SettingGroup tab="water" label={translateText("Underwater Effect")} keywords="underwater submerged camera dive fog tint" {...groupProps}>
+        <ToggleRow label={translateText("Underwater Effect")} value={perf.underwaterEffect !== false} onChange={(v) => onPerfSetting('underwaterEffect', v)} settingId="performance.underwaterEffect" />
       </SettingGroup>
 
-      <SettingGroup tab="water" label="Water Distance" keywords="extent range fade" {...groupProps}>
+      <SettingGroup tab="water" label={translateText("Water Distance")} keywords="extent range fade" {...groupProps}>
         <PerfSlider perf={perf} id="waterDistance" onPerfSetting={onPerfSetting} settingId="performance.waterDistance" />
       </SettingGroup>
 
-      <SettingGroup tab="fog" label="Fog Distance" keywords="horizon haze atmosphere visibility" {...groupProps}>
+      <SettingGroup tab="fog" label={translateText("Fog Distance")} keywords="horizon haze atmosphere visibility" {...groupProps}>
         <PerfSlider perf={perf} id="fogDistance" onPerfSetting={onPerfSetting} settingId="performance.fogDistance" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Fallback Mode" keywords="clouds performance quality fallback mode" {...groupProps}>
-        <SelectRow label="Fallback Mode" value={perf.cloudFallback} options={[{ value: 'none', label: 'Full' }, { value: 'lite', label: 'Lite (weak GPU)' }, { value: 'off', label: 'Off' }]} onChange={(v) => onPerfSetting('cloudFallback', v)} settingId="performance.cloudFallback" />
+      <SettingGroup tab="clouds" label={translateText("Fallback Mode")} keywords="clouds performance quality fallback mode" {...groupProps}>
+        <SelectRow label={translateText("Fallback Mode")} value={perf.cloudFallback} options={[{ value: 'none', label: 'Full' }, { value: 'lite', label: 'Lite (weak GPU)' }, { value: 'off', label: 'Off' }]} onChange={(v) => onPerfSetting('cloudFallback', v)} settingId="performance.cloudFallback" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Raymarch Steps" keywords="clouds step raymarch resolution quality steps" {...groupProps}>
+      <SettingGroup tab="clouds" label={translateText("Raymarch Steps")} keywords="clouds step raymarch resolution quality steps" {...groupProps}>
         <PerfSlider perf={perf} id="cloudSteps" onPerfSetting={onPerfSetting} settingId="performance.cloudSteps" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Self-Shadowing" keywords="clouds shadow self lighting" {...groupProps}>
-        <ToggleRow label="Self-Shadowing" value={perf.cloudSelfShadow !== false} onChange={(v) => onPerfSetting('cloudSelfShadow', v)} settingId="performance.cloudSelfShadow" />
+      <SettingGroup tab="clouds" label={translateText("Self-Shadowing")} keywords="clouds shadow self lighting" {...groupProps}>
+        <ToggleRow label={translateText("Self-Shadowing")} value={perf.cloudSelfShadow !== false} onChange={(v) => onPerfSetting('cloudSelfShadow', v)} settingId="performance.cloudSelfShadow" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Fast Shadows" keywords="clouds shadow analytic cheap performance fast self lighting" {...groupProps}>
-        <ToggleRow label="Fast Shadows (analytic)" value={!!perf.cloudLightMode} onChange={(v) => onPerfSetting('cloudLightMode', v)} settingId="performance.cloudLightMode" />
+      <SettingGroup tab="clouds" label={translateText("Fast Shadows")} keywords="clouds shadow analytic cheap performance fast self lighting" {...groupProps}>
+        <ToggleRow label={translateText("Fast Shadows (analytic)")} value={!!perf.cloudLightMode} onChange={(v) => onPerfSetting('cloudLightMode', v)} settingId="performance.cloudLightMode" />
       </SettingGroup>
 
       <SettingNote tab="clouds" text="Fast Shadows replaces the secondary shadow march with a cheap 2-tap approximation — big win when Self-Shadowing is on, near-identical look." {...groupProps} />
 
-      <SettingGroup tab="clouds" label="Shadow Steps" keywords="clouds shadow lighting steps" {...groupProps}>
+      <SettingGroup tab="clouds" label={translateText("Shadow Steps")} keywords="clouds shadow lighting steps" {...groupProps}>
         <PerfSlider perf={perf} id="cloudLightSteps" onPerfSetting={onPerfSetting} settingId="performance.cloudLightSteps" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Distance Step LOD" keywords="clouds distance lod steps raymarch performance far" {...groupProps}>
-        <ToggleRow label="Distance Step LOD" value={!!perf.cloudStepLOD} onChange={(v) => onPerfSetting('cloudStepLOD', v)} settingId="performance.cloudStepLOD" />
+      <SettingGroup tab="clouds" label={translateText("Distance Step LOD")} keywords="clouds distance lod steps raymarch performance far" {...groupProps}>
+        <ToggleRow label={translateText("Distance Step LOD")} value={!!perf.cloudStepLOD} onChange={(v) => onPerfSetting('cloudStepLOD', v)} settingId="performance.cloudStepLOD" />
       </SettingGroup>
 
       <SettingNote tab="clouds" text="Distance Step LOD marches fewer samples as the camera pulls away from the surface." {...groupProps} />
 
 
-      <SettingGroup tab="clouds" label="Base Noise Octaves" keywords="clouds octaves noise fbm base" {...groupProps}>
+      <SettingGroup tab="clouds" label={translateText("Base Noise Octaves")} keywords="clouds octaves noise fbm base" {...groupProps}>
         <PerfSlider perf={perf} id="cloudOctaves" onPerfSetting={onPerfSetting} settingId="performance.cloudOctaves" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Detail Noise Octaves" keywords="clouds octaves detail noise fbm" {...groupProps}>
+      <SettingGroup tab="clouds" label={translateText("Detail Noise Octaves")} keywords="clouds octaves detail noise fbm" {...groupProps}>
         <PerfSlider perf={perf} id="cloudDetailOctaves" onPerfSetting={onPerfSetting} settingId="performance.cloudDetailOctaves" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Erosion (Worley Noise)" keywords="clouds erosion cellular worley detail" {...groupProps}>
-        <ToggleRow label="Erosion (Worley Noise)" value={perf.cloudUseErosion !== false} onChange={(v) => onPerfSetting('cloudUseErosion', v)} settingId="performance.cloudUseErosion" />
+      <SettingGroup tab="clouds" label={translateText("Erosion (Worley Noise)")} keywords="clouds erosion cellular worley detail" {...groupProps}>
+        <ToggleRow label={translateText("Erosion (Worley Noise)")} value={perf.cloudUseErosion !== false} onChange={(v) => onPerfSetting('cloudUseErosion', v)} settingId="performance.cloudUseErosion" />
       </SettingGroup>
 
-      <SettingGroup tab="clouds" label="Max Distance" keywords="clouds max distance visibility culling" {...groupProps}>
+      <SettingGroup tab="clouds" label={translateText("Max Distance")} keywords="clouds max distance visibility culling" {...groupProps}>
         <PerfSlider perf={perf} id="cloudMaxDistance" onPerfSetting={onPerfSetting} settingId="performance.cloudMaxDistance" />
       </SettingGroup>
     </>

@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import PlanetPresetPanel from './PlanetPresetPanel.jsx';
 import ColorPalettePanel from './ColorPalettePanel.jsx';
 import ControlSection from './ui/ControlSection.jsx';
@@ -19,6 +20,7 @@ export default function PlanetStylePanel({
   embedded = false,
   paletteOnly = false,
 }) {
+  useLanguage();
   const style = planetStyle ?? {};
 
   const palettePanel = (
@@ -38,7 +40,7 @@ export default function PlanetStylePanel({
 
   const content = paletteOnly ? palettePanel : (
     <>
-      <ControlSection id="planet-preset" title="Preset" defaultOpen settingId="planet.section.preset">
+      <ControlSection id="planet-preset" title={translateText("Preset")} defaultOpen settingId="planet.section.preset">
         <PlanetPresetPanel
           planetPreset={planetPreset}
           onSelect={onPlanetPreset}
@@ -46,8 +48,8 @@ export default function PlanetStylePanel({
         />
       </ControlSection>
 
-      <ControlSection id="planet-palette" title="Palette" defaultOpen settingId="planet.section.palette">
-        {palettePanel}
+      <ControlSection id="planet-palette" title={translateText("Palette")} defaultOpen settingId="planet.section.palette">
+        {translateText(palettePanel)}
       </ControlSection>
     </>
   );
@@ -57,9 +59,9 @@ export default function PlanetStylePanel({
   return (
     <aside id="planet-style-panel" className="panel">
       <div className="panel-header">
-        <span>PLANET STYLE</span>
+        <span>{translateText("PLANET STYLE")}</span>
       </div>
-      <div className="panel-body">{content}</div>
+      <div className="panel-body">{translateText(content)}</div>
     </aside>
   );
 }

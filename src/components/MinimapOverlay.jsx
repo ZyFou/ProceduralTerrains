@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ruler } from 'lucide-react';
 
@@ -22,6 +23,7 @@ const MapIcon = () => (
 );
 
 const PickerIcon = ({ mode }) => {
+  useLanguage();
   if (mode === 'height') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 12 6 7l2 2 3-5 3 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (mode === 'biome') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 14V8m0 0C5 8 3 6 3 3c3 0 5 2 5 5Zm0 2c2.5 0 4.5-1.5 5-4-2.7 0-5 1.5-5 4Z" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
   if (mode === 'noise') return <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 5c2-4 4 4 6 0s4 4 6 0M2 11c2-4 4 4 6 0s4 4 6 0" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
@@ -43,6 +45,7 @@ export default function MinimapOverlay({
   onHoverInfoRequest,
   docked = false,
 }) {
+  useLanguage();
   const [collapsed, setCollapsed] = useState(!docked);
   const [mode, setMode] = useState('color');
   const [zoom, setZoom] = useState(1);
@@ -120,8 +123,8 @@ export default function MinimapOverlay({
         type="button"
         className="minimap-fab"
         onClick={() => setCollapsed(false)}
-        title="Show minimap"
-        aria-label="Show minimap"
+        title={translateText("Show minimap")}
+        aria-label={translateText("Show minimap")}
         aria-expanded={!collapsed}
       >
         <MapIcon />
@@ -131,15 +134,15 @@ export default function MinimapOverlay({
         <div className="minimap-overlay-header">
           <span className="minimap-title">
             <MapIcon />
-            <span className="minimap-title-text">Mini Map</span>
+            <span className="minimap-title-text">{translateText("Mini Map")}</span>
           </span>
           <div className="minimap-header-actions">
             {!docked && <button
               type="button"
               className="minimap-toggle-btn"
               onClick={() => setCollapsed((value) => !value)}
-              title={collapsed ? 'Expand minimap' : 'Collapse minimap'}
-              aria-label={collapsed ? 'Expand minimap' : 'Collapse minimap'}
+              title={translateText(collapsed ? 'Expand minimap' : 'Collapse minimap')}
+              aria-label={translateText(collapsed ? 'Expand minimap' : 'Collapse minimap')}
             >
               {collapsed ? (
                 <svg viewBox="0 0 16 16" width="10" height="10" fill="none" aria-hidden>
@@ -157,7 +160,7 @@ export default function MinimapOverlay({
         <div className="minimap-overlay-body">
           <div className="minimap-toolbar">
             <div className="minimap-zoom-group">
-              <span className="minimap-zoom-value">{zoom}x</span>
+              <span className="minimap-zoom-value">{translateText(zoom)}{translateText("x")}</span>
             </div>
           </div>
 
@@ -165,7 +168,7 @@ export default function MinimapOverlay({
             <button type="button"
               className={`tb-btn minimap-chip minimap-icon-chip${showDistanceScale ? ' active' : ''}`}
               onClick={() => setShowDistanceScale((value) => !value)}
-              title="Distance scale" aria-label="Distance scale" aria-pressed={showDistanceScale}>
+              title={translateText("Distance scale")} aria-label={translateText("Distance scale")} aria-pressed={showDistanceScale}>
               <Ruler size={16} aria-hidden />
             </button>
             {MAP_MODES.map(([value, label]) => (
@@ -174,8 +177,8 @@ export default function MinimapOverlay({
                 type="button"
                 className={`tb-btn minimap-chip minimap-icon-chip${mode === value ? ' active' : ''}`}
                 onClick={() => setMode(value)}
-                title={label}
-                aria-label={label}
+                title={translateText(label)}
+                aria-label={translateText(label)}
               >
                 <PickerIcon mode={value} />
               </button>
@@ -184,8 +187,8 @@ export default function MinimapOverlay({
               type="button"
               className={`tb-btn minimap-chip minimap-icon-chip${showChunkGrid ? ' active' : ''}`}
               onClick={() => setShowChunkGrid((value) => !value)}
-              title="Chunk grid"
-              aria-label="Chunk grid"
+              title={translateText("Chunk grid")}
+              aria-label={translateText("Chunk grid")}
             >
               <svg viewBox="0 0 16 16" fill="none" aria-hidden><path d="M2 2h12v12H2zM2 6h12M6 2v12M10 2v12M2 10h12" stroke="currentColor" strokeWidth="1.05" /></svg>
             </button>
@@ -196,7 +199,7 @@ export default function MinimapOverlay({
             className="minimap-wrap"
             onMouseMove={updateHover}
             onMouseLeave={clearHover}
-            data-tooltip="Interactive minimap with terrain overlays and hover inspection"
+            data-tooltip={translateText("Interactive minimap with terrain overlays and hover inspection")}
           >
             <canvas className="minimap-base" width="256" height="256" ref={baseRef} />
             <canvas className="minimap-overlay" width="256" height="256" ref={overlayRef} />
@@ -204,15 +207,15 @@ export default function MinimapOverlay({
 
           <div className="minimap-meta">
             <div className="minimap-caption">
-              <span>{modeLabel}</span>
-              <span>{boardSize} x {boardSize}u</span>
+              <span>{translateText(modeLabel)}</span>
+              <span>{translateText(boardSize)}{translateText(" x ")}{translateText(boardSize)}{translateText("u")}</span>
             </div>
             {SHOW_HOVER_INFO && hoverInfo ? (
               <div className="minimap-hover-info">
-                <span>Height: {fmt(hoverInfo.height01, 2)}</span>
-                <span>Biome: {hoverInfo.biome}</span>
-                <span>Slope: {fmt(hoverInfo.slope, 2)}</span>
-                <span>Water: {hoverInfo.water ? 'true' : 'false'}</span>
+                <span>{translateText("Height: ")}{translateText(fmt(hoverInfo.height01, 2))}</span>
+                <span>{translateText("Biome: ")}{translateText(hoverInfo.biome)}</span>
+                <span>{translateText("Slope: ")}{translateText(fmt(hoverInfo.slope, 2))}</span>
+                <span>{translateText("Water: ")}{translateText(hoverInfo.water ? 'true' : 'false')}</span>
               </div>
             ) : null}
           </div>

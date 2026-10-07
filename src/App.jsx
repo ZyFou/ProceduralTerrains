@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from './i18n/LanguageContext.jsx';
 import { normalizeMarkers } from './engine/terrain/RealWorldMarkers.js';
 import { captureSurfaceProject, restoreSurfaceProject } from './engine/terrain/surface/SurfaceLibrary.js';
 import { encodePortableProject, decodePortableProject } from './project/PortableProject.js';
@@ -139,6 +140,7 @@ const historyActionLabel = (beforeSnapshot, afterSnapshot) => {
 };
 
 export default function App() {
+  const { language } = useLanguage();
   const canvasRef = useRef(null);
   const minimapBaseRef = useRef(null);
   const minimapOverlayRef = useRef(null);
@@ -2102,7 +2104,7 @@ export default function App() {
     ))
       .filter((item) => !realTerrainMode || item.panelId !== 'terrain' || item.tabId === 'import' || ['terrain.heightScale', 'terrain.noiseScale'].includes(item.settingId))
       .map((item) => ({ ...item, valueText: formatSearchValue(item) }));
-  }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, realTerrainMode, formatSearchValue]);
+  }, [settingsSearchOpen, settingsSearchQuery, searchEnabled, worldMode, realTerrainMode, formatSearchValue, language]);
 
   const groupedSettingsSearchResults = useMemo(() => {
     const map = new Map();
@@ -2545,7 +2547,7 @@ export default function App() {
               <path d="M12 3v11M12 3 8.2 6.8M12 3l3.8 3.8" stroke="currentColor" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span>Drop terrain file to load</span>
+            <span>{translateText("Drop terrain file to load")}</span>
           </div>
         </div>
       )}
@@ -2655,15 +2657,10 @@ export default function App() {
           <canvas id="viewport" ref={canvasRef} className={webglError ? 'viewport-disabled' : ''} />
           {webglError && (
             <div className="webgl-error-overlay" role="alert">
-              <h2>WebGL unavailable</h2>
-              <p>{webglError}</p>
-              <p className="webgl-error-hint">
-                Close other 3D tabs, reload the page, or enable hardware acceleration in your browser settings
-                (Chrome: Settings → System → &quot;Use graphics acceleration when available&quot;).
-              </p>
-              <button type="button" onClick={() => window.location.reload()}>
-                Reload
-              </button>
+              <h2>{translateText("WebGL unavailable")}</h2>
+              <p>{translateText(webglError)}</p>
+              <p className="webgl-error-hint">{translateText("Close other 3D tabs, reload the page, or enable hardware acceleration in your browser settings (Chrome: Settings → System → \"Use graphics acceleration when available\").")}</p>
+              <button type="button" onClick={() => window.location.reload()}>{translateText("Reload")}</button>
             </div>
           )}
           {showToolPanels && settingsSearchOpen && (
@@ -2685,9 +2682,9 @@ export default function App() {
           )}
 
           <div id="help-card" className={helpVisible && studioLike && !nodesWorkspaceActive ? '' : 'hidden'}>
-            <div className="help-row"><span className="help-ic">↻</span> Drag to orbit camera</div>
-            <div className="help-row"><span className="help-ic">🤏</span> Pinch to zoom • move two fingers to pan</div>
-            <div className="help-row"><span className="help-ic">🖱</span> Mouse: left pan • right orbit</div>
+            <div className="help-row"><span className="help-ic">↻</span>{translateText(" Drag to orbit camera")}</div>
+            <div className="help-row"><span className="help-ic">🤏</span>{translateText(" Pinch to zoom • move two fingers to pan")}</div>
+            <div className="help-row"><span className="help-ic">🖱</span>{translateText(" Mouse: left pan • right orbit")}</div>
           </div>
 
           {showStudioUI && isStudio && !nodesWorkspaceActive && (
@@ -2829,7 +2826,7 @@ export default function App() {
           {exploreMode === 'plane' && <PlaneHUD liveMetrics={liveMetrics} />}
 
           {nodesWorkspaceActive && terrainGraph ? (
-            <Suspense fallback={<div className="nodes-workspace-loading">Loading node editor…</div>}>
+            <Suspense fallback={<div className="nodes-workspace-loading">{translateText("Loading node editor…")}</div>}>
               <NodeWorkspace
                 graph={terrainGraph}
                 graphView={graphView}

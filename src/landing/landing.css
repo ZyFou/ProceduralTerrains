@@ -144,6 +144,12 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .lp-nav-links a:hover { color: var(--text-bright); background: rgba(255, 255, 255, 0.05); }
 .lp-nav-links button.active { color: var(--text-bright); background: rgba(255, 255, 255, 0.07); }
 .lp-nav-actions { display: flex; align-items: center; gap: 8px; }
+.lp-nav-actions .lp-language-switch { margin-inline-start: auto; }
+.lp-nav-menu { display: contents; }
+.lp-menu-toggle.lp-secondary { display: none; }
+.lp-menu-toggle:focus-visible,
+.lp-nav-menu :is(button, a):focus-visible,
+.lp-footer :is(button, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .lp-account-chip {
   display: inline-flex;
   align-items: center;
@@ -1678,7 +1684,7 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .lp--community .lp-footer {
   width: min(684px, calc(52vw - 76px));
 }
-.lp-footer-socials { display: flex; align-items: center; gap: 4px; }
+.lp-footer-socials { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .lp-footer-socials :is(a, button) {
   display: grid;
   place-items: center;
@@ -1691,7 +1697,8 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .lp-footer-socials button { padding: 0; border: 0; background: transparent; cursor: pointer; }
 .lp-footer-socials :is(a, button):hover { color: var(--text-bright); background: rgba(255, 255, 255, 0.05); }
 .lp-footer-socials :is(a, button):hover svg, .lp-footer-socials :is(a, button):focus-visible svg { animation: lp-footer-icon-wobble .5s ease-out; }
-.lp-footer-meta { display: flex; align-items: center; gap: 14px; color: var(--text-dim); font-size: 11.5px; }
+.lp-footer-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; color: var(--text-muted); font-size: 11.5px; }
+.lp-footer-meta .lp-link { min-height: 32px; }
 .lp-footer-socials .lp-footer-donation { display: inline-flex; width: auto; align-items: center; gap: 5px; padding: 0 8px; color: var(--text-dim); text-decoration: none; }
 .lp-footer-donation:hover, .lp-footer-donation:focus-visible { color: #ff5e5b; }
 .lp-footer-donation:hover svg, .lp-footer-donation:focus-visible svg { animation: lp-footer-icon-wobble .5s ease-out; }
@@ -1907,22 +1914,55 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
     padding: 0 20px;
   }
   .lp-content-scroll { gap: 36px; padding: 28px 0; }
-  .lp-footer { padding-bottom: 36px; }
+  .lp:not(.lp--admin) .lp-content { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
+  .lp:not(.lp--admin) .lp-content::-webkit-scrollbar { display: none; }
+  .lp:not(.lp--admin) .lp-content-scroll { flex: 1 0 auto; overflow: visible; }
+  .lp-footer { flex-direction: column; align-items: center; gap: 12px; padding: 16px 0 max(16px, env(safe-area-inset-bottom)); }
+  .lp-footer-socials { justify-content: center; }
+  .lp-footer-socials :is(a, button) { min-width: 40px; height: 40px; }
+  .lp-footer-meta { justify-content: center; width: 100%; text-align: center; border-top: 1px solid rgba(255, 255, 255, .07); padding-top: 10px; }
   .lp-nav { padding: 0 16px; }
-  .lp-nav-links { display: none; }
+  .lp-menu-toggle.lp-secondary { display: inline-flex; width: 40px; height: 40px; padding: 0; flex-shrink: 0; }
+  .lp-nav-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    position: absolute;
+    inset: calc(100% + 1px) 0 auto;
+    box-sizing: border-box;
+    height: calc(100dvh - 60px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 24px 16px max(24px, env(safe-area-inset-bottom));
+    background: #090b10;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-12px);
+    pointer-events: none;
+    transition: opacity .24s ease, transform .28s cubic-bezier(.22, 1, .36, 1), visibility 0s linear .28s;
+  }
+  .lp-nav-menu.is-open {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+  .lp-nav-links { display: flex; align-items: stretch; flex-direction: column; gap: 4px; }
+  .lp-nav-links :is(button, a) { display: flex; align-items: center; min-height: 44px; padding: 0 14px; text-align: left; }
+  .lp-nav-actions { flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .08); }
+  .lp-nav-actions > button { min-height: 40px; }
 }
 
 @media (max-width: 560px) {
   .lp-nav { height: 56px; gap: 10px; }
   .lp-brand { gap: 8px; font-size: 13.5px; }
-  .lp-nav-credits, .lp-auth-register { display: none; }
-  .lp-account-chip { width: 34px; padding: 0; justify-content: center; }
-  .lp-account-chip span, .lp-auth-logout span { display: none; }
-  .lp-auth-logout { width: 34px; padding: 0; }
+  .lp-nav-menu { height: calc(100dvh - 56px); }
+  .lp-nav-actions .lp-account-chip { width: auto; padding: 0 10px; }
+  .lp-nav-actions .lp-account-chip span, .lp-nav-actions .lp-auth-logout span { display: inline; }
   .lp-open-app { height: 34px; padding: 0 12px; font-size: 12.5px; }
   .lp-content { padding: 0 16px; }
   .lp-content-scroll { gap: 32px; padding: 22px 0; }
-  .lp-footer { padding-bottom: 30px; }
   .lp-hero h1 { font-size: clamp(27px, 8.5vw, 34px); }
   .lp-hero p { font-size: 14px; }
   .lp-hero-actions { margin-top: 22px; }
@@ -1930,9 +1970,6 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .lp-hero-actions .lp-secondary { flex: 1; min-width: 150px; }
   .lp-version-pill { gap: 8px; font-size: 11.5px; }
   .lp-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .lp-footer { flex-direction: column; align-items: stretch; gap: 10px; }
-  .lp-footer-socials { align-self: flex-start; }
-  .lp-footer-meta { justify-content: space-between; width: 100%; }
   .lp-head-actions .lp-secondary.sm span { display: none; }
   .lp-template-create { width: 100%; }
   .lp-node-color-options { grid-template-columns: 1fr; gap: 10px; }
@@ -1959,12 +1996,12 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 }
 
 @media (max-width: 380px) {
-  .lp-brand strong { display: none; }
   .lp-card-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .lp-version-text { white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .lp-nav-menu, .lp-nav-menu.is-open { transition: none; transform: none; }
   .landing-overlay { transition: opacity 0.35s ease; }
   .landing-overlay.exiting { transform: none; filter: none; }
   #app .viewport-area { transition: opacity .12s ease; }

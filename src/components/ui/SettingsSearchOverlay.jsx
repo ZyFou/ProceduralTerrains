@@ -1,8 +1,10 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { SEARCH_SETTINGS_SHORTCUT } from '../../keyboardShortcuts.js';
 import ShortcutHint from './ShortcutHint.jsx';
 
 function SearchIcon() {
+  useLanguage();
   return (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
       <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
@@ -23,6 +25,7 @@ export default function SettingsSearchOverlay({
   onConfirmPanel,
   onClose,
 }) {
+  useLanguage();
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -60,17 +63,17 @@ export default function SettingsSearchOverlay({
       <button
         type="button"
         className="settings-search-backdrop"
-        aria-label="Close settings search"
+        aria-label={translateText("Close settings search")}
         onClick={onClose}
       />
-      <div className="settings-search-shell" role="dialog" aria-modal="false" aria-label="Search settings">
+      <div className="settings-search-shell" role="dialog" aria-modal="false" aria-label={translateText("Search settings")}>
         <div className="settings-search-wrap settings-search-wrap-global">
           <SearchIcon />
           <input
             ref={inputRef}
             type="search"
             className="settings-search-input"
-            placeholder="Search settings..."
+            placeholder={translateText("Search settings...")}
             value={query}
             onChange={(e) => onChangeQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -80,16 +83,14 @@ export default function SettingsSearchOverlay({
               type="button"
               className="settings-search-clear"
               onClick={() => onChangeQuery('')}
-              aria-label="Clear search"
-            >
-              x
-            </button>
+              aria-label={translateText("Clear search")}
+            >{translateText("x")}</button>
           )}
         </div>
 
         <div className="settings-search-results-panel">
           <div className="settings-search-hint-row">
-            <span>{hint}</span>
+            <span>{translateText(hint)}</span>
             <ShortcutHint shortcut={SEARCH_SETTINGS_SHORTCUT} className="settings-search-shortcut" />
           </div>
 
@@ -102,8 +103,8 @@ export default function SettingsSearchOverlay({
                     className="settings-search-group-title settings-search-group-title-btn"
                     onClick={() => onConfirmPanel?.(group.panelId)}
                   >
-                    <span>{group.panelLabel}</span>
-                    <span>{group.items.length}</span>
+                    <span>{translateText(group.panelLabel)}</span>
+                    <span>{translateText(group.items.length)}</span>
                   </button>
                   <div className="settings-search-group-body">
                     {group.items.map((item) => {
@@ -118,14 +119,14 @@ export default function SettingsSearchOverlay({
                         >
                           <div className="settings-search-item-row">
                             <div className="settings-search-item-copy">
-                              <div className="settings-search-item-label">{item.label}</div>
+                              <div className="settings-search-item-label">{translateText(item.label)}</div>
                               <div className="settings-search-item-meta">
-                                <span>{group.panelLabel}</span>
-                                {item.sectionLabel && <span>{item.sectionLabel}</span>}
+                                <span>{translateText(group.panelLabel)}</span>
+                                {item.sectionLabel && <span>{translateText(item.sectionLabel)}</span>}
                               </div>
                             </div>
                             <span className="settings-search-item-value">
-                              {item.isSection ? 'Section' : (item.valueText ?? '-')}
+                              {translateText(item.isSection ? 'Section' : (item.valueText ?? '-'))}
                             </span>
                           </div>
                         </button>
@@ -136,7 +137,7 @@ export default function SettingsSearchOverlay({
               ))}
             </div>
           ) : (
-            <div className="settings-search-empty">No settings match this search.</div>
+            <div className="settings-search-empty">{translateText("No settings match this search.")}</div>
           )}
         </div>
       </div>

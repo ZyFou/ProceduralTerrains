@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import SurfaceLayerPanel from './SurfaceLayerPanel.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -173,6 +174,7 @@ const PIXEL_COLORS = {
 };
 
 function TerrainShapePreview({ type }) {
+  useLanguage();
   const pixels = PIXEL_PREVIEWS[type] ?? PIXEL_PREVIEWS.mountain;
 
   return (
@@ -213,6 +215,7 @@ export default function ManualTerrainPanel({
   onClearTexturePaint,
   onClearPropPaint,
 }) {
+  useLanguage();
   const shapes = state?.shapes ?? [];
   const selected = shapes.find((shape) => shape.id === state?.selectedId) ?? null;
   const activeSculptTool = SCULPT_TOOLS.find((tool) => tool.id === state?.sculpt?.tool) ?? SCULPT_TOOLS[0];
@@ -340,16 +343,16 @@ export default function ManualTerrainPanel({
   };
 
   return (
-    <section ref={workspaceRef} className={`manual-terrain-workspace${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label="Manual Terrain workspace">
-      <div className="manual-viewport-tools" role="toolbar" aria-label="Shape transform tools">
+    <section ref={workspaceRef} className={`manual-terrain-workspace${inspectorReplaced ? ' inspector-replaced' : ''}`} aria-label={translateText("Manual Terrain workspace")}>
+      <div className="manual-viewport-tools" role="toolbar" aria-label={translateText("Shape transform tools")}>
         {TRANSFORMS.map(({ id, label, Icon, shortcut }) => (
           <button
             key={id}
             type="button"
             className={state?.transformMode === id ? 'active' : ''}
             onClick={() => onTransformMode(id)}
-            title={`${label} (${shortcut})`}
-            aria-label={`${label} selected shape (${shortcut})`}
+            title={translateText(`${label} (${shortcut})`)}
+            aria-label={translateText(`${label} selected shape (${shortcut})`)}
             aria-pressed={state?.transformMode === id}
             disabled={!selected || state?.sculpt?.enabled || state?.texturePaint?.enabled}
           >
@@ -362,8 +365,8 @@ export default function ManualTerrainPanel({
           type="button"
           className={state?.sculpt?.enabled ? 'active sculpt-active' : ''}
           onClick={() => onSculptEnabled(!state?.sculpt?.enabled)}
-          title="Manual Sculpt (B)"
-          aria-label="Toggle Manual Sculpt (B)"
+          title={translateText("Manual Sculpt (B)")}
+          aria-label={translateText("Toggle Manual Sculpt (B)")}
           aria-pressed={!!state?.sculpt?.enabled}
         >
           <SlidersHorizontal size={18} aria-hidden />
@@ -374,8 +377,8 @@ export default function ManualTerrainPanel({
           type="button"
           className={state?.texturePaint?.enabled ? 'active texture-active' : ''}
           onClick={() => onTexturePaintEnabled(!state?.texturePaint?.enabled)}
-          title="Surface & Props Paint (T)"
-          aria-label="Toggle Surface & Props Paint (T)"
+          title={translateText("Surface & Props Paint (T)")}
+          aria-label={translateText("Toggle Surface & Props Paint (T)")}
           aria-pressed={!!state?.texturePaint?.enabled}
         >
           <Palette size={18} aria-hidden />
@@ -387,7 +390,7 @@ export default function ManualTerrainPanel({
         <div
           className="manual-library-resizer"
           role="separator"
-          aria-label="Resize Shape Library"
+          aria-label={translateText("Resize Shape Library")}
           aria-orientation="horizontal"
           aria-valuemin={MIN_LIBRARY_HEIGHT}
           aria-valuemax={MAX_LIBRARY_HEIGHT}
@@ -398,31 +401,29 @@ export default function ManualTerrainPanel({
           onPointerUp={finishLibraryResize}
           onPointerCancel={finishLibraryResize}
           onKeyDown={resizeLibraryWithKeyboard}
-          title="Drag to resize the Shape Library"
+          title={translateText("Drag to resize the Shape Library")}
         />
         <header className="manual-dock-header">
           <div className="node-dock-heading">
-            <span className="node-dock-kicker">Manual</span>
-            <strong>Shape Library</strong>
+            <span className="node-dock-kicker">{translateText("Manual")}</span>
+            <strong>{translateText("Shape Library")}</strong>
           </div>
-          <span>Drag a shape onto the terrain, or click then place.</span>
+          <span>{translateText("Drag a shape onto the terrain, or click then place.")}</span>
           {state?.placementType ? (
-            <button type="button" className="manual-cancel-place" onClick={() => onPlacementType(null)}>
-              Cancel placement
-            </button>
+            <button type="button" className="manual-cancel-place" onClick={() => onPlacementType(null)}>{translateText("Cancel placement")}</button>
           ) : null}
         </header>
 
         <div className="manual-dock-body">
           <section className="manual-hierarchy">
             <div className="manual-dock-section-title">
-              <strong>Terrain Shapes</strong>
-              <span>{shapes.length}</span>
+              <strong>{translateText("Terrain Shapes")}</strong>
+              <span>{translateText(shapes.length)}</span>
             </div>
             {shapes.length === 0 ? (
               <div className="manual-empty-state">
                 <MousePointer2 size={16} aria-hidden />
-                <span>Place a shape to begin.</span>
+                <span>{translateText("Place a shape to begin.")}</span>
               </div>
             ) : (
               <div className="manual-shape-list">
@@ -437,17 +438,17 @@ export default function ManualTerrainPanel({
                       <span className="manual-list-type"><Mountain size={13} aria-hidden /></span>
                       <span>
                         <strong>{shape.name}</strong>
-                        <small>{getManualShapeDefinition(shape.type).name} · {shape.blendMode}</small>
+                        <small>{translateText(getManualShapeDefinition(shape.type).name)} · {translateText(shape.blendMode)}</small>
                       </span>
                     </button>
                     <div className="manual-layer-actions">
-                      <button type="button" onClick={() => onUpdate(shape.id, { enabled: shape.enabled === false })} title={shape.enabled === false ? 'Show layer' : 'Hide layer'} aria-label={shape.enabled === false ? `Show ${shape.name}` : `Hide ${shape.name}`}>
+                      <button type="button" onClick={() => onUpdate(shape.id, { enabled: shape.enabled === false })} title={translateText(shape.enabled === false ? 'Show layer' : 'Hide layer')} aria-label={translateText(shape.enabled === false ? `Show ${shape.name}` : `Hide ${shape.name}`)}>
                         {shape.enabled === false ? <EyeOff size={12} /> : <Eye size={12} />}
                       </button>
-                      <button type="button" onClick={() => onReorder(shape.id, 1)} disabled={visibleIndex === 0} title="Move layer up" aria-label={`Move ${shape.name} up`}>
+                      <button type="button" onClick={() => onReorder(shape.id, 1)} disabled={visibleIndex === 0} title={translateText("Move layer up")} aria-label={translateText(`Move ${shape.name} up`)}>
                         <ChevronUp size={12} />
                       </button>
-                      <button type="button" onClick={() => onReorder(shape.id, -1)} disabled={visibleIndex === shapes.length - 1} title="Move layer down" aria-label={`Move ${shape.name} down`}>
+                      <button type="button" onClick={() => onReorder(shape.id, -1)} disabled={visibleIndex === shapes.length - 1} title={translateText("Move layer down")} aria-label={translateText(`Move ${shape.name} down`)}>
                         <ChevronDown size={12} />
                       </button>
                     </div>
@@ -460,7 +461,7 @@ export default function ManualTerrainPanel({
           <div className="manual-library-scroll">
             {categories.map(([category, entries]) => (
               <section className="manual-library-category" key={category}>
-                <h3>{category}</h3>
+                <h3>{translateText(category)}</h3>
                 <div className="manual-shape-grid">
                   {entries.map((entry) => (
                     <button
@@ -475,7 +476,7 @@ export default function ManualTerrainPanel({
                         onBeginDrag(entry.id);
                       }}
                       onDragEnd={onEndDrag}
-                      title={entry.description}
+                      title={translateText(entry.description)}
                     >
                       <span className={`manual-shape-thumb type-${entry.id}`}>
                         <TerrainShapePreview type={entry.id} />
@@ -491,20 +492,20 @@ export default function ManualTerrainPanel({
       </div>
 
       {!inspectorReplaced ? (
-        <aside className="manual-inspector-dock" style={inspectorStyle} aria-label="Terrain shape inspector">
+        <aside className="manual-inspector-dock" style={inspectorStyle} aria-label={translateText("Terrain shape inspector")}>
           <header className="node-dock-header manual-inspector-header">
             <div className="node-dock-heading">
-              <span className="node-dock-kicker">Manual terrain</span>
-              <strong>{state?.texturePaint?.enabled
+              <span className="node-dock-kicker">{translateText("Manual terrain")}</span>
+              <strong>{translateText(state?.texturePaint?.enabled
                 ? (state.texturePaint.mode === 'props' ? 'Prop Paint' : 'Texture Paint')
-                : state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector'}</strong>
+                : state?.sculpt?.enabled ? 'Sculpt' : selected?.name || 'Shape Inspector')}</strong>
             </div>
             {selected && !state?.sculpt?.enabled && !state?.texturePaint?.enabled ? (
               <div className="manual-shape-actions">
-                <button type="button" onClick={() => onDuplicate(selected.id)} title="Duplicate (Ctrl/Cmd+D)" aria-label="Duplicate selected shape">
+                <button type="button" onClick={() => onDuplicate(selected.id)} title={translateText("Duplicate (Ctrl/Cmd+D)")} aria-label={translateText("Duplicate selected shape")}>
                   <Copy size={14} aria-hidden />
                 </button>
-                <button type="button" className="danger" onClick={() => onDelete(selected.id)} title="Delete" aria-label="Delete selected shape">
+                <button type="button" className="danger" onClick={() => onDelete(selected.id)} title={translateText("Delete")} aria-label={translateText("Delete selected shape")}>
                   <Trash2 size={14} aria-hidden />
                 </button>
               </div>
@@ -514,13 +515,13 @@ export default function ManualTerrainPanel({
           {state?.texturePaint?.enabled ? (
             <div className="manual-inspector-body">
               <p className="manual-inspector-description">
-                {state.texturePaint.mode === 'props'
+                {translateText(state.texturePaint.mode === 'props'
                   ? 'Paint independent grass, flower, rock, and tree density directly onto Manual Terrain.'
-                  : 'Paint the shipped terrain materials directly onto the final surface. Soft weights and triplanar projection keep transitions continuous.'}
+                  : 'Paint the shipped terrain materials directly onto the final surface. Soft weights and triplanar projection keep transitions continuous.')}
               </p>
               <section className="manual-inspector-section">
-                <h3>Paint Layer</h3>
-                <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-paint-layer-grid" role="tablist" aria-label="Manual paint layer">
+                <h3>{translateText("Paint Layer")}</h3>
+                <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-paint-layer-grid" role="tablist" aria-label={translateText("Manual paint layer")}>
                   <button
                     type="button"
                     className={state.texturePaint.mode === 'surface' ? 'active' : ''}
@@ -528,7 +529,7 @@ export default function ManualTerrainPanel({
                     aria-selected={state.texturePaint.mode === 'surface'}
                     role="tab"
                   >
-                    <Palette size={14} aria-hidden /><span>Surface</span>
+                    <Palette size={14} aria-hidden /><span>{translateText("Surface")}</span>
                   </button>
                   <button
                     type="button"
@@ -537,13 +538,13 @@ export default function ManualTerrainPanel({
                     aria-selected={state.texturePaint.mode === 'props'}
                     role="tab"
                   >
-                    <Sprout size={14} aria-hidden /><span>Props</span>
+                    <Sprout size={14} aria-hidden /><span>{translateText("Props")}</span>
                   </button>
                 </div>
               </section>
               <section className="manual-inspector-section">
-                <h3>{state.texturePaint.mode === 'props' ? 'Prop Tool' : 'Texture Tool'}</h3>
-                <div className="manual-sculpt-tool-grid manual-texture-tool-grid" role="toolbar" aria-label={state.texturePaint.mode === 'props' ? 'Prop paint tools' : 'Texture paint tools'}>
+                <h3>{translateText(state.texturePaint.mode === 'props' ? 'Prop Tool' : 'Texture Tool')}</h3>
+                <div className="manual-sculpt-tool-grid manual-texture-tool-grid" role="toolbar" aria-label={translateText(state.texturePaint.mode === 'props' ? 'Prop paint tools' : 'Texture paint tools')}>
                   {TEXTURE_TOOLS.filter(({ id }) => state.texturePaint.mode === 'surface' || id !== 'blend').map(({ id, label, Icon }) => (
                     <button
                       key={id}
@@ -553,25 +554,25 @@ export default function ManualTerrainPanel({
                       aria-pressed={state.texturePaint.tool === id}
                     >
                       <Icon size={14} aria-hidden />
-                      <span>{label}</span>
+                      <span>{translateText(label)}</span>
                     </button>
                   ))}
                 </div>
                 <p className="manual-sculpt-tool-description">
-                  {state.texturePaint.tool === 'paint'
+                  {translateText(state.texturePaint.tool === 'paint'
                     ? (state.texturePaint.mode === 'props'
                       ? 'Add the selected prop layer without removing other painted prop types.'
                       : 'Crossfade the selected material over existing terrain textures.')
                     : state.texturePaint.tool === 'blend'
                       ? 'Smooth neighboring material weights without flattening the terrain.'
-                      : 'Fade painted materials back to the original manual terrain surface.'}
+                      : 'Fade painted materials back to the original manual terrain surface.')}
                 </p>
               </section>
               {state.texturePaint.mode === 'surface' && <SurfaceLayerPanel state={state.texturePaint} onSetting={onTexturePaintSetting} />}
               {state.texturePaint.tool === 'paint' && state.texturePaint.mode === 'surface' && !state.texturePaint.layers?.length ? (
                 <section className="manual-inspector-section">
-                  <h3>Material</h3>
-                  <div className="manual-material-grid" role="listbox" aria-label="Terrain material">
+                  <h3>{translateText("Material")}</h3>
+                  <div className="manual-material-grid" role="listbox" aria-label={translateText("Terrain material")}>
                     {MANUAL_SURFACE_MATERIALS.map((material) => (
                       <button
                         key={material.id}
@@ -582,15 +583,15 @@ export default function ManualTerrainPanel({
                         role="option"
                       >
                         <img src={manualSurfaceDiffuseUrl(material)} alt="" draggable="false" />
-                        <span>{material.label}</span>
+                        <span>{translateText(material.label)}</span>
                       </button>
                     ))}
                   </div>
                 </section>
               ) : state.texturePaint.tool === 'paint' ? (
                 <section className="manual-inspector-section">
-                  <h3>Prop Type</h3>
-                  <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-prop-type-grid" role="listbox" aria-label="Terrain prop type">
+                  <h3>{translateText("Prop Type")}</h3>
+                  <div className="manual-sculpt-tool-grid manual-texture-tool-grid manual-prop-type-grid" role="listbox" aria-label={translateText("Terrain prop type")}>
                     {PROP_PAINT_TYPES.map(({ id, label, Icon, color }) => (
                       <button
                         key={id}
@@ -602,23 +603,23 @@ export default function ManualTerrainPanel({
                         style={{ '--manual-prop-color': color }}
                       >
                         <Icon size={14} aria-hidden />
-                        <span>{label}</span>
+                        <span>{translateText(label)}</span>
                       </button>
                     ))}
                   </div>
                 </section>
               ) : null}
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Brush</h3>
+                <h3>{translateText("Brush")}</h3>
                 <SliderCtl def={textureBrushSize} value={state.texturePaint.brushSize} onChange={(value) => onTexturePaintSetting('brushSize', value)} />
                 <SliderCtl def={textureStrength} value={state.texturePaint.strength} onChange={(value) => onTexturePaintSetting('strength', value)} />
                 <SliderCtl def={textureFalloff} value={state.texturePaint.falloff} onChange={(value) => onTexturePaintSetting('falloff', value)} />
               </section>
               <div className="manual-sculpt-help">
-                <span>Left drag: apply tool</span>
-                <span>Alt + left drag: pan</span>
-                <span>Shift + wheel: brush size</span>
-                <span>Right drag: orbit</span>
+                <span>{translateText("Left drag: apply tool")}</span>
+                <span>{translateText("Alt + left drag: pan")}</span>
+                <span>{translateText("Shift + wheel: brush size")}</span>
+                <span>{translateText("Right drag: orbit")}</span>
               </div>
               <button
                 type="button"
@@ -626,15 +627,14 @@ export default function ManualTerrainPanel({
                 onClick={state.texturePaint.mode === 'props' ? onClearPropPaint : onClearTexturePaint}
                 disabled={!state.texturePaint.hasData}
               >
-                <Trash2 size={14} aria-hidden /> Clear {state.texturePaint.mode === 'props' ? 'prop' : 'texture'} layer
-              </button>
+                <Trash2 size={14} aria-hidden />{translateText(" Clear ")}{translateText(state.texturePaint.mode === 'props' ? 'prop' : 'texture')}{translateText(" layer")}</button>
             </div>
           ) : state?.sculpt?.enabled ? (
             <div className="manual-inspector-body">
-              <p className="manual-inspector-description">Paint non-destructive terrain detail over the procedural shape stack.</p>
+              <p className="manual-inspector-description">{translateText("Paint non-destructive terrain detail over the procedural shape stack.")}</p>
               <section className="manual-inspector-section">
-                <h3>Sculpt Tool</h3>
-                <div className="manual-sculpt-tool-grid" role="toolbar" aria-label="Sculpt tools">
+                <h3>{translateText("Sculpt Tool")}</h3>
+                <div className="manual-sculpt-tool-grid" role="toolbar" aria-label={translateText("Sculpt tools")}>
                   {SCULPT_TOOLS.map(({ id, label, Icon }) => (
                     <button
                       key={id}
@@ -644,27 +644,27 @@ export default function ManualTerrainPanel({
                       aria-pressed={state.sculpt.tool === id}
                     >
                       <Icon size={14} aria-hidden />
-                      <span>{label}</span>
+                      <span>{translateText(label)}</span>
                     </button>
                   ))}
                 </div>
-                <p className="manual-sculpt-tool-description">{activeSculptTool.description}</p>
+                <p className="manual-sculpt-tool-description">{translateText(activeSculptTool.description)}</p>
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Brush</h3>
+                <h3>{translateText("Brush")}</h3>
                 <SliderCtl def={brushSize} value={state.sculpt.brushSize} onChange={(value) => onSculptSetting('brushSize', value)} />
                 <SliderCtl def={brushStrength} value={state.sculpt.strength} onChange={(value) => onSculptSetting('strength', value)} />
                 <SliderCtl def={brushFalloff} value={state.sculpt.falloff} onChange={(value) => onSculptSetting('falloff', value)} />
               </section>
               {state.sculpt.tool === 'flatten' ? (
                 <section className="manual-inspector-section manual-inspector-controls">
-                  <h3>Flatten</h3>
+                  <h3>{translateText("Flatten")}</h3>
                   <SliderCtl def={targetHeight} value={state.sculpt.targetHeight} onChange={(value) => onSculptSetting('targetHeight', value)} />
                 </section>
               ) : null}
               {state.sculpt.tool === 'erode' ? (
                 <section className="manual-inspector-section manual-inspector-controls">
-                  <h3>Hydraulic Erosion</h3>
+                  <h3>{translateText("Hydraulic Erosion")}</h3>
                   <SliderCtl def={erosionIterations} value={state.sculpt.erosionIterations} onChange={(value) => onSculptSetting('erosionIterations', value)} />
                   <SliderCtl def={erosionDeposition} value={state.sculpt.erosionDeposition} onChange={(value) => onSculptSetting('erosionDeposition', value)} />
                   <SliderCtl def={erosionTalus} value={state.sculpt.erosionTalus} onChange={(value) => onSculptSetting('erosionTalus', value)} />
@@ -672,17 +672,17 @@ export default function ManualTerrainPanel({
               ) : null}
               {state.sculpt.tool === 'crease' || state.sculpt.tool === 'ridge' ? (
                 <section className="manual-inspector-section manual-inspector-controls">
-                  <h3>{state.sculpt.tool === 'crease' ? 'Crease Profile' : 'Ridge Profile'}</h3>
+                  <h3>{translateText(state.sculpt.tool === 'crease' ? 'Crease Profile' : 'Ridge Profile')}</h3>
                   <SliderCtl def={creaseWidth} value={state.sculpt.creaseWidth} onChange={(value) => onSculptSetting('creaseWidth', value)} />
                 </section>
               ) : null}
               {state.sculpt.tool === 'detail' ? (
                 <section className="manual-inspector-section manual-inspector-controls">
-                  <h3>Relief Detail</h3>
+                  <h3>{translateText("Relief Detail")}</h3>
                   <SliderCtl def={detailScale} value={state.sculpt.detailScale} onChange={(value) => onSculptSetting('detailScale', value)} />
                   <SliderCtl def={detailRoughness} value={state.sculpt.detailRoughness} onChange={(value) => onSculptSetting('detailRoughness', value)} />
                   <label className="manual-name-field">
-                    <span>Detail Seed</span>
+                    <span>{translateText("Detail Seed")}</span>
                     <span className="manual-seed-row">
                       <input
                         type="number"
@@ -691,7 +691,7 @@ export default function ManualTerrainPanel({
                         value={state.sculpt.detailSeed}
                         onChange={(event) => onSculptSetting('detailSeed', Number(event.target.value) || 0)}
                       />
-                      <button type="button" onClick={() => onSculptSetting('detailSeed', Math.floor(Math.random() * 0x7fffffff))} title="Randomize detail seed" aria-label="Randomize detail seed">
+                      <button type="button" onClick={() => onSculptSetting('detailSeed', Math.floor(Math.random() * 0x7fffffff))} title={translateText("Randomize detail seed")} aria-label={translateText("Randomize detail seed")}>
                         <Dices size={14} aria-hidden />
                       </button>
                     </span>
@@ -700,32 +700,31 @@ export default function ManualTerrainPanel({
               ) : null}
               {state.sculpt.tool === 'terrace' ? (
                 <section className="manual-inspector-section manual-inspector-controls">
-                  <h3>Terraces</h3>
+                  <h3>{translateText("Terraces")}</h3>
                   <SliderCtl def={terraceStep} value={state.sculpt.terraceStep} onChange={(value) => onSculptSetting('terraceStep', value)} />
                 </section>
               ) : null}
               <div className="manual-sculpt-help">
-                <span>Left drag: sculpt</span>
-                <span>Alt + left drag: pan</span>
-                <span>Shift + wheel: brush size</span>
-                <span>Right drag: orbit</span>
+                <span>{translateText("Left drag: sculpt")}</span>
+                <span>{translateText("Alt + left drag: pan")}</span>
+                <span>{translateText("Shift + wheel: brush size")}</span>
+                <span>{translateText("Right drag: orbit")}</span>
               </div>
               <button type="button" className="manual-clear-sculpt" onClick={onClearSculpt} disabled={!state.sculpt.hasData}>
-                <Trash2 size={14} aria-hidden /> Clear sculpt layer
-              </button>
+                <Trash2 size={14} aria-hidden />{translateText(" Clear sculpt layer")}</button>
             </div>
           ) : selected ? (
             <div className="manual-inspector-body">
-              <p className="manual-inspector-description">{getManualShapeDefinition(selected.type).description}</p>
+              <p className="manual-inspector-description">{translateText(getManualShapeDefinition(selected.type).description)}</p>
               <section className="manual-inspector-section">
-                <h3>Shape</h3>
+                <h3>{translateText("Shape")}</h3>
                 <label className="manual-toggle-field">
-                  <span>Enabled</span>
+                  <span>{translateText("Enabled")}</span>
                   <input type="checkbox" checked={selected.enabled !== false} onChange={(event) => onUpdate(selected.id, { enabled: event.target.checked })} />
                 </label>
                 <SliderCtl def={height} value={selected.height} onChange={(value) => onUpdate(selected.id, { height: value })} />
                 <label className="manual-name-field">
-                  <span>Name</span>
+                  <span>{translateText("Name")}</span>
                   <input
                     value={selected.name}
                     maxLength={80}
@@ -734,17 +733,17 @@ export default function ManualTerrainPanel({
                 </label>
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Layer Blend</h3>
+                <h3>{translateText("Layer Blend")}</h3>
                 <label className="manual-select-field">
-                  <span>Blend Mode</span>
+                  <span>{translateText("Blend Mode")}</span>
                   <select value={selected.blendMode} onChange={(event) => onUpdate(selected.id, { blendMode: event.target.value })}>
-                    {MANUAL_BLEND_MODES.map((mode) => <option value={mode.id} key={mode.id}>{mode.name}</option>)}
+                    {MANUAL_BLEND_MODES.map((mode) => <option value={mode.id} key={mode.id}>{translateText(mode.name)}</option>)}
                   </select>
                 </label>
                 <SliderCtl def={opacity} value={selected.opacity} onChange={(value) => onUpdate(selected.id, { opacity: value })} />
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Transform</h3>
+                <h3>{translateText("Transform")}</h3>
                 <SliderCtl def={positionX} value={selected.position.x} onChange={(value) => onUpdate(selected.id, { position: { x: value } })} />
                 <SliderCtl def={positionZ} value={selected.position.z} onChange={(value) => onUpdate(selected.id, { position: { z: value } })} />
                 <SliderCtl def={rotation} value={selected.rotation * 180 / Math.PI} onChange={(value) => onUpdate(selected.id, { rotation: value * Math.PI / 180 })} />
@@ -752,12 +751,12 @@ export default function ManualTerrainPanel({
                 <SliderCtl def={scaleZ} value={selected.scale.z} onChange={(value) => onUpdate(selected.id, { scale: { z: value } })} />
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Terrain Shape</h3>
+                <h3>{translateText("Terrain Shape")}</h3>
                 <SliderCtl def={detail} value={selected.detail} onChange={(value) => onUpdate(selected.id, { detail: value })} />
                 <SliderCtl def={sharpness} value={selected.sharpness} onChange={(value) => onUpdate(selected.id, { sharpness: value })} />
                 <SliderCtl def={terraces} value={selected.terraces} onChange={(value) => onUpdate(selected.id, { terraces: value })} />
                 <label className="manual-name-field">
-                  <span>Seed</span>
+                  <span>{translateText("Seed")}</span>
                   <span className="manual-seed-row">
                     <input
                       type="number"
@@ -766,7 +765,7 @@ export default function ManualTerrainPanel({
                       value={selected.seed}
                       onChange={(event) => onUpdate(selected.id, { seed: Number(event.target.value) || 0 })}
                     />
-                    <button type="button" onClick={() => onUpdate(selected.id, { seed: Math.floor(Math.random() * 0x7fffffff) })} title="Randomize seed" aria-label="Randomize shape seed">
+                    <button type="button" onClick={() => onUpdate(selected.id, { seed: Math.floor(Math.random() * 0x7fffffff) })} title={translateText("Randomize seed")} aria-label={translateText("Randomize shape seed")}>
                       <Dices size={14} aria-hidden />
                     </button>
                   </span>
@@ -775,23 +774,23 @@ export default function ManualTerrainPanel({
               <section className="manual-inspector-section manual-shape-layer-stack">
                 <div className="manual-shape-layer-title">
                   <span>
-                    <h3>Shape Layers</h3>
-                    <small>{selected.layers.length} / {MAX_MANUAL_SHAPE_LAYERS}</small>
+                    <h3>{translateText("Shape Layers")}</h3>
+                    <small>{translateText(selected.layers.length)} / {translateText(MAX_MANUAL_SHAPE_LAYERS)}</small>
                   </span>
-                  <label title="Add a modifier layer to this shape">
+                  <label title={translateText("Add a modifier layer to this shape")}>
                     <Plus size={13} aria-hidden />
                     <select
                       value=""
                       disabled={selected.layers.length >= MAX_MANUAL_SHAPE_LAYERS}
-                      aria-label="Add shape modifier layer"
+                      aria-label={translateText("Add shape modifier layer")}
                       onChange={(event) => {
                         const layer = onAddShapeLayer?.(selected.id, event.target.value);
                         if (layer?.id) setExpandedLayerId(layer.id);
                       }}
                     >
-                      <option value="">Add layer</option>
+                      <option value="">{translateText("Add layer")}</option>
                       {MANUAL_SHAPE_LAYER_CATALOG.map((definition) => (
-                        <option key={definition.id} value={definition.id}>{definition.name}</option>
+                        <option key={definition.id} value={definition.id}>{translateText(definition.name)}</option>
                       ))}
                     </select>
                     <ChevronDown size={11} aria-hidden />
@@ -807,24 +806,24 @@ export default function ManualTerrainPanel({
                           <div className="manual-shape-layer-row">
                             <button type="button" className="manual-shape-layer-main" onClick={() => setExpandedLayerId(expanded ? null : layer.id)} aria-expanded={expanded}>
                               <Layers3 size={13} aria-hidden />
-                              <span><strong>{layer.name}</strong><small>{definition.name}</small></span>
+                              <span><strong>{layer.name}</strong><small>{translateText(definition.name)}</small></span>
                               {expanded ? <ChevronUp size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
                             </button>
                             <div className="manual-shape-layer-actions">
-                              <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { enabled: layer.enabled === false })} title={layer.enabled === false ? 'Enable layer' : 'Disable layer'} aria-label={layer.enabled === false ? `Enable ${layer.name}` : `Disable ${layer.name}`}>
+                              <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { enabled: layer.enabled === false })} title={translateText(layer.enabled === false ? 'Enable layer' : 'Disable layer')} aria-label={translateText(layer.enabled === false ? `Enable ${layer.name}` : `Disable ${layer.name}`)}>
                                 {layer.enabled === false ? <EyeOff size={12} /> : <Eye size={12} />}
                               </button>
-                              <button type="button" onClick={() => onDuplicateShapeLayer?.(selected.id, layer.id)} disabled={selected.layers.length >= MAX_MANUAL_SHAPE_LAYERS} title="Duplicate layer" aria-label={`Duplicate ${layer.name}`}><Copy size={12} /></button>
-                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, -1)} disabled={layerIndex === 0} title="Move layer up" aria-label={`Move ${layer.name} up`}><ChevronUp size={12} /></button>
-                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, 1)} disabled={layerIndex === selected.layers.length - 1} title="Move layer down" aria-label={`Move ${layer.name} down`}><ChevronDown size={12} /></button>
-                              <button type="button" className="danger" onClick={() => onDeleteShapeLayer?.(selected.id, layer.id)} title="Delete layer" aria-label={`Delete ${layer.name}`}><Trash2 size={12} /></button>
+                              <button type="button" onClick={() => onDuplicateShapeLayer?.(selected.id, layer.id)} disabled={selected.layers.length >= MAX_MANUAL_SHAPE_LAYERS} title={translateText("Duplicate layer")} aria-label={translateText(`Duplicate ${layer.name}`)}><Copy size={12} /></button>
+                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, -1)} disabled={layerIndex === 0} title={translateText("Move layer up")} aria-label={translateText(`Move ${layer.name} up`)}><ChevronUp size={12} /></button>
+                              <button type="button" onClick={() => onReorderShapeLayer?.(selected.id, layer.id, 1)} disabled={layerIndex === selected.layers.length - 1} title={translateText("Move layer down")} aria-label={translateText(`Move ${layer.name} down`)}><ChevronDown size={12} /></button>
+                              <button type="button" className="danger" onClick={() => onDeleteShapeLayer?.(selected.id, layer.id)} title={translateText("Delete layer")} aria-label={translateText(`Delete ${layer.name}`)}><Trash2 size={12} /></button>
                             </div>
                           </div>
                           {expanded ? (
                             <div className="manual-shape-layer-editor manual-inspector-controls">
-                              <p>{definition.description}</p>
+                              <p>{translateText(definition.description)}</p>
                               <label className="manual-name-field">
-                                <span>Layer Name</span>
+                                <span>{translateText("Layer Name")}</span>
                                 <input value={layer.name} maxLength={80} onChange={(event) => onUpdateShapeLayer?.(selected.id, layer.id, { name: event.target.value })} />
                               </label>
                               <SliderCtl def={layerOpacity} value={layer.opacity} onChange={(value) => onUpdateShapeLayer?.(selected.id, layer.id, { opacity: value })} />
@@ -837,10 +836,10 @@ export default function ManualTerrainPanel({
                                 />
                               ))}
                               <label className="manual-name-field">
-                                <span>Seed Offset</span>
+                                <span>{translateText("Seed Offset")}</span>
                                 <span className="manual-seed-row">
                                   <input type="number" min="0" max="2147483647" value={layer.seedOffset} onChange={(event) => onUpdateShapeLayer?.(selected.id, layer.id, { seedOffset: Number(event.target.value) || 0 })} />
-                                  <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { seedOffset: Math.floor(Math.random() * 0x7fffffff) })} title="Randomize layer seed" aria-label={`Randomize ${layer.name} seed`}><Dices size={14} aria-hidden /></button>
+                                  <button type="button" onClick={() => onUpdateShapeLayer?.(selected.id, layer.id, { seedOffset: Math.floor(Math.random() * 0x7fffffff) })} title={translateText("Randomize layer seed")} aria-label={translateText(`Randomize ${layer.name} seed`)}><Dices size={14} aria-hidden /></button>
                                 </span>
                               </label>
                             </div>
@@ -852,16 +851,16 @@ export default function ManualTerrainPanel({
                 ) : (
                   <div className="manual-shape-layer-empty">
                     <Layers3 size={16} aria-hidden />
-                    <span>Add procedural detail that stays attached to this shape.</span>
+                    <span>{translateText("Add procedural detail that stays attached to this shape.")}</span>
                   </div>
                 )}
               </section>
               <section className="manual-inspector-section manual-inspector-controls">
-                <h3>Shape Mask</h3>
+                <h3>{translateText("Shape Mask")}</h3>
                 <label className="manual-select-field">
-                  <span>Mask</span>
+                  <span>{translateText("Mask")}</span>
                   <select value={selected.mask.type} onChange={(event) => onUpdate(selected.id, { mask: { type: event.target.value } })}>
-                    {MANUAL_MASK_TYPES.map((mask) => <option value={mask.id} key={mask.id}>{mask.name}</option>)}
+                    {MANUAL_MASK_TYPES.map((mask) => <option value={mask.id} key={mask.id}>{translateText(mask.name)}</option>)}
                   </select>
                 </label>
                 {selected.mask.type !== 'none' ? (
@@ -869,7 +868,7 @@ export default function ManualTerrainPanel({
                     <SliderCtl def={maskFeather} value={selected.mask.feather} onChange={(value) => onUpdate(selected.id, { mask: { feather: value } })} />
                     <SliderCtl def={maskStrength} value={selected.mask.strength} onChange={(value) => onUpdate(selected.id, { mask: { strength: value } })} />
                     <label className="manual-toggle-field">
-                      <span>Invert Mask</span>
+                      <span>{translateText("Invert Mask")}</span>
                       <input type="checkbox" checked={selected.mask.invert} onChange={(event) => onUpdate(selected.id, { mask: { invert: event.target.checked } })} />
                     </label>
                   </>
@@ -879,8 +878,8 @@ export default function ManualTerrainPanel({
           ) : (
             <div className="manual-inspector-empty">
               <MousePointer2 size={22} aria-hidden />
-              <strong>No shape selected</strong>
-              <span>Select a terrain shape in the viewport or hierarchy to edit its settings.</span>
+              <strong>{translateText("No shape selected")}</strong>
+              <span>{translateText("Select a terrain shape in the viewport or hierarchy to edit its settings.")}</span>
             </div>
           )}
         </aside>

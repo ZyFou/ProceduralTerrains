@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { Info, X } from 'lucide-react';
 
@@ -33,6 +34,7 @@ function formatAge(timestamp) {
 }
 
 export default function NotificationCenter({ recent = [], notificationsIgnored = false, onClear, onToggleIgnore }) {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   const count = recent.length;
@@ -60,20 +62,20 @@ export default function NotificationCenter({ recent = [], notificationsIgnored =
         type="button"
         className={`tb-btn tb-icon-btn tb-notification-btn${open ? ' active' : ''}`}
         onClick={() => setOpen((value) => !value)}
-        title="Recent activity"
-        aria-label={`Recent activity${count ? ` (${count})` : ''}`}
+        title={translateText("Recent activity")}
+        aria-label={translateText(`Recent activity${count ? ` (${count})` : ''}`)}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
         <Info size={15} strokeWidth={1.8} aria-hidden />
-        {count > 0 && <span className="tb-notification-badge">{badge}</span>}
+        {count > 0 && <span className="tb-notification-badge">{translateText(badge)}</span>}
       </button>
 
       {open && (
-        <div className="tb-notification-popover" role="dialog" aria-label="Recent activity">
+        <div className="tb-notification-popover" role="dialog" aria-label={translateText("Recent activity")}>
           <div className="tb-notification-heading">
-            <span>Recent activity</span>
-            <button type="button" className="tb-notification-close" onClick={() => setOpen(false)} aria-label="Close recent activity">
+            <span>{translateText("Recent activity")}</span>
+            <button type="button" className="tb-notification-close" onClick={() => setOpen(false)} aria-label={translateText("Close recent activity")}>
               <X size={13} strokeWidth={1.8} aria-hidden />
             </button>
           </div>
@@ -83,29 +85,27 @@ export default function NotificationCenter({ recent = [], notificationsIgnored =
                 const type = item.type ?? 'info';
                 return (
                   <div key={item.id} className={`tb-notification-item tb-notification-${type}`}>
-                    <span className="tb-notification-icon">{ICONS[type]}</span>
+                    <span className="tb-notification-icon">{translateText(ICONS[type])}</span>
                     <span className="tb-notification-copy">
-                      <span className="tb-notification-message">{item.msg}</span>
-                      <span className="tb-notification-time">{formatAge(item.timestamp)}</span>
+                      <span className="tb-notification-message">{translateText(item.msg)}</span>
+                      <span className="tb-notification-time">{translateText(formatAge(item.timestamp))}</span>
                     </span>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="tb-notification-empty">No recent activity</div>
+            <div className="tb-notification-empty">{translateText("No recent activity")}</div>
           )}
           <div className="tb-notification-footer">
-            <button type="button" className="tb-notification-action" onClick={onClear} disabled={recent.length === 0}>
-              Clear
-            </button>
+            <button type="button" className="tb-notification-action" onClick={onClear} disabled={recent.length === 0}>{translateText("Clear")}</button>
             <button
               type="button"
               className={`tb-notification-action${notificationsIgnored ? ' active' : ''}`}
               onClick={onToggleIgnore}
               aria-pressed={notificationsIgnored}
             >
-              {notificationsIgnored ? 'Enable logging' : 'Ignore'}
+              {translateText(notificationsIgnored ? 'Enable logging' : 'Ignore')}
             </button>
           </div>
         </div>

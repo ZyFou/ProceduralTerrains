@@ -1,3 +1,4 @@
+import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import ControlSection from './ControlSection.jsx';
 
 function fmtTris(n) {
@@ -7,12 +8,13 @@ function fmtTris(n) {
 }
 
 export default function PerformancePanel({ stats, gpu }) {
+  useLanguage();
   const fpsLow = stats.fps > 0 && stats.fps < 30;
 
   return (
     <ControlSection
       id="inspector-performance"
-      title="PERFORMANCE"
+      title={translateText("PERFORMANCE")}
       defaultOpen={false}
       icon={(
         <svg viewBox="0 0 16 16" fill="none">
@@ -20,7 +22,7 @@ export default function PerformancePanel({ stats, gpu }) {
         </svg>
       )}
     >
-      <div className="stat-row" data-tooltip="Frames per second (aim for 60 for smooth rendering)">
+      <div className="stat-row" data-tooltip={translateText("Frames per second (aim for 60 for smooth rendering)")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
@@ -28,11 +30,11 @@ export default function PerformancePanel({ stats, gpu }) {
               <path d="M8 3.5V8l3 2" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">FPS</span>
+          <span className="setting-label">{translateText("FPS")}</span>
         </div>
-        <span className={`stat-value stat-fps${fpsLow ? ' low' : ''}`}>{stats.fps}</span>
+        <span className={`stat-value stat-fps${fpsLow ? ' low' : ''}`}>{translateText(stats.fps)}</span>
       </div>
-      <div className="stat-row" data-tooltip="Graphics card model used for hardware rendering">
+      <div className="stat-row" data-tooltip={translateText("Graphics card model used for hardware rendering")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
@@ -40,22 +42,22 @@ export default function PerformancePanel({ stats, gpu }) {
               <path d="M1 5h2M1 8h2M1 11h2M13 5h2M13 8h2M13 11h2" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">GPU</span>
+          <span className="setting-label">{translateText("GPU")}</span>
         </div>
-        <span className="stat-value stat-mono stat-truncate" title={gpu}>{gpu || 'Unknown'}</span>
+        <span className="stat-value stat-mono stat-truncate" title={translateText(gpu)}>{translateText(gpu || 'Unknown')}</span>
       </div>
-      <div className="stat-row" data-tooltip="Total number of 3D triangles rendered in this frame">
+      <div className="stat-row" data-tooltip={translateText("Total number of 3D triangles rendered in this frame")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
               <path d="M8 2l6 11H2L8 2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
             </svg>
           </span>
-          <span className="setting-label">Triangles</span>
+          <span className="setting-label">{translateText("Triangles")}</span>
         </div>
-        <span className="stat-value stat-mono">{fmtTris(stats.triangles)}</span>
+        <span className="stat-value stat-mono">{translateText(fmtTris(stats.triangles))}</span>
       </div>
-      <div className="stat-row" data-tooltip="Number of active mesh rendering calls in this frame">
+      <div className="stat-row" data-tooltip={translateText("Number of active mesh rendering calls in this frame")}>
         <div className="label-with-icon">
           <span className="setting-icon">
             <svg viewBox="0 0 16 16" fill="none">
@@ -63,9 +65,9 @@ export default function PerformancePanel({ stats, gpu }) {
               <path d="M5 8h6M5 5h6M5 11h4" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </span>
-          <span className="setting-label">Draw Calls</span>
+          <span className="setting-label">{translateText("Draw Calls")}</span>
         </div>
-        <span className="stat-value stat-mono">{stats.drawCalls}</span>
+        <span className="stat-value stat-mono">{translateText(stats.drawCalls)}</span>
       </div>
     </ControlSection>
   );
