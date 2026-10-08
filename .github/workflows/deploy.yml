@@ -362,12 +362,13 @@ jobs:
             echo ""
             echo "Starting or restarting frontend..."
 
+            # Navigation uses #/ fragments; missing files/paths must remain 404.
+            # Override the SPA flag saved by earlier deployments on restart too.
             if pm2 describe TerrainStudio > /dev/null 2>&1; then
-              pm2 restart TerrainStudio
+              PM2_SERVE_SPA=false pm2 restart TerrainStudio --update-env
             else
-              pm2 serve /home/TerrainStudio 6061 \
-                --name TerrainStudio \
-                --spa
+              PM2_SERVE_SPA=false pm2 serve /home/TerrainStudio 6061 \
+                --name TerrainStudio
             fi
 
             echo ""
