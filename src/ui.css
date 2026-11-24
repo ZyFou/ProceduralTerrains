@@ -1,0 +1,124 @@
+/* ============ UI v3 — Tailwind v4 + shadcn foundation ============
+ *
+ * The editor still runs on ~380 KB of hand-written, unlayered CSS (styles.css,
+ * landing.css, …). Two choices keep the new system and the legacy one apart:
+ *
+ * 1. No global preflight. Tailwind's reset would restyle every legacy heading,
+ *    list, image and button in the editor. A minimal reset is applied only to
+ *    new UI instead: anything inside `.ui`, plus shadcn parts (`[data-slot]`,
+ *    which also covers Radix portals rendered into <body>).
+ * 2. Utilities are `!important`. Unlayered legacy rules (e.g. the global
+ *    `* { margin: 0; padding: 0 }`) otherwise beat every layered utility.
+ *
+ * Raw tokens use a `--ui-` prefix because the legacy theme already owns
+ * `--accent`, `--radius` and `--radius-sm|md|lg` with different meanings.
+ * `@theme inline` bakes them into the utilities so the names never collide.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) important;
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --ui-radius: 0.625rem;
+  --ui-background: #07080a;
+  --ui-foreground: #f4f4f5;
+  --ui-card: #0b0c0f;
+  --ui-card-foreground: #f4f4f5;
+  --ui-popover: #0d0e12;
+  --ui-popover-foreground: #f4f4f5;
+  --ui-primary: #f4f4f5;
+  --ui-primary-foreground: #0a0a0b;
+  --ui-secondary: #16171b;
+  --ui-secondary-foreground: #f4f4f5;
+  --ui-muted: #131418;
+  --ui-muted-foreground: #a1a1aa;
+  --ui-accent: #1a1b20;
+  --ui-accent-foreground: #f4f4f5;
+  --ui-destructive: #ef4444;
+  --ui-border: rgb(255 255 255 / 0.08);
+  --ui-input: rgb(255 255 255 / 0.1);
+  --ui-ring: #3b82f6;
+  /* The single brand accent — used sparingly: dots, focus, active states. */
+  --ui-brand: #3b82f6;
+  --ui-brand-foreground: #eff6ff;
+  /* Dot textures retired in v3.1 (user feedback); the bg-dots* utilities are
+     kept as no-ops so existing markup doesn't need to change. */
+  --ui-dot: transparent;
+  --ui-dot-brand: transparent;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --radius-*: initial;
+  --radius-xs: calc(var(--ui-radius) - 6px);
+  --radius-sm: calc(var(--ui-radius) - 4px);
+  --radius-md: calc(var(--ui-radius) - 2px);
+  --radius-lg: var(--ui-radius);
+  --radius-xl: calc(var(--ui-radius) + 4px);
+  --radius-2xl: calc(var(--ui-radius) + 8px);
+  --radius-full: 9999px;
+
+  --color-background: var(--ui-background);
+  --color-foreground: var(--ui-foreground);
+  --color-card: var(--ui-card);
+  --color-card-foreground: var(--ui-card-foreground);
+  --color-popover: var(--ui-popover);
+  --color-popover-foreground: var(--ui-popover-foreground);
+  --color-primary: var(--ui-primary);
+  --color-primary-foreground: var(--ui-primary-foreground);
+  --color-secondary: var(--ui-secondary);
+  --color-secondary-foreground: var(--ui-secondary-foreground);
+  --color-muted: var(--ui-muted);
+  --color-muted-foreground: var(--ui-muted-foreground);
+  --color-accent: var(--ui-accent);
+  --color-accent-foreground: var(--ui-accent-foreground);
+  --color-destructive: var(--ui-destructive);
+  --color-border: var(--ui-border);
+  --color-input: var(--ui-input);
+  --color-ring: var(--ui-ring);
+  --color-brand: var(--ui-brand);
+  --color-brand-foreground: var(--ui-brand-foreground);
+}
+
+/* Scoped stand-in for Tailwind preflight (see note 1 above). */
+@layer base {
+  :where(.ui, .ui *, [data-slot], [data-slot] *),
+  :where(.ui, .ui *, [data-slot], [data-slot] *)::before,
+  :where(.ui, .ui *, [data-slot], [data-slot] *)::after {
+    box-sizing: border-box;
+    border: 0 solid var(--ui-border);
+  }
+  :where(.ui, [data-slot]) :where(button, input, select, textarea),
+  :where(button, input, select, textarea):where([data-slot]) {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+    border-radius: 0;
+  }
+  :where(.ui, [data-slot]) :where(a), a:where([data-slot]) { color: inherit; text-decoration: inherit; }
+  :where(.ui) :where(h1, h2, h3, h4, h5, h6) { font-size: inherit; font-weight: inherit; }
+  :where(.ui) :where(ol, ul) { list-style: none; }
+  :where(.ui, [data-slot]) :where(img, svg, video, canvas) { display: block; vertical-align: middle; }
+  :where(.ui, [data-slot]) :where(img, video) { max-width: 100%; height: auto; }
+  :where(.ui, [data-slot]) :where(button, [role="button"], a[href], [role="menuitem"]):not(:disabled) { cursor: var(--cursor-pointer, pointer); }
+}
+
+/* Dot-matrix surfaces — the v3 card texture. */
+@utility bg-dots {
+  background-image: radial-gradient(circle at center, var(--ui-dot) 1px, transparent 1.2px);
+  background-size: 12px 12px;
+}
+@utility bg-dots-lg {
+  background-image: radial-gradient(circle at center, var(--ui-dot) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+@utility bg-dots-brand {
+  background-image: radial-gradient(circle at center, var(--ui-dot-brand) 1px, transparent 1.2px);
+  background-size: 12px 12px;
+}

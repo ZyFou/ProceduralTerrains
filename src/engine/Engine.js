@@ -36,6 +36,7 @@ import { CloudAdaptiveQualityController } from './sky/CloudAdaptiveQualityContro
 import {
   CLOUD_QUALITY_PRESETS,
   CLOUD_LEGACY_PERF_KEYS,
+  cloudRenderModeDefaultsPatch,
   normalizeCloudFormation,
   resolveCloudQuality,
   resolveCloudRenderMode,
@@ -2816,7 +2817,17 @@ export class Engine {
       this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else {
       if (Object.is(this.params[key], value)) return;
+      const previous = this.params[key];
       this.params[key] = value;
+      // Each cloud renderer has its own starting values (Realistic V2 starts
+      // with no towering and no wind shear); settings the user tuned are kept.
+      if (key === 'cloudRenderMode') {
+        Object.assign(this.params, cloudRenderModeDefaultsPatch(
+          this.params,
+          resolveCloudRenderMode({ cloudRenderMode: previous }),
+          resolveCloudRenderMode({ cloudRenderMode: value }),
+        ));
+      }
     }
     this.cb.onParams(this._paramsSnapshot());
     this._needsRender = true;   // any param change → redraw (on-demand studio)

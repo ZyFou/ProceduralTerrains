@@ -1,7 +1,8 @@
 import { formatRelativeTime } from '../../i18n/language.js';
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Boxes, Check, LoaderCircle, Mountain, Shapes, X } from 'lucide-react';
+import { Boxes, Check, Mountain, Shapes, X } from 'lucide-react';
+import MatrixSpinner from '../matrix/MatrixSpinner.jsx';
 
 const projectMode = (project) => project?.terrain?.editorMode === 'nodes' ? 'nodes' : 'procedural';
 
@@ -109,7 +110,7 @@ export default function ManualTerrainImportDialog({
 
         <div className="manual-import-projects" role="listbox" aria-label={translateText(`${mode === 'nodes' ? 'Nodes' : 'Procedural'} terrain projects`)}>
           {loading ? (
-            <div className="manual-import-empty"><LoaderCircle className="spin" size={22} aria-hidden /><strong>{translateText("Loading projects…")}</strong></div>
+            <div className="manual-import-empty"><MatrixSpinner size="md" /><strong>{translateText("Loading projects…")}</strong></div>
           ) : visibleProjects.length ? visibleProjects.map((project) => {
             const selected = project.id === selectedId;
             const tileCount = Array.isArray(project.terrain?.tiles) ? project.terrain.tiles.length : 1;
@@ -148,7 +149,7 @@ export default function ManualTerrainImportDialog({
         <footer>
           <button type="button" className="manual-import-cancel" onClick={onClose} disabled={busy}>{translateText("Cancel")}</button>
           <button type="submit" className="manual-import-confirm" disabled={!selectedProject || loading || busy}>
-            {busy ? <><LoaderCircle className="spin" size={14} aria-hidden />{translateText(" Importing…")}</> : 'Import selected terrain'}
+            {busy ? <><MatrixSpinner size={14} minimal color="currentColor" />{translateText(" Importing…")}</> : 'Import selected terrain'}
           </button>
         </footer>
       </form>

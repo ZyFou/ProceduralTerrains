@@ -52,6 +52,7 @@ uniform float uCloudShear;            // world units the layer top is carried
 uniform vec2  uShearDir;
 uniform float uCloudBottom;
 uniform float uCloudTop;
+uniform float uCloudRefDepth;         // natural depth of one cloud (world units)
 uniform vec2  uCloudCenter;           // XZ centre of the cloud disc
 uniform float uCloudRadius;
 uniform float uCloudFar;
@@ -70,6 +71,10 @@ float cv2EdgeFade(vec2 xz) {
 float cloudV2Density(vec3 p, float lod, bool detail) {
   float hf = (p.y - uCloudBottom) / (uCloudTop - uCloudBottom);
   if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  // Height in natural cloud depths. A layer thinner than one depth squashes
+  // the clouds into it (hf); a thicker one lets them keep growing (z).
+  float z = (p.y - uCloudBottom) / uCloudRefDepth;
+  float rise = max(hf, z);
   float fade = cv2EdgeFade(p.xz);
   if (fade <= 0.0) return 0.0;
 
@@ -86,12 +91,17 @@ float cloudV2Density(vec3 p, float lod, bool detail) {
   // billow the footprint: warp the weather lookup with the shape noise
   w = textureLod(uWeatherV2, wuv + (n.gb - 0.55) * uCloudWarp, 0.0);
   float sig = w.g * 0.58 + w.r * 0.70 + (n.a - 0.5) * 0.10;
+  // Above one natural depth only the stronger cores keep rising, and less and
+  // less of them: a thicker layer grows tapering towers on the same clouds
+  // instead of extruding every footprint into a pillar up to the ceiling.
+  float over = max(z - 1.0, 0.0);
+  sig -= 0.14 * over * over;
   float cov = smoothstep(th, th + uCloudEdge, sig) * fade;
   if (cov <= 0.002) return 0.0;
 
   // dense cores build higher than their fringes: domed tops, flat bases
   float topH = mix(uCloudTopMin, 1.0, cv2Sat(cov * 0.85 + (w.b - 0.5) * 0.9));
-  float prof = smoothstep(0.0, 0.07, hf) * (1.0 - smoothstep(topH * 0.45, topH, hf));
+  float prof = smoothstep(0.0, 0.07, rise) * (1.0 - smoothstep(topH * 0.45, topH, hf));
   float lowF = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
   float base = cv2Sat(cv2Remap(n.r, (1.0 - lowF) * uCloudContrast, 1.0, 0.0, 1.0)) * prof;
   float d = cv2Remap(base, 1.0 - cov * 0.86, 1.0, 0.0, 1.0) * cov;
@@ -105,7 +115,7 @@ float cloudV2Density(vec3 p, float lod, bool detail) {
       lod
     ).gba;
     float hfb = hn.r * 0.625 + hn.g * 0.25 + hn.b * 0.125;
-    float m = mix(hfb, 1.0 - hfb, cv2Sat(hf * 5.0));
+    float m = mix(hfb, 1.0 - hfb, cv2Sat(rise * 5.0));
     d = cv2Remap(d, m * 0.50 * uCloudDetail, 1.0, 0.0, 1.0);
     if (d > 0.0 && d < 0.35) {
       // finest wisps only where the body thins out
@@ -128,6 +138,7 @@ varying vec3 vWorldPos;
 
 uniform float uCloudSigma;       // extinction per world unit at density 1
 uniform float uCloudSteps;
+uniform float uCloudMinStep;     // finest march step (world units)
 uniform float uCloudJitter;      // 1 = dithered lattice (filtered low-res pass)
 uniform float uCloudSilver;
 uniform vec3  uCloudColor;       // sRGB albedo tint
@@ -236,8 +247,13 @@ void main() {
   // grazing rays (camera in or near the layer) switch to steps that grow with
   // distance, fine near the eye and coarse toward the horizon.
   float dtSlice = segLen / steps;
-  float dtMin = thick / (steps * 0.383);
+  float dtMin = uCloudMinStep;
   float lodScale = uCloudNoiseFreq * 86.0;
+  // The noise level never drops below the one a mid-distance view uses. The
+  // field is shaped by thresholds, so its sharpest mip is a different (far
+  // more eroded) cloud: without the floor a cloud thins out and vanishes as
+  // the camera closes in and the steps shorten.
+  float lodFloor = 2.1;
 
   float mu = dot(rd, uSunDir);
   float ph = mix(cv2Phase(mu, 0.72), cv2Phase(mu, -0.22), 0.38);
@@ -247,7 +263,7 @@ void main() {
   vec3 tint = cv2SrgbToLinear(uCloudColor);
   vec3 ambTint = cv2SrgbToLinear(uCloudSkyTint) * 1.35;
   vec3 sunCol = uSunLight * 0.55;
-  float lightStep = thick * 0.0281;
+  float lightStep = min(thick, uCloudRefDepth) * 0.0281;
 
   float T = 1.0;
   vec3 L = vec3(0.0);
@@ -265,7 +281,7 @@ void main() {
     // integrate the part of this interval in front of the opaque scene
     float dt = min(stride, tEnd - t);
     vec3 p = ro + rd * (t + dt * 0.5);
-    float lod = clamp(log2(stride * lodScale), 0.0, 4.0);
+    float lod = clamp(log2(max(stride * lodScale, lodFloor)), 0.0, 4.0);
     float dn = cloudV2Density(p, lod, true);
     if (dn > 0.0) {
       // The sun march is the expensive part. Once most of the pixel is
@@ -291,7 +307,7 @@ void main() {
   float alpha = 1.0 - T;
   if (alpha < 0.003) discard;
   // drawn over an already display-encoded frame: expose + ACES + sRGB here
-  vec3 col = cv2Aces(L / alpha * uExposure * 0.72);
+  vec3 col = cv2Aces(L / alpha * uExposure * 0.54);
   gl_FragColor = vec4(cv2LinearToSrgb(col), alpha);
 }
 `;

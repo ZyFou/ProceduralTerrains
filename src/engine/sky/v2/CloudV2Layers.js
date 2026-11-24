@@ -31,6 +31,8 @@ const REFERENCE_THICKNESS = 1350;
 // Board size, in reference metres, that maps one weather cell (1/6 of the
 // weather tile) onto a quarter of the board.
 const REFERENCE_BOARD = 17333;
+// Tile size the default Thickness is one natural cloud depth on.
+const REFERENCE_TILE = 2048;
 // Reference coverage (the authored sky) that the default Coverage maps to.
 const REFERENCE_COVERAGE = 0.68;
 const REFERENCE_NOISE_TILE = 4300;
@@ -69,6 +71,8 @@ export function createCloudV2Material() {
     uShearDir:         { value: new THREE.Vector2(1, 0) },
     uCloudBottom:      { value: 240 },
     uCloudTop:         { value: 860 },
+    uCloudRefDepth:    { value: 620 },
+    uCloudMinStep:     { value: 25 },
     uCloudCenter:      { value: new THREE.Vector2() },
     uCloudRadius:      { value: 1500 },
     uCloudFar:         { value: 9000 },
@@ -168,10 +172,14 @@ export class CloudV2SlabLayer extends CloudSlabLayer {
     // World units per reference metre. Formations follow the board: at System
     // Scale 1 a weather cell (one cumulus) spans about a quarter of a tile,
     // so a bounded board still reads as a cloudscape rather than one cloud.
-    // A thicker layer grows them a little (fourth root).
+    // Nothing here depends on Thickness: the slider only gives the same
+    // clouds more (or less) room to grow, it never moves or rescales them.
     const board = Math.max(this._boardSize, 1);
-    const unit = (board / REFERENCE_BOARD)
-      * Math.sqrt(Math.sqrt(thickness / CLOUD_DEFAULT_PARAMS.cloudThickness));
+    const unit = board / REFERENCE_BOARD;
+    // natural depth of one cloud at this board size (the default Thickness
+    // on a default tile)
+    const refDepth = CLOUD_DEFAULT_PARAMS.cloudThickness * board / REFERENCE_TILE;
+    u.uCloudRefDepth.value = refDepth;
     // System Scale is a frequency (higher = smaller formations); Billow Size
     // scales the shape noise inside each formation.
     const systemFrequency = Math.max(0.1, param(params, 'cloudSystemScale'))
@@ -201,7 +209,11 @@ export class CloudV2SlabLayer extends CloudSlabLayer {
       0.15, 0.98,
     );
     u.uCloudContrast.value = look[2];
-    u.uCloudSigma.value = REFERENCE_OPTICAL_DEPTH / thickness * param(params, 'cloudDensity');
+    // Extinction per world unit is fixed by the natural depth: a thicker
+    // layer holds more cloud, it does not dilute the same amount over more
+    // height. (A thinner one keeps its clouds opaque.)
+    const opticalDepthSpan = Math.min(thickness, refDepth);
+    u.uCloudSigma.value = REFERENCE_OPTICAL_DEPTH / opticalDepthSpan * param(params, 'cloudDensity');
     u.uCloudSilver.value = param(params, 'cloudForwardScatter');
     u.uCloudColor.value.fromArray(param(params, 'cloudColor'));
     u.uCloudSkyTint.value.fromArray(param(params, 'cloudSkyTint'));
@@ -230,7 +242,12 @@ export class CloudV2SlabLayer extends CloudSlabLayer {
 
     let steps = config.cloudRealisticSteps ?? 64;
     if (config.cloudFallback === 'lite') steps = Math.min(steps, 32);
-    this._baseSteps = Math.max(12, Math.min(CLOUD_V2_MAX_STEPS, steps)) * (q.disabled ? 0 : 1);
+    steps = Math.max(12, Math.min(CLOUD_V2_MAX_STEPS, steps));
+    u.uCloudMinStep.value = opticalDepthSpan / (steps * 0.383);
+    // a thicker layer gets proportionally more slices (up to 2x), so its
+    // clouds are sampled as finely as the default ones
+    const depthSteps = steps * THREE.MathUtils.clamp(thickness / refDepth, 1, 2);
+    this._baseSteps = Math.min(CLOUD_V2_MAX_STEPS, depthSteps) * (q.disabled ? 0 : 1);
 
     this._baseRenderScale = config.cloudRenderScale ?? 1.0;
     this.setAdaptiveQuality(this._adaptiveScaleMultiplier, this._adaptiveStepScale);

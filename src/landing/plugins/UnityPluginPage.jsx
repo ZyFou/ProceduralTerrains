@@ -1,11 +1,9 @@
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { useState } from 'react';
 import {
-  ArrowRight,
   Box,
   Check,
   CheckCircle2,
-  ChevronRight,
   CircleAlert,
   Clipboard,
   Copy,
@@ -13,7 +11,6 @@ import {
   ExternalLink,
   FileArchive,
   FileJson,
-  FolderOpen,
   Layers3,
   MonitorDown,
   Mountain,
@@ -30,6 +27,35 @@ import {
 } from 'lucide-react';
 import { GITHUB_REPO_URL } from '../../constants/app.js';
 import { PLUGINS } from '../../config/plugins.js';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/shadcn/button.jsx';
+import {
+  CompatItem,
+  CompatibilityStrip,
+  DocSection,
+  DownloadButton,
+  ExportLayout,
+  ExportTip,
+  FaqItem,
+  FaqSection,
+  FinalCta,
+  FolderTree,
+  GeneratedGrid,
+  MethodCard,
+  Note,
+  PluginHero,
+  PreviewChecks,
+  PreviewGenerate,
+  PreviewWindow,
+  QuickStart,
+  ScopeCard,
+  ScopeGrid,
+  SecondaryButton,
+  SectionHeading,
+  StepCard,
+  StepList,
+  scrollToSection,
+} from './PluginDoc.jsx';
 
 const UNITY_PLUGIN = PLUGINS.unity;
 const UNITY_PACKAGE_VERSION = UNITY_PLUGIN.currentVersion;
@@ -84,344 +110,259 @@ function CopyField({ value }) {
   };
 
   return (
-    <div className="unity-copy-field">
-      <code>{value}</code>
-      <button type="button" onClick={copy} aria-label={translateText("Copy Git package URL")}>
-        {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
-        <span>{translateText(copied ? 'Copied' : 'Copy')}</span>
-      </button>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-border bg-background py-1.5 pr-1.5 pl-3">
+      <code className="truncate font-mono text-[12.5px] text-zinc-300">{value}</code>
+      <Button variant="outline" size="sm" onClick={copy} aria-label={translateText("Copy Git package URL")} className="h-8 rounded-md">
+        {copied ? <Check className="text-brand" aria-hidden /> : <Copy aria-hidden />}
+        <span className="hidden sm:inline">{translateText(copied ? 'Copied' : 'Copy')}</span>
+      </Button>
     </div>
   );
 }
 
-function StepList({ steps }) {
-  useLanguage();
-  return (
-    <ol className="unity-numbered-steps">
-      {steps.map((step, index) => (
-        <li key={step.title}>
-          <span>{translateText(index + 1)}</span>
-          <div>
-            <strong>{translateText(step.title)}</strong>
-            <p>{translateText(step.body)}</p>
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
+const windowTab = 'grid h-8 place-items-center rounded-md text-[13px] text-zinc-400';
 
 export default function UnityPluginPage({ onOpenEditor, onDownload }) {
   useLanguage();
-  const scrollToSection = (sectionId) => {
-    const section = document.getElementById(sectionId);
-    if (!section) return;
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    section.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
-  };
 
   return (
-    <article className="unity-page">
-      <section className="unity-hero" aria-labelledby="unity-plugin-title">
-        <div className="unity-hero-copy">
-          <div className="unity-eyebrow"><Puzzle size={14} aria-hidden />{translateText(" Unity integration")}</div>
-          <h1 id="unity-plugin-title">{translateText("Create terrain, ")}<em>{translateText("inside Unity.")}</em></h1>
-          <p>{translateText("Generate deterministic native TerrainData from seeded presets and editable Noise Stacks, or import an existing Procedural Terrains world.")}</p>
-          <div className="unity-hero-actions">
-            <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}>
-              <Download size={16} aria-hidden />{translateText(" Download plugin")}</button>
-            <button type="button" className="lp-secondary" onClick={() => scrollToSection('unity-install')}>
-              <MonitorDown size={16} aria-hidden />{translateText(" Installation guide")}</button>
-          </div>
-          <div className="unity-download-meta">
-            <span><PackageCheck size={13} aria-hidden />{translateText(" v")}{translateText(UNITY_PACKAGE_VERSION)}</span>
-            <span><ShieldCheck size={13} aria-hidden />{translateText(" MIT licensed")}</span>
-            <span><RefreshCw size={13} aria-hidden />{translateText(" Alpha release")}</span>
-          </div>
-        </div>
+    <article className="w-full text-foreground">
+      <PluginHero
+        titleId="unity-plugin-title"
+        eyebrow={translateText(" Unity integration")}
+        title={translateText("Create terrain, ")}
+        subtitle={translateText("inside Unity.")}
+        description={translateText("Generate deterministic native TerrainData from seeded presets and editable Noise Stacks, or import an existing Procedural Terrains world.")}
+        actions={(
+          <>
+            <DownloadButton block plugin={UNITY_PLUGIN} onDownload={onDownload}>
+              <Download aria-hidden />{translateText(" Download plugin")}</DownloadButton>
+            <SecondaryButton onClick={() => scrollToSection('unity-install')}>
+              <MonitorDown aria-hidden />{translateText(" Installation guide")}</SecondaryButton>
+          </>
+        )}
+        meta={(
+          <>
+            <span><PackageCheck aria-hidden />{translateText(" v")}{translateText(UNITY_PACKAGE_VERSION)}</span>
+            <span><ShieldCheck aria-hidden />{translateText(" MIT licensed")}</span>
+            <span><RefreshCw aria-hidden />{translateText(" Alpha release")}</span>
+          </>
+        )}
+        preview={(
+          <PreviewWindow
+            label={translateText("Unity terrain creation preview")}
+            icon={Puzzle}
+            title={translateText("Procedural Terrains")}
+            subtitle={translateText("Terrain Creator")}
+            badge={translateText("ALPHA")}
+          >
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-background/70 p-1">
+              <span className={windowTab}>{translateText("Import")}</span>
+              <span className={cn(windowTab, 'bg-accent text-foreground shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]')}>{translateText("Create")}</span>
+            </div>
+            <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-white/15 bg-background/70 px-3 py-7 text-center">
+              <Mountain className="mb-1 size-7 text-brand" aria-hidden />
+              <strong className="text-sm font-medium text-foreground">{translateText("Highlands · Seed 1337")}</strong>
+              <small className="text-xs text-zinc-400">{translateText("1000 × 1000 m · 513² · 4 tiles")}</small>
+            </div>
+            <PreviewChecks>
+              <span><CheckCircle2 />{translateText(" Deterministic Noise Stack")}</span>
+              <span><CheckCircle2 />{translateText(" Shared tile borders")}</span>
+              <span><CheckCircle2 />{translateText(" Native TerrainData output")}</span>
+            </PreviewChecks>
+            <PreviewGenerate icon={Zap}>{translateText(" Generate Terrain")}</PreviewGenerate>
+          </PreviewWindow>
+        )}
+      />
 
-        <div className="unity-hero-panel" aria-label={translateText("Unity terrain creation preview")}>
-          <div className="unity-window-bar">
-            <span className="unity-window-icon"><Puzzle size={16} aria-hidden /></span>
-            <div><strong>{translateText("Procedural Terrains")}</strong><small>{translateText("Terrain Creator")}</small></div>
-            <span className="unity-alpha-badge">{translateText("ALPHA")}</span>
-          </div>
-          <div className="unity-window-body">
-            <div className="unity-window-tabs"><span>{translateText("Import")}</span><span className="active">{translateText("Create")}</span></div>
-            <div className="unity-drop-preview">
-              <Mountain size={28} aria-hidden />
-              <strong>{translateText("Highlands · Seed 1337")}</strong>
-              <small>{translateText("1000 × 1000 m · 513² · 4 tiles")}</small>
-            </div>
-            <div className="unity-preview-checks">
-              <span><CheckCircle2 size={13} />{translateText(" Deterministic Noise Stack")}</span>
-              <span><CheckCircle2 size={13} />{translateText(" Shared tile borders")}</span>
-              <span><CheckCircle2 size={13} />{translateText(" Native TerrainData output")}</span>
-            </div>
-            <div className="unity-preview-button"><Zap size={14} aria-hidden />{translateText(" Generate Terrain")}</div>
-          </div>
-        </div>
-      </section>
+      <CompatibilityStrip label={translateText("Plugin compatibility")}>
+        <CompatItem title={<>{translateText("Unity ")}{translateText(UNITY_VERSION)}+</>} caption={translateText("Editor package")} />
+        <CompatItem title={translateText("Built-in · URP · HDRP")} caption={translateText("Native Terrain shaders")} />
+        <CompatItem title={translateText("Create + Import")} caption={translateText("Native TerrainData")} />
+      </CompatibilityStrip>
 
-      <div className="unity-compatibility" aria-label={translateText("Plugin compatibility")}>
-        <span><strong>{translateText("Unity ")}{translateText(UNITY_VERSION)}+</strong><small>{translateText("Editor package")}</small></span>
-        <span><strong>{translateText("Built-in · URP · HDRP")}</strong><small>{translateText("Native Terrain shaders")}</small></span>
-        <span><strong>{translateText("Create + Import")}</strong><small>{translateText("Native TerrainData")}</small></span>
-      </div>
+      <QuickStart
+        titleId="unity-quickstart-title"
+        label={translateText("Quick start")}
+        title={translateText("From seed to playable terrain")}
+        description={translateText("Create natively or import baked worlds without manual tile stitching.")}
+        steps={quickSteps}
+      />
 
-      <section className="unity-section unity-quickstart" aria-labelledby="unity-quickstart-title">
-        <div className="unity-section-heading">
-          <span>{translateText("Quick start")}</span>
-          <h2 id="unity-quickstart-title">{translateText("From seed to playable terrain")}</h2>
-          <p>{translateText("Create natively or import baked worlds without manual tile stitching.")}</p>
-        </div>
-        <div className="unity-step-grid">
-          {quickSteps.map(({ icon: Icon, ...step }) => (
-            <button type="button" onClick={() => scrollToSection(step.target)} className="unity-step-card" key={step.label}>
-              <div className="unity-step-top"><span>{translateText(step.label)}</span><Icon size={20} aria-hidden /></div>
-              <h3>{translateText(step.title)}</h3>
-              <p>{translateText(step.body)}</p>
-              <span className="unity-step-link">{translateText("Read the guide ")}<ArrowRight size={13} aria-hidden /></span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="unity-section unity-doc-section" id="unity-install" aria-labelledby="unity-install-title">
-        <div className="unity-doc-aside">
-          <span className="unity-doc-index">01</span>
-          <div className="unity-doc-heading">
-            <PackagePlus size={24} aria-hidden />
-            <div>
-              <h2 id="unity-install-title">{translateText("Install the plugin")}</h2>
-              <p>{translateText("The downloaded ZIP contains a standard Unity Package Manager package.")}</p>
-            </div>
-          </div>
-        </div>
-        <div className="unity-doc-content">
-          <div className="unity-method-card recommended">
-            <div className="unity-method-heading">
-              <span><Download size={18} aria-hidden /></span>
-              <div><strong>{translateText("Install from the download")}</strong><small>{translateText("Recommended")}</small></div>
-            </div>
-            <StepList steps={[
-              { title: 'Download and extract the ZIP', body: 'Keep the com.zyfou.procedural-terrains folder intact.' },
-              { title: 'Open Package Manager', body: 'In Unity, go to Window > Package Management > Package Manager.' },
-              { title: 'Add package from disk', body: 'Click the + menu, choose Add package from disk, then select package.json in the extracted folder.' },
-              { title: 'Wait for compilation', body: 'Unity adds Procedural Terrains to In Project and compiles the Editor tools.' },
-            ]} />
-            <button type="button" className="lp-primary unity-inline-download" onClick={() => onDownload(UNITY_PLUGIN)}>
-              <Download size={15} aria-hidden />{translateText(" Download v")}{translateText(UNITY_PACKAGE_VERSION)}
-            </button>
-          </div>
-
-          <div className="unity-method-card">
-            <div className="unity-method-heading">
-              <span><Clipboard size={18} aria-hidden /></span>
-              <div><strong>{translateText("Install from Git")}</strong><small>{translateText("Best for easy updates")}</small></div>
-            </div>
-            <p className="unity-method-copy">{translateText("In Package Manager, open the ")}<strong>+</strong>{translateText(" menu, select")}<strong>{translateText(" Add package from git URL")}</strong>{translateText(", and paste this address.")}</p>
-            <CopyField value={GIT_URL} />
-          </div>
-
-          <div className="unity-note">
-            <CircleAlert size={17} aria-hidden />
-            <p><strong>{translateText("Alpha requirement.")}</strong>{translateText(" The package currently targets Unity ")}{translateText(UNITY_VERSION)}{translateText(". Keep the package in source control so your team uses the same plugin version.")}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="unity-section unity-doc-section" id="unity-create" aria-labelledby="unity-create-title">
-        <div className="unity-doc-aside">
-          <span className="unity-doc-index">02</span>
-          <div className="unity-doc-heading">
-            <Sparkles size={24} aria-hidden />
-            <div>
-              <h2 id="unity-create-title">{translateText("Create native terrain")}</h2>
-              <p>{translateText("Generate editable TerrainData without leaving the Unity Editor.")}</p>
-            </div>
-          </div>
-        </div>
-        <div className="unity-doc-content">
-          <div className="unity-method-card recommended">
-            <div className="unity-method-heading">
-              <span><Mountain size={18} aria-hidden /></span>
-              <div><strong>{translateText("Create a new terrain")}</strong><small>{translateText("Native Unity workflow")}</small></div>
-            </div>
-            <StepList steps={[
-              { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
-              { title: 'Name and seed the recipe', body: 'Enter a project name, choose one of the eight Terrain presets, click Apply, and set the deterministic seed.' },
-              { title: 'Set the assembly', body: 'Choose total width, depth, height scale, Tiles X/Z, and a 65, 129, 257, 513, or 1025 heightmap resolution per tile.' },
-              { title: 'Choose placement and preview', body: 'Center the assembly at World Origin or the current Scene View Pivot, then optionally enable procedural sand, grass, rock and snow TerrainLayers.' },
-              { title: 'Customize the Noise Stack', body: 'Open Advanced Noise Stack to apply a stack preset or add, duplicate, reorder, and remove layers. Every layer exposes its blend, parameters, seed offset, and optional height, noise, slope, or biome masks.' },
-              { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, Terrain GameObjects, colliders, connected neighbors, procedural surface assets, placeholder water, and a saved generation recipe.' },
-            ]} />
-          </div>
-          <div className="unity-method-card">
-            <div className="unity-method-heading">
-              <span><RefreshCw size={18} aria-hidden /></span>
-              <div><strong>{translateText("Edit and regenerate")}</strong><small>{translateText("Keep the saved recipe")}</small></div>
-            </div>
-            <StepList steps={[
-              { title: 'Select generated terrain', body: 'Select the Procedural Terrain root or any generated Terrain tile in the Hierarchy.' },
-              { title: 'Load Selected', body: 'Click Load Selected to copy the referenced TerrainGenerationRecipe back into the Create controls.' },
-              { title: 'Adjust the recipe', body: 'Change the seed, dimensions, resolution, presets, layers, masks, fine detail, thermal erosion, surface settings, or water.' },
-              { title: 'Regenerate Selected', body: 'Unity replaces only marked generated tiles and assets, reconnects neighbors, and preserves unrelated child GameObjects under the root.' },
-            ]} />
-          </div>
-          <div className="unity-note success">
-            <CheckCircle2 size={17} aria-hidden />
-            <p><strong>{translateText("Blender parity.")}</strong>{translateText(" Unity uses the same deterministic CPU formulas and presets, with shared world coordinates for seamless tile borders.")}</p>
-          </div>
-          <div className="unity-note">
-            <CircleAlert size={17} aria-hidden />
-            <p><strong>{translateText("Choose resolution deliberately.")}</strong>{translateText(" The window warns above one million samples and blocks recipes above sixteen million. Use 129 or 257 while shaping, then regenerate at 513 or 1025 for final detail.")}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="unity-section unity-doc-section" id="unity-export" aria-labelledby="unity-export-title">
-        <div className="unity-doc-aside">
-          <span className="unity-doc-index">03</span>
-          <div className="unity-doc-heading">
-            <UploadCloud size={24} aria-hidden />
-            <div>
-              <h2 id="unity-export-title">{translateText("Export for Unity")}</h2>
-              <p>{translateText("Use the production preset so every required runtime file is packaged correctly.")}</p>
-            </div>
-          </div>
-        </div>
-        <div className="unity-doc-content">
+      <DocSection
+        id="unity-install"
+        titleId="unity-install-title"
+        index="01"
+        icon={PackagePlus}
+        title={translateText("Install the plugin")}
+        description={translateText("The downloaded ZIP contains a standard Unity Package Manager package.")}
+      >
+        <MethodCard recommended icon={Download} title={translateText("Install from the download")} caption={translateText("Recommended")}>
           <StepList steps={[
-            { title: 'Finish your terrain in Tile mode', body: 'The current Unity runtime document supports Tile mode and square tile assemblies.' },
-            { title: 'Open the Export panel', body: 'Select Export in the editor toolbar, then open Production Preset.' },
-            { title: 'Choose Unity Terrain', body: 'The preset enables separate tiles, RAW heightfields, baked color and normal maps, splat data, colliders and water metadata.' },
-            { title: 'Review Production Check', body: 'Resolve any red validation message. Unity height grids must use a supported vertex resolution such as 1025 × 1025.' },
-            { title: 'Click Export Terrain', body: 'Save the generated ZIP without changing its internal Terrain folder structure.' },
+            { title: 'Download and extract the ZIP', body: 'Keep the com.zyfou.procedural-terrains folder intact.' },
+            { title: 'Open Package Manager', body: 'In Unity, go to Window > Package Management > Package Manager.' },
+            { title: 'Add package from disk', body: 'Click the + menu, choose Add package from disk, then select package.json in the extracted folder.' },
+            { title: 'Wait for compilation', body: 'Unity adds Procedural Terrains to In Project and compiles the Editor tools.' },
           ]} />
-
-          <div className="unity-export-layout">
-            <div className="unity-folder-tree">
-              <div><FolderOpen size={15} /><strong>{translateText("Terrain/")}</strong></div>
-              <span><FileJson size={14} />{translateText(" project.ptrterrain")}</span>
-              <span><FileArchive size={14} />{translateText(" heightmap.raw")}</span>
-              <span><Mountain size={14} />{translateText(" tiles/")}</span>
-              <span><Layers3 size={14} />{translateText(" textures/")}</span>
-              <span><Settings2 size={14} />{translateText(" splatmaps/")}</span>
-            </div>
-            <div className="unity-export-tip">
-              <CheckCircle2 size={18} aria-hidden />
-              <div><strong>{translateText("Keep the ZIP untouched")}</strong><p>{translateText("The Unity importer safely extracts it into a unique folder below Assets/ProceduralTerrains/Imports.")}</p></div>
-            </div>
+          <div className="mt-6">
+            <DownloadButton plugin={UNITY_PLUGIN} onDownload={onDownload}>
+              <Download aria-hidden />{translateText(" Download v")}{translateText(UNITY_PACKAGE_VERSION)}
+            </DownloadButton>
           </div>
-        </div>
-      </section>
+        </MethodCard>
 
-      <section className="unity-section unity-doc-section" id="unity-import" aria-labelledby="unity-import-title">
-        <div className="unity-doc-aside">
-          <span className="unity-doc-index">04</span>
-          <div className="unity-doc-heading">
-            <Mountain size={24} aria-hidden />
-            <div>
-              <h2 id="unity-import-title">{translateText("Import and build")}</h2>
-              <p>{translateText("The importer creates a native Unity Terrain hierarchy you can continue editing.")}</p>
-            </div>
-          </div>
-        </div>
-        <div className="unity-doc-content">
+        <MethodCard icon={Clipboard} title={translateText("Install from Git")} caption={translateText("Best for easy updates")}>
+          <p className="mt-5 mb-4 text-[13.5px] leading-relaxed text-zinc-400 [&_strong]:font-medium [&_strong]:text-zinc-100">{translateText("In Package Manager, open the ")}<strong>+</strong>{translateText(" menu, select")}<strong>{translateText(" Add package from git URL")}</strong>{translateText(", and paste this address.")}</p>
+          <CopyField value={GIT_URL} />
+        </MethodCard>
+
+        <Note icon={CircleAlert}>
+          <strong>{translateText("Alpha requirement.")}</strong>{translateText(" The package currently targets Unity ")}{translateText(UNITY_VERSION)}{translateText(". Keep the package in source control so your team uses the same plugin version.")}
+        </Note>
+      </DocSection>
+
+      <DocSection
+        id="unity-create"
+        titleId="unity-create-title"
+        index="02"
+        icon={Sparkles}
+        title={translateText("Create native terrain")}
+        description={translateText("Generate editable TerrainData without leaving the Unity Editor.")}
+      >
+        <MethodCard recommended icon={Mountain} title={translateText("Create a new terrain")} caption={translateText("Native Unity workflow")}>
           <StepList steps={[
-            { title: 'Open the Terrain Importer', body: 'Go to Window > Procedural Terrains > Terrain Importer.' },
-            { title: 'Select your export', body: 'Choose the ZIP produced by Procedural Terrains. The importer validates the document and its artifacts before building.' },
-            { title: 'Choose build options', body: 'Keep Create Terrain objects enabled, then choose whether to create pipeline-compatible Terrain Materials and baked TerrainLayers.' },
-            { title: 'Import ZIP and Build Scene', body: 'The ZIP is extracted below Assets/ProceduralTerrains/Imports and a Terrain GameObject is created for every exported tile.' },
-            { title: 'Rebuild an imported project', body: 'Drag an existing project.ptrterrain TerrainProjectAsset into Already imported, then click Build Terrains in Current Scene.' },
-            { title: 'Save the scene', body: 'Review the generated hierarchy, position it in your project, then save your Unity scene.' },
+            { title: 'Open the Create tab', body: 'Go to Window > Procedural Terrains > Terrain Importer, then choose Create.' },
+            { title: 'Name and seed the recipe', body: 'Enter a project name, choose one of the eight Terrain presets, click Apply, and set the deterministic seed.' },
+            { title: 'Set the assembly', body: 'Choose total width, depth, height scale, Tiles X/Z, and a 65, 129, 257, 513, or 1025 heightmap resolution per tile.' },
+            { title: 'Choose placement and preview', body: 'Center the assembly at World Origin or the current Scene View Pivot, then optionally enable procedural sand, grass, rock and snow TerrainLayers.' },
+            { title: 'Customize the Noise Stack', body: 'Open Advanced Noise Stack to apply a stack preset or add, duplicate, reorder, and remove layers. Every layer exposes its blend, parameters, seed offset, and optional height, noise, slope, or biome masks.' },
+            { title: 'Generate Terrain', body: 'Unity creates TerrainData assets, Terrain GameObjects, colliders, connected neighbors, procedural surface assets, placeholder water, and a saved generation recipe.' },
           ]} />
+        </MethodCard>
+        <MethodCard icon={RefreshCw} title={translateText("Edit and regenerate")} caption={translateText("Keep the saved recipe")}>
+          <StepList steps={[
+            { title: 'Select generated terrain', body: 'Select the Procedural Terrain root or any generated Terrain tile in the Hierarchy.' },
+            { title: 'Load Selected', body: 'Click Load Selected to copy the referenced TerrainGenerationRecipe back into the Create controls.' },
+            { title: 'Adjust the recipe', body: 'Change the seed, dimensions, resolution, presets, layers, masks, fine detail, thermal erosion, surface settings, or water.' },
+            { title: 'Regenerate Selected', body: 'Unity replaces only marked generated tiles and assets, reconnects neighbors, and preserves unrelated child GameObjects under the root.' },
+          ]} />
+        </MethodCard>
+        <Note tone="success" icon={CheckCircle2}>
+          <strong>{translateText("Blender parity.")}</strong>{translateText(" Unity uses the same deterministic CPU formulas and presets, with shared world coordinates for seamless tile borders.")}
+        </Note>
+        <Note icon={CircleAlert}>
+          <strong>{translateText("Choose resolution deliberately.")}</strong>{translateText(" The window warns above one million samples and blocks recipes above sixteen million. Use 129 or 257 while shaping, then regenerate at 513 or 1025 for final detail.")}
+        </Note>
+      </DocSection>
 
-          <div className="unity-generated-grid">
-            {generatedAssets.map(([label, Icon]) => (
-              <div key={label}><span><Icon size={16} aria-hidden /></span><strong>{translateText(label)}</strong><Check size={14} aria-hidden /></div>
-            ))}
-          </div>
+      <DocSection
+        id="unity-export"
+        titleId="unity-export-title"
+        index="03"
+        icon={UploadCloud}
+        title={translateText("Export for Unity")}
+        description={translateText("Use the production preset so every required runtime file is packaged correctly.")}
+      >
+        <StepCard steps={[
+          { title: 'Finish your terrain in Tile mode', body: 'The current Unity runtime document supports Tile mode and square tile assemblies.' },
+          { title: 'Open the Export panel', body: 'Select Export in the editor toolbar, then open Production Preset.' },
+          { title: 'Choose Unity Terrain', body: 'The preset enables separate tiles, RAW heightfields, baked color and normal maps, splat data, colliders and water metadata.' },
+          { title: 'Review Production Check', body: 'Resolve any red validation message. Unity height grids must use a supported vertex resolution such as 1025 × 1025.' },
+          { title: 'Click Export Terrain', body: 'Save the generated ZIP without changing its internal Terrain folder structure.' },
+        ]} />
 
-          <div className="unity-note success">
-            <PackageCheck size={17} aria-hidden />
-            <p><strong>{translateText("Rebuild at any time.")}</strong>{translateText(" You can also select an imported TerrainProjectAsset in the importer window and rebuild its Terrain hierarchy.")}</p>
-          </div>
-        </div>
+        <ExportLayout>
+          <FolderTree root={translateText("Terrain/")}>
+            <span><FileJson aria-hidden />{translateText(" project.ptrterrain")}</span>
+            <span><FileArchive aria-hidden />{translateText(" heightmap.raw")}</span>
+            <span><Mountain aria-hidden />{translateText(" tiles/")}</span>
+            <span><Layers3 aria-hidden />{translateText(" textures/")}</span>
+            <span><Settings2 aria-hidden />{translateText(" splatmaps/")}</span>
+          </FolderTree>
+          <ExportTip icon={CheckCircle2} title={translateText("Keep the ZIP untouched")}>
+            {translateText("The Unity importer safely extracts it into a unique folder below Assets/ProceduralTerrains/Imports.")}
+          </ExportTip>
+        </ExportLayout>
+      </DocSection>
+
+      <DocSection
+        id="unity-import"
+        titleId="unity-import-title"
+        index="04"
+        icon={Mountain}
+        title={translateText("Import and build")}
+        description={translateText("The importer creates a native Unity Terrain hierarchy you can continue editing.")}
+      >
+        <StepCard steps={[
+          { title: 'Open the Terrain Importer', body: 'Go to Window > Procedural Terrains > Terrain Importer.' },
+          { title: 'Select your export', body: 'Choose the ZIP produced by Procedural Terrains. The importer validates the document and its artifacts before building.' },
+          { title: 'Choose build options', body: 'Keep Create Terrain objects enabled, then choose whether to create pipeline-compatible Terrain Materials and baked TerrainLayers.' },
+          { title: 'Import ZIP and Build Scene', body: 'The ZIP is extracted below Assets/ProceduralTerrains/Imports and a Terrain GameObject is created for every exported tile.' },
+          { title: 'Rebuild an imported project', body: 'Drag an existing project.ptrterrain TerrainProjectAsset into Already imported, then click Build Terrains in Current Scene.' },
+          { title: 'Save the scene', body: 'Review the generated hierarchy, position it in your project, then save your Unity scene.' },
+        ]} />
+
+        <GeneratedGrid items={generatedAssets} />
+
+        <Note tone="success" icon={PackageCheck}>
+          <strong>{translateText("Rebuild at any time.")}</strong>{translateText(" You can also select an imported TerrainProjectAsset in the importer window and rebuild its Terrain hierarchy.")}
+        </Note>
+      </DocSection>
+
+      <section aria-labelledby="unity-limitations-title" className="scroll-mt-[88px] border-b border-border py-14 sm:py-16 lg:py-20">
+        <SectionHeading
+          label={translateText("Alpha scope")}
+          titleId="unity-limitations-title"
+          title={translateText("What is available today")}
+          description={translateText("A clear view of what the current editor plugin handles—and what comes next.")}
+        />
+        <ScopeGrid>
+          <ScopeCard icon={CheckCircle2} title={translateText("Available now")}>
+            <li>{translateText("ZIP and .ptrterrain validation")}</li>
+            <li>{translateText("TerrainData, colliders and tile neighbors")}</li>
+            <li>{translateText("Seeded presets and editable Noise Stacks")}</li>
+            <li>{translateText("Fine detail and thermal erosion across tile seams")}</li>
+            <li>{translateText("Procedural sand, grass, rock and snow surfaces")}</li>
+            <li>{translateText("Live placeholder water in creation and import")}</li>
+            <li>{translateText("Saved recipes, load selected and regeneration")}</li>
+            <li>{translateText("Baked color and normal TerrainLayer")}</li>
+            <li>{translateText("Built-in, URP and HDRP Terrain materials")}</li>
+          </ScopeCard>
+          <ScopeCard planned icon={Sparkles} title={translateText("Planned next")}>
+            <li>{translateText("Runtime terrain generation")}</li>
+            <li>{translateText("Full studio biome shader reconstruction")}</li>
+            <li>{translateText("Splines and richer water reconstruction")}</li>
+            <li>{translateText("Expanded runtime generation tools")}</li>
+          </ScopeCard>
+        </ScopeGrid>
       </section>
 
-      <section className="unity-section unity-limitations" aria-labelledby="unity-limitations-title">
-        <div className="unity-section-heading">
-          <span>{translateText("Alpha scope")}</span>
-          <h2 id="unity-limitations-title">{translateText("What is available today")}</h2>
-          <p>{translateText("A clear view of what the current editor plugin handles—and what comes next.")}</p>
-        </div>
-        <div className="unity-scope-grid">
-          <div>
-            <span className="unity-scope-icon available"><CheckCircle2 size={20} aria-hidden /></span>
-            <h3>{translateText("Available now")}</h3>
-            <ul>
-              <li>{translateText("ZIP and .ptrterrain validation")}</li>
-              <li>{translateText("TerrainData, colliders and tile neighbors")}</li>
-              <li>{translateText("Seeded presets and editable Noise Stacks")}</li>
-              <li>{translateText("Fine detail and thermal erosion across tile seams")}</li>
-              <li>{translateText("Procedural sand, grass, rock and snow surfaces")}</li>
-              <li>{translateText("Live placeholder water in creation and import")}</li>
-              <li>{translateText("Saved recipes, load selected and regeneration")}</li>
-              <li>{translateText("Baked color and normal TerrainLayer")}</li>
-              <li>{translateText("Built-in, URP and HDRP Terrain materials")}</li>
-            </ul>
-          </div>
-          <div>
-            <span className="unity-scope-icon upcoming"><Sparkles size={20} aria-hidden /></span>
-            <h3>{translateText("Planned next")}</h3>
-            <ul>
-              <li>{translateText("Runtime terrain generation")}</li>
-              <li>{translateText("Full studio biome shader reconstruction")}</li>
-              <li>{translateText("Splines and richer water reconstruction")}</li>
-              <li>{translateText("Expanded runtime generation tools")}</li>
-            </ul>
-          </div>
-        </div>
-      </section>
+      <FaqSection titleId="unity-faq-title" label={translateText("Help")} title={translateText("Common questions")}>
+        <FaqItem question={translateText("Does it work with URP and HDRP?")}>
+          {translateText("Yes. Generated materials use Unity's native Terrain shader for the active Built-in, URP or HDRP render pipeline, while baked textures are assigned through a TerrainLayer.")}
+        </FaqItem>
+        <FaqItem question={translateText("Can I edit the terrain after import?")}>
+          {translateText("Yes. The importer builds regular Unity Terrain objects and TerrainData assets, so you can use Unity's standard terrain tools afterward.")}
+        </FaqItem>
+        <FaqItem question={translateText("Can Unity match Blender-generated terrain?")}>
+          {translateText("Yes. Both plugins use the same seeded CPU Noise Stack formulas and presets. Unity adapts the result to native TerrainData and reverses the horizontal generator axis consistently.")}
+        </FaqItem>
+        <FaqItem question={translateText("Where are imported files stored?")}>
+          {translateText("Each ZIP is extracted into its own folder below Assets/ProceduralTerrains/Imports, avoiding accidental overwrites between imports.")}
+        </FaqItem>
+      </FaqSection>
 
-      <section className="unity-section unity-faq" aria-labelledby="unity-faq-title">
-        <div className="unity-section-heading">
-          <span>{translateText("Help")}</span>
-          <h2 id="unity-faq-title">{translateText("Common questions")}</h2>
-        </div>
-        <div className="unity-faq-list">
-          <details>
-            <summary>{translateText("Does it work with URP and HDRP?")}<ChevronRight size={16} aria-hidden /></summary>
-            <p>{translateText("Yes. Generated materials use Unity's native Terrain shader for the active Built-in, URP or HDRP render pipeline, while baked textures are assigned through a TerrainLayer.")}</p>
-          </details>
-          <details>
-            <summary>{translateText("Can I edit the terrain after import?")}<ChevronRight size={16} aria-hidden /></summary>
-            <p>{translateText("Yes. The importer builds regular Unity Terrain objects and TerrainData assets, so you can use Unity's standard terrain tools afterward.")}</p>
-          </details>
-          <details>
-            <summary>{translateText("Can Unity match Blender-generated terrain?")}<ChevronRight size={16} aria-hidden /></summary>
-            <p>{translateText("Yes. Both plugins use the same seeded CPU Noise Stack formulas and presets. Unity adapts the result to native TerrainData and reverses the horizontal generator axis consistently.")}</p>
-          </details>
-          <details>
-            <summary>{translateText("Where are imported files stored?")}<ChevronRight size={16} aria-hidden /></summary>
-            <p>{translateText("Each ZIP is extracted into its own folder below Assets/ProceduralTerrains/Imports, avoiding accidental overwrites between imports.")}</p>
-          </details>
-        </div>
-      </section>
-
-      <section className="unity-final-cta">
-        <div>
-          <span><Puzzle size={15} aria-hidden />{translateText(" Unity package v")}{translateText(UNITY_PACKAGE_VERSION)}</span>
-          <h2>{translateText("Bring your next world into Unity.")}</h2>
-          <p>{translateText("Install the alpha package, create or import a terrain, and keep building with native Unity tools.")}</p>
-        </div>
-        <div>
-          <button type="button" className="lp-primary" onClick={() => onDownload(UNITY_PLUGIN)}><Download size={16} aria-hidden />{translateText(" Download plugin")}</button>
-          <button type="button" className="lp-secondary" onClick={onOpenEditor}>{translateText("Open terrain editor ")}<ExternalLink size={15} aria-hidden /></button>
-        </div>
-      </section>
+      <FinalCta
+        label={<>{translateText(" Unity package v")}{translateText(UNITY_PACKAGE_VERSION)}</>}
+        title={translateText("Bring your next world into Unity.")}
+        body={translateText("Install the alpha package, create or import a terrain, and keep building with native Unity tools.")}
+        actions={(
+          <>
+            <DownloadButton block plugin={UNITY_PLUGIN} onDownload={onDownload}><Download aria-hidden />{translateText(" Download plugin")}</DownloadButton>
+            <SecondaryButton onClick={onOpenEditor}>{translateText("Open terrain editor ")}<ExternalLink aria-hidden /></SecondaryButton>
+          </>
+        )}
+      />
     </article>
   );
 }

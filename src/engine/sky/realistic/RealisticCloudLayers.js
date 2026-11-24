@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { CloudSlabLayer } from '../CloudSlabLayer.js';
 import { PlanetCloudLayer } from '../PlanetCloudLayer.js';
-import { resolveCloudQuality, CLOUD_DEFAULT_PARAMS, cloudNoiseOffset, resolveCloudNoiseType } from '../CloudSettings.js';
+import {
+  resolveCloudQuality,
+  CLOUD_DEFAULT_PARAMS,
+  cloudFormationDepth,
+  cloudNoiseOffset,
+  resolveCloudNoiseType,
+} from '../CloudSettings.js';
 import { REALISTIC_CLOUD_VERTEX, REALISTIC_CLOUD_FRAGMENT, REALISTIC_MAX_STEPS } from './realisticCloudGLSL.js';
 import {
   getRealisticNoiseVolumes,
@@ -139,6 +145,18 @@ function applySharedParams(u, params, config, q) {
   return Math.max(12, Math.min(REALISTIC_MAX_STEPS, steps)) * (q.disabled ? 0 : 1);
 }
 
+/**
+ * Thickness past the natural cloud depth must add cloud, not thin it out:
+ * the shader spreads its optical depth over the whole layer, so the density
+ * is scaled back up, and the march gets proportionally more slices (up to 2x).
+ * @returns {number} the step budget for the layer
+ */
+function applyLayerDepth(u, steps, thickness, formationDepth) {
+  const depthRatio = Math.max(1, thickness / Math.max(formationDepth, 1e-3));
+  u.uCloudDensity.value *= depthRatio;
+  return Math.min(REALISTIC_MAX_STEPS, steps * Math.min(depthRatio, 2));
+}
+
 // ---------------------------------------------------------------------------
 // Flat (studio board): slab between two world-Y planes over a disc
 // ---------------------------------------------------------------------------
@@ -215,13 +233,20 @@ export class RealisticCloudSlabLayer extends CloudSlabLayer {
     // layer stacks more of them into taller towers); the reference length is
     // tied to the board so a slider value means the same look at any size.
     const board = Math.max(this._boardSize, 1);
-    const billow = Math.sqrt(thickness * board * 0.3);
+    // Formation depth: the layer thickness up to the natural depth of a cloud
+    // (the default Thickness). Past it the formations stop rescaling: a
+    // thicker layer gives the same clouds more room instead of redrawing the
+    // whole sky. Below it nothing changes from before.
+    const formationDepth = cloudFormationDepth(thickness);
+    const billow = Math.sqrt(formationDepth * board * 0.3);
     // Tower cells twice as wide as on a planet: the slab is mostly seen from
     // the side, where narrow cells of different heights read as streaks.
-    applyFormationFrequencies(u, params, billow, thickness * 3.2);
+    applyFormationFrequencies(u, params, billow, formationDepth * 3.2);
     // shear: how far the layer top is carried downstream (world units)
     u.uCloudShear.value = param(params, 'cloudShear') * thickness * 2.2;
-    this._baseSteps = applySharedParams(u, params, config, q);
+    this._baseSteps = applyLayerDepth(
+      u, applySharedParams(u, params, config, q), thickness, formationDepth,
+    );
 
     // Bound weather detail to the visible board instead of sampling one
     // nearly constant weather value across an entire Tile or Mini.
@@ -386,11 +411,14 @@ export class RealisticPlanetCloudLayer extends PlanetCloudLayer {
 
     // noise frequencies in world units, tied to the shell thickness exactly
     // as in Procedural Planets (billows grow with sqrt of the thickness)
-    const billow = Math.sqrt(thick * R * 0.009);
-    applyFormationFrequencies(u, params, billow, thick * 1.6);
+    const formationDepth = cloudFormationDepth(thick, radiusScale);
+    const billow = Math.sqrt(formationDepth * R * 0.009);
+    applyFormationFrequencies(u, params, billow, formationDepth * 1.6);
     // shear in direction units: how far the shell top is carried downstream
     u.uCloudShear.value = param(params, 'cloudShear') * (thick / R) * 2.2;
-    this._baseSteps = applySharedParams(u, params, config, q);
+    this._baseSteps = applyLayerDepth(
+      u, applySharedParams(u, params, config, q), thick, formationDepth,
+    );
 
     this._systemScale = param(params, 'cloudSystemScale');
     this._seed.copy(seedOffset(params.seed ?? 0)).add(u.uCloudVariationOffset.value);

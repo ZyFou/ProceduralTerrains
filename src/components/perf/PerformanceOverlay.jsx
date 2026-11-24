@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { computeWarnings } from './warnings.js';
 import { buildDiagnosticsText, buildDiagnosticsObject } from './diagnostics.js';
 import PerfSparkline from './PerfSparkline.jsx';
+import MatrixSpinner from '../matrix/MatrixSpinner.jsx';
 
 function fmtNum(n) {
   if (n == null) return '–';
@@ -75,7 +76,7 @@ export default function PerformanceOverlay({
           <button type="button" className="perf-x" onClick={onClose} aria-label={translateText("Close")}>✕</button>
         </div>
         <div className="perf-loading-body">
-          <span className="perf-loading-dot" />{translateText("Collecting metrics…")}</div>
+          <MatrixSpinner size={14} minimal className="perf-loading-dot" />{translateText("Collecting metrics…")}</div>
       </div>
     );
   }

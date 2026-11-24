@@ -25,6 +25,9 @@ import { APP_NAME, APP_VERSION } from '../constants/app.js';
 import { EDITOR_SHORTCUTS, matchesShortcut, SEARCH_SETTINGS_SHORTCUT, shortcutText } from '../keyboardShortcuts.js';
 import NotificationCenter from './ui/Toast.jsx';
 import ShortcutHint from './ui/ShortcutHint.jsx';
+import MatrixSpinner from './matrix/MatrixSpinner.jsx';
+import MatrixButton from './matrix/MatrixButton.jsx';
+import { useOptionalLoading } from '../state/loading.jsx';
 import LanguageSwitch from '../i18n/LanguageSwitch.jsx';
 
 const Icon = ({ d, viewBox = '0 0 16 16', fill }) => (
@@ -66,6 +69,9 @@ export default function TopBar({
   onToggleNotificationLogging,
 }) {
   useLanguage();
+  // The scene export runs as the 'export' loading task (App.jsx); the Export
+  // button plays its LED animation for as long as that task is alive.
+  const exporting = useOptionalLoading()?.tasks.some((task) => task.id === 'export') ?? false;
   const fileRef = useRef(null);
   const fileMenuRef = useRef(null);
   const editMenuRef = useRef(null);
@@ -353,10 +359,7 @@ export default function TopBar({
       <div className="tb-group tb-center">
         {loading && (
           <span className="tb-loading" title={translateText(loading.detail || loading.label)}>
-            <svg viewBox="0 0 24 24" width="14" height="14" className="tb-spin" aria-hidden>
-              <circle cx="12" cy="12" r="9" fill="none" stroke="var(--border-subtle)" strokeWidth="2.5" />
-              <path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
+            <MatrixSpinner size={14} className="tb-loading-spinner" />
             <span className="tb-text">{translateText(loading.label)}</span>
           </span>
         )}
@@ -393,14 +396,18 @@ export default function TopBar({
           onClear={onClearNotifications}
           onToggleIgnore={onToggleNotificationLogging}
         />
-        <button
-          className={`tb-btn primary${activePanel === 'export' ? ' active' : ''}`}
+        <MatrixButton
+          className="tb-export-matrix"
+          selected={activePanel === 'export'}
+          color="#ffffff"
+          loading={exporting}
+          loadingLabel={translateText('Exporting…')}
           onClick={() => onOpenPanel('export')}
           title={translateText("Export the scene")}
         >
-          <Download size={14} strokeWidth={1.75} aria-hidden />
+          <Download size={14} strokeWidth={2} aria-hidden />
           <span className="tb-text">{translateText("Export")}</span>
-        </button>
+        </MatrixButton>
         <button className="tb-btn tb-icon-btn" onClick={onToggleHelp} title={translateText("Show controls help")} aria-label={translateText("Help")}>
           <HelpCircle size={14} strokeWidth={1.75} aria-hidden />
         </button>

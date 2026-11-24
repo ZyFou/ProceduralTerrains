@@ -83,6 +83,44 @@ export const CLOUD_DEFAULT_PARAMS = {
 };
 
 export const CLOUD_RENDER_MODES = ['legacy', 'realistic', 'realisticV2'];
+
+/**
+ * Depth over which a cloud layer spreads its formations and its optical
+ * depth: the layer thickness, capped at the natural depth of a cloud at this
+ * world scale (the default Thickness on a default tile / reference planet).
+ *
+ * Every renderer used to normalize by the raw thickness, so raising Thickness
+ * stretched the same amount of cloud over more height (fainter, coarser, and
+ * in Realistic a different pattern). Capped, a thicker layer simply holds
+ * more cloud; a thinner one still squeezes its clouds to fit.
+ * @param {number} thickness layer thickness in world units
+ * @param {number} worldScale board size / 2048, or planet radius / reference
+ */
+export function cloudFormationDepth(thickness, worldScale = 1) {
+  const natural = CLOUD_DEFAULT_PARAMS.cloudThickness * Math.max(worldScale, 1e-6);
+  return Math.max(1, Math.min(thickness, natural));
+}
+
+// Per-renderer starting values, applied when the user switches renderer and a
+// setting is still at the previous renderer's default (never over a value the
+// user tuned). Realistic V2 starts calm: no towering, no wind shear.
+export const CLOUD_RENDER_MODE_DEFAULTS = {
+  realisticV2: { cloudTowering: 0, cloudShear: 0 },
+};
+
+/** Params to change when switching from one cloud renderer to another. */
+export function cloudRenderModeDefaultsPatch(params, previousMode, nextMode) {
+  const previous = CLOUD_RENDER_MODE_DEFAULTS[previousMode] ?? {};
+  const next = CLOUD_RENDER_MODE_DEFAULTS[nextMode] ?? {};
+  const patch = {};
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+    const previousDefault = previous[key] ?? CLOUD_DEFAULT_PARAMS[key];
+    const nextDefault = next[key] ?? CLOUD_DEFAULT_PARAMS[key];
+    const current = params?.[key] ?? CLOUD_DEFAULT_PARAMS[key];
+    if (current === previousDefault && nextDefault !== previousDefault) patch[key] = nextDefault;
+  }
+  return patch;
+}
 export const CLOUD_NOISE_TYPES = ['soft', 'billowy', 'wispy'];
 
 export function resolveCloudNoiseType(params) {

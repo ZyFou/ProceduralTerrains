@@ -1,5 +1,6 @@
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import { LoadingBar } from './LoadingOverlay.jsx';
+import MatrixSpinner from '../matrix/MatrixSpinner.jsx';
 
 export default function CompileProgressChip({ progress }) {
   useLanguage();
@@ -17,6 +18,7 @@ export default function CompileProgressChip({ progress }) {
   return (
     <div className="compile-progress-chip" role="status" aria-live="polite">
       <div className="compile-progress-chip-main">
+        <MatrixSpinner size={14} className="compile-progress-spinner" />
         <span className="compile-progress-label">{translateText(label)}</span>
         {hasTotal && (
           <span className="compile-progress-count">

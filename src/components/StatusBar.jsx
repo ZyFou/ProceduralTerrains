@@ -1,6 +1,7 @@
 import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { GITHUB_REPO_URL } from '../constants/app.js';
 import { useLiveMetrics } from '../state/LiveMetricsStore.js';
+import MatrixSpinner from './matrix/MatrixSpinner.jsx';
 
 function fmtTris(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(0)}K`;
@@ -70,7 +71,7 @@ export default function StatusBar({
         {bgWork && (
           <>
             <span className="sb-bgwork" title={translateText("Full-detail shaders are compiling in the background — brief hiccups are normal until this finishes")}>
-              <span className="status-dot busy" />
+              <MatrixSpinner size={12} minimal className="sb-bgwork-spinner" />
               {translateText(bgWork)}
             </span>
             <span className="sb-sep" aria-hidden="true" />

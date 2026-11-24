@@ -1,6 +1,7 @@
 import { matchesTranslatedSearch } from '../../i18n/language.js';
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import SurfaceBranchPreview from '../ui/SurfaceBranchPreview.jsx';
+import MatrixSpinner from '../matrix/MatrixSpinner.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background, BackgroundVariant, ConnectionMode, Controls, Handle, NodeResizer, Position, ReactFlow, useUpdateNodeInternals,
@@ -9,7 +10,7 @@ import '@xyflow/react/dist/style.css';
 import {
   Boxes, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
   Eye, EyeOff, FolderPlus, GripVertical, Maximize2,
-  Layers3, LoaderCircle, Mountain, Palette, Plus, RotateCcw, Route, Search,
+  Layers3, Mountain, Palette, Plus, RotateCcw, Route, Search,
   SlidersHorizontal, Sparkles, Trash2, Ungroup, Waves, X,
 } from 'lucide-react';
 import {
@@ -176,7 +177,7 @@ function TerrainNode({ data, selected }) {
           <span className="terrain-flow-node__eyebrow">{translateText(definition.category || 'Node')}</span>
           <span className="terrain-flow-node__title">{node.label === definition.label ? translateText(definition.label) : node.label}</span>
         </span>
-        {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={translateText(`${node.label} is compiling`)} title={translateText("Compiling shader")}><LoaderCircle size={12} aria-hidden /></span> : null}
+        {compiling ? <span className="terrain-flow-node__compile" role="status" aria-label={translateText(`${node.label} is compiling`)} title={translateText("Compiling shader")}><MatrixSpinner size={14} minimal /></span> : null}
         <span className="terrain-flow-node__kind">{translateText(definition.permanent ? 'Output' : outputKind)}</span>
       </div>
       <div className="terrain-flow-node__ports">

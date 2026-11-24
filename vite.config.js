@@ -1,5 +1,7 @@
+import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import surfaceMaterialsApi from './vite-plugins/surfaceMaterialsApi.js';
 import playgroundRuntime from './vite-plugins/playgroundRuntime.js';
 
@@ -13,7 +15,10 @@ export default defineConfig({
   esbuild: {
     jsx: 'automatic',
   },
-  plugins: [react({ jsxRuntime: 'automatic' }), surfaceMaterialsApi(), playgroundRuntime()],
+  plugins: [react({ jsxRuntime: 'automatic' }), tailwindcss(), surfaceMaterialsApi(), playgroundRuntime()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   worker: {
     // The render worker loads optional world/export bundles dynamically, so it
     // must remain an ES-module graph rather than Vite's single-file IIFE mode.

@@ -5,6 +5,7 @@ import { FaGithub as Github } from 'react-icons/fa6';
 import Markdown, { parseMarkdown } from './Markdown.jsx';
 import DocsOverview from './DocsOverview.jsx';
 import Playground from './playground/Playground.jsx';
+import { SectionLabel } from '../landing/home/HomeView.jsx';
 import { DOCS_GROUPS, DOCS_PAGES, createLinkContext, docsHref, getPage, githubSourceUrl, pageSource, parseDocsHash } from './docsPages.js';
 import './docs.css';
 
@@ -123,7 +124,7 @@ function Sidebar({ page, open, onToggle }) {
           <nav className="docs-nav" aria-label={translate('Documentation')}>
             {DOCS_GROUPS.map((group) => (
               <div key={group.id} className="docs-nav-group">
-                <h2>{translate(group.title)}</h2>
+                <h2 className="docs-nav-label">{translate(group.title)}</h2>
                 {DOCS_PAGES.filter((item) => item.group === group.id).map((item) => (
                   <a key={item.id} href={docsHref(item.id)} className={item.id === page ? 'active' : ''} aria-current={item.id === page ? 'page' : undefined}
                     onClick={() => onToggle(false)}>
@@ -145,7 +146,7 @@ function Outline({ items, active, page }) {
   useLanguage();
   return (
     <aside className="docs-outline">
-      <h2>{translate('On this page')}</h2>
+      <h2 className="docs-outline-title"><SectionLabel>{translate('On this page')}</SectionLabel></h2>
       <nav aria-label={translate('On this page')}>
         {items.map((heading) => (
           <a key={heading.id} href={docsHref(page, heading.id)} className={`depth-${heading.depth}${heading.id === active ? ' active' : ''}`}>
@@ -229,7 +230,7 @@ export default function DocsPage({ onOpenInStudio }) {
   else content = <Markdown source={doc.source} reference={doc.reference} ctx={ctx} />;
 
   return (
-    <div className={`docs${hasOutline ? '' : ' docs--wide'}`} ref={rootRef} onClick={onClick}>
+    <div className={`ui docs${hasOutline ? '' : ' docs--wide'}`} ref={rootRef} onClick={onClick}>
       <Sidebar page={page.id} open={sidebarOpen} onToggle={setSidebarOpen} />
       <article className="docs-article" key={page.id} lang={isMarkdown && !doc.translated ? 'en' : undefined}>
         {isMarkdown && !doc.translated && (

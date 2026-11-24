@@ -75,6 +75,12 @@ export function useLoading() {
   return ctx;
 }
 
+// For components that may render outside the provider (e.g. in isolated
+// tests): returns null instead of throwing.
+export function useOptionalLoading() {
+  return useContext(LoadingContext);
+}
+
 // Selectors / helpers
 export function blockingTask(tasks) {
   return tasks.find((t) => t.blocking) ?? null;
