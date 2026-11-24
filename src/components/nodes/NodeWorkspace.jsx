@@ -22,7 +22,7 @@ import {
 } from '../../engine/terrain/graph/GraphDocument.js';
 import { ANALYTIC_COLOR, getGraphNodeDefinition, listGraphNodeDefinitions } from '../../engine/terrain/graph/GraphRegistry.js';
 import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../../engine/terrain/graph/TerrainGradientPresets.js';
-import { NODE_PROJECT_TEMPLATES } from '../../project/NodeProjectTemplates.js';
+import { expandDryCanyon, NODE_PROJECT_TEMPLATES } from '../../project/NodeProjectTemplates.js';
 import { resolveNearestEdge, SIDE_DRAWER_DESKTOP_WIDTH } from '../ui/toolsRailLayout.js';
 
 const LAYOUT_KEY = 'pt-nodes-workspace-layout-v2';
@@ -149,11 +149,20 @@ function NodePalette({
   );
 }
 
+function portKind(type = '') {
+  return type.replace(/^analytic-/, '');
+}
+
+function portTypeLabel(type) {
+  const kind = portKind(type);
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
 function TerrainNode({ data, selected }) {
   useLanguage();
   const { node, invalid, compiling } = data;
   const definition = data.definition || { label: node.type, description: 'This node type is unavailable in this version.', color: 'amber', inputs: [], outputs: [] };
-  const outputKind = definition.outputs?.some((port) => port.type === ANALYTIC_COLOR) ? 'Color' : 'Height';
+  const outputKind = portTypeLabel(definition.outputs?.[0]?.type);
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => {
     const frame = requestAnimationFrame(() => updateNodeInternals(node.id));
@@ -173,17 +182,17 @@ function TerrainNode({ data, selected }) {
       <div className="terrain-flow-node__ports">
         <div className="terrain-flow-node__port-column inputs">
           {definition.inputs.map((port, index) => (
-            <div className={`terrain-flow-port input${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
-              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableStart={false} aria-label={translateText(`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`)} title={translateText(`${port.label} accepts ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} cables`)} />
+            <div className={`terrain-flow-port input port-${portKind(port.type)}`} key={port.id}>
+              <Handle id={port.id} type="target" position={Position.Left} style={{ top: 57 + index * 24 }} className={`handle-${portKind(port.type)}`} isConnectableStart={false} aria-label={translateText(`${port.label} accepts ${portTypeLabel(port.type)} cables`)} title={translateText(`${port.label} accepts ${portTypeLabel(port.type)} cables`)} />
               <span>{translateText(port.label)}</span>
             </div>
           ))}
         </div>
         <div className="terrain-flow-node__port-column outputs">
           {definition.outputs.map((port, index) => (
-            <div className={`terrain-flow-port output${port.type === ANALYTIC_COLOR ? ' port-color' : ' port-height'}`} key={port.id}>
+            <div className={`terrain-flow-port output port-${portKind(port.type)}`} key={port.id}>
               <span>{translateText(port.label)}</span>
-              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 57 + index * 24 }} className={port.type === ANALYTIC_COLOR ? 'handle-color' : 'handle-height'} isConnectableEnd={false} aria-label={translateText(`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`)} title={translateText(`Drag or click to connect this ${port.type === ANALYTIC_COLOR ? 'Color' : 'Height'} output`)} />
+              <Handle id={port.id} type="source" position={Position.Right} style={{ top: 57 + index * 24 }} className={`handle-${portKind(port.type)}`} isConnectableEnd={false} aria-label={translateText(`Drag or click to connect ${port.label} (${portTypeLabel(port.type)})`)} title={translateText(`Drag or click to connect ${port.label} (${portTypeLabel(port.type)})`)} />
             </div>
           ))}
         </div>
@@ -317,7 +326,7 @@ function InspectorField({ field, value, onChange }) {
 
 function NodeInspector({
   node, group, graphState, graph, onRename, onParam, onDelete, onReset, onInsertAfter,
-  onGroupPatch, onUngroup, onHeaderPointerDown,
+  onGroupPatch, onUngroup, onHeaderPointerDown, onExpandCanyon,
 }) {
   useLanguage();
   const [propertyQuery, setPropertyQuery] = useState('');
@@ -399,6 +408,7 @@ function NodeInspector({
               <input value={node.label} onChange={(event) => onRename(event.target.value)} />
             </label>
             <p className="node-inspector-description">{translateText(definition.description)}</p>
+            {node.type === 'dryCanyon' && <button type="button" onClick={onExpandCanyon}>{translateText("Expand Dry Canyon")}</button>}
             {suggestedDefinition ? (
               <div className="node-inspector-recommendation">
                 <span><Sparkles size={13} />{translateText(" Recommended next")}</span>
@@ -567,7 +577,7 @@ export default function NodeWorkspace({
   ], [localGraph.groups, localGraph.nodes, selectedGroups, selectedNodes, invalidNodes, compilingNodes, nodeMeasurements, collapsedNodes, resizeGroup, toggleGroup]);
   const flowEdges = useMemo(() => localGraph.edges.filter((edge) => !collapsedNodes.has(edge.source) && !collapsedNodes.has(edge.target)).map((edge) => ({
     ...edge, type: 'default', data: { portType: edge.type }, selected: selectedEdges.has(edge.id), animated: false, zIndex: 1,
-    className: `terrain-flow-edge ${edge.type === ANALYTIC_COLOR ? 'edge-color' : 'edge-height'}`,
+    className: `terrain-flow-edge edge-${portKind(edge.type)}`,
   })), [localGraph.edges, localGraph.nodes, selectedEdges, collapsedNodes]);
 
   const addNodeAt = useCallback((type, position) => {
@@ -1039,6 +1049,15 @@ export default function NodeWorkspace({
               if (definition) commit(updateGraphNodeParams(graphRef.current, selectedNode.id, definition.defaults), { structural: true, history: true });
             }}
             onInsertAfter={insertAfterSelected}
+            onExpandCanyon={() => {
+              try {
+                const next = expandDryCanyon(graphRef.current, selectedNode.id);
+                commit(next, { structural: true, history: true });
+                requestAnimationFrame(() => instance?.fitView({ padding: 0.18, maxZoom: 1, duration: 280 }));
+              } catch (error) {
+                graphState?.onDiagnostic?.(error.message);
+              }
+            }}
             onDelete={() => { const next = removeGraphNodes(graphRef.current, [selectedNode.id]); commit(next, { structural: true, history: true }); setSelectedNodes(new Set()); }}
             onGroupPatch={(patch) => commit(updateGraphGroup(graphRef.current, selectedGroup.id, patch), { structural: false, history: true })}
             onUngroup={() => ungroupSelection([selectedGroup.id])}

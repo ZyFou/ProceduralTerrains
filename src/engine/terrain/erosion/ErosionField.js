@@ -48,7 +48,7 @@ export class ErosionField {
   constructor() {
     this.res = 0;            // grid resolution (res × res samples)
     this.delta = null;       // Float32Array, signed world-unit height delta
-    this.texture = null;     // HalfFloat DataTexture, R = delta
+    this.texture = null;     // HalfFloat RGBA: delta, removal, deposition, flow
     this.enabled = false;
     // Bumped on every change to the baked result (delta replaced or cleared).
     // The undo/redo history uses this as a dedupe key, exactly like the paint
@@ -79,7 +79,7 @@ export class ErosionField {
   _ensureTexture(res) {
     if (this.texture && this.texture.image.width === res) return;
     this.texture?.dispose();
-    // RGBA HalfFloat (matches the import-map path); only R carries the delta.
+    // Share a texture between displacement and material classification.
     const data = new Uint16Array(res * res * 4);
     this.texture = new THREE.DataTexture(data, res, res, THREE.RGBAFormat, THREE.HalfFloatType);
     this.texture.colorSpace = THREE.NoColorSpace;
@@ -98,16 +98,19 @@ export class ErosionField {
 
   /** Adopt a real eroded delta grid (eroded - base, world units) and upload it. */
   setDelta(delta, res) {
+    this.graphKey = null;
     this.res = Math.max(2, Math.round(res));
     this.delta = delta;
+    this.masks = null;
     this._ensureTexture(this.res);
     this._upload();
     this.revision++;
   }
 
-  /** Store the analysis masks from a bake (for later texturing / props). */
+  /** Bind analysis at exactly the same texel centres as its height delta. */
   setMasks(masks, res) {
     this.masks = masks ? { ...masks, res } : null;
+    if (this.delta) this._upload();
   }
 
   hasResult() { return !!(this.delta && this.res > 0); }
@@ -117,7 +120,13 @@ export class ErosionField {
     const toHalf = THREE.DataUtils.toHalfFloat;
     const out = this.texture.image.data;
     const d = this.delta;
-    for (let i = 0; i < d.length; i++) out[i * 4] = toHalf(d[i]);
+    const masks = this.masks;
+    for (let i = 0; i < d.length; i++) {
+      out[i * 4] = toHalf(d[i]);
+      out[i * 4 + 1] = toHalf(masks?.erosionMask?.[i] ?? 0);
+      out[i * 4 + 2] = toHalf(masks?.depositionMask?.[i] ?? 0);
+      out[i * 4 + 3] = toHalf(masks?.flow?.[i] ?? 0);
+    }
     this.texture.needsUpdate = true;
   }
 
@@ -128,9 +137,11 @@ export class ErosionField {
    * @param {number} [res] grid resolution
    */
   bakeIdentity(region, res = 512) {
+    this.graphKey = null;
     if (region) this.setRegion(region.originX, region.originZ, region.sizeX, region.sizeZ);
     this._ensureGrid(res);
     this.delta.fill(0);
+    this.masks = null;
     this._upload();
     this.enabled = true;
     this.revision++;
@@ -169,6 +180,7 @@ export class ErosionField {
   /** Fully drop the baked result (offset + masks). hasResult() → false. */
   clear() {
     const had = this.hasResult();
+    this.graphKey = null;
     this.enabled = false;
     this.delta = null;
     this.masks = null;
@@ -197,6 +209,7 @@ export class ErosionField {
       ...(jsonSafe ? { version: 1, encoding: 'base64-f32' } : {}),
       res: this.res,
       delta: encodeGrid(this.delta),
+      ...(this.graphKey ? { graphKey: this.graphKey } : {}),
       masks,
       enabled: this.enabled,
       originX: this.originX,
@@ -221,12 +234,13 @@ export class ErosionField {
     if (!delta || delta.length !== res * res) { this.clear(); return; }
     this.setRegion(blob.originX, blob.originZ, blob.sizeX, blob.sizeZ);
     this.setDelta(delta, res);
-    this.masks = blob.masks
+    this.graphKey = blob.graphKey ?? null;
+    this.setMasks(blob.masks
       ? Object.fromEntries(Object.entries(blob.masks).map(([key, value]) => [
         key,
         key === 'res' ? value : reviveFloatGrid(value),
       ]))
-      : null;
+      : null, res);
     this.enabled = !!blob.enabled && this.hasResult();
   }
 

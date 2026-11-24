@@ -114,7 +114,8 @@ export function syncSurfaceMaterialBackend(material) {
     material.needsUpdate=true;
   }
   if(paint && material.uniforms.uPaintBiomeTexture)material.uniforms.uPaintBiomeTexture.value=material.uniforms.uSurfacePaintArray.value;
-  const graph=enabled ? material.uniforms.uSurfaceGraphCode?.value || '' : '';
+  const graph=enabled && material.fragmentShader.includes('/*SURFACE_GRAPH_BEGIN*/')
+    ? material.uniforms.uSurfaceGraphCode?.value || '' : '';
   if(material.userData.surfaceGraph!==graph || (graph && !material.fragmentShader.includes(graph))){
     material.fragmentShader=material.fragmentShader.replace(/\/\*SURFACE_GRAPH_BEGIN\*\/[\s\S]*?\/\*SURFACE_GRAPH_END\*\//,`/*SURFACE_GRAPH_BEGIN*/\n${graph}\n/*SURFACE_GRAPH_END*/`);
     material.defines ||= {};

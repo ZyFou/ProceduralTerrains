@@ -1253,6 +1253,7 @@ export default function App() {
             ? (miniRecipe ? (miniBaseTemplate?.noiseStackPreset ?? null) : template.noiseStackPreset)
             : null,
           initialGraph: templateGraph,
+          nodeTemplateId: nextMode === 'nodes' ? template.id : null,
           mini: miniRecipe
             ? { recipe: miniRecipe.id, seed: projectSeed, preset: miniBaseTemplate?.preset ?? null }
             : null,
@@ -1957,6 +1958,7 @@ export default function App() {
     setGraphView(nextView);
     engineRef.current?.setGraphView(nextView);
     const graphResult = await engineRef.current?.setTerrainGraph(next, {
+      nodeTemplateId: template.id,
       structural: true,
       atomic: true,
       affectedNodeIds: next.nodes.map((node) => node.id),

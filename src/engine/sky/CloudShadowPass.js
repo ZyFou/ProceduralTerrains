@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CLOUD_NOISE_GLSL, CLOUD_FIELD_GLSL, CLOUD_SLAB_GLSL, CLOUD_VOLUME_GLSL } from './cloudGLSL.js';
 import { REALISTIC_CLOUD_FIELD_GLSL } from './realistic/realisticCloudGLSL.js';
+import { CLOUD_V2_FIELD_GLSL } from './v2/cloudV2GLSL.js';
 
 export const TERRAIN_CLOUD_SHADOW_GLSL = /* glsl */ `
 // Tile occupancy occupies R; cloud optical depth uses its otherwise unused G.
@@ -52,10 +53,10 @@ varying vec2 vUv;
 void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
 
-function fragment(realistic, planet) {
+function fragment(realistic, planet, v2 = false) {
   return /* glsl */ `
 precision highp float;
-${realistic ? REALISTIC_CLOUD_FIELD_GLSL : `
+${v2 ? CLOUD_V2_FIELD_GLSL : realistic ? REALISTIC_CLOUD_FIELD_GLSL : `
 #define CLOUD_OCTAVES 3
 #define CLOUD_DETAIL_OCTAVES 0
 #define CLOUD_USE_EROSION 0
@@ -97,10 +98,14 @@ void main() {
   float od = 0.0;
   for (int i = 0; i < 12 + uLoopGuard; i++) {
     vec3 p = ro + uShadowSun * (distance * (float(i) + 0.5) / 12.0);
-    od += ${realistic ? 'cloudDensityAt(p, 0.0)' : 'cloudDensity(p)'};
+    od += ${v2 ? 'cloudV2Density(p, 1.0, false)' : realistic ? 'cloudDensityAt(p, 0.0)' : 'cloudDensity(p)'};
   }
+${v2 ? /* glsl */ `
+  // V2 columns are optically thick: let the shadow follow the mean density
+  // along the sun ray instead of saturating on the full extinction.
+  float shadow = 1.0 - exp(-od / 12.0 * 6.0);` : /* glsl */ `
   float sigma = ${realistic ? '14.0 * uCloudDensity / max(span, 1.0)' : 'uCloudExtinction'};
-  float shadow = 1.0 - exp(-od * distance / 12.0 * sigma);
+  float shadow = 1.0 - exp(-od * distance / 12.0 * sigma);`}
   gl_FragColor = vec4(tile, shadow, 0.0, 1.0);
 }
 `;
@@ -108,19 +113,22 @@ void main() {
 
 /** Small GPU map of the visible density integrated toward the sun. */
 export class CloudShadowPass {
-  constructor({ realistic = false, planet = false } = {}) {
+  constructor({ realistic = false, planet = false, v2 = false } = {}) {
+    v2 = v2 && !planet;
     this.planet = planet;
-    const size = planet ? 384 : 192;
+    // The flat map also feeds the cloud reflections on realistic water, where
+    // a calm lake shows its texels: 320 keeps a cumulus a few dozen across.
+    const size = planet ? 384 : 320;
     this.target = new THREE.WebGLRenderTarget(size, size, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
       depthBuffer: false, generateMipmaps: false,
     });
     this.material = new THREE.ShaderMaterial({
-      vertexShader, fragmentShader: fragment(realistic, planet),
+      vertexShader, fragmentShader: fragment(realistic, planet, v2),
       defines: planet && realistic ? { CLOUD_PLANET: 1 } : {},
       depthTest: false, depthWrite: false, blending: THREE.NoBlending,
     });
-    this.material.name = `cloud-shadow.${realistic ? 'realistic' : 'legacy'}.${planet ? 'planet' : 'flat'}`;
+    this.material.name = `cloud-shadow.${v2 ? 'realisticV2' : realistic ? 'realistic' : 'legacy'}.${planet ? 'planet' : 'flat'}`;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
     this.mesh.frustumCulled = false;
     this.scene = new THREE.Scene();
@@ -176,8 +184,16 @@ export class CloudShadowPass {
   }
 }
 
+function createShadowPassFor(layer, planet) {
+  return new CloudShadowPass({
+    realistic: layer.renderMode === 'realistic',
+    v2: layer.renderMode === 'realisticV2',
+    planet,
+  });
+}
+
 export function cloudShadowPreparationPass(layer, planet = false) {
-  layer._shadowPass ??= new CloudShadowPass({ realistic: layer.renderMode === 'realistic', planet });
+  layer._shadowPass ??= createShadowPassFor(layer, planet);
   const pass = layer._shadowPass;
   pass.material.uniforms = { ...layer.material.uniforms, ...pass.uniforms };
   return { material: pass.material, source: pass.mesh, camera: pass.camera,
@@ -187,6 +203,7 @@ export function cloudShadowPreparationPass(layer, planet = false) {
 export function renderTerrainCloudShadow(layer, sun, planet = false, tiles = null) {
   if (!layer._renderer || !layer.active) return null;
   if (layer.renderMode === 'realistic' && !layer.material.uniforms.uCloudNoise.value) return null;
-  layer._shadowPass ??= new CloudShadowPass({ realistic: layer.renderMode === 'realistic', planet });
+  if (layer.renderMode === 'realisticV2' && !layer.material.uniforms.uNoiseV2.value) return null;
+  layer._shadowPass ??= createShadowPassFor(layer, planet);
   return layer._shadowPass.render(layer._renderer, layer.material.uniforms, sun, tiles);
 }

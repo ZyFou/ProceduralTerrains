@@ -66,9 +66,11 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudShadowColor: [0.42, 0.47, 0.60],
 
   // Rendering mode: 'legacy' = the procedural slab/shell renderer above,
-  // 'realistic' = the Procedural Planets renderer (sky/realistic/). Shape,
-  // shell, motion and colour keys above are shared; the keys below only drive
-  // the realistic renderer (defaults = Procedural Planets).
+  // 'realistic' = the Procedural Planets renderer (sky/realistic/),
+  // 'realisticV2' = weather-map cumulus from baked, mip-mapped noise (sky/v2/;
+  // flat worlds — the planet shell renders it with the realistic renderer).
+  // Shape, shell, motion and colour keys above are shared; the keys below
+  // drive both realistic renderers (defaults = Procedural Planets).
   cloudRenderMode: 'legacy',
   cloudSystemScale: 3.2,      // weather / formation frequency (higher = smaller clouds)
   cloudErosion: 0.7,          // wispy bottoms / billowy tops
@@ -80,7 +82,7 @@ export const CLOUD_DEFAULT_PARAMS = {
   cloudExposure: 1.0,
 };
 
-export const CLOUD_RENDER_MODES = ['legacy', 'realistic'];
+export const CLOUD_RENDER_MODES = ['legacy', 'realistic', 'realisticV2'];
 export const CLOUD_NOISE_TYPES = ['soft', 'billowy', 'wispy'];
 
 export function resolveCloudNoiseType(params) {
@@ -97,7 +99,14 @@ export function cloudNoiseOffset(seed = 0) {
 }
 
 export function resolveCloudRenderMode(params) {
-  return params?.cloudRenderMode === 'realistic' ? 'realistic' : 'legacy';
+  const mode = params?.cloudRenderMode;
+  return mode === 'realistic' || mode === 'realisticV2' ? mode : 'legacy';
+}
+
+/** Mode a world can render: the planet shell has no V2 renderer of its own. */
+export function resolveCloudLayerMode(params, worldMode) {
+  const mode = resolveCloudRenderMode(params);
+  return worldMode === 'planet' && mode === 'realisticV2' ? 'realistic' : mode;
 }
 
 // Legacy quality/perf keys that used to live in params. Old saves may still

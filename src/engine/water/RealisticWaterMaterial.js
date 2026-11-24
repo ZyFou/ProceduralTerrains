@@ -15,6 +15,7 @@ import {
 import { WATER_OPTICS_GLSL } from './waterOpticsGLSL.js';
 import {
   WATER_GEOMETRY_WAVES_GLSL,
+  WATER_GERSTNER_REFERENCE_GAIN,
   WATER_WAVES_GLSL,
 } from './waterWavesGLSL.js';
 import {
@@ -218,6 +219,13 @@ uniform float uVisualWetSandRange;
 uniform float uVisualShallowWaterSoftness;
 uniform int uWaterTraceSteps;      // reflection height-field march, 0 = off
 uniform mat4 projectionMatrix;
+// Cloud reflections: the top-down cloud map that also casts the terrain cloud
+// shadows (G channel of the tile-occupancy unit, so no extra sampler).
+uniform float uWaterCloudReflection;       // 0 = off / no map, else strength
+uniform float uCloudLayerSpan;             // cloud layer thickness
+uniform vec2  uTerrainCloudShadowCenter;
+uniform float uTerrainCloudShadowExtent;
+uniform float uTerrainCloudShadowAltitude; // cloud layer base
 
 varying vec3 vWorldPos;
 
@@ -348,6 +356,77 @@ float waterGlintHash(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
+// Cloud cover along the sun ray that starts at baseXZ on the cloud-layer base
+// (what the cloud map stores per texel). Fades out at the map border.
+float waterCloudCoverAt(vec2 baseXZ) {
+  vec2 uv = (baseXZ - uTerrainCloudShadowCenter)
+    / (2.0 * max(uTerrainCloudShadowExtent, 1.0)) + 0.5;
+  vec2 border = min(uv, 1.0 - uv);
+  float inside = min(border.x, border.y);
+  if (inside <= 0.0) return 0.0;
+  return textureLod(uTileOccupancy, uv, 0.0).g * smoothstep(0.0, 0.05, inside);
+}
+
+// Clouds mirrored on the water: where the reflected ray meets the cloud layer
+// it reads the cloud map (shifted back down the sun ray the map was
+// integrated along). rgb = cloud radiance, a = cover. Seen from below a cloud
+// shows its base: bright thin edges, greyer where the column is thick.
+vec4 waterCloudReflection(vec3 origin, vec3 dir, float blur) {
+  if (uWaterCloudReflection < 0.001 || dir.y < 0.02 || uSunDir.y <= 0.01) return vec4(0.0);
+  float lift = uCloudLayerSpan * 0.4;
+  float travel = (uTerrainCloudShadowAltitude + lift - origin.y) / dir.y;
+  if (travel <= 0.0) return vec4(0.0);
+  vec2 baseXZ = origin.xz + dir.xz * travel
+    - uSunDir.xz * (lift / max(uSunDir.y, 0.05));
+  // rough water reads a wider footprint of the sky
+  vec2 spread = vec2(uTerrainCloudShadowExtent * mix(0.008, 0.034, blur), 0.0);
+  float cover = 0.25 * (
+    waterCloudCoverAt(baseXZ + spread.xy)
+    + waterCloudCoverAt(baseXZ - spread.xy)
+    + waterCloudCoverAt(baseXZ + spread.yx)
+    + waterCloudCoverAt(baseXZ - spread.yx)
+  );
+  if (cover <= 0.004) return vec4(0.0);
+  vec3 cloudLight = uTerrainSunCol * uTerrainSunIntensity * 0.60
+    + uTerrainSkyAmb * 0.60;
+  vec3 radiance = cloudLight * mix(1.15, 0.78, cover);
+  // wide ramp: waves stretch the cloud edge, a hard one would read as a contour
+  float alpha = smoothstep(0.0, 0.75, cover) * 0.94
+    * clamp(uWaterCloudReflection, 0.0, 1.5);
+  return vec4(radiance, clamp(alpha, 0.0, 1.0));
+}
+
+// How much of the sun a cloud hides at this point of the surface.
+float waterCloudSunCover(vec3 origin) {
+  if (uWaterCloudReflection < 0.001 || uSunDir.y <= 0.01) return 0.0;
+  float rise = uTerrainCloudShadowAltitude - origin.y;
+  if (rise <= 0.0) return 0.0;
+  return waterCloudCoverAt(origin.xz + uSunDir.xz * (rise / max(uSunDir.y, 0.05)))
+    * clamp(uWaterCloudReflection, 0.0, 1.0);
+}
+
+// Cellular foam lace: distance to the nearest of a jittered grid of slowly
+// orbiting sites, 0 at a site and ~1 along the cell borders. Thresholding it
+// near 1 leaves thin connected filaments; lower thresholds fill the cells.
+float waterFoamCells(vec2 p, float time) {
+  vec2 cell = floor(p);
+  vec2 local = fract(p);
+  float nearest = 8.0;
+  for (int y = -1; y <= 1 + uLoopGuard; y++) {
+    for (int x = -1; x <= 1 + uLoopGuard; x++) {
+      vec2 offset = vec2(float(x), float(y));
+      vec2 id = cell + offset;
+      vec2 phase = 6.2831853 * vec2(
+        waterGlintHash(id),
+        waterGlintHash(id + vec2(37.1, 91.7))
+      );
+      vec2 delta = offset + 0.5 + 0.36 * sin(phase + time) - local;
+      nearest = min(nearest, dot(delta, delta));
+    }
+  }
+  return clamp(sqrt(nearest) * 1.35, 0.0, 1.0);
+}
+
 float waterLinearSceneDepth(float rawDepth) {
   float z = rawDepth * 2.0 - 1.0;
   return (2.0 * uSceneNear * uSceneFar)
@@ -466,13 +545,22 @@ void main() {
   // base keeps the sun highlight broken into sharp glints on every wavelet.
   float roughness = clamp(uRoughness * 0.5 + farWater * 0.08, 0.03, 1.0);
   float t = uTime * uWaterAnim * uAnimSpeed;
-  vec3 n = waterDirectionalNormal(xz, t, camDist, roughness);
-  // Ripples too small for this pixel were filtered out of n; their slope
-  // variance widens the sun lobe and reflection blur instead.
-  roughness = waterFilteredRoughness(
-    roughness,
-    uNormalIntensity * uWaveStrength * uWaveComplexity
+  // The sea state dies down where the water shoals and in sheltered, shallow
+  // basins: lakes, coves and river mouths stay calm while open deep water
+  // carries the full wind sea.
+  float shoaling = smoothstep(0.5, max(uShallowDist * 1.75, 2.0), visualDepth);
+  float openWater = smoothstep(
+    uShallowDist,
+    max(uDeepDist, uShallowDist + 1.0),
+    visualDepth
   );
+  waterWaveShelter = mix(0.30, 1.0, shoaling) * mix(0.32, 1.0, openWater);
+  vec3 n = waterDirectionalNormal(xz, t, camDist, roughness);
+  // Waves too small for this pixel were filtered out of n; their slope
+  // variance widens the sun lobe and reflection blur instead. The variance
+  // already carries the sea state, so only the normal gain scales it.
+  roughness = waterFilteredRoughness(roughness, uNormalIntensity);
+  float seaGain = ${WATER_GERSTNER_REFERENCE_GAIN.toFixed(2)} * uWaveStrength * uWaveComplexity;
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   if (dot(n, viewDir) < 0.0) n = -n;
 
@@ -661,6 +749,10 @@ void main() {
     * mix(0.35, 1.0, reflectionDetail);
   reflectedSky = mix(fallbackReflection, reflectedSky, liveSkyAmount);
 
+  // Clouds mirrored on the water (terrain reflections still go in front).
+  vec4 cloudMirror = waterCloudReflection(vWorldPos, reflectedDirection, reflectionBlur);
+  reflectedSky = mix(reflectedSky, cloudMirror.rgb, cloudMirror.a);
+
   // Planar reflection quality gate for Cinematic (terrain, props, clouds).
   float planarReflectionWeight = uPlanarReflectionEnabled
     * step(2.5, uWaterTier);
@@ -688,9 +780,16 @@ void main() {
     )));
     vec3 traceHit;
     float traveled;
+    // Mirror the terrain about a calmed normal. Steep wave facets far from
+    // land would otherwise scatter an island into isolated blobs; real water
+    // draws a coherent, vertically smeared image beneath it.
+    vec3 traceDirection = reflect(
+      -viewDir,
+      normalize(vec3(n.x * 0.3, n.y, n.z * 0.3))
+    );
     terrainReflection = waterTraceTerrain(
       vec3(vWorldPos.x, max(vWorldPos.y, uSeaLevel), vWorldPos.z),
-      reflectedDirection,
+      traceDirection,
       traceJitter,
       traceHit,
       traveled
@@ -823,8 +922,10 @@ void main() {
       glitterVisible * clamp(uSpecularStrength, 0.0, 1.0)
     );
   }
-  // Mirrored terrain blocks the sun's reflection too.
-  sunSpecular = min(sunSpecular, 24.0) * (1.0 - terrainReflection);
+  // Mirrored terrain blocks the sun's reflection too, and so does a cloud
+  // between the sun and this patch of water.
+  sunSpecular = min(sunSpecular, 24.0) * (1.0 - terrainReflection)
+    * (1.0 - waterCloudSunCover(vWorldPos));
   vec3 sunSpecularTerm = waterResolveSunLight(
     uSkySunColor * uSkyLightIntensity
   )
@@ -857,7 +958,34 @@ void main() {
   vec3 scatterHue = shallowColor / max(scatterPeak, 0.0001);
   vec3 subsurface = scatterHue * max(bodyAlbedo, shallowColor * 0.1)
     * sunLightColor * sssAmount * 0.6;
-  vec3 scatteringColor = bodyAlbedo * waterLight + subsurface;
+  // Wave-shaped body colour: troughs keep the deep body colour, steep lit
+  // faces and crests lift toward the shallow hue, and backlit crests glow
+  // where sunlight crosses the thin water. Calm, sheltered water stays even.
+  float backlit = clamp(
+    0.5 - 0.5 * dot(
+      normalize(viewDir.xz + vec2(1e-4)),
+      normalize(skySunDir.xz + vec2(1e-4))
+    ),
+    0.0,
+    1.0
+  );
+  backlit *= backlit;
+  // (eased out with distance: far water keeps one even body colour instead
+  // of printing the swell as a regular pattern)
+  float faceTint = clamp(
+    waterWaveCrest * 0.85 + (1.0 - n.y) * 2.6 - 0.18,
+    0.0,
+    1.0
+  ) * mix(0.35, 1.0, waterWaveShelter) * (1.0 - farWater * 0.75);
+  vec3 waveAlbedo = mix(
+    bodyAlbedo,
+    shallowColor * 0.46,
+    faceTint * (0.55 + 0.45 * backlit)
+  );
+  waveAlbedo += shallowColor * 0.75
+    * (waterWaveCrest * waterWaveCrest * waterWaveCrest)
+    * backlit * 0.6 * waterWaveShelter;
+  vec3 scatteringColor = waveAlbedo * waterLight + subsurface;
   vec3 inScatter = scatteringColor * (vec3(1.0) - transmittance);
 
   // Realistic mode keeps the transparent single-pass approximation: the
@@ -893,98 +1021,87 @@ void main() {
   );
   alpha = mix(alpha, 1.0, sceneRefractionWeight);
 
-  // shoreline foam — depth-based only; slope foam restricted to very shallow water
+  // Foam. Three sources share one cellular lace pattern:
+  //   whitecaps  where the Gerstner fold pinches the surface on breaking
+  //              crests, plus drifting patches left by earlier breakers
+  //   shoreline  a wash band that breathes with the swell (user width /
+  //              softness), solid at the waterline
+  //   slope / cliff foam along steep banks (very shallow water only)
   float shoreDist = depth;
-  float foamNoise = 0.0;
-  if (uFoamEnabled > 0.5 && uFoamQual > 0.1) {
-    foamNoise = vnoise(xz * 0.18 + vec2(t * uFoamAnimSpeed * 1.4, -t * uFoamAnimSpeed * 1.1));
-  }
   float breakup = clamp(uVisualFoamBreakup, 0.0, 1.0);
-  float foamEdgeNoise = foamNoise * mix(1.4, 4.2, breakup);
-  float foamPatch = mix(1.0, smoothstep(0.18, 0.82, vnoise(xz * 0.055 + vec2(t * 0.35, t * -0.28))), breakup);
-  float shoreFoam = 1.0 - smoothstep(uFoamSoftness, uFoamWidth + uFoamSoftness + uVisualWetSandRange * 0.05, shoreDist + foamEdgeNoise);
-  // Lace: solid at the waterline, breaking into drifting cells farther out.
-  // Fades to its mean before the finer octave can alias.
+  float foam = 0.0;
+  float whitecap = 0.0;
   if (uFoamEnabled > 0.5 && uFoamQual > 0.1) {
-    vec2 foamFlow = vec2(t * uFoamAnimSpeed * 0.35, -t * uFoamAnimSpeed * 0.27);
-    float lace = vnoise(xz * 0.85 + foamFlow) * 0.6
-      + vnoise(xz * 2.1 - foamFlow * 1.7) * 0.4;
-    float laceVisible = waterBandFilter(13.2, glintFootprint);
-    lace = mix(0.62, smoothstep(0.36, 0.70, lace), laceVisible);
+    vec2 foamWind = normalize(uWaveDir);
+    float foamTime = t * uFoamAnimSpeed;
+    // Drifting sea-state patches. Three octaves on differently rotated
+    // lattices: a single axis-aligned value noise thresholds into visible
+    // squares when seen from far above.
+    vec2 driftP = xz - foamWind * foamTime * 2.4;
+    float foamDrift = vnoise(waterRotateDirection(driftP, 0.52) * 0.019) * 0.45
+      + vnoise(waterRotateDirection(driftP, 1.91) * 0.0437 + vec2(4.7, 1.9)) * 0.33
+      + vnoise(waterRotateDirection(driftP, 3.37) * 0.0071 + vec2(-8.3, 2.6)) * 0.22;
+    float foamPatch = mix(1.0, smoothstep(0.18, 0.82, foamDrift), breakup);
+
+    if (uFoamQual > 0.75) {
+      float pinch = 1.0 - smoothstep(0.30, 0.82, waterWaveFold);
+      float crestLift = smoothstep(0.70, 1.0, waterWaveCrest) * 0.30;
+      whitecap = (pinch + crestLift) * waterWaveShelter
+        + 0.50 * min(seaGain, 1.5) * waterWaveShelter
+          * smoothstep(0.55, 0.85, foamDrift);
+    }
+
+    float wash = sin(foamTime * 0.9 + foamDrift * 9.0);
+    float shoreFoam = 1.0 - smoothstep(
+      uFoamSoftness,
+      uFoamWidth + uFoamSoftness + uVisualWetSandRange * 0.05,
+      shoreDist + uFoamWidth * (0.11 * wash + foamDrift * mix(0.35, 1.05, breakup))
+    );
     float edgeSolid = 1.0 - smoothstep(
       uFoamSoftness,
       uFoamSoftness + 0.9,
       shoreDist
     );
-    shoreFoam *= mix(lace, 1.0, edgeSolid);
-  }
-  float nearShore = 1.0 - smoothstep(0.0, 10.0 + uVisualWetSandRange * 0.35, shoreDist);
-  float slopeFoam = 0.0;
-  float cliffFoam = 0.0;
-  if (uFoamEnabled > 0.5 && nearShore > 0.01 && (uSlopeFoam > 0.01 || uCliffFoam > 0.01)) {
-    float slope = slopeFromCenter(xz, floorH);
-    slopeFoam = smoothstep(0.35, 1.1, slope) * uSlopeFoam * nearShore;
-    cliffFoam = smoothstep(0.85, 1.8, slope) * uCliffFoam * nearShore;
-  }
-  // Cinematic whitecaps follow the same Gerstner phases as vertex movement.
-  // A delayed sample leaves a short advected trail, approximating temporal
-  // foam persistence without another history render target.
-  float crestFoam = 0.0;
-  float breakingFoam = 0.0;
-  if (
-    uWaterTier > 2.5
-    && uGeometryDisplacementEnabled > 0.5
-    && uFoamEnabled > 0.5
-    && uFoamQual > 0.75
-  ) {
-    float crestNow = waterCinematicCrest(xz, t);
-    float crestPrevious = waterCinematicCrest(
-      xz - normalize(uWaveDir) * 1.8,
-      t - 0.42 * uFoamAnimSpeed
-    );
-    float foamPersistence = max(crestNow, crestPrevious * 0.78);
-    float crestAa = max(fwidth(foamPersistence) * 1.35, 0.018);
-    crestFoam = smoothstep(
-      0.86 - crestAa,
-      0.86 + crestAa,
-      foamPersistence
-    );
-    // Break the remaining crests into sparse streaks. Reusing the existing
-    // foam fields avoids a new noise lookup and keeps whitecaps from forming
-    // repeated rows over a large ocean.
-    float crestBreakup = smoothstep(
-      0.42,
-      0.76,
-      foamNoise * 0.62 + foamPatch * 0.38
-    );
-    crestFoam *= crestBreakup;
-    float waveEnergy = smoothstep(
-      0.82,
-      1.72,
-      uWaveStrength * uLargeWaveStr
-    );
-    float crestDistanceFade = 1.0 - smoothstep(520.0, 1750.0, camDist);
-    crestFoam *= waveEnergy * crestDistanceFade;
 
-    float breakingBand = 1.0 - smoothstep(
-      max(uFoamWidth * 0.7, 1.0),
-      max(uShallowDist * 1.65, uFoamWidth * 2.0),
-      visualDepth
-    );
-    float shoreApproach = smoothstep(0.35, 0.82, foamPatch);
-    breakingFoam = crestFoam * breakingBand * shoreApproach;
+    float nearShore = 1.0 - smoothstep(0.0, 10.0 + uVisualWetSandRange * 0.35, shoreDist);
+    float bankFoam = 0.0;
+    if (nearShore > 0.01 && (uSlopeFoam > 0.01 || uCliffFoam > 0.01)) {
+      float slope = slopeFromCenter(xz, floorH);
+      bankFoam = (smoothstep(0.35, 1.1, slope) * uSlopeFoam * 0.2
+        + smoothstep(0.85, 1.8, slope) * uCliffFoam * 0.15) * nearShore;
+    }
+
+    float laced = clamp(whitecap, 0.0, 1.0);
+    float shoreLaced = shoreFoam * foamPatch;
+    if (laced + shoreLaced > 0.02) {
+      // Lace cells ride the wave slopes and stretch along the wind. The
+      // pattern fades to its mean before the cells drop below a pixel.
+      float laceFrequency = 0.9 * max(uWaveScale, 0.2);
+      vec2 laceUv = xz + n.xz * 0.6;
+      laceUv = vec2(
+        dot(laceUv, foamWind) * 0.42,
+        dot(laceUv, vec2(-foamWind.y, foamWind.x))
+      ) * laceFrequency;
+      float laceVisible = 1.0 - smoothstep(0.16, 0.60, glintFootprint * laceFrequency);
+      float lace = 0.6;
+      if (laceVisible > 0.001) {
+        lace = waterFoamCells(laceUv - vec2(foamTime * 0.05, 0.0), foamTime * 0.9) * 0.58
+          + waterFoamCells(laceUv * 2.55 + vec2(7.3, 2.1), foamTime * 1.4) * 0.54;
+      }
+      // Thin filaments where the sea barely breaks, filled cells on a full
+      // breaker. The wide ramp keeps the lace soft-edged and translucent.
+      float laceThreshold = mix(0.98, 0.50, laced);
+      float whitecapFoam = mix(
+        clamp(whitecap - 0.30, 0.0, 1.0) * 0.16,
+        smoothstep(laceThreshold - 0.10, laceThreshold + 0.18, lace)
+          * mix(0.55, 0.92, laced),
+        laceVisible
+      );
+      float shoreLace = mix(0.62, smoothstep(0.42, 0.78, lace), laceVisible);
+      foam = whitecapFoam + shoreLaced * mix(shoreLace, 1.0, edgeSolid);
+    }
+    foam = clamp((foam + bankFoam) * uFoamStrength, 0.0, 1.0);
   }
-  float foam = clamp(
-    (
-      shoreFoam * foamPatch
-      + slopeFoam * 0.2
-      + cliffFoam * 0.15
-      + crestFoam * 0.13
-      + breakingFoam * 0.48
-    ) * uFoamStrength,
-    0.0,
-    1.0
-  );
   // Keep the authored foam hue, but let its brightness and tint follow the
   // active atmosphere. uWaterFoamLighting retains a readable unlit component
   // at night instead of leaving a pure-white emissive-looking shoreline.

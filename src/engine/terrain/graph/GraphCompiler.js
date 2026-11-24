@@ -1,4 +1,6 @@
 import { compileSurfaceGraph } from '../surface/SurfaceGraph.js';
+import { canyonBasinRelief, canyonDomain, canyonHeadwall, canyonMainWash, canyonTributaries, dryCanyonHeight } from '../dryCanyon.js';
+import { terrainSeedOffset } from '../../../runtime/TerrainParameters.js';
 import { blendGlslStmt, blendJs } from '../noise/blendModes.js';
 import { activeLayers, migrateStack } from '../noise/NoiseStack.js';
 import { evalStack2D, generateStackGLSL, packStackUniforms } from '../noise/noiseStackCodegen.js';
@@ -189,6 +191,10 @@ function nodeFunction(graph, node, slot) {
   const a = upstream(graph, node, 'a');
   const b = upstream(graph, node, 'b');
   const source = upstream(graph, node, 'source');
+  const sample = port => {
+    const parent = upstream(graph, node, port);
+    return parent ? `${parent}(xz, c)` : '0.0';
+  };
   const definition = getGraphNodeDefinition(node.type);
   const compiler = {
     currentTerrain: () => currentTerrainFunction(node),
@@ -323,6 +329,33 @@ float ${fn}(vec2 xz, Climate c) {
   return depth*(bowl+rim+breakup);
 }`;
     },
+    canyonDomain: () => `CanyonDomain ${fn}(vec2 xz, Climate c) {
+  return canyonDomain(xz * (uLayerScale[${slot}] / max(2.0 * uBoardHalf, 1.0)), uLayerParamsA[${slot}].xy);
+}`,
+    mainWash: () => `CanyonChannel ${fn}(vec2 xz, Climate c) {
+  return canyonMainWash(${sample('domain')}, uLayerParamsA[${slot}].x, uLayerParamsA[${slot}].y);
+}`,
+    tributaryChannels: () => `CanyonChannel ${fn}(vec2 xz, Climate c) {
+  return canyonTributaries(${sample('channel')}, uLayerParamsA[${slot}].x, uLayerParamsA[${slot}].y);
+}`,
+    basinHeadwall: () => `float ${fn}(vec2 xz, Climate c) {
+  return canyonHeadwall(${sample('domain')}, uLayerParamsA[${slot}].x, uLayerParamsA[${slot}].y);
+}`,
+    basinRelief: () => `#ifndef GRAPH_CANYON_RELIEF
+#define GRAPH_CANYON_RELIEF
+#endif
+float ${fn}(vec2 xz, Climate c) {
+  return canyonBasinRelief(${sample('channel')}, ${sample('headwall')}, uLayerParamsA[${slot}].x, uLayerParamsA[${slot}].y)
+    * uLayerStrength[${slot}] / max(uHeightScale, 1.0);
+}`,
+    dryCanyon: () => `#ifndef GRAPH_CANYON_RELIEF
+#define GRAPH_CANYON_RELIEF
+#endif
+float ${fn}(vec2 xz, Climate c) {
+  vec4 p = uLayerParamsA[${slot}];
+  vec2 uv = xz * (uLayerScale[${slot}] / max(2.0 * uBoardHalf, 1.0));
+  return dryCanyonHeight(uv, p.xy, p.z, p.w) * uLayerStrength[${slot}] / max(uHeightScale, 1.0);
+}`,
     canyon: () => {
       const style = canyonStyle(node);
       return `float ${fn}(vec2 xz, Climate c) {
@@ -656,13 +689,16 @@ function structuralSignature(graph, ordered, slotById, colorSlotById) {
 // Water and height-only materials do not consume the color stream. Keeping a
 // separate signature lets the engine avoid recompiling them when a color node
 // is added, removed, or rewired.
+const heightFieldTypes = new Set(['analytic-height', 'domain', 'channel', 'headwall']);
+const isHeightPort = port => heightFieldTypes.has(port.type);
+
 function heightStructuralSignature(graph, ordered, slotById) {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const parts = [];
   for (const id of ordered) {
     const node = nodes.get(id); const definition = getGraphNodeDefinition(node.type);
     const isHeightNode = node.type === 'terrainOutput'
-      || definition?.outputs?.some((port) => port.type === 'analytic-height');
+      || definition?.outputs?.some(isHeightPort);
     if (!isHeightNode) continue;
     const structuralParams = node.type === 'mountain'
       ? [...new Set([...(definition.structuralParams || []), 'reduceDetails'])]
@@ -671,7 +707,7 @@ function heightStructuralSignature(graph, ordered, slotById) {
       ? generateStackGLSL(migrateStack(node.params?.stack)).sig
       : `${key}=${JSON.stringify(node.params?.[key])}`).join(',');
     const links = (definition.inputs || [])
-      .filter((port) => port.type === 'analytic-height')
+      .filter(isHeightPort)
       .map((port) => `${port.id}<-${inputEdge(graph, id, port.id)?.source || '?'}`).join(',');
     parts.push(`${node.type}@${slotById.get(id) ?? '-'}[${params}](${links})`);
   }
@@ -737,6 +773,22 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
       } else if (node.type === 'singleCrater') {
         packed.strength[slot] = num(node.params.depth, 0.75);
         packed.paramsA[slot] = [num(node.params.radius, 0.9), num(node.params.rimHeight, 0.42), num(node.params.rimWidth, 0.18), num(node.params.roughness, 0.2)];
+      } else if (node.type === 'canyonDomain') {
+        const seed = terrainSeedOffset(node.params.seed);
+        packed.paramsA[slot] = [seed.x, seed.y, 0, 0];
+      } else if (node.type === 'mainWash') {
+        packed.paramsA[slot] = [node.params.warp, node.params.meander, 0, 0];
+      } else if (node.type === 'tributaryChannels') {
+        packed.paramsA[slot] = [node.params.leftSpacing, node.params.rightSpacing, 0, 0];
+      } else if (node.type === 'basinHeadwall') {
+        packed.paramsA[slot] = [node.params.setback, node.params.rise, 0, 0];
+      } else if (node.type === 'basinRelief') {
+        packed.strength[slot] = node.params.height;
+        packed.paramsA[slot] = [node.params.ridge, node.params.fluting, 0, 0];
+      } else if (node.type === 'dryCanyon') {
+        const seed = terrainSeedOffset(node.params.seed);
+        packed.strength[slot] = node.params.height;
+        packed.paramsA[slot] = [seed.x, seed.y, node.params.warp, node.params.ridge];
       } else if (node.type === 'canyon') {
         packed.strength[slot] = num(node.params.depth, 1.12);
         packed.paramsA[slot] = [num(node.params.slot, 0.34), num(node.params.valley, 1.65), num(node.params.surrounding, 0.72), num(node.params.structuralWarp, 0.68)];
@@ -795,6 +847,8 @@ function packUniforms(graph, ordered, slotById, colorSlotById) {
 
 function cpuEvaluator(graph) {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const canyonSeeds = new Map(graph.nodes.filter(n => n.type === 'dryCanyon' || n.type === 'canyonDomain')
+    .map(n => [n.id, terrainSeedOffset(n.params.seed)]));
   const output = findOutputNode(graph);
   const evalNode = (id, x, z, ctx) => {
     const node = nodes.get(id); const get = (port, px = x, pz = z) => {
@@ -935,6 +989,20 @@ function cpuEvaluator(graph) {
         const damage = fractal(px * 4 + seed, pz * 4 + seed * 1.7 + 3.1, node.params.octaves, 0.5, 2);
         const breakup = (damage - 0.5) * num(node.params.roughness, 0.2) * (1 - smoothstep(1, 1.4, r));
         return num(node.params.depth, 0.75) * (bowl + rim + breakup);
+      },
+      canyonDomain: () => {
+        const scale = node.params.scale / Math.max(2 * u.uBoardHalf.value, 1);
+        return canyonDomain(x * scale, z * scale, canyonSeeds.get(id));
+      },
+      mainWash: () => canyonMainWash(get('domain'), node.params.warp, node.params.meander),
+      tributaryChannels: () => canyonTributaries(get('channel'), node.params.leftSpacing, node.params.rightSpacing),
+      basinHeadwall: () => canyonHeadwall(get('domain'), node.params.setback, node.params.rise),
+      basinRelief: () => canyonBasinRelief(get('channel'), get('headwall'), node.params.ridge, node.params.fluting)
+        * node.params.height / Math.max(u.uHeightScale.value, 1),
+      dryCanyon: () => {
+        const scale = node.params.scale / Math.max(2 * u.uBoardHalf.value, 1);
+        return dryCanyonHeight(x * scale, z * scale, canyonSeeds.get(id), node.params.warp, node.params.ridge)
+          * node.params.height / Math.max(u.uHeightScale.value, 1);
       },
       canyon: () => {
         const { px, pz, seed } = point(), style = canyonStyle(node);
@@ -1158,7 +1226,7 @@ export function compileTerrainGraph(graph) {
     const functions = ordered.filter((id) => {
       if (!reachable.has(id)) return false;
       const node = nodes.get(id); const definition = getGraphNodeDefinition(node?.type);
-      return node?.type === 'terrainOutput' || definition?.outputs?.some((port) => port.type === 'analytic-height');
+      return node?.type === 'terrainOutput' || definition?.outputs?.some(isHeightPort);
     }).map((id) => nodeFunction(graph, nodes.get(id), slotById.get(id))).join('\n\n');
     shaderSource = cacheShaderSource(sig, {
       body2d: `${GRAPH_FUNCTIONS_MARKER}\n${functions}\n${GRAPH_BODY_MARKER}\n  h = ${safe(output.id)}(xz, c);`,
@@ -1167,7 +1235,9 @@ export function compileTerrainGraph(graph) {
     });
   }
   const program = {
-    kind: 'graph', sig, heightSig, surface,
+    kind: 'graph', sig: surface?.procedural ? sig + '|' + surface.body : sig, heightSig, surface,
+    heightInputKey: JSON.stringify([heightSig, ...ordered.filter(id =>
+      slotById.has(id) || id === output.id).map(id => nodes.get(id).params)]),
     body2d: shaderSource.body2d,
     body3d: shaderSource.body3d,
     colorBody: shaderSource.colorBody,

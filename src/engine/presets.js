@@ -6,7 +6,7 @@
 import { CLOUD_DEFAULT_PARAMS } from './sky/CloudSettings.js';
 import { SKYBOX_DEFAULT_PARAMS } from './sky/SkyboxSettings.js';
 import { WATER_DEFAULT_PARAMS } from './water/WaterSettings.js';
-import { EROSION_DEFAULT_PARAMS } from './terrain/erosion/ErosionPresets.js';
+import { EROSION_DEFAULT_PARAMS, EROSION_PRESETS } from './terrain/erosion/ErosionPresets.js';
 import { VISUAL_DEFAULT_PARAMS } from './render/VisualSettings.js';
 import { createDefaultPropAssets } from './props/PropAssetLibrary.js';
 
@@ -70,6 +70,14 @@ export const DEFAULT_PARAMS = {
   surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
   surfaceTextureAO: 1.0,         // sampled-AO crevice darkening
   surfaceTextureTriplanar: true, // triplanar projection (off = planar world-XZ)
+  // Procedural V2 surface (surfaceTextureSource: 'proceduralV2')
+  surfaceV2Scale: 1.0,           // feature size multiplier
+  surfaceV2Relief: 1.0,          // surface relief (ledges, grain, ripples)
+  surfaceV2Strata: 1.0,          // rock bedding contrast
+  surfaceV2Sandstone: 0.0,       // 0 = biome rock, 1 = sandstone strata hues on all rock
+  surfaceV2Variation: 1.0,       // per-material tone / hue variation
+  surfaceV2Breakup: 1.0,         // bare earth breaking up the plant cover
+  surfaceV2Shore: 1.0,           // mineral ring + wet edge at the waterline
 
   // world (rebuild required)
   chunkCount: 16,
@@ -183,6 +191,16 @@ export const PRESETS = {
       heightScale: 380, seaLevel: 12, ridge: 0.55, warp: 2.4,
       noiseScale: 42, persistence: 0.58, lacunarity: 2.4,
       moistBias: -0.5, snowLine: 1.0, falloff: 0.3, tempBias: 0.35,
+    },
+  },
+  dryCanyon: {
+    label: 'Dry Canyon',
+    params: {
+      heightScale: 250, seaLevel: 0, falloff: 0, noiseScale: 10, warp: 0.88, ridge: 0.78,
+      moistBias: -0.8, tempBias: 0.45, snowLine: 1, normalStrength: 1.5, aoStrength: 0.85,
+      surfaceTextureSource: 'procedural', surfaceTextureMode: false,
+      ...EROSION_PRESETS.canyon.params, erosionPreset: 'custom', erosionQuality: 'high',
+      erosionBackend: 'cpu', erosionStrength: 0.55,
     },
   },
   // Unified cartoon look: soft low-relief shape + the matching "Cartoon Terrain"

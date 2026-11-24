@@ -22,6 +22,8 @@ export const TERRAIN_RESET_KEYS = [
   'surfaceTextureBreakup', 'surfaceTextureBlend', 'surfaceTextureTransition', 'surfaceTextureRawColor', 'surfaceTexturePaletteInfluence',
   'surfaceTextureNormal', 'surfaceTextureRough', 'surfaceTextureAO',
   'surfaceTextureTriplanar',
+  'surfaceV2Scale', 'surfaceV2Relief', 'surfaceV2Strata', 'surfaceV2Sandstone', 'surfaceV2Variation',
+  'surfaceV2Breakup', 'surfaceV2Shore',
 ];
 
 // Erosion now lives in the Terrain panel, so resetting Terrain settings also

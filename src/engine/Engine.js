@@ -31,6 +31,7 @@ import { InfiniteTerrainClipmap } from './terrain/InfiniteTerrainClipmap.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { InfiniteCloudLayer } from './sky/InfiniteCloudLayer.js';
 import { RealisticCloudSlabLayer, RealisticInfiniteCloudLayer } from './sky/realistic/RealisticCloudLayers.js';
+import { CloudV2SlabLayer, CloudV2InfiniteLayer } from './sky/v2/CloudV2Layers.js';
 import { CloudAdaptiveQualityController } from './sky/CloudAdaptiveQualityController.js';
 import {
   CLOUD_QUALITY_PRESETS,
@@ -132,7 +133,9 @@ import {
   SURFACE_TEXTURE_SOURCE,
   normalizeSurfaceTextureParams,
   normalizeSurfaceTextureSource,
+  sourceUsesTextureAtlas,
 } from './terrain/surface/SurfaceTextureSources.js';
+import { getNoiseVolumeV2, retainNoiseVolumeV2 } from './render/NoiseVolumeV2.js';
 import {
   detectRendererCapabilities,
   getWebGpuSupport,
@@ -910,9 +913,10 @@ export class Engine {
   /** Studio slab for the current cloud render mode (legacy / realistic). */
   _createStudioCloudLayer() {
     const initialCloudConfig = resolveCloudQuality({ ...this.params, ...this.perf });
-    const Layer = resolveCloudRenderMode(this.params) === 'realistic'
-      ? RealisticCloudSlabLayer
-      : CloudSlabLayer;
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const Layer = cloudMode === 'realisticV2' ? CloudV2SlabLayer
+      : cloudMode === 'realistic' ? RealisticCloudSlabLayer
+        : CloudSlabLayer;
     return new Layer(this.scene, {
       initialConfig: initialCloudConfig,
       compile: async (mats) => {
@@ -940,9 +944,10 @@ export class Engine {
 
   /** Camera-following infinite-world slab for the current cloud render mode. */
   _createInfiniteCloudLayer() {
-    const Layer = resolveCloudRenderMode(this.params) === 'realistic'
-      ? RealisticInfiniteCloudLayer
-      : InfiniteCloudLayer;
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const Layer = cloudMode === 'realisticV2' ? CloudV2InfiniteLayer
+      : cloudMode === 'realistic' ? RealisticInfiniteCloudLayer
+        : InfiniteCloudLayer;
     return new Layer(this.scene, {
       compile: async (mats) => {
         // Applying restored quality may request a rebuild while mode setup is
@@ -2799,16 +2804,16 @@ export class Engine {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: value });
       if (this.params.surfaceTextureSource === surfaceTextureSource
           && this.params.surfaceTextureMode
-            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
+            === sourceUsesTextureAtlas(surfaceTextureSource)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
-      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+      this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else if (key === 'surfaceTextureMode') {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureMode: !!value });
       if (this.params.surfaceTextureSource === surfaceTextureSource
           && this.params.surfaceTextureMode
-            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
+            === sourceUsesTextureAtlas(surfaceTextureSource)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
-      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+      this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else {
       if (Object.is(this.params[key], value)) return;
       this.params[key] = value;
@@ -2866,7 +2871,8 @@ export class Engine {
       return;
     }
 
-    if (key === 'surfaceDocument' || key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
+    if (key === 'surfaceDocument' || key === 'surfaceTextureSource'
+        || key.startsWith('surfaceTexture') || key.startsWith('surfaceV2')) {
       this._applySurfaceSettings();
       void this._ensureTerrainShaderVariantAsync();
       return;
@@ -2916,9 +2922,14 @@ export class Engine {
       return;
     }
     this._afterParamChange(REBUILD_KEYS.has(key), TERRAIN_FIELD_KEYS.has(key));
+    if (key === 'seed' && this.params.preset === 'dryCanyon' && this.worldMode === 'studio') {
+      this.clearErosion();
+      void this.bakeErosion({ presetBake: true });
+    }
   }
 
   applyPresetByKey(presetKey) {
+    if (this.params.preset === 'dryCanyon' || presetKey === 'dryCanyon') this.clearErosion();
     this._clearPendingTerrainParams(
       [...TERRAIN_FIELD_KEYS].filter((key) => key !== 'seed'),
     );
@@ -2926,7 +2937,7 @@ export class Engine {
     this._pendingNoiseSolo = null;
     this.params = applyPreset(this.params, presetKey);
     const defaultStack = migrateStack(undefined);
-    this.setNoiseStack(defaultStack, { force: true });
+    const stackReady = this.setNoiseStack(defaultStack, { force: true });
     // A preset may also carry a colour palette (e.g. Cartoon) — switch the
     // terrain colours together with the shape so it's a single click.
     const preset = PRESETS[presetKey];
@@ -2936,12 +2947,24 @@ export class Engine {
     }
     this.cb.onParams({ ...this.params });
     this._afterParamChange(true, true);
+    if (presetKey === 'dryCanyon' && this.worldMode === 'studio') {
+      this._frameDryCanyon();
+      const appliedParams = this.params;
+      return Promise.resolve(stackReady).then(result => {
+        if (result?.error || this.params !== appliedParams || this._disposed) return false;
+        return this.bakeErosion({ presetBake: true });
+      });
+    }
   }
 
   regenerate() {
     const committed = this._commitPendingTerrainParams();
     if (!committed.stackChanged) {
       this.applyAll({ force: false, terrainDirty: true });
+      if (this.params.preset === 'dryCanyon' && this.worldMode === 'studio') {
+        this.clearErosion();
+        void this.bakeErosion({ presetBake: true });
+      }
     }
   }
 
@@ -2957,6 +2980,7 @@ export class Engine {
     presetKey = null,
     noiseStackPresetKey = null,
     initialGraph = null,
+    nodeTemplateId = null,
     mini = null,
   } = {}) {
     this.projectMode = projectMode === 'nodes' ? 'nodes' : projectMode === 'manual' ? 'manual' : 'procedural';
@@ -3067,6 +3091,8 @@ export class Engine {
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
     this._graphProgram = compiled?.ok ? compiled.program : null;
     this._graphDiagnostics = compiled?.diagnostics || [];
+    const canyonTemplate = this.projectMode === 'nodes' && nodeTemplateId === 'nodes-dry-canyon';
+    if (canyonTemplate) Object.assign(this.params, PRESETS.dryCanyon.params);
     this.cb.onProjectMode?.(this.projectMode);
     this.cb.onGenerationSource?.(this.generationSource);
     this.cb.onTerrainGraph?.(this.terrainGraph ? structuredClone(this.terrainGraph) : null);
@@ -3102,6 +3128,11 @@ export class Engine {
     this.controls.reset(this.boardSize);
     this.cb.onMiniTerrain?.(this.mini?.serialize() ?? null);
     this._prepareFirstFrameShaders();
+    if (canyonTemplate && this.worldMode === 'studio') this._frameDryCanyon();
+    if (this.params.preset === 'dryCanyon' && this.worldMode === 'studio') {
+      this._frameDryCanyon();
+      void this.bakeErosion({ presetBake: true });
+    }
     if (!silent) {
       const label = this.mini?.state ? 'New Mini Terrain' : this.projectMode === 'nodes'
         ? 'New Nodes terrain'
@@ -3110,6 +3141,17 @@ export class Engine {
           : 'New procedural terrain';
       this.cb.onToast(label);
     }
+  }
+
+  _frameDryCanyon() {
+    const size = this.boardSize;
+    this.controls.autoOrbit = false;
+    this.setFov(36);
+    this.controls.goToView({
+      theta: 7 * Math.PI / 180, phi: 72 * Math.PI / 180, radius: size * 0.94,
+      target: [0, this.params.heightScale * 0.74 + size * 0.084, -size * 0.08],
+    }, { blend: false });
+    this.controls.update(0);
   }
 
   // ---------------------------------------------------------- planet style
@@ -3751,6 +3793,10 @@ export class Engine {
     this._liveGenerationSource = this.generationSource;
     if (this.generationSource === 'graph') {
       this._liveGraphProgram = this._graphProgram;
+      const surface = this._liveGraphProgram?.surface;
+      if (surface?.procedural) {
+        this.uniforms.uProceduralSurfaceParams.value.set(surface.values.flat());
+      }
     } else {
       this._liveNoiseStack = this.noiseStack;
       this._liveSoloLayerId = this._soloLayerId;
@@ -3761,7 +3807,7 @@ export class Engine {
   }
 
   setTerrainGraph(graph, {
-    structural = true, silent = false, atomic = false, affectedNodeIds = [],
+    structural = true, silent = false, atomic = false, affectedNodeIds = [], nodeTemplateId = null,
   } = {}) {
     const nextGraph = migrateGraphDocument(graph, this.noiseStack);
     const compiled = compileTerrainGraph(nextGraph);
@@ -3794,11 +3840,19 @@ export class Engine {
       return { ok: false, diagnostics: this._graphDiagnostics, ready: Promise.resolve({ swapped: false }) };
     }
 
-    if (compiled.program.surface) {
+    if (nodeTemplateId === 'nodes-dry-canyon' && this.projectMode === 'nodes') {
+      Object.assign(this.params, PRESETS.dryCanyon.params);
+      this._applySurfaceSettings();
+      this.cb.onParams?.(this._paramsSnapshot());
+    }
+    if (compiled.program.surface && !compiled.program.surface.procedural) {
       this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.PBR;
       this.params.surfaceTextureMode = true;
+      if (!previousProgram?.surface || previousProgram.surface.procedural) this.params.surfaceTextureAmount = 1;
       if(this._surfaceAtlas?.backend==='array' && compiled.program.surface.assets.every(id=>this._surfaceAtlas.slots[id]!=null)) {
         const surface=compileSurfaceGraph(nextGraph,this.params.surfaceDocument,this._surfaceAtlas.slots);
+        this._surfaceAtlas.graph=surface;
+        this._surfaceAtlas.cacheKey=this._surfaceBuildKey(SURFACE_TEXTURE_SOURCE.PBR);
         this.uniforms.uSurfaceGraphCode.value=surface.body;
         this.uniforms.uSurfaceGraphParams.value=Array.from({length:128},(_,i)=>new THREE.Vector4(...(surface.values[i]||[0,0,0,0])));
         this._needsRender=true;
@@ -3806,6 +3860,17 @@ export class Engine {
       this._applySurfaceSettings();
     } else if (this.uniforms.uSurfaceGraphCode) this.uniforms.uSurfaceGraphCode.value = '';
     const liveOctaves = this.terrainMaterial?.defines?.OCTAVES;
+    const heightChanged = this._liveGraphProgram?.heightInputKey !== compiled.program.heightInputKey;
+    const finish = async result => {
+      if (!result?.error && compiled.program === this._liveGraphProgram) {
+        if (compiled.program.surface?.usesErosion) {
+          await this._ensureGraphErosion();
+        } else if (heightChanged && this.erosionField?.graphKey) {
+          this.clearErosion();
+        }
+      }
+      return result;
+    };
     const needsCompile = this._liveHeightSig !== compiled.program.sig
       || ((this.projectMode !== 'nodes' || compiled.program.surface) && this.terrainMaterial?.userData?.minimalFragment)
       || liveOctaves !== Math.round(this.params.octaves);
@@ -3818,7 +3883,7 @@ export class Engine {
             valid: true, compiling: true, compilingNodeIds: [...this._pendingGraphCompileNodeIds], diagnostics: [],
             slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
           });
-          return { ok: true, program: compiled.program, ready: this._pendingGraphCompileReady, reused: true };
+          return { ok: true, program: compiled.program, ready: this._pendingGraphCompileReady.then(finish), reused: true };
         }
 
         const fallbackProgram = this._pendingGraphFallbackProgram
@@ -3835,7 +3900,7 @@ export class Engine {
         ready = this._rebuildStackMaterialsAsync(compiled.program, {
           label: 'Compiling terrain graph',
           atomic,
-          terrainDirtyOnSwap: true,
+          terrainDirtyOnSwap: heightChanged,
         }).then((result) => {
           if (this._pendingGraphCompileSig !== compiled.program.sig) return result;
           if (result?.error) {
@@ -3868,7 +3933,7 @@ export class Engine {
           this.cb.onCompileProgress?.(null);
         }
         this._commitLiveHeightSource();
-        this._markTerrainFieldDirty();
+        if (heightChanged) this._markTerrainFieldDirty();
         this._applyUniforms();
         this.minimap.requestRedraw();
         this.cb.onGraphState?.({
@@ -3882,7 +3947,7 @@ export class Engine {
         slotCount: compiled.program.slotCount, colorSlotCount: compiled.program.colorSlotCount,
       });
     }
-    return { ok: true, program: compiled.program, ready };
+    return { ok: true, program: compiled.program, ready: ready.then(finish) };
   }
 
   setGenerationSource(source, { silent = false } = {}) {
@@ -4983,7 +5048,8 @@ export class Engine {
     if (!u?.uSurfMode) return;
     const surfaceTextureSource = normalizeSurfaceTextureSource(p);
     p.surfaceTextureSource = surfaceTextureSource;
-    p.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+    p.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
+    this._applySurfaceV2Settings(surfaceTextureSource);
     const flatManual = this.projectMode === 'manual' && !this._manualHasGeneratedBase();
     // A generated Manual base keeps the source project's surface mode. Manual
     // paint still samples the atlas through uManualSurfaceMode, but an
@@ -5016,6 +5082,42 @@ export class Engine {
     u.uSurfAOAmt.value = surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR ? 0.55 : 1.0;
     u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
     this._needsRender = true;
+  }
+
+  /** True when the Procedural V2 surface applies to the current project. */
+  _surfaceV2Active(source = normalizeSurfaceTextureSource(this.params || {})) {
+    return source === SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2 && this.projectMode !== 'manual';
+  }
+
+  // Procedural V2 surface: bind the shared noise volume (baked on first use)
+  // and publish the look controls. Amount drops to 0 the moment another source
+  // is selected, so the switch is instant even while the terrain program for
+  // the new source is still compiling.
+  _applySurfaceV2Settings(source) {
+    const p = this.params;
+    const u = this.uniforms;
+    if (!u?.uSurfV2Amount) return;
+    const active = this._surfaceV2Active(source);
+    if (active && this.renderer) {
+      this._releaseSurfaceV2Noise ??= retainNoiseVolumeV2(this.renderer);
+      try {
+        u.uSurfV2Noise.value = getNoiseVolumeV2(this.renderer).volume;
+      } catch (error) {
+        console.warn('Procedural V2 surface noise could not be prepared', error);
+        u.uSurfV2Noise.value = null;
+      }
+    }
+    u.uSurfV2Amount.value = active && u.uSurfV2Noise.value ? 1.0 : 0.0;
+    const clamp = (value, fallback, min, max) => (
+      Math.min(max, Math.max(min, Number.isFinite(value) ? value : fallback))
+    );
+    u.uSurfV2Scale.value = clamp(p.surfaceV2Scale, 1.0, 0.25, 4.0);
+    u.uSurfV2Relief.value = clamp(p.surfaceV2Relief, 1.0, 0.0, 2.0);
+    u.uSurfV2Strata.value = clamp(p.surfaceV2Strata, 1.0, 0.0, 1.5);
+    u.uSurfV2Sandstone.value = clamp(p.surfaceV2Sandstone, 0.0, 0.0, 1.0);
+    u.uSurfV2Variation.value = clamp(p.surfaceV2Variation, 1.0, 0.0, 2.0);
+    u.uSurfV2Breakup.value = clamp(p.surfaceV2Breakup, 1.0, 0.0, 1.0);
+    u.uSurfV2Shore.value = clamp(p.surfaceV2Shore, 1.0, 0.0, 1.0);
   }
 
   _disposeSurfaceAtlas(atlas) {
@@ -8806,14 +8908,44 @@ export class Engine {
    * that resolves true on success.
    * @param {{onProgress?:(p:number,phase:string)=>void}} [opts]
    */
-  async bakeErosion({ onProgress } = {}) {
+  _graphErosionKey() {
+    const program = this.worldMode === 'studio' && this._liveGenerationSource === 'graph'
+      ? this._liveGraphProgram : null;
+    if (!program?.surface?.usesErosion) return null;
+    const { uBakeOrigin, uBakeSpan } = this.uniforms;
+    return JSON.stringify([program.heightInputKey, this.params.seed, this.params.heightScale,
+      uBakeOrigin.value.toArray(), uBakeSpan.value.toArray(), this.params.erosionQuality,
+      this._erosionSimParams(1)]);
+  }
+
+  async _ensureGraphErosion() {
+    const key = this._graphErosionKey();
+    if (!key || (this.erosionField.masks && this.erosionField.graphKey === key)) return;
+    if (this._graphErosionJob?.key === key && this._graphErosionJob.generation === this._terrainGen) {
+      return this._graphErosionJob.ready;
+    }
+    const job = { key, generation: this._terrainGen, ready: this.bakeErosion({ presetBake: true }) };
+    this._graphErosionJob = job;
+    try {
+      return await job.ready;
+    } finally {
+      if (this._graphErosionJob === job) this._graphErosionJob = null;
+    }
+  }
+
+  async bakeErosion({ onProgress, presetBake = false } = {}) {
     if (this.worldMode !== 'studio') {
       this.cb.onToast?.('Erosion is available in Tile mode.');
       return false;
     }
-    if (this._erosionBaking) return false;
-    this.projectHistory?.createSnapshot('Before erosion', { automatic: true });
-    this._erosionBaking = true;
+    if (this._erosionBaking && !presetBake) return false;
+    if (!presetBake) this.projectHistory?.createSnapshot('Before erosion', { automatic: true });
+    const graphKey = this._graphErosionKey();
+    const generation = this._terrainGen;
+    const job = Symbol('erosion');
+    this._erosionBaking = job;
+    const isCurrent = () => this._erosionBaking === job && generation === this._terrainGen
+      && !this._disposed && this.worldMode === 'studio';
     try {
       const u = this.uniforms;
       const q = EROSION_QUALITY[this.params.erosionQuality] || EROSION_QUALITY.balanced;
@@ -8826,22 +8958,20 @@ export class Engine {
       // sample the BASE field (erosion off → no feedback) at texel centres,
       // yielding to the event loop so the UI/progress stay responsive
       const sampler = this._getHeightSampler().cpu;
-      const prevEnabled = this.erosionField.enabled;
-      this.erosionField.enabled = false;
       const base = new Float32Array(res * res);
       for (let row = 0; row < res; row++) {
+        if (!isCurrent()) return false;
         const z = originZ + ((row + 0.5) / res) * sizeZ;
         const rowOff = row * res;
         for (let col = 0; col < res; col++) {
           const x = originX + ((col + 0.5) / res) * sizeX;
-          base[rowOff + col] = sampler.heightAt(x, z);
+          base[rowOff + col] = sampler.heightAt(x, z, { ignoreErosion: true });
         }
         if ((row & 31) === 0) {
           onProgress?.(0.08 * (row / res), 'sampling');
           await new Promise((r) => setTimeout(r, 0));
         }
       }
-      this.erosionField.enabled = prevEnabled;
 
       // cell size in world units → scale cell-relative knobs (talus / minSlope)
       const cellWorld = Math.max(sizeX, sizeZ) / res;
@@ -8852,8 +8982,10 @@ export class Engine {
         onProgress: (pr, phase) => onProgress?.(0.1 + pr * 0.85, phase),
       });
 
+      if (!isCurrent()) return false;
       this.erosionField.setRegion(originX, originZ, sizeX, sizeZ);
       this.erosionField.setDelta(out.delta, res);
+      this.erosionField.graphKey = graphKey;
       this.erosionField.setMasks({
         flow: out.flow, erosionMask: out.erosionMask, depositionMask: out.depositionMask,
         sedimentMap: out.sedimentMap, slopeMap: out.slopeMap,
@@ -8873,7 +9005,7 @@ export class Engine {
       this.cb.onToast?.(`Erosion failed: ${err?.message || err}`);
       return false;
     } finally {
-      this._erosionBaking = false;
+      if (this._erosionBaking === job) this._erosionBaking = false;
     }
   }
 
@@ -9531,6 +9663,10 @@ export class Engine {
       if (result?.error) throw result.error;
     }
     context.assertCurrent();
+    if (context.targetWorldMode === 'studio' && this._graphProgram?.surface?.usesErosion) {
+      await this._ensureGraphErosion();
+      context.assertCurrent();
+    }
     await this._waitForFirstFrameShaders();
     context.assertCurrent();
     context.keepaliveMaterials = result?.keepaliveMaterials || [];
@@ -10550,7 +10686,8 @@ export class Engine {
 
     // Apply the requested cloud quality before starting GPU work so a default
     // material is never compiled and immediately replaced.
-    const realisticClouds = resolveCloudRenderMode(p) === 'realistic';
+    // Realistic V2 has no spherical shell: the planet renders it as Realistic.
+    const realisticClouds = resolveCloudRenderMode(p) !== 'legacy';
     if (p.cloudsEnabled === true && p.cloudChunksEnabled === true && !realisticClouds) {
       this.planetCloudChunks = new planet.PlanetCloudChunks(this.scene, {
         planetRadius: this._planetRadius(),
@@ -10622,15 +10759,19 @@ export class Engine {
    *  rebuild). Both layers read the same cloud* params; each is only visible in
    *  its own world mode. */
   _applyCloudSettings() {
-    // A render-mode switch swaps every layer for its legacy / realistic twin.
-    const realisticClouds = resolveCloudRenderMode(this.params) === 'realistic';
+    // A render-mode switch swaps every layer for the twin of the new mode.
+    // Flat worlds have all three renderers; the planet shell renders
+    // Realistic V2 with the realistic renderer.
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const realisticClouds = cloudMode !== 'legacy';
+    const layerMode = (layer) => layer?.renderMode ?? 'legacy';
     const isRealistic = (layer) => layer?.renderMode === 'realistic';
-    if (this.studioCloud && isRealistic(this.studioCloud) !== realisticClouds) {
+    if (this.studioCloud && layerMode(this.studioCloud) !== cloudMode) {
       this.studioCloud.dispose();
       this.studioCloud = this._createStudioCloudLayer();
       this.studioCloud.setInScene(this.worldMode === 'studio');
     }
-    if (this.infiniteCloud && isRealistic(this.infiniteCloud) !== realisticClouds) {
+    if (this.infiniteCloud && layerMode(this.infiniteCloud) !== cloudMode) {
       this.infiniteCloud.dispose();
       this.infiniteCloud = this._createInfiniteCloudLayer();
     } else if (!this.infiniteCloud && this.worldMode === 'infinite' && this.params.cloudsEnabled === true) {
@@ -11242,6 +11383,9 @@ export class Engine {
       if (!surfaceReady) return 'hybrid-base';
       return detailEnabled ? 'hybrid' : 'hybrid-surface';
     }
+    // Procedural V2 is a shader-only surface with its own detail: one program
+    // whatever the detail pages or atlases are doing.
+    if (this._surfaceV2Active(source)) return 'v2';
     if (surfaceEnabled && surfaceReady && detailEnabled) return 'full';
     if (surfaceEnabled && surfaceReady) return 'surface';
     if (detailEnabled) return 'detail';
@@ -11596,9 +11740,25 @@ export class Engine {
     if (!u?.uTerrainCloudShadowEnabled) return;
     const layer = this.worldMode === 'planet' ? (this.planetCloudLayer || this.planetCloudChunks)
       : this.worldMode === 'infinite' ? this.infiniteCloud : this.studioCloud;
-    const requested = !!this.params.cloudsEnabled && !!this.params.cloudShadowsEnabled;
-    const state = requested ? layer?.renderTerrainShadow?.(u.uSunDir.value, this._tileOccTex) : null;
-    u.uTerrainCloudShadowEnabled.value = state ? 1 : 0;
+    const cloudsOn = !!this.params.cloudsEnabled;
+    const shadowsRequested = cloudsOn && !!this.params.cloudShadowsEnabled;
+    // Realistic water mirrors the clouds through the same top-down cloud map
+    // that casts their shadows, so the map is also needed when only the
+    // reflections are on. (Flat worlds; the sphere has its own ocean shader.)
+    const reflection = cloudsOn && this.worldMode !== 'planet'
+      && isRealisticWaterMode(this.waterSystem?.getEffectiveMode?.() ?? 'legacy')
+      ? Math.min(1.5, Math.max(0, this.params.waterCloudReflection ?? 1))
+      : 0;
+    const state = (shadowsRequested || reflection > 0)
+      ? layer?.renderTerrainShadow?.(u.uSunDir.value, this._tileOccTex)
+      : null;
+    u.uTerrainCloudShadowEnabled.value = state && shadowsRequested ? 1 : 0;
+    if (u.uWaterCloudReflection) {
+      u.uWaterCloudReflection.value = state && !state.planet ? reflection : 0;
+      const cloudUniforms = layer?.material?.uniforms;
+      const span = (cloudUniforms?.uCloudTop?.value ?? 0) - (cloudUniforms?.uCloudBottom?.value ?? 0);
+      if (state && span > 0) u.uCloudLayerSpan.value = span;
+    }
     u.uTerrainCloudShadowStrength.value = Math.min(0.85, Math.max(0, this.params.cloudShadowOpacity ?? 0.45));
     u.uTerrainCloudShadowTex.value = state?.texture ?? null;
     u.uTileOccupancy.value = state?.texture ?? this._tileOccTex ?? null;
@@ -11954,6 +12114,7 @@ export class Engine {
       if (realWorldSource) {
         await this._restoreRealWorldSource(realWorldSource, { onProgress: onRealWorldProgress });
       }
+      if (this._graphProgram?.surface?.usesErosion && !json?.erosion) await this._ensureGraphErosion();
       await this.waitForTerrainReady();
       if (!silent) this.cb.onToast(`Loaded seed ${loadedSeed}`);
       return result;
@@ -14228,6 +14389,9 @@ export class Engine {
       this._surfaceAtlasCache = null;
       this._surfaceAtlas = null;
     }
+    if (this.uniforms?.uSurfV2Noise) this.uniforms.uSurfV2Noise.value = null;
+    this._releaseSurfaceV2Noise?.();
+    this._releaseSurfaceV2Noise = null;
     if (this.controls) { this.controls.dispose(); this.controls = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     // tile hover-to-add listeners + resources

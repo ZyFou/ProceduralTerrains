@@ -1,5 +1,36 @@
 # Terrain surface materials
 
+## Rebuild the Dry Canyon graph
+
+Open **Nodal Terrain → Dry Canyon** to inspect the complete recipe, or start with **Blank graph** and make these connections. Every node is available in the node palette.
+
+### Build the landform
+
+Add the five nodes below from **Landforms**. Their default settings reproduce the template. If your graph already contains the single **Dry Canyon** node, select it and click **Expand Dry Canyon** in Properties to carry its settings and outgoing wires into the five-node layout.
+
+```mermaid
+flowchart LR
+  D[Canyon Domain] -->|Domain| M[Main Wash]
+  M -->|Channel| T[Tributary Channels]
+  T -->|Channel| R[Basin Relief]
+  D -->|Domain| H[Basin Headwall]
+  H -->|Headwall| R
+  R -->|Height| O[Terrain Output]
+```
+
+1. Connect **Canyon Domain** to **Main Wash**, **Main Wash** directly to **Basin Relief · Channel**, and **Basin Relief · Height** to **Terrain Output · Height**. This gives you a single open wash. Domain controls the seed and scale. Main Wash controls the bends.
+2. Insert **Tributary Channels** between Main Wash and Basin Relief. Both wires use **Channel**. Set **Left Bank Spacing** to **0.29** and **Right Bank Spacing** to **0.37**. Smaller spacing adds more side valleys on that bank.
+3. Branch **Canyon Domain · Domain** into **Basin Headwall · Domain**, then wire **Basin Headwall · Headwall** into **Basin Relief · Headwall**. Setback positions the upper wall. Basin Relief sets the final relief in metres, rim strength and fluting depth.
+
+### Add the erosion-driven surface
+
+1. Add **Erosion Maps**, **Rock Exposure**, and **Wash Coverage**. Wire **Erosion → Rock Exposure · Erosion**, **Flow → Wash Coverage · Flow**, and **Deposition → Wash Coverage · Deposition**. Rock Exposure combines removed material with slope and elevation. Wash Coverage favors sediment and drainage on gentler ground.
+2. Add three **Canyon Material** nodes. Set their ground types to **Scrub soil**, **Bedded rock**, and **Wash gravel**. Connect **Wash Coverage → Scrub soil · Wash** to thin the scrub in drainage channels.
+3. Add a **Material Blend**. Wire soil to **A**, rock to **B**, and **Rock Exposure** to **Mask**. A mask of zero selects A and a mask of one selects B.
+4. Add a second **Material Blend**. Wire the first blend to **A**, gravel to **B**, and **Wash Coverage** to **Mask**. Connect its **Surface** output to **Terrain Output · Surface**.
+
+The template opens with a 384 × 384 Tile erosion bake. All three map sockets read the same simulation that displaces the terrain. To see what one map contributes, connect **Deposition** directly to the second blend's **Mask**. Gravel will follow sediment accumulation alone. Rewiring the material reuses the bake. Editing the connected landform regenerates it. For the template's simulation settings on a blank project, start from the Canyon erosion settings, choose High quality and CPU, and set strength to **0.55**.
+
 The local pack contains 22 CC0 source textures and nine derived recipes. The prepared 512, 1024 and 2048 pixel maps, mipmaps, height sources, thumbnails, catalog and [attribution](../public/textures/terrain/pbr/ATTRIBUTION.md) live in `public/textures/terrain/pbr`. Builds copy this directory into the web output and the Electron resources. Runtime rendering does not contact Poly Haven or ambientCG.
 
 Run `npm run materials:fetch` to download or resume the official sources into `.cache/materials`. Run `npm run materials:build` to regenerate the prepared pack, and `npm run materials:verify` to check files, hashes and the recipe manifest. `npm run build` verifies the source pack and the web output. `npm run desktop:package` builds the web output and packages it for Windows.

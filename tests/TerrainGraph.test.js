@@ -8,10 +8,12 @@ import {
   setGraphColorEnabled, setGraphMode, topologicalSort, updateGraphGroup, updateGraphNodeParams, validateGraph,
 } from '../src/engine/terrain/graph/GraphDocument.js';
 import { compileTerrainGraph } from '../src/engine/terrain/graph/GraphCompiler.js';
+import { createNodeTemplateGraph } from '../src/project/NodeProjectTemplates.js';
 import { ANALYTIC_COLOR, ANALYTIC_HEIGHT, getGraphNodeDefinition, listGraphNodeDefinitions, nodeDefaults } from '../src/engine/terrain/graph/GraphRegistry.js';
 import { SEED_DOMAIN_RADIUS, seedDomainOffset } from '../src/engine/terrain/noise/seedDomain.js';
 
 const uniforms = {
+  uBoardHalf: { value: 1024 },
   uFrequency: { value: 0.01 }, uSeedOffset: { value: { x: 2, y: 3 } }, uAmplitude: { value: 1 },
   uHeightScale: { value: 100 }, uPersistence: { value: 0.5 }, uLacunarity: { value: 2 },
 };
@@ -24,10 +26,14 @@ function addConnected(graph, type, sourceId, targetId = TERRAIN_OUTPUT_ID, targe
 }
 
 function graphForRegistryNode(type) {
+  const definition = getGraphNodeDefinition(type);
+  if ([...definition.inputs, ...definition.outputs].some(port => ['domain', 'channel', 'headwall'].includes(port.type))) {
+    const graph = createNodeTemplateGraph('nodes-dry-canyon');
+    return { graph, node: graph.nodes.find(node => node.type === type) };
+  }
   let graph = createBlankGraph();
   graph = addGraphNode(graph, type, { x: 220, y: 120 });
   const node = graph.nodes.at(-1);
-  const definition = getGraphNodeDefinition(type);
   if (definition.inputs.length === 0) {
     graph = connectGraphNodes(graph, { source: node.id, target: TERRAIN_OUTPUT_ID });
     return { graph, node };
@@ -228,7 +234,8 @@ describe('analytical terrain graph compiler', () => {
       expect(definition.executionKind).toBe('analytical');
       expect(definition.glslCompiler).toBeTypeOf('function');
       expect(definition.cpuEvaluator).toBeTypeOf('function');
-      expect([...definition.inputs, ...definition.outputs].every((port) => [ANALYTIC_HEIGHT, ANALYTIC_COLOR, 'surface'].includes(port.type))).toBe(true);
+      expect([...definition.inputs, ...definition.outputs].every((port) =>
+        [ANALYTIC_HEIGHT, ANALYTIC_COLOR, 'surface', 'domain', 'channel', 'headwall'].includes(port.type))).toBe(true);
       expect(JSON.parse(JSON.stringify(definition.defaults))).toEqual(definition.defaults);
     }
   });

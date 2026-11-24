@@ -8,11 +8,17 @@ function mulberry32(a) {
   };
 }
 
+export function terrainSeedOffset(seed) {
+  const rng = mulberry32(seed >>> 0);
+  return { x: rng() * 2048 - 1024, y: rng() * 2048 - 1024 };
+}
+
 export function applyTerrainShapeUniforms(u, p, size) {
-  const rng = mulberry32(p.seed >>> 0);
-  u.uSeedOffset.value.set(rng() * 2048 - 1024, rng() * 2048 - 1024);
+  const offset = terrainSeedOffset(p.seed);
+  u.uSeedOffset.value.set(offset.x, offset.y);
 
   u.uFrequency.value = (p.noiseScale * 0.1) / size;
+  if (u.uDryCanyon) u.uDryCanyon.value = p.preset === 'dryCanyon' ? 1 : 0;
   u.uHeightScale.value = p.heightScale;
   u.uSeaLevel.value = p.seaLevel;
   u.uTerrainFormationSeaLevel.value = p.terrainFormationSeaLevel;

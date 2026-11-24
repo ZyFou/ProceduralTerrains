@@ -46,6 +46,33 @@ uniform float uSurfRolePresent[${SURFACE_TEXTURE_ROLE_COUNT}];
 uniform float uSurfPresent[${SURFACE_TEXTURE_ROWS}]; // legacy/debug metadata
 `;
 
+export const SURFACE_SAMPLE_GLSL = /* glsl */ `
+struct SurfMaterialSample {
+  vec3 albedo;
+  vec3 normal;
+  float ao;
+  float rough;
+  float missing;
+  float height;
+};
+SurfMaterialSample surfMixSamples(SurfMaterialSample a, SurfMaterialSample b, float k) {
+  SurfMaterialSample outS;
+  outS.albedo = mix(a.albedo, b.albedo, k);
+  outS.normal = normalize(mix(a.normal, b.normal, k));
+  outS.rough = mix(a.rough, b.rough, k);
+  outS.ao = mix(a.ao, b.ao, k);
+  outS.missing = mix(a.missing, b.missing, k);
+  outS.height = mix(a.height, b.height, k);
+  return outS;
+}
+SurfMaterialSample pbrHeightMix(SurfMaterialSample a,SurfMaterialSample b,float k,float contrast){
+  if(k<=0.0)return a;if(k>=1.0)return b;
+  float h=max(a.height+1.0-k,b.height+k)-max(contrast,0.001);
+  float wa=max(0.0,a.height+1.0-k-h)*(1.0-k),wb=max(0.0,b.height+k-h)*k;
+  return surfMixSamples(a,b,wb/max(wa+wb,0.0001));
+}
+`;
+
 export const SURFACE_TEXTURE_FUNCTIONS_GLSL = /* glsl */ `
 const int SURF_ROLE_COUNT = ${SURFACE_TEXTURE_ROLE_COUNT};
 const int SURF_VARIANT_COUNT = ${SURFACE_TEXTURE_VARIANT_COUNT};
@@ -60,14 +87,7 @@ struct SurfaceTexResult {
   float amount;
 };
 
-struct SurfMaterialSample {
-  vec3 albedo;
-  vec3 normal;
-  float ao;
-  float rough;
-  float missing;
-  float height;
-};
+${SURFACE_SAMPLE_GLSL}
 
 ${SURFACE_ARRAY_FUNCTIONS}
 
@@ -226,17 +246,6 @@ vec3 surfPaletteForRole(int roleIndex) {
   return applyPalettePost(uColSnow);
 }
 
-SurfMaterialSample surfMixSamples(SurfMaterialSample a, SurfMaterialSample b, float k) {
-  SurfMaterialSample outS;
-  outS.albedo = mix(a.albedo, b.albedo, k);
-  outS.normal = normalize(mix(a.normal, b.normal, k));
-  outS.rough = mix(a.rough, b.rough, k);
-  outS.ao = mix(a.ao, b.ao, k);
-  outS.missing = mix(a.missing, b.missing, k);
-  outS.height = mix(a.height, b.height, k);
-  return outS;
-}
-
 SurfMaterialSample surfSampleRole(int roleIndex, vec3 wp, vec3 blend, vec3 nGeo) {
   #ifdef SURFACE_ARRAYS
   return pbrRole(roleIndex,wp,blend,nGeo);
@@ -359,12 +368,6 @@ void surfCheckRole(int roleIndex, float weight, inout int bestI, inout int secon
 }
 
 #ifdef SURFACE_ARRAYS
-SurfMaterialSample pbrHeightMix(SurfMaterialSample a,SurfMaterialSample b,float k,float contrast){
-  if(k<=0.0)return a;if(k>=1.0)return b;
-  float h=max(a.height+1.0-k,b.height+k)-max(contrast,0.001);
-  float wa=max(0.0,a.height+1.0-k-h)*(1.0-k),wb=max(0.0,b.height+k-h)*k;
-  return surfMixSamples(a,b,wb/max(wa+wb,0.0001));
-}
 
 void pbrApplyPaint(inout SurfaceTexResult result,vec3 wp,vec3 ng,vec3 blend) {
 #ifdef SURFACE_PAINT_LAYERS

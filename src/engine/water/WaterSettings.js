@@ -109,6 +109,9 @@ export const WATER_DEFAULT_PARAMS = {
   // transmission clarity; Volumetric/Cinematic also use it for distortion.
   waterRefractionStrength: 0.45,
   waterSpecularStrength: 1.0,
+  // Realistic modes: clouds mirrored on the water (0 = off). Uses the
+  // top-down cloud map, so it works with every cloud renderer.
+  waterCloudReflection: 1.0,
   waterBiomeColorEnabled: true,
   waterBiomeColorStrength: 0.55,
   // Realistic modes: 0 = palette colours only, 1 = physically plausible clear

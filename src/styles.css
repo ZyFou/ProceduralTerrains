@@ -5224,6 +5224,10 @@ input[type="color"].palette-color-input {
 .terrain-flow-node .react-flow__handle.connectingfrom,
 .terrain-flow-node .react-flow__handle.connectingto { box-shadow: 0 0 0 3px #171b21, 0 0 11px currentColor; }
 .terrain-flow-node .react-flow__handle.handle-color { background: var(--node-rose); }
+.terrain-flow-node .react-flow__handle.handle-mask { background: #56c9c3; }
+.terrain-flow-node .react-flow__handle.handle-surface { background: #ceaa75; }
+.terrain-flow-edge.edge-mask .react-flow__edge-path { stroke: #56c9c3; }
+.terrain-flow-edge.edge-surface .react-flow__edge-path { stroke: #ceaa75; }
 .terrain-flow-node .react-flow__handle.handle-height { background: var(--node-cyan); }
 .terrain-flow-node .react-flow__handle.connection-incompatible { opacity: .2; filter: grayscale(1); transform: translate(-50%, -50%) scale(.82); }
 .terrain-flow-node .react-flow__handle.source-selected,

@@ -109,7 +109,7 @@ export function createRealisticCloudMaterial({ planet = false } = {}) {
 }
 
 /** Resolved engine lighting -> the realistic material's HDR sun / sky inputs. */
-function applyRealisticLighting(u, state) {
+export function applyRealisticLighting(u, state) {
   if (!u || !state) return;
   const d = state.sunDirection;
   if (d) u.uSunDir.value.set(d[0], d[1], d[2]).normalize();

@@ -423,6 +423,25 @@ const SURFACE_MODE_SLIDERS = [
   slider('surfaceTextureNormal', 'Normal Strength', 0, 2, 0.05, { digits: 2, fallback: 1 }),
 ];
 
+// Procedural V2: shader-only materials. The biome picks the stone and the
+// ground cover; these sliders only set how strongly each trait shows.
+const SURFACE_V2_SLIDERS = [
+  slider('surfaceV2Scale', 'Feature Scale', 0.25, 4, 0.05, { digits: 2, fallback: 1,
+    info: 'Size of the rock layers, soil patches and grain. Raise it for large worlds, lower it for close-up dioramas.' }),
+  slider('surfaceV2Variation', 'Color Variation', 0, 2, 0.05, { digits: 2, fallback: 1,
+    info: 'How much each material varies: dry and lush plant cover, sand tones, weathering, moss and lichen on rock. 0 keeps flat biome colours.' }),
+  slider('surfaceV2Relief', 'Surface Relief', 0, 2, 0.05, { digits: 2, fallback: 1,
+    info: 'Strength of rock ledges, ground grain and sand ripples in the lighting. Snow and sand always stay smoother than rock.' }),
+  slider('surfaceV2Strata', 'Rock Bedding', 0, 1.5, 0.05, { digits: 2, fallback: 1,
+    info: 'Contrast of the thin rock layers. Canyon and desert stone is strongly bedded, mountain granite barely.' }),
+  slider('surfaceV2Sandstone', 'Sandstone Tint', 0, 1, 0.02, { digits: 2, fallback: 0,
+    info: '0 lets each biome keep its own stone. Raise it to paint all rock with warm sandstone strata (canyon look).' }),
+  slider('surfaceV2Breakup', 'Ground Breakup', 0, 1, 0.02, { digits: 2, fallback: 1,
+    info: 'Bare earth patches breaking up the plant cover; plants gather in hollows.' }),
+  slider('surfaceV2Shore', 'Shoreline', 0, 1, 0.02, { digits: 2, fallback: 1,
+    info: 'Pale mineral ring above the waterline and wet darkening at the water edge.' }),
+];
+
 function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
   useLanguage();
   const { params, onParam } = ctx;
@@ -441,13 +460,28 @@ function SurfaceModeControls({ ctx, source, onBake, applying, status }) {
         value={source}
         options={[
           { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL, label: 'Procedural' },
+          { value: SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2, label: 'Procedural V2' },
           { value: SURFACE_TEXTURE_SOURCE.CUSTOM, label: 'Custom Materials' },
           { value: SURFACE_TEXTURE_SOURCE.PBR, label: 'Local PBR Library' },
         ]}
         onChange={(value) => onParam('surfaceTextureSource', value)}
         settingId="surface.mode"
-        info={translateText("Procedural uses shader colours. Custom Materials uses only uploaded maps and shows missing layers in the viewport.")}
+        info={translateText("Procedural uses shader colours. Procedural V2 gives every material its own texture from the biome (bedded or jointed rock, dry and lush ground, rippled sand, drifted snow) with no texture files. Custom Materials uses only uploaded maps and shows missing layers in the viewport.")}
       />
+      {source === SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2 && (
+        <>
+          <p className="section-hint">{translateText("Shader-only surface for Tile and Infinite World: nothing to bake or upload. Colours still come from the palette; the first switch compiles the terrain shader in the background.")}</p>
+          {SURFACE_V2_SLIDERS.map((def) => (
+            <SliderCtl
+              key={def.key}
+              def={def}
+              value={params[def.key] ?? def.fallback}
+              onChange={(v) => onParam(def.key, v)}
+              settingId={`surface.${def.key}`}
+            />
+          ))}
+        </>
+      )}
       {textureMode && (
         <>
           <div className="surface-apply-row">

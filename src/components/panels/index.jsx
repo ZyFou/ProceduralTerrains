@@ -395,7 +395,7 @@ function ErosionTabContent({ ctx, erosion }) {
         ))}
       </ControlSection>
 
-      <p className="section-hint">{translateText("Erosion also produces flow / rock / sediment / slope masks used by texturing & props (wiring in progress). Exports already include the eroded terrain. Bake / reset can be reverted with Ctrl+Z.")}</p>
+      <p className="section-hint">{translateText("In Nodal Terrain, use Erosion Maps to connect flow, erosion and deposition to a Material Blend mask. Terrain exports include the eroded height. Use Ctrl+Z to undo a bake or reset.")}</p>
     </>
   );
 }
