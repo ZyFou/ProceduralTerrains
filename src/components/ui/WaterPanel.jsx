@@ -517,6 +517,20 @@ export default function WaterPanelInner({
                 onChange={(v) => onParam('waterNaturalColor', v)}
                 settingId="water.waterNaturalColor"
               />
+              <SliderCtl
+                def={{
+                  key: 'waterCloudReflection',
+                  label: 'Cloud Reflections',
+                  min: 0,
+                  max: 1.5,
+                  step: 0.05,
+                  digits: 2,
+                  info: 'Mirrors the clouds on the water and hides the sun glitter beneath them. Works with every cloud renderer; 0 turns it off.',
+                }}
+                value={val(params, 'waterCloudReflection')}
+                onChange={(v) => onParam('waterCloudReflection', v)}
+                settingId="water.waterCloudReflection"
+              />
               <ToggleRow
                 label={translateText("Biome Color Variation")}
                 value={val(params, 'waterBiomeColorEnabled')}

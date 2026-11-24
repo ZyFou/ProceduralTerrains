@@ -133,7 +133,8 @@ function projectFeatures(payload, options) {
     splines: Array.isArray(splines) && splines.length > 0,
     importedMaps: payload?.realWorldSource != null,
     surfaces: (typeof params.surfaceTextureSource === 'string'
-      && params.surfaceTextureSource !== 'procedural')
+      && params.surfaceTextureSource !== 'procedural'
+      && params.surfaceTextureSource !== 'proceduralV2')
       || params.surfaceTextureMode === true || manualMaterials != null,
     water: params.waterEnabled !== false && finite(params.seaLevel) > 0.5,
     props: params.propsEnabled === true || manualProps != null,

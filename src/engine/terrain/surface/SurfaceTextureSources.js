@@ -1,5 +1,8 @@
 export const SURFACE_TEXTURE_SOURCE = Object.freeze({
   PROCEDURAL: 'procedural',
+  // Shader-only like Procedural, with layered-rock relief, strata banding and
+  // soil / vegetation breakup from the shared V2 noise volume.
+  PROCEDURAL_V2: 'proceduralV2',
   PBR: 'pbrLibrary',
   DEFAULT: 'defaultTextures',
   CUSTOM: 'customTextures',
@@ -12,9 +15,16 @@ export function isSurfaceTextureSource(value) {
   return SOURCE_VALUES.has(value);
 }
 
+/** Sources that shade from shader code alone (no material atlas). */
+export function isProceduralSurfaceSource(source) {
+  return source === SURFACE_TEXTURE_SOURCE.PROCEDURAL
+    || source === SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2;
+}
+
 export function normalizeSurfaceTextureSource(params = {}) {
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR) return SURFACE_TEXTURE_SOURCE.PBR;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PROCEDURAL) return SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+  if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2) return SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.CUSTOM) return SURFACE_TEXTURE_SOURCE.CUSTOM;
   if (params.surfaceTextureSource === SURFACE_TEXTURE_SOURCE.BUILT_IN) return SURFACE_TEXTURE_SOURCE.BUILT_IN;
   // defaultTextures is kept only as a save-compatibility value. The active
@@ -28,10 +38,10 @@ export function normalizeSurfaceTextureParams(params = {}, source = params) {
   return {
     ...params,
     surfaceTextureSource,
-    surfaceTextureMode: surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL,
+    surfaceTextureMode: !isProceduralSurfaceSource(surfaceTextureSource),
   };
 }
 
 export function sourceUsesTextureAtlas(source) {
-  return normalizeSurfaceTextureSource({ surfaceTextureSource: source }) !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+  return !isProceduralSurfaceSource(normalizeSurfaceTextureSource({ surfaceTextureSource: source }));
 }

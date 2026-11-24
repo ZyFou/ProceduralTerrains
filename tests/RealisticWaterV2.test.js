@@ -9,6 +9,8 @@ import {
 import { WATER_PRESETS } from '../src/engine/water/WaterPresets.js';
 import {
   getWaterWaveFeatureSpacing,
+  WATER_GERSTNER_GEOMETRY_TRAINS,
+  WATER_GERSTNER_TRAINS,
   WATER_WAVE_SCALE_COMPATIBILITY,
   WATER_WAVES_GLSL,
 } from '../src/engine/water/waterWavesGLSL.js';
@@ -145,7 +147,7 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
-  it('uses camera-focused Gerstner geometry and anti-aliased persistent whitecaps', () => {
+  it('uses camera-focused Gerstner geometry and fold-driven whitecaps', () => {
     const material = createRealisticWaterMaterial(createTerrainUniforms());
 
     expect(material.vertexShader).toContain('waterConcentratedGridAxis');
@@ -153,10 +155,17 @@ describe('Realistic Water Surface V2', () => {
     expect(material.vertexShader).toMatch(
       /uGeometryDisplacementEnabled\s*\*\s*step\(2\.5,\s*uWaterTier\)/,
     );
-    expect(material.fragmentShader).toContain('waterCinematicCrest');
-    expect(material.fragmentShader).toContain('float foamPersistence');
-    expect(material.fragmentShader).toContain('fwidth(foamPersistence)');
-    expect(material.fragmentShader).toContain('float breakingFoam');
+    // Geometry displaces the longest trains of the sea the fragment shades.
+    expect(material.vertexShader).toContain('waterGerstnerDomain(xz, t)');
+    expect(material.vertexShader.match(/waterGerstnerDisplace\(offset/g))
+      .toHaveLength(WATER_GERSTNER_GEOMETRY_TRAINS);
+    // Whitecaps follow the fold of the same Gerstner sea on every tier and
+    // break into cellular lace; sheltered water calms the sea state.
+    expect(material.fragmentShader).toContain('smoothstep(0.30, 0.82, waterWaveFold)');
+    expect(material.fragmentShader).toContain('float whitecap');
+    expect(material.fragmentShader).toContain('float waterFoamCells(vec2 p, float time)');
+    expect(material.fragmentShader).toContain('waterWaveShelter = mix(0.30, 1.0, shoaling)');
+    expect(material.fragmentShader).not.toContain('waterCinematicCrest');
 
     applyRealisticWaterUniforms(material, {}, 'cinematic');
     expect(material.uniforms.uGeometryDisplacementEnabled.value).toBe(1);
@@ -232,10 +241,13 @@ describe('Realistic Water Surface V2', () => {
     expect(WATER_WAVES_GLSL).toContain('float regionalA');
     expect(WATER_WAVES_GLSL).toContain('float regionalB');
     expect(WATER_WAVES_GLSL).toContain('vec2 waveXZ = xz + macroWarp');
-    expect(WATER_WAVES_GLSL).toContain('void waterSpectrumBand(');
-    // ANGLE/FXC stalls on loops with loop-carried transcendental state.
+    expect(WATER_WAVES_GLSL).toContain('void waterGerstnerShade(');
+    // One straight-line call per train: ANGLE/FXC stalls unrolling long
+    // transcendental loops.
     expect(WATER_WAVES_GLSL).not.toMatch(/\bfor \(|\bbreak;/);
-    expect(WATER_WAVES_GLSL).toContain('exp(sin(phase) - 1.0)');
+    expect(WATER_WAVES_GLSL.match(/  waterGerstnerShade\(slope, fold, height, lost/g))
+      .toHaveLength(WATER_GERSTNER_TRAINS.length);
+    expect(WATER_WAVES_GLSL).toContain('float chop = waterGerstnerChop(seaState);');
     expect(WATER_WAVES_GLSL).toContain('waterBandFilter(k, footprint)');
     expect(WATER_WAVES_GLSL).toContain('float largePatchA');
     expect(WATER_WAVES_GLSL).toContain('float largePatchB');
@@ -278,10 +290,28 @@ describe('Realistic Water Surface V2', () => {
     material.dispose();
   });
 
-  it('adds aperiodic gust-modulated ripples to the analytic spectrum', () => {
+  it('adds aperiodic gust-modulated ripples to the analytic sea', () => {
     expect(WATER_WAVES_GLSL).toContain('float waterGustMask(');
     expect(WATER_WAVES_GLSL).toContain('vec3 waterNoiseD(vec2 p)');
     expect(WATER_WAVES_GLSL).toContain('void waterRippleOctave(');
-    expect(WATER_WAVES_GLSL).toContain('float dirWobble');
+    expect(WATER_WAVES_GLSL).toContain('smallPatch *= mix(0.22, 1.12, gust);');
+  });
+
+  it('describes a peaked wind sea: 20 trains from swell to capillary chop', () => {
+    expect(WATER_GERSTNER_TRAINS).toHaveLength(20);
+    expect(WATER_GERSTNER_GEOMETRY_TRAINS).toBeLessThanOrEqual(12);
+    // strictly shortening wavelengths, deterministic phases, bounded steepness
+    for (let i = 1; i < WATER_GERSTNER_TRAINS.length; i++) {
+      expect(WATER_GERSTNER_TRAINS[i].kRatio).toBeGreaterThan(WATER_GERSTNER_TRAINS[i - 1].kRatio);
+    }
+    expect(WATER_GERSTNER_TRAINS[0].kRatio).toBe(1);
+    expect(WATER_GERSTNER_TRAINS[0].phase).toBeCloseTo(4.738939, 5);
+    const steepness = WATER_GERSTNER_TRAINS.reduce((sum, train) => sum + train.steepness, 0);
+    expect(steepness).toBeGreaterThan(0.9);
+    expect(steepness).toBeLessThan(1.2);
+    // the pinch stays below self-intersection at the reference sea state
+    expect(0.95 / (steepness * 1.15)).toBeLessThan(1);
+    expect(WATER_WAVES_GLSL).toContain('float waterWaveFold = 1.0;');
+    expect(WATER_WAVES_GLSL).toContain('float waterWaveCrest = 0.5;');
   });
 });

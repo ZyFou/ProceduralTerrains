@@ -33,6 +33,7 @@ import {
   SURFACE_TEXTURE_ROLE_COUNT,
   SURFACE_TEXTURE_ROWS,
 } from './surface/terrainSurfaceTextureGLSL.js';
+import { SURFACE_V2_GLSL } from './surface/terrainSurfaceV2GLSL.js';
 import { createPaletteUniforms } from '../style/PaletteUniforms.js';
 import { EARTH_PALETTE } from '../style/ColorPalette.js';
 import { applyPlanetStyleToUniforms } from '../style/PaletteUniforms.js';
@@ -236,6 +237,12 @@ function resolveTerrainVariant(variant = 'full') {
   if (variant === 'hybrid') {
     return { name: 'hybrid', detail: true, surface: true, manual: false, manualSurface: true, tileOnly: true };
   }
+  if (variant === 'v2') {
+    // Procedural V2 surface: shader-only texturing from the shared noise
+    // volume. It carries its own multi-scale detail, so the page-backed detail
+    // layer is left out — its sampler unit is the one the volume takes.
+    return { name: 'v2', detail: false, surface: false, manualSurface: false, proceduralV2: true };
+  }
   if (variant === 'base') return { name: 'base', detail: true, surface: false, manualSurface: false };
   if (variant === 'detail') return { name: 'detail', detail: true, surface: false, manualSurface: false };
   if (variant === 'surface') return { name: 'surface', detail: true, surface: true, manualSurface: false };
@@ -249,6 +256,7 @@ function resolveTerrainVariant(variant = 'full') {
 export function terrainShaderFamily(variant) {
   const families = {
     base: 'base', detail: 'base',
+    v2: 'v2',
     surface: 'surface', full: 'surface',
     'manual-empty-base': 'manual-empty', 'manual-base': 'manual-empty',
     'manual-empty': 'manual-empty',
@@ -546,6 +554,7 @@ ${SURFACE_SAMPLE_GLSL}
 ${surface.body.replaceAll('uSurfaceGraphParams', 'uProceduralSurfaceParams')}` : features.surface
     ? SURFACE_TEXTURE_UNIFORMS_GLSL + SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
 ${features.detail ? TERRAIN_DETAIL_GLSL : TERRAIN_DETAIL_STUB_GLSL}
+${features.proceduralV2 ? SURFACE_V2_GLSL : ''}
 
 uniform float uNormalStrength;
 uniform float uAO;
@@ -1041,6 +1050,18 @@ ${surface?.procedural ? /* glsl */ `
 ` : ''}
   td.albedo = surf.albedo;
   n = surf.normal;
+${features.proceduralV2 ? /* glsl */ `
+  // Procedural V2 surface: strata rock, ledge relief and soil / vegetation
+  // breakup over the biome colour. uSurfV2Amount 0 leaves the plain result.
+  if (uSurfV2Amount > 0.001) {
+    SurfaceV2Result v2 = applySurfaceV2(
+      td.albedo, n, vWorldPos, dist, tc, cl, bw, slope, hRel, h01,
+      clamp(((hX + hZ) * 0.5 - hC) / (eps * 0.9), 0.0, 1.0)
+    );
+    td.albedo = mix(td.albedo, v2.albedo, uSurfV2Amount);
+    n = normalize(mix(n, v2.normal, uSurfV2Amount));
+  }
+` : ''}
 
 ${features.manual ? '' : /* glsl */ `
   // Geo-aligned OpenTopoMap (or file) imagery — same UV region as the real-world
@@ -1402,6 +1423,10 @@ export function createTerrainUniforms({ surfaceFallback = null } = {}) {
     uTerrainCloudShadowCenter: { value: new THREE.Vector2() },
     uTerrainCloudShadowExtent: { value: 1.0 },
     uTerrainCloudShadowAltitude: { value: 1000.0 },
+    // Realistic water mirrors the clouds through the same top-down cloud map
+    // (0 = off / no map this frame, else the reflection strength).
+    uWaterCloudReflection: { value: 0.0 },
+    uCloudLayerSpan: { value: 600.0 },
     // Underwater caustics (shared by every terrain material — studio/infinite
     // declare + use them; the planet material harmlessly ignores them). Default
     // off; the engine enables uCausticBlend while water caustics are active.
@@ -1634,6 +1659,18 @@ export function createTerrainUniforms({ surfaceFallback = null } = {}) {
     uSurfTile:       { value: new Array(SURFACE_TEXTURE_ROLE_COUNT).fill(12) },
     uSurfRolePresent:{ value: new Array(SURFACE_TEXTURE_ROLE_COUNT).fill(0) },
     uSurfPresent:    { value: new Array(SURFACE_TEXTURE_ROWS).fill(0) },
+
+    // Procedural V2 surface (only the 'v2' terrain variant declares these).
+    // The noise volume is bound by the engine once baked; Amount 0 = off.
+    uSurfV2Noise:    { value: null },
+    uSurfV2Amount:   { value: 0.0 },
+    uSurfV2Scale:    { value: 1.0 },
+    uSurfV2Relief:   { value: 1.0 },
+    uSurfV2Strata:   { value: 1.0 },
+    uSurfV2Sandstone: { value: 0.0 },
+    uSurfV2Variation: { value: 1.0 },
+    uSurfV2Breakup:  { value: 1.0 },
+    uSurfV2Shore:    { value: 1.0 },
     ...paletteUniforms,
   };
 }

@@ -442,9 +442,10 @@ void main() {
   float footprint = length(fwidth(p.xz));
   float waveScale = max(uMiniWaveScale, 0.05);
 #ifdef MINI_WATER_REALISTIC
-  // the classic worlds' wave field: spectrum, gust slicks, aperiodic ripples
+  // the classic worlds' wave field: Gerstner sea, gust slicks, aperiodic
+  // ripples; the sea state itself calms down in shallow, sheltered water
+  waterWaveShelter = calm;
   vec3 n = waterDirectionalNormal(p.xz, t, fragDist, 0.08);
-  n = normalize(vec3(n.x * calm, n.y, n.z * calm));
 #else
   vec3 n = miniWaterNormal(p.xz / waveScale, t, footprint / waveScale, calm);
 #endif
@@ -512,7 +513,7 @@ void main() {
   col = mix(col, reflected, clamp(fresnel * uMiniReflect / 0.6 * uWaterReflection, 0.0, 0.98));
   float rough = waterFilteredRoughness(
     mix(0.06, 0.32, uMiniReflectBlur),
-    uNormalIntensity * uWaveStrength * uWaveComplexity
+    uNormalIntensity
   );
   float sunSpec = min(waterGgxSunSpecular(n, viewDir, normalize(uSunDir), rough), 16.0);
   col += uTerrainSunCol * uTerrainSunIntensity * sunSpec * sunUp * lightSurface.r

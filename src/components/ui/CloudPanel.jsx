@@ -5,7 +5,7 @@ import { FlatPanelContext } from '../panels/PanelContext.js';
 import { shouldForceSectionOpen } from '../panels/sectionUtils.js';
 import { SliderCtl, ToggleRow, SelectRow, ColorInput } from '../controls.jsx';
 import { colorToHex, parseColor } from '../../engine/style/ColorPalette.js';
-import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_TYPES } from '../../engine/sky/CloudSettings.js';
+import { CLOUD_DEFAULT_PARAMS, CLOUD_NOISE_TYPES, CLOUD_RENDER_MODES } from '../../engine/sky/CloudSettings.js';
 
 const NOISE_TYPE_OPTIONS = CLOUD_NOISE_TYPES.map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
 
@@ -69,6 +69,7 @@ const RENDER_SCALE_OPTIONS = [
 const RENDER_MODE_OPTIONS = [
   { value: 'legacy', label: 'Legacy' },
   { value: 'realistic', label: 'Realistic' },
+  { value: 'realisticV2', label: 'Realistic V2' },
 ];
 
 // Realistic mode: the Procedural Planets cloud settings.
@@ -141,7 +142,9 @@ export default function CloudPanel({
     else if (v === 'ultra') onPerfSetting('cloudSteps', 48);
   };
 
-  const realistic = params.cloudRenderMode === 'realistic';
+  const renderMode = CLOUD_RENDER_MODES.includes(params.cloudRenderMode) ? params.cloudRenderMode : 'legacy';
+  // Realistic and Realistic V2 share the same control set.
+  const realistic = renderMode !== 'legacy';
   const noiseTypeControl = (
     <SelectRow
       label={translateText('Noise Type')}
@@ -275,12 +278,16 @@ export default function CloudPanel({
       {enabled && (
         <SelectRow
           label={translateText("Rendering")}
-          value={realistic ? 'realistic' : 'legacy'}
+          value={renderMode}
           options={RENDER_MODE_OPTIONS}
           onChange={(v) => onParam('cloudRenderMode', v)}
-          info={translateText("Legacy: the original procedural cloud renderer. Realistic: the Procedural Planets renderer (weather systems, towering cumulus, multiple scattering).")}
+          info={translateText("Legacy: the original procedural cloud renderer. Realistic: the Procedural Planets renderer (weather systems, towering cumulus, multiple scattering). Realistic V2: billowy weather-map cumulus from baked noise volumes — sharper detail for less GPU time.")}
           settingId="clouds.cloudRenderMode"
         />
+      )}
+
+      {enabled && renderMode === 'realisticV2' && worldMode === 'planet' && (
+        <p className="section-hint">{translateText("Realistic V2 is a flat-world renderer: the planet shell renders it with Realistic.")}</p>
       )}
 
       {enabled && realistic && realisticContent}

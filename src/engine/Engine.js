@@ -31,6 +31,7 @@ import { InfiniteTerrainClipmap } from './terrain/InfiniteTerrainClipmap.js';
 import { CloudSlabLayer } from './sky/CloudSlabLayer.js';
 import { InfiniteCloudLayer } from './sky/InfiniteCloudLayer.js';
 import { RealisticCloudSlabLayer, RealisticInfiniteCloudLayer } from './sky/realistic/RealisticCloudLayers.js';
+import { CloudV2SlabLayer, CloudV2InfiniteLayer } from './sky/v2/CloudV2Layers.js';
 import { CloudAdaptiveQualityController } from './sky/CloudAdaptiveQualityController.js';
 import {
   CLOUD_QUALITY_PRESETS,
@@ -132,7 +133,9 @@ import {
   SURFACE_TEXTURE_SOURCE,
   normalizeSurfaceTextureParams,
   normalizeSurfaceTextureSource,
+  sourceUsesTextureAtlas,
 } from './terrain/surface/SurfaceTextureSources.js';
+import { getNoiseVolumeV2, retainNoiseVolumeV2 } from './render/NoiseVolumeV2.js';
 import {
   detectRendererCapabilities,
   getWebGpuSupport,
@@ -910,9 +913,10 @@ export class Engine {
   /** Studio slab for the current cloud render mode (legacy / realistic). */
   _createStudioCloudLayer() {
     const initialCloudConfig = resolveCloudQuality({ ...this.params, ...this.perf });
-    const Layer = resolveCloudRenderMode(this.params) === 'realistic'
-      ? RealisticCloudSlabLayer
-      : CloudSlabLayer;
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const Layer = cloudMode === 'realisticV2' ? CloudV2SlabLayer
+      : cloudMode === 'realistic' ? RealisticCloudSlabLayer
+        : CloudSlabLayer;
     return new Layer(this.scene, {
       initialConfig: initialCloudConfig,
       compile: async (mats) => {
@@ -940,9 +944,10 @@ export class Engine {
 
   /** Camera-following infinite-world slab for the current cloud render mode. */
   _createInfiniteCloudLayer() {
-    const Layer = resolveCloudRenderMode(this.params) === 'realistic'
-      ? RealisticInfiniteCloudLayer
-      : InfiniteCloudLayer;
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const Layer = cloudMode === 'realisticV2' ? CloudV2InfiniteLayer
+      : cloudMode === 'realistic' ? RealisticInfiniteCloudLayer
+        : InfiniteCloudLayer;
     return new Layer(this.scene, {
       compile: async (mats) => {
         // Applying restored quality may request a rebuild while mode setup is
@@ -2799,16 +2804,16 @@ export class Engine {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureSource: value });
       if (this.params.surfaceTextureSource === surfaceTextureSource
           && this.params.surfaceTextureMode
-            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
+            === sourceUsesTextureAtlas(surfaceTextureSource)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
-      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+      this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else if (key === 'surfaceTextureMode') {
       const surfaceTextureSource = normalizeSurfaceTextureSource({ surfaceTextureMode: !!value });
       if (this.params.surfaceTextureSource === surfaceTextureSource
           && this.params.surfaceTextureMode
-            === (surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL)) return;
+            === sourceUsesTextureAtlas(surfaceTextureSource)) return;
       this.params.surfaceTextureSource = surfaceTextureSource;
-      this.params.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+      this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else {
       if (Object.is(this.params[key], value)) return;
       this.params[key] = value;
@@ -2866,7 +2871,8 @@ export class Engine {
       return;
     }
 
-    if (key === 'surfaceDocument' || key === 'surfaceTextureSource' || key.startsWith('surfaceTexture')) {
+    if (key === 'surfaceDocument' || key === 'surfaceTextureSource'
+        || key.startsWith('surfaceTexture') || key.startsWith('surfaceV2')) {
       this._applySurfaceSettings();
       void this._ensureTerrainShaderVariantAsync();
       return;
@@ -5042,7 +5048,8 @@ export class Engine {
     if (!u?.uSurfMode) return;
     const surfaceTextureSource = normalizeSurfaceTextureSource(p);
     p.surfaceTextureSource = surfaceTextureSource;
-    p.surfaceTextureMode = surfaceTextureSource !== SURFACE_TEXTURE_SOURCE.PROCEDURAL;
+    p.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
+    this._applySurfaceV2Settings(surfaceTextureSource);
     const flatManual = this.projectMode === 'manual' && !this._manualHasGeneratedBase();
     // A generated Manual base keeps the source project's surface mode. Manual
     // paint still samples the atlas through uManualSurfaceMode, but an
@@ -5075,6 +5082,42 @@ export class Engine {
     u.uSurfAOAmt.value = surfaceTextureSource === SURFACE_TEXTURE_SOURCE.PBR ? 0.55 : 1.0;
     u.uSurfTriplanar.value = p.surfaceTextureTriplanar === false ? 0.0 : 1.0;
     this._needsRender = true;
+  }
+
+  /** True when the Procedural V2 surface applies to the current project. */
+  _surfaceV2Active(source = normalizeSurfaceTextureSource(this.params || {})) {
+    return source === SURFACE_TEXTURE_SOURCE.PROCEDURAL_V2 && this.projectMode !== 'manual';
+  }
+
+  // Procedural V2 surface: bind the shared noise volume (baked on first use)
+  // and publish the look controls. Amount drops to 0 the moment another source
+  // is selected, so the switch is instant even while the terrain program for
+  // the new source is still compiling.
+  _applySurfaceV2Settings(source) {
+    const p = this.params;
+    const u = this.uniforms;
+    if (!u?.uSurfV2Amount) return;
+    const active = this._surfaceV2Active(source);
+    if (active && this.renderer) {
+      this._releaseSurfaceV2Noise ??= retainNoiseVolumeV2(this.renderer);
+      try {
+        u.uSurfV2Noise.value = getNoiseVolumeV2(this.renderer).volume;
+      } catch (error) {
+        console.warn('Procedural V2 surface noise could not be prepared', error);
+        u.uSurfV2Noise.value = null;
+      }
+    }
+    u.uSurfV2Amount.value = active && u.uSurfV2Noise.value ? 1.0 : 0.0;
+    const clamp = (value, fallback, min, max) => (
+      Math.min(max, Math.max(min, Number.isFinite(value) ? value : fallback))
+    );
+    u.uSurfV2Scale.value = clamp(p.surfaceV2Scale, 1.0, 0.25, 4.0);
+    u.uSurfV2Relief.value = clamp(p.surfaceV2Relief, 1.0, 0.0, 2.0);
+    u.uSurfV2Strata.value = clamp(p.surfaceV2Strata, 1.0, 0.0, 1.5);
+    u.uSurfV2Sandstone.value = clamp(p.surfaceV2Sandstone, 0.0, 0.0, 1.0);
+    u.uSurfV2Variation.value = clamp(p.surfaceV2Variation, 1.0, 0.0, 2.0);
+    u.uSurfV2Breakup.value = clamp(p.surfaceV2Breakup, 1.0, 0.0, 1.0);
+    u.uSurfV2Shore.value = clamp(p.surfaceV2Shore, 1.0, 0.0, 1.0);
   }
 
   _disposeSurfaceAtlas(atlas) {
@@ -10643,7 +10686,8 @@ export class Engine {
 
     // Apply the requested cloud quality before starting GPU work so a default
     // material is never compiled and immediately replaced.
-    const realisticClouds = resolveCloudRenderMode(p) === 'realistic';
+    // Realistic V2 has no spherical shell: the planet renders it as Realistic.
+    const realisticClouds = resolveCloudRenderMode(p) !== 'legacy';
     if (p.cloudsEnabled === true && p.cloudChunksEnabled === true && !realisticClouds) {
       this.planetCloudChunks = new planet.PlanetCloudChunks(this.scene, {
         planetRadius: this._planetRadius(),
@@ -10715,15 +10759,19 @@ export class Engine {
    *  rebuild). Both layers read the same cloud* params; each is only visible in
    *  its own world mode. */
   _applyCloudSettings() {
-    // A render-mode switch swaps every layer for its legacy / realistic twin.
-    const realisticClouds = resolveCloudRenderMode(this.params) === 'realistic';
+    // A render-mode switch swaps every layer for the twin of the new mode.
+    // Flat worlds have all three renderers; the planet shell renders
+    // Realistic V2 with the realistic renderer.
+    const cloudMode = resolveCloudRenderMode(this.params);
+    const realisticClouds = cloudMode !== 'legacy';
+    const layerMode = (layer) => layer?.renderMode ?? 'legacy';
     const isRealistic = (layer) => layer?.renderMode === 'realistic';
-    if (this.studioCloud && isRealistic(this.studioCloud) !== realisticClouds) {
+    if (this.studioCloud && layerMode(this.studioCloud) !== cloudMode) {
       this.studioCloud.dispose();
       this.studioCloud = this._createStudioCloudLayer();
       this.studioCloud.setInScene(this.worldMode === 'studio');
     }
-    if (this.infiniteCloud && isRealistic(this.infiniteCloud) !== realisticClouds) {
+    if (this.infiniteCloud && layerMode(this.infiniteCloud) !== cloudMode) {
       this.infiniteCloud.dispose();
       this.infiniteCloud = this._createInfiniteCloudLayer();
     } else if (!this.infiniteCloud && this.worldMode === 'infinite' && this.params.cloudsEnabled === true) {
@@ -11335,6 +11383,9 @@ export class Engine {
       if (!surfaceReady) return 'hybrid-base';
       return detailEnabled ? 'hybrid' : 'hybrid-surface';
     }
+    // Procedural V2 is a shader-only surface with its own detail: one program
+    // whatever the detail pages or atlases are doing.
+    if (this._surfaceV2Active(source)) return 'v2';
     if (surfaceEnabled && surfaceReady && detailEnabled) return 'full';
     if (surfaceEnabled && surfaceReady) return 'surface';
     if (detailEnabled) return 'detail';
@@ -11689,9 +11740,25 @@ export class Engine {
     if (!u?.uTerrainCloudShadowEnabled) return;
     const layer = this.worldMode === 'planet' ? (this.planetCloudLayer || this.planetCloudChunks)
       : this.worldMode === 'infinite' ? this.infiniteCloud : this.studioCloud;
-    const requested = !!this.params.cloudsEnabled && !!this.params.cloudShadowsEnabled;
-    const state = requested ? layer?.renderTerrainShadow?.(u.uSunDir.value, this._tileOccTex) : null;
-    u.uTerrainCloudShadowEnabled.value = state ? 1 : 0;
+    const cloudsOn = !!this.params.cloudsEnabled;
+    const shadowsRequested = cloudsOn && !!this.params.cloudShadowsEnabled;
+    // Realistic water mirrors the clouds through the same top-down cloud map
+    // that casts their shadows, so the map is also needed when only the
+    // reflections are on. (Flat worlds; the sphere has its own ocean shader.)
+    const reflection = cloudsOn && this.worldMode !== 'planet'
+      && isRealisticWaterMode(this.waterSystem?.getEffectiveMode?.() ?? 'legacy')
+      ? Math.min(1.5, Math.max(0, this.params.waterCloudReflection ?? 1))
+      : 0;
+    const state = (shadowsRequested || reflection > 0)
+      ? layer?.renderTerrainShadow?.(u.uSunDir.value, this._tileOccTex)
+      : null;
+    u.uTerrainCloudShadowEnabled.value = state && shadowsRequested ? 1 : 0;
+    if (u.uWaterCloudReflection) {
+      u.uWaterCloudReflection.value = state && !state.planet ? reflection : 0;
+      const cloudUniforms = layer?.material?.uniforms;
+      const span = (cloudUniforms?.uCloudTop?.value ?? 0) - (cloudUniforms?.uCloudBottom?.value ?? 0);
+      if (state && span > 0) u.uCloudLayerSpan.value = span;
+    }
     u.uTerrainCloudShadowStrength.value = Math.min(0.85, Math.max(0, this.params.cloudShadowOpacity ?? 0.45));
     u.uTerrainCloudShadowTex.value = state?.texture ?? null;
     u.uTileOccupancy.value = state?.texture ?? this._tileOccTex ?? null;
@@ -14322,6 +14389,9 @@ export class Engine {
       this._surfaceAtlasCache = null;
       this._surfaceAtlas = null;
     }
+    if (this.uniforms?.uSurfV2Noise) this.uniforms.uSurfV2Noise.value = null;
+    this._releaseSurfaceV2Noise?.();
+    this._releaseSurfaceV2Noise = null;
     if (this.controls) { this.controls.dispose(); this.controls = null; }
     if (this.planetControls) { this.planetControls.dispose(); this.planetControls = null; }
     // tile hover-to-add listeners + resources

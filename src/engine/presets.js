@@ -70,6 +70,14 @@ export const DEFAULT_PARAMS = {
   surfaceTextureRough: 1.0,      // sampled-roughness sheen amount
   surfaceTextureAO: 1.0,         // sampled-AO crevice darkening
   surfaceTextureTriplanar: true, // triplanar projection (off = planar world-XZ)
+  // Procedural V2 surface (surfaceTextureSource: 'proceduralV2')
+  surfaceV2Scale: 1.0,           // feature size multiplier
+  surfaceV2Relief: 1.0,          // surface relief (ledges, grain, ripples)
+  surfaceV2Strata: 1.0,          // rock bedding contrast
+  surfaceV2Sandstone: 0.0,       // 0 = biome rock, 1 = sandstone strata hues on all rock
+  surfaceV2Variation: 1.0,       // per-material tone / hue variation
+  surfaceV2Breakup: 1.0,         // bare earth breaking up the plant cover
+  surfaceV2Shore: 1.0,           // mineral ring + wet edge at the waterline
 
   // world (rebuild required)
   chunkCount: 16,

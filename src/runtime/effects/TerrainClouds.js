@@ -10,6 +10,7 @@ import {
   RealisticInfiniteCloudLayer,
   RealisticPlanetCloudLayer,
 } from '../../engine/sky/realistic/RealisticCloudLayers.js';
+import { CloudV2SlabLayer, CloudV2InfiniteLayer } from '../../engine/sky/v2/CloudV2Layers.js';
 import { CLOUD_DEFAULT_PARAMS } from '../../engine/sky/CloudSettings.js';
 import { resolveCloudLightingState } from '../../engine/sky/CloudLightingState.js';
 import { compileMaterial } from '../resources/CompileMaterial.js';
@@ -21,6 +22,12 @@ const classes = {
   realistic: {
     finite: RealisticCloudSlabLayer,
     infinite: RealisticInfiniteCloudLayer,
+    planet: RealisticPlanetCloudLayer,
+  },
+  // Realistic V2 is a flat-world renderer; the sphere keeps the realistic shell.
+  realisticV2: {
+    finite: CloudV2SlabLayer,
+    infinite: CloudV2InfiniteLayer,
     planet: RealisticPlanetCloudLayer,
   },
 };
