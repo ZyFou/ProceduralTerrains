@@ -23,6 +23,7 @@ import {
   buildHeightGLSL,
 } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
+import { DRY_CANYON_SURFACE_GLSL } from './dryCanyon.js';
 import {
   PALETTE_UNIFORMS_GLSL,
   TERRAIN_COLOR_FUNCTIONS_GLSL,
@@ -62,6 +63,7 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
   ${heightGLSL}
   ${PALETTE_UNIFORMS_GLSL}
   ${TERRAIN_COLOR_FUNCTIONS_GLSL}
+  ${DRY_CANYON_SURFACE_GLSL}
   ${graphColorGLSL}
   ${SURFACE_TEXTURE_UNIFORMS_GLSL}
   ${SURFACE_TEXTURE_FUNCTIONS_GLSL}
@@ -129,6 +131,7 @@ export const buildTerrainBakeFragment = (heightGLSL, graphColorGLSL = DEFAULT_TE
     float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
     TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
+    applyDryCanyonSurface(tc, xz, hC, slope);
     tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
     // Match the live terrain shader: real-world satellite/topographic imagery
     // is the final albedo layer and shares the imported heightmap's geo region.

@@ -6,11 +6,13 @@
 
 import { NOISE_STACK_PRIMS2D_GLSL, TERRAIN_DETAIL_GLSL } from './noise/noisePrimsGLSL.js';
 import { NOISE_STACK_MASKS2D_GLSL } from './noise/masks.js';
+import { DRY_CANYON_HEIGHT_GLSL } from './dryCanyon.js';
 import { MINI_COMPOSITION_GLSL, MINI_COMPOSITION_UNIFORMS_GLSL } from '../mini/miniCompositionGLSL.js';
 
 export const COMMON_UNIFORMS_GLSL = /* glsl */ `
 uniform vec2  uSeedOffset;     // deterministic domain offset derived from seed
 uniform float uFrequency;      // base noise frequency (1/world units)
+uniform float uDryCanyon;
 uniform float uHeightScale;    // world-space height of h01 == 1.0
 uniform float uSeaLevel;       // world-space water height
 uniform float uTerrainFormationSeaLevel; // frozen wetland-generation baseline
@@ -799,6 +801,7 @@ export function buildHeightGLSL(stackBody2D) {
   return /* glsl */ `
 ${NOISE_STACK_PRIMS2D_GLSL}
 ${NOISE_STACK_MASKS2D_GLSL}
+${DRY_CANYON_HEIGHT_GLSL}
 
 // Canyon/badlands strata: smooth terrace steps. C1-smooth so normals stay
 // clean. Used by the legacy recipe and the Terrace modifier layer.
@@ -812,6 +815,7 @@ float terrace(float h, float steps) {
 // BEFORE island falloff and the uHeightScale multiply (the wrapper applies
 // those to the whole stack). This is the legacy noise type.
 float legacyShape2D(vec2 xz, Climate c) {
+  if (uDryCanyon > 0.5 && uInfiniteMode < 0.5) return dryCanyonHeight(xz * uFrequency, uSeedOffset, uWarp, uRidge);
   vec2 p = xz * uFrequency + uSeedOffset;
   BiomeWeights bw = biomeWeightsAt(c);
 
@@ -993,11 +997,15 @@ vec4 splineMaskAt(vec2 xz) {
 // field, sampled over the studio bake region [uBakeOrigin, +uBakeSpan]. Mirrors
 // the paint-offset path; free and zero when disabled or outside the region. The
 // base field is never mutated, so erosion stays fully non-destructive.
-float erosionOffsetAt(vec2 xz) {
-  if (uErosionEnabled < 0.5) return 0.0;
+#define TERRAIN_HAS_EROSION_FIELD
+vec4 erosionSampleAt(vec2 xz) {
+  if (uErosionEnabled < 0.5) return vec4(0.0);
   vec2 uv = (xz - uBakeOrigin) / max(uBakeSpan, vec2(1.0));
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  return textureLod(uErosionOffsetTex, uv, 0.0).r;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return textureLod(uErosionOffsetTex, uv, 0.0);
+}
+float erosionOffsetAt(vec2 xz) {
+  return erosionSampleAt(xz).r;
 }
 
 vec2 destructionUvAt(vec2 xz) {

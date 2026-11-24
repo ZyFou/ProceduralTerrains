@@ -16,6 +16,7 @@ import {
   MANUAL_SURFACE_WEIGHTS_GLSL,
 } from './terrainGLSL.js';
 import { BIOME_GLSL } from './biomeGLSL.js';
+import { DRY_CANYON_SURFACE_GLSL } from './dryCanyon.js';
 import { generateStackGLSL } from './noise/noiseStackCodegen.js';
 import { MINI_CUT_GLSL } from '../mini/miniCutGLSL.js';
 import { MINI_BEVEL_GLSL } from '../mini/MiniBevel.js';
@@ -26,6 +27,7 @@ import {
 } from '../shaders/terrainColor.glsl.js';
 import { TERRAIN_DETAIL_GLSL } from './TerrainDetailMaterial.js';
 import {
+  SURFACE_SAMPLE_GLSL,
   SURFACE_TEXTURE_UNIFORMS_GLSL,
   SURFACE_TEXTURE_FUNCTIONS_GLSL,
   SURFACE_TEXTURE_ROLE_COUNT,
@@ -501,6 +503,7 @@ const buildFragmentSource = (
   graphColorGLSL = DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
   variant = 'full',
   requestedWorldMode = 'studio',
+  surface = null,
 ) => {
   const worldMode = resolveTerrainWorldMode(requestedWorldMode);
   const features = resolveTerrainVariant(variant);
@@ -537,8 +540,11 @@ ${climateCacheGLSL}
 ${PALETTE_UNIFORMS_GLSL}
 ${TERRAIN_COLOR_FUNCTIONS_GLSL}
 ${graphColorGLSL}
-${features.surface ? SURFACE_TEXTURE_UNIFORMS_GLSL : ''}
-${features.surface ? SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
+${surface?.procedural ? `${SURFACE_TEXTURE_STUB_GLSL}
+uniform vec4 uProceduralSurfaceParams[128];
+${SURFACE_SAMPLE_GLSL}
+${surface.body.replaceAll('uSurfaceGraphParams', 'uProceduralSurfaceParams')}` : features.surface
+    ? SURFACE_TEXTURE_UNIFORMS_GLSL + SURFACE_TEXTURE_FUNCTIONS_GLSL : SURFACE_TEXTURE_STUB_GLSL}
 ${features.detail ? TERRAIN_DETAIL_GLSL : TERRAIN_DETAIL_STUB_GLSL}
 
 uniform float uNormalStrength;
@@ -746,6 +752,8 @@ vec3 applyTerrainCaustics(vec3 col, vec2 xz, float visibleHeight, vec3 nGeo, vec
   float illumination = c * amt * depthFade * upFace * light;
   return col + (col * 1.65 + vec3(0.12)) * uCausticColor * illumination;
 }
+
+${features.manual ? '' : DRY_CANYON_SURFACE_GLSL}
 
 vec3 applyTerrainDetailNormal2D(vec3 n, vec3 nGeo, vec3 worldPos, float fade, float rockMask, float shoreMask) {
   float strength = uTerrainDetailNormalStrength * fade * (0.45 + 0.55 * terrainDetailQualityFactor());
@@ -989,6 +997,7 @@ ${features.manual ? '' : /* glsl */ `
   float detail = vnoise(xz * 0.35 + uSeedOffset.yx);
 
   TerrainColorResult tc = computeTerrainAlbedo(cl, bw, hC, hRel, h01, slope, detail, jitter, vnoise(xz * 0.9));
+  ${features.manual ? '' : 'applyDryCanyonSurface(tc, xz, hC, slope);'}
   tc.albedo = applyTerrainGraphColor(tc.albedo, xz, clamp(h01, 0.0, 1.0), slope, detail, cl.moist);
   TerrainDetailResult td = applyTerrainDetailLayer(tc, cl, bw, vWorldPos, nGeo, hC, hRel, h01, slope, jitter);
   n = applyTerrainDetailNormal2D(n, nGeo, vWorldPos, td.fade, td.rockMask, td.shoreMask);
@@ -1026,6 +1035,10 @@ ${features.manual ? '' : /* glsl */ `
   surf.ao = mix(1.0, surf.ao, uSurfReveal);
   surf.rough = mix(0.8, surf.rough, uSurfReveal);
   surf.amount *= uSurfReveal;
+${surface?.procedural ? /* glsl */ `
+  SurfMaterialSample ground = evaluateSurfaceGraph(vWorldPos,nGeo,vec3(0.0,1.0,0.0),cl,bw,slope,h01);
+  surf = SurfaceTexResult(ground.albedo,ground.normal,ground.ao,ground.rough,1.0);
+` : ''}
   td.albedo = surf.albedo;
   n = surf.normal;
 
@@ -1056,8 +1069,26 @@ ${features.manual ? '' : /* glsl */ `
   );
 
   // Attenuate direct sun while preserving sky light and ground bounce.
+  float sunShadow = terrainCloudShadow(vWorldPos);
+${!features.manual && worldMode === 'studio' ? /* glsl */ `
+  if (${heightGLSL.includes('#define GRAPH_CANYON_RELIEF') ? 'true' : 'uDryCanyon > 0.5'} && uUseTerrainHeightTex > 0.5 && uSunDir.y > 0.0) {
+    // Trace the height bake toward the sun. A widening edge softens distant
+    // occluders while the bias avoids self-shadowing on the sampled slope.
+    float shade = 0.0;
+    float reach = max(uBakeSpan.x, uBakeSpan.y) * 0.003;
+    for (int i = 0; i < 9; i++) {
+      vec3 ray = vec3(xz.x, hC + 1.7, xz.y) + uSunDir * reach;
+      vec2 uv = bakedUvAt(ray.xz);
+      if (any(lessThan(uv, vec2(0))) || any(greaterThan(uv, vec2(1)))) break;
+      float blocker = textureLod(uTerrainHeightTex, uv, 0.0).a * uHeightScale;
+      shade = max(shade, smoothstep(0.0, 2.5 + reach * 0.035, blocker - ray.y));
+      reach *= 1.71;
+    }
+    sunShadow = max(sunShadow, shade * 0.80);
+  }
+` : ''}
   col -= td.albedo * uTerrainSunCol * uTerrainSunIntensity
-    * max(dot(n, uSunDir), 0.0) * ao * terrainCloudShadow(vWorldPos);
+    * max(dot(n, uSunDir), 0.0) * ao * sunShadow;
 
   // sampled roughness -> subtle view-dependent sheen (smoother materials glint)
   if (uTerrainSpecular > 0.5 && surf.amount > 0.001) {
@@ -1284,6 +1315,7 @@ export function createTerrainUniforms({ surfaceFallback = null } = {}) {
   return {
     uSeedOffset:     { value: new THREE.Vector2(0, 0) },
     uFrequency:      { value: 0.002 },
+    uDryCanyon:      { value: 0 },
     uHeightScale:    { value: 420 },
     uTerrainSpecular: { value: 1.0 },
     uSeaLevel:       { value: 42 },
@@ -1567,6 +1599,7 @@ export function createTerrainUniforms({ surfaceFallback = null } = {}) {
     // the user switches to texture mode.
     uSurfaceArrayMode: { value: 0 },
     uSurfaceGraphCode: { value: "" },
+    uProceduralSurfaceParams: { value: new Float32Array(128 * 4) },
     uSurfacePaintArray: { value: new THREE.DataArrayTexture(new Uint8Array(4),1,1,1) },
     uSurfacePaintEnabled: { value: 0 },
     uSurfaceContributions: { value: 4 },
@@ -1632,6 +1665,7 @@ export function createTerrainMaterial(
       stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
       variant,
       worldMode,
+      stackGLSL.surface,
     ),
     side: THREE.DoubleSide,
     extensions: { derivatives: true },
@@ -1695,6 +1729,7 @@ export function rebuildTerrainShaderSource(mat, stackGLSL, options = {}) {
     stackGLSL.colorBody || DEFAULT_TERRAIN_GRAPH_COLOR_GLSL,
     variant,
     worldMode,
+    stackGLSL.surface,
   );
   mat.userData.minimalFragment = false;   // boot materials upgrade to the full fragment here
   mat.userData.terrainVariant = variant;

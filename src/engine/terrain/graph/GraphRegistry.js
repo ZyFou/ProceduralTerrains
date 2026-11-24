@@ -106,9 +106,9 @@ function deterministicNoiseDefinition() {
   };
 }
 
-const terrainNode = ({ id, label, description, color = 'green', inspector }) => ({
+const terrainNode = ({ id, label, description, color = 'green', inspector, inputs = [], outputs = [output()] }) => ({
   id, label, description, category: 'Landforms', color,
-  executionKind: 'analytical', inputs: [], outputs: [output()], inspector,
+  executionKind: 'analytical', inputs, outputs, inspector,
   defaults: Object.fromEntries(inspector.map((field) => [field.key, field.default])),
   structuralParams: inspector.filter((field) => field.structural).map((field) => field.key),
   uniformSlots: () => 1, glslCompiler: execute(id), cpuEvaluator: execute(id),
@@ -116,6 +116,51 @@ const terrainNode = ({ id, label, description, color = 'green', inspector }) => 
 });
 
 const LANDFORM_DEFINITIONS = [
+  terrainNode({
+    id: 'canyonDomain', label: 'Canyon Domain', color: 'amber',
+    description: 'Sets the tile-relative scale and seeded rock variation shared by the drainage and headwall.',
+    outputs: [output('domain', 'Domain', 'domain')],
+    inspector: [number('scale', 'Channel Scale', 0.4, 2.5, 0.01, 1),
+      number('seed', 'Seed', 0, 999999, 1, 1337, { control: 'seed' })],
+  }),
+  terrainNode({
+    id: 'mainWash', label: 'Main Wash', color: 'amber',
+    description: 'Lays out the winding main channel. Connect Channel directly to Basin Relief for a single wash.',
+    inputs: [input('domain', 'Domain', true, 'domain')], outputs: [output('channel', 'Channel', 'channel')],
+    inspector: [number('warp', 'Channel Warp', 0, 2, 0.01, 0.88),
+      number('meander', 'Meander Amplitude', 0, 0.2, 0.001, 0.064)],
+  }),
+  terrainNode({
+    id: 'tributaryChannels', label: 'Tributary Channels', color: 'amber',
+    description: 'Adds side valleys that drain toward the main wash. Bank spacing is measured in fractions of the scaled tile width.',
+    inputs: [input('channel', 'Channel', true, 'channel')], outputs: [output('channel', 'Channel', 'channel')],
+    inspector: [number('leftSpacing', 'Left Bank Spacing', 0.05, 1, 0.01, 0.29),
+      number('rightSpacing', 'Right Bank Spacing', 0.05, 1, 0.01, 0.37)],
+  }),
+  terrainNode({
+    id: 'basinHeadwall', label: 'Basin Headwall', color: 'amber',
+    description: 'Closes the upstream end of the basin. Setback positions the wall and rise controls its steepness.',
+    inputs: [input('domain', 'Domain', true, 'domain')], outputs: [output('headwall', 'Headwall', 'headwall')],
+    inspector: [number('setback', 'Setback', 0, 0.5, 0.01, 0.21), number('rise', 'Rise', 0, 2, 0.01, 0.95)],
+  }),
+  terrainNode({
+    id: 'basinRelief', label: 'Basin Relief', color: 'amber',
+    description: 'Builds valley walls, rims and flutes around the channel network. Leave Headwall unplugged for an open valley.',
+    inputs: [input('channel', 'Channel', true, 'channel'), input('headwall', 'Headwall', false, 'headwall')],
+    inspector: [number('height', 'Relief', 10, 1000, 1, 250, { unit: ' m' }),
+      number('ridge', 'Rim Strength', 0, 2, 0.01, 0.78), number('fluting', 'Fluting Depth', 0, 0.3, 0.001, 0.095)],
+  }),
+  terrainNode({
+    id: 'dryCanyon', label: 'Dry Canyon', color: 'amber',
+    description: 'A seeded dry wash with branching tributaries and a scalloped headwall. Connect Height to Terrain Output.',
+    inspector: [
+      number('height', 'Relief', 10, 1000, 1, 250, { unit: ' m', tier: 'essential' }),
+      number('scale', 'Channel Scale', 0.4, 2.5, 0.01, 1, { tier: 'essential' }),
+      number('warp', 'Channel Warp', 0, 2, 0.01, 0.88),
+      number('ridge', 'Rim Strength', 0, 2, 0.01, 0.78),
+      number('seed', 'Seed', 0, 999999, 1, 1337, { control: 'seed' }),
+    ],
+  }),
   terrainNode({
     id: 'mountain', label: 'Mountain',
     description: 'Builds a seeded multi-peak massif from organically distorted cellular structure, with branching ridges, drainage valleys, and natural foothills.',

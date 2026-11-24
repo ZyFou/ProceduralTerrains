@@ -1,11 +1,24 @@
 import { SURFACE_ASSETS, SURFACE_RECIPES } from './SurfaceCatalog.js';
 import { createSurfaceDocument, resolveSurfaceReference } from './SurfaceDocument.js';
+import { CANYON_MATERIAL_FUNCTIONS } from '../dryCanyon.js';
 const port=(id,type,required=false)=>({id,label:id[0].toUpperCase()+id.slice(1),type,required});
 const number=(key,label,value,min=0,max=1)=>({key,label,type:'number',default:value,min,max,step:0.01});
 const material={key:'material',label:'Material',type:'enum',structural:true,default:'polyhaven:rock_boulder_dry',options:[...SURFACE_ASSETS,...SURFACE_RECIPES].map(a=>({value:a.id,label:a.name}))};
 const def=(id,label,inputs,outputs,inspector=[])=>({id,label,category:'Textures & Materials',color:'cyan',workspaceModes:['terrain'],executionKind:'surface',inputs,outputs,inspector,defaults:Object.fromEntries(inspector.map(f=>[f.key,f.default])),structuralParams:inspector.filter(f=>f.structural).map(f=>f.key),uniformSlots:()=>0});
 const maskThresholds=[number('low','Start',0.3),number('high','End',0.7)];
 export const SURFACE_NODE_DEFINITIONS=[
+  { ...def('erosionMaps','Erosion Maps',[],['flow','erosion','deposition'].map(id=>port(id,'mask'))),
+    description: 'Reads the Tile erosion bake. Flow follows water paths, Erosion measures removed rock, and Deposition measures settled sediment. Connect any output to a blend mask.' },
+  def('rockExposure','Rock Exposure',[port('erosion','mask')],[port('mask','mask')],[
+    number('amount','Exposure strength',1,0,2),
+    {...number('relief','Reference relief (m)',250,10,1000),step:1},
+  ]),
+  def('washCoverage','Wash Coverage',[port('flow','mask'),port('deposition','mask')],[port('mask','mask')],[number('amount','Wash coverage',1,0,2)]),
+  def('canyonMaterial','Canyon Material',[port('wash','mask')],[port('surface','surface')],[
+    {key:'layer',label:'Ground type',type:'enum',structural:true,default:'soil',options:[
+      {value:'soil',label:'Scrub soil'},{value:'rock',label:'Bedded rock'},{value:'gravel',label:'Wash gravel'}]},
+    number('brightness','Brightness',1,0,2),number('roughness','Roughness',0.85),
+  ]),
   def('pbrMaterial','PBR Material',[port('mapping','mapping')],[port('surface','surface')],[material,number('scale','Scale',1,0.01,100),number('normal','Normal strength',1,0,2)]),
   def('imageTexture','Image Texture',[port('mapping','mapping')],[port('color','color-texture'),port('scalar','scalar-texture'),port('normal','normal-texture')],[{...material,type:'text',label:'Asset ID (built-in or user import)'},{key:'channel',label:'Map',type:'enum',structural:true,default:'albedo',options:['albedo','height','roughness','ao','normal'].map(value=>({value,label:value}))}]),
   def('pbrAssemble','PBR Assemble',[port('albedo','color-texture'),port('normal','normal-texture'),port('roughness','scalar-texture'),port('ao','scalar-texture'),port('height','scalar-texture')],[port('surface','surface')],[number('roughness','Default roughness',0.8)]),
@@ -27,12 +40,29 @@ export function compileSurfaceGraph(graph,documentInput,slots={}) {
   function visit(id){if(visiting.has(id))throw new Error(`Surface graph cycle at ${id}`);if(seen.has(id))return;const n=byId.get(id);if(!n)throw new Error(`Unknown surface node ${id}`);visiting.add(id);for(const e of graph.edges.filter(e=>e.target===id))visit(e.source);visiting.delete(id);seen.add(id);ordered.push(n);}
   visit(edge.source);if(ordered.length>64)throw new Error('Surface graph exceeds 64 active nodes');
   const refs=[],values=[],lines=[],names=new Map(ordered.map((n,i)=>[n.id,`sg${i}`]));
-  const input=(node,port,fallback)=>{const e=graph.edges.find(e=>e.target===node.id&&e.targetHandle===port);return e?`${names.get(e.source)}${e.sourceHandle==='mapping'?'':e.sourceHandle==='color'?'C':e.sourceHandle==='scalar'?'D':e.sourceHandle==='normal'?'N':''}`:fallback;};
+  const suffix={color:'C',scalar:'D',normal:'N',flow:'.a',erosion:'.g',deposition:'.b'};
+  const input=(node,port,fallback)=>{const e=graph.edges.find(e=>e.target===node.id&&e.targetHandle===port);return e?names.get(e.source)+(suffix[e.sourceHandle]||''):fallback;};
+  const usesErosion = ordered.some(node => node.type === 'erosionMaps');
+  const canyonMaterials = ordered.some(node => ['rockExposure','washCoverage','canyonMaterial'].includes(node.type));
   for(const [i,n] of ordered.entries()) {
     const name=names.get(n.id),p=n.params||{},u=`uSurfaceGraphParams[${i*2}]`,v=`uSurfaceGraphParams[${i*2+1}]`;
     let a=[p.low??p.amount??p.scale??p.brightness??0,p.high??p.roughness??1,p.scale??p.normal??1,p.contrast??0.2],b=[0,0,0,0];
     const surface=(body)=>lines.push(`SurfMaterialSample ${name};${body}`);
-    if(n.type==='pbrMaterial'||n.type==='imageTexture') {
+    if (n.type === 'erosionMaps') {
+      lines.push(`#ifdef TERRAIN_HAS_EROSION_FIELD\nvec4 ${name} = erosionSampleAt(wpos.xz);\n#else\nvec4 ${name} = vec4(0.0);\n#endif`);
+    } else if (n.type === 'rockExposure') {
+      a[1] = p.relief ?? 250;
+      lines.push(`float ${name} = clamp(${u}.x * canyonRockExposure(wpos.y/max(${u}.y,1.0),slope,${input(n,'erosion','0.0')},canyonGrain(wpos.xz+uSeedOffset,wpos.y).y),0.0,1.0);`);
+    } else if (n.type === 'washCoverage') {
+      lines.push(`float ${name} = clamp(${u}.x * canyonWashCoverage(slope,${input(n,'flow','0.0')},${input(n,'deposition','0.0')}),0.0,1.0);`);
+    } else if (n.type === 'canyonMaterial') {
+      const point = 'wpos.xz+uSeedOffset';
+      const grain = `canyonGrain(${point},wpos.y)`;
+      const color = p.layer === 'rock' ? `canyonBeddedRock(${point},wpos.y,${grain})`
+        : p.layer === 'gravel' ? `canyonWashGravel(${grain})`
+        : `canyonScrubSoil(${point},slope,${input(n,'wash','0.0')},${grain})`;
+      surface(`${name}=SurfMaterialSample(${color}*${u}.x,nGeo,1.0,${u}.y,0.0,0.5);`);
+    } else if(n.type==='pbrMaterial'||n.type==='imageTexture') {
       if(p.material?.startsWith('user:')&&!document.assets[p.material])document.assets={...document.assets,[p.material]:{id:p.material,provider:'user'}};
       const items=resolveSurfaceReference(p.material||material.default,document);refs.push(...items.map(item=>item.assetId));
       const first=items[0],index=slots[first.assetId]??refs.indexOf(first.assetId);
@@ -63,6 +93,7 @@ export function compileSurfaceGraph(graph,documentInput,slots={}) {
     values.push(a,b);
   }
   const assets=[...new Set(refs)];if(assets.length>32)throw new Error('Surface graph exceeds 32 source assets');
-  const body=`SurfMaterialSample evaluateSurfaceGraph(vec3 wpos,vec3 nGeo,vec3 triBlend,Climate cl,BiomeWeights bw,float slope,float h01){\n${lines.join('\n')}\nreturn ${names.get(edge.source)};}`;
-  return {assets,values,body,nodeIds:ordered.map(n=>n.id),signature:body};
+  const body=`${canyonMaterials ? CANYON_MATERIAL_FUNCTIONS : ''}SurfMaterialSample evaluateSurfaceGraph(vec3 wpos,vec3 nGeo,vec3 triBlend,Climate cl,BiomeWeights bw,float slope,float h01){\n${lines.join('\n')}\nreturn ${names.get(edge.source)};}`;
+  const procedural = assets.length === 0 && !ordered.some(node => node.type === 'paintMask');
+  return {assets,values,body,nodeIds:ordered.map(n=>n.id),signature:body,usesErosion,procedural};
 }

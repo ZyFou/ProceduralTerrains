@@ -1,5 +1,5 @@
 import {
-  GRAPH_DOCUMENT_VERSION, TERRAIN_OUTPUT_ID, connectGraphNodes, createBlankGraph, makeGraphNode,
+  GRAPH_DOCUMENT_VERSION, TERRAIN_OUTPUT_ID, connectGraphNodes, createBlankGraph, makeGraphNode, validateGraph,
 } from '../engine/terrain/graph/GraphDocument.js';
 
 export const NODE_PROJECT_TEMPLATES = Object.freeze([
@@ -14,6 +14,7 @@ export const NODE_PROJECT_TEMPLATES = Object.freeze([
   { id: 'nodes-canyon', name: 'River canyon', description: 'A drainage-led canyon with a meandering slot, branching gullies, eroded strata, and sandstone color.', icon: 'route', colorsEnabled: true, colorPreset: 'canyon' },
   { id: 'nodes-craters', name: 'Crater basin', description: 'Eroded impact terrain with basalt, scoria, and ash coloration.', icon: 'orbit', colorsEnabled: true, colorPreset: 'volcanic' },
   { id: 'nodes-rivers', name: 'River valleys', description: 'A continuous river trunk, converging tributaries, floodplain shaping, and damp valley color.', icon: 'route', colorsEnabled: true, colorPreset: 'river' },
+  { id: 'nodes-dry-canyon', name: 'Dry Canyon', description: 'A dry catchment with editable rock, soil and gravel blends driven by baked flow, erosion and deposition.', icon: 'route', colorsEnabled: false, colorPreset: 'canyon' },
 ]);
 
 export function nodeTemplatePreviewCacheKey(id) {
@@ -84,7 +85,71 @@ const pbrExample=(kind)=>{
   g.edges=edges.map(([source,sourceHandle,target,targetHandle],i)=>({id:`pbr-${i}`,source,sourceHandle,target,targetHandle,type:sourceHandle==='height'?'analytic-height':sourceHandle}));
   g.nodes[0].position={x:960,y:170};return g;
 };
+const canyonLandform = [
+    {key:'domain', type:'canyonDomain', position:{x:40,y:-200}, section:'Basin and tributaries', sectionColor:'amber'},
+    {key:'washPath', type:'mainWash', position:{x:320,y:-305}, section:'Basin and tributaries', sectionColor:'amber'},
+    {key:'feeders', type:'tributaryChannels', position:{x:605,y:-305}, section:'Basin and tributaries', sectionColor:'amber'},
+    {key:'headwall', type:'basinHeadwall', position:{x:320,y:-90}, section:'Basin and tributaries', sectionColor:'amber'},
+    {key:'basin', type:'basinRelief', position:{x:900,y:-200}, section:'Basin and tributaries', sectionColor:'amber'},
+];
+const canyonConnections = [
+  ['domain','washPath','domain'], ['washPath','feeders','channel'], ['feeders','basin','channel'],
+  ['domain','headwall','domain'], ['headwall','basin','headwall'],
+];
+
+export function expandDryCanyon(graph, nodeId) {
+  const old = graph.nodes.find(node => node.id === nodeId);
+  if (old?.type !== 'dryCanyon') return graph;
+  const anchor = canyonLandform.find(stage => stage.type === 'basinRelief').position;
+  const stages = new Map(canyonLandform.map(({key, type, position}) => {
+    const relief = type === 'basinRelief';
+    const node = makeGraphNode(type, {
+      x: old.position.x + position.x - anchor.x,
+      y: old.position.y + position.y - anchor.y,
+    }, relief ? {id: old.id} : {});
+    if (relief && old.label !== 'Dry Canyon') node.label = old.label;
+    for (const param of Object.keys(node.params)) {
+      if (Object.hasOwn(old.params, param)) node.params[param] = old.params[param];
+    }
+    return [key, node];
+  }));
+  const nodes = [...stages.values()];
+  const groups = (graph.groups || []).map(group => {
+    if (!group.nodeIds.includes(old.id)) return group;
+    const x = Math.min(group.position.x, ...nodes.map(n => n.position.x - 24));
+    const y = Math.min(group.position.y, ...nodes.map(n => n.position.y - 42));
+    return { ...group, position: {x, y},
+      width: Math.max(group.position.x + group.width, ...nodes.map(n => n.position.x + 200)) - x,
+      height: Math.max(group.position.y + group.height, ...nodes.map(n => n.position.y + 120)) - y,
+      nodeIds: [...group.nodeIds.filter(id => id !== old.id), ...nodes.map(n => n.id)] };
+  });
+  let next = { ...graph, groups, nodes: graph.nodes.flatMap(node => node.id === old.id ? nodes : [node]) };
+  for (const [from, to, port] of canyonConnections) {
+    next = connectGraphNodes(next, {source: stages.get(from).id, target: stages.get(to).id, targetHandle: port});
+  }
+  const validation = validateGraph(next, { requireInputs: false });
+  if (!validation.ok) throw new Error(validation.diagnostics[0].message);
+  return next;
+}
+
 const factories = {
+  'nodes-dry-canyon': () => buildGraph('dry-canyon', [
+    ...canyonLandform,
+    {key:'maps', type:'erosionMaps', position:{x:40,y:375}, section:'Erosion bake', sectionColor:'cyan'},
+    {key:'outcrop', type:'rockExposure', position:{x:320,y:265}, section:'Coverage', sectionColor:'cyan'},
+    {key:'wash', type:'washCoverage', position:{x:320,y:545}, section:'Coverage', sectionColor:'cyan'},
+    {key:'soil', type:'canyonMaterial', label:'Scrub soil', params:{layer:'soil'}, position:{x:605,y:185}, section:'Ground materials', sectionColor:'green'},
+    {key:'rock', type:'canyonMaterial', label:'Bedded rock', params:{layer:'rock'}, position:{x:605,y:410}, section:'Ground materials', sectionColor:'green'},
+    {key:'gravel', type:'canyonMaterial', label:'Wash gravel', params:{layer:'gravel'}, position:{x:605,y:640}, section:'Ground materials', sectionColor:'green'},
+    {key:'bluffs', type:'materialBlend', label:'Expose bedrock', position:{x:900,y:220}, section:'Material blends', sectionColor:'violet'},
+    {key:'deposits', type:'materialBlend', label:'Deposit gravel', position:{x:1175,y:450}, section:'Material blends', sectionColor:'violet'},
+  ], [
+    ...canyonConnections, ['basin','output','height'],
+    ['maps','outcrop','erosion','erosion'],
+    ['maps','wash','flow','flow'], ['maps','wash','deposition','deposition'],
+    ['wash','soil','wash'], ['soil','bluffs','a'], ['rock','bluffs','b'], ['outcrop','bluffs','mask'],
+    ['bluffs','deposits','a'], ['gravel','deposits','b'], ['wash','deposits','mask'], ['deposits','output','surface'],
+  ]),
   'nodes-pbr-alpine':()=>pbrExample('alpine'),
   'nodes-pbr-canyon':()=>pbrExample('canyon'),
   'nodes-pbr-marsh':()=>pbrExample('marsh'),

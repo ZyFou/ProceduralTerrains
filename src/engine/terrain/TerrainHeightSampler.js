@@ -82,6 +82,7 @@ import { setNoiseDetailCut } from './noise/cpuNoise.js';
 import { isLegacyStack } from './noise/NoiseStack.js';
 import { miniComposeCPU } from '../mini/miniCompositionGLSL.js';
 import { sampleImportedHeight } from './RealWorldElevation.js';
+import { dryCanyonHeight } from './dryCanyon.js';
 
 export class TerrainHeightSampler {
   /**
@@ -273,7 +274,7 @@ export class TerrainHeightSampler {
   }
 
   /** World-space terrain height at world position (x, z). */
-  heightAt(x, z, { ignoreImports = false } = {}) {
+  heightAt(x, z, { ignoreImports = false, ignoreErosion = false } = {}) {
     const u = this.u;
     const env = this.getEnv();
 
@@ -303,7 +304,7 @@ export class TerrainHeightSampler {
       if (imported !== null) height = u.uImportHeightMode.value > 2.5
         ? mix32(height, imported, u.uImportHeightBlend.value) : f(imported);
     }
-    return f(f(height + this._erosionOffset(x, z)) + this._destructionOffset(x, z));
+    return f(f(height + (ignoreErosion ? 0 : this._erosionOffset(x, z))) + this._destructionOffset(x, z));
   }
 
   _erosionOffset(x, z) {
@@ -367,6 +368,9 @@ export class TerrainHeightSampler {
     const octaves = env.octaves;
 
     const freq = f(u.uFrequency.value);
+    if (u.uDryCanyon?.value && !env.infinite) {
+      return dryCanyonHeight(f(x * freq), f(z * freq), u.uSeedOffset.value, u.uWarp.value, u.uRidge.value);
+    }
     const px = f(f(f(x) * freq) + f(u.uSeedOffset.value.x));
     const py = f(f(f(z) * freq) + f(u.uSeedOffset.value.y));
 
