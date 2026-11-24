@@ -98,6 +98,7 @@ export function createRealisticCloudMaterial({ planet = false } = {}) {
     uniforms.uShearDir = { value: new THREE.Vector2(1, 0) };
     uniforms.uCloudCenter = { value: new THREE.Vector2() };
     uniforms.uCloudRadius = { value: 1500 };
+    uniforms.uCloudSquare = { value: 0 };
     uniforms.uCloudFar = { value: 9000 };
   }
   const material = new THREE.ShaderMaterial({
@@ -223,6 +224,7 @@ export class RealisticCloudSlabLayer extends CloudSlabLayer {
 
     const radius = Math.max(1, layout.radius ?? extent * 0.62);
     u.uCloudRadius.value = radius;
+    u.uCloudSquare.value = layout.shape === 'square' ? 1 : 0;
     u.uCloudFar.value = extent * 4.0;
     u.uCloudCenter.value.set(cx, cz);
     const horiz = radius * 2.1;

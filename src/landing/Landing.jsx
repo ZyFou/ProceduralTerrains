@@ -3,7 +3,7 @@ import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import SurfacePackCredits from '../components/ui/SurfacePackCredits.jsx';
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Box, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Menu, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Box, Boxes, Check, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Menu, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaDiscord, FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
@@ -11,8 +11,9 @@ import { projectStore, projectSyncStore } from '../project/ProjectStore.js';
 import { projectApi } from '../project/projectApi.js';
 import { decodePortableProject } from '../project/PortableProject.js';
 import { buildUnifiedProjectIndex } from '../project/projectSync.js';
-import { PROJECT_TEMPLATES, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
-import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
+import { PROJECT_TEMPLATES } from '../project/ProjectTemplates.js';
+import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate } from '../project/NodeProjectTemplates.js';
+import { templateThumbnailUrl } from '../project/templateThumbnails.js';
 import { MINI_COMPOSITION_IDS, MINI_RECIPES } from '../engine/mini/MiniTerrainSettings.js';
 import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../engine/terrain/graph/TerrainGradientPresets.js';
 import { BUILDING_SOURCE, BUILDING_SOURCE_URL } from '../engine/terrain/RealWorldBuildings.js';
@@ -104,17 +105,18 @@ function viewFromHash() {
   return HASH_VIEWS.has(value) ? value : null;
 }
 
-function initialTemplateThumbs() {
-  const entries = [];
-  for (const template of PROJECT_TEMPLATES) {
-    const image = sessionStorage.getItem(projectTemplatePreviewCacheKey(template.id));
-    if (image) entries.push([template.id, image]);
+function TemplateThumb({ kind, item }) {
+  const src = templateThumbnailUrl(kind, item.id);
+  const [loaded, setLoaded] = useState(false);
+  if (!src) {
+    const Icon = NODE_TEMPLATE_ICONS[item.icon] || (kind === 'mini' ? Box : LayoutTemplate);
+    return <span className={`lp-card-thumb ${kind}`}><Icon size={22} /></span>;
   }
-  for (const template of NODE_PROJECT_TEMPLATES) {
-    const image = sessionStorage.getItem(nodeTemplatePreviewCacheKey(template.id));
-    if (image) entries.push([template.id, image]);
-  }
-  return Object.fromEntries(entries);
+  return (
+    <span className={`lp-card-thumb ${kind} has-image${loaded ? ' loaded' : ''}`}>
+      <img src={src} alt="" width="448" height="280" loading="lazy" decoding="async" draggable="false" onLoad={() => setLoaded(true)} />
+    </span>
+  );
 }
 
 
@@ -149,7 +151,6 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
-  const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
   const [query, setQuery] = useState('');
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
@@ -218,15 +219,6 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
       .catch(() => { if (!cancelled) setCloudProjects([]); });
     return () => { cancelled = true; };
   }, [cloudRefreshToken, user, view]);
-  useEffect(() => {
-    if (!bootReady) return undefined;
-    const onThumbnail = (event) => {
-      const { templateId, image } = event.detail ?? {};
-      if (templateId && image) setTemplateThumbs((current) => ({ ...current, [templateId]: image }));
-    };
-    window.addEventListener('terrain-template:thumbnail', onThumbnail);
-    return () => window.removeEventListener('terrain-template:thumbnail', onThumbnail);
-  }, [bootReady]);
   useEffect(() => { setQuery(''); }, [view]);
   useEffect(() => { setMobileMenuOpen(false); }, [view]);
 
@@ -562,14 +554,14 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               {filtered.length === 0 && <p className="lp-no-results">{translateText("No template matches “")}{query.trim()}&rdquo;.</p>}
               <div className="lp-card-grid">
                 {filtered.map((item) => (
-                  <article className={`lp-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={item.id}>
-                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
-                      <span className={`lp-card-thumb ${templateKind}`}>{templateKind !== 'mini' && templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : (() => { const Icon = NODE_TEMPLATE_ICONS[item.icon] || (templateKind === 'mini' ? Box : LayoutTemplate); return <Icon size={22} />; })()}</span>
+                  <article className={`lp-card lp-template-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={`${templateKind}:${item.id}`}>
+                    <button type="button" className="lp-card-main" aria-pressed={item.id === selectedTemplateId} title={translateText(item.description)} onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
+                      <TemplateThumb kind={templateKind} item={item} />
                       <span className="lp-card-info">
                         <strong>{translateText(item.name)}</strong>
                         <small>{translateText(item.description)}</small>
                       </span>
-                      <span className={`lp-template-kind-badge ${templateKind}`}>{translateText(templateKind === 'mini' ? 'Mini Terrain' : templateKind === 'nodes' ? 'Nodes' : 'Procedural')}</span>
+                      {item.id === selectedTemplateId ? <span className="lp-template-selected-mark" aria-hidden><Check size={12} strokeWidth={3} /></span> : null}
                     </button>
                   </article>
                 ))}

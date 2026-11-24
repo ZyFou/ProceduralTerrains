@@ -3,7 +3,7 @@ import { PANEL_ICONS } from '../icons/panelIcons.jsx';
 // Lightweight panel metadata lives separately from the panel implementations so
 // the startup bundle does not pull every settings panel into the landing page.
 export const PANEL_META = {
-  reference: { label: 'Reference Image', title: 'Reference Image', desc: 'Reference Image', icon: PANEL_ICONS.terrain, modes: ['studio'] },
+  reference: { label: 'Reference', title: 'Reference Image', desc: 'Reference Image', icon: PANEL_ICONS.terrain, modes: ['studio'] },
   mini: { label: 'Mini', title: 'Mini Terrain', desc: 'Diorama composition, water level, vegetation and base.', icon: PANEL_ICONS.mini, modes: ['studio'] },
   markers: { label: 'Markers', title: 'Markers', desc: 'Floating places and routes.', icon: PANEL_ICONS.markers, modes: ['studio'] },
   terrain: { label: 'Terrain', title: 'Terrain', desc: 'Shape and surface generation.', icon: PANEL_ICONS.terrain },

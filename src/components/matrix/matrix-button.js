@@ -118,10 +118,12 @@ button:hover{background:var(--mb-hover);transform:translateY(-1px);box-shadow:va
 button:hover::before{opacity:1;background-position:-30% 0}
 /* Hover ring: a clean blue stroke that DRAWS itself around the button
    (clockwise from the top-left, via an animated conic mask), then keeps a
-   lighter highlight travelling along it. Leaving un-draws it. Mask layers
+   lighter highlight travelling along it. Leaving un-draws it. The stroke is a
+   whole 2px: at 1.5px, a button on a fractional y rendered its top edge
+   visibly fainter than the rest, so the ring read as incomplete. Mask layers
    (top → bottom): progress sweep ∩ (full box − content box) = partial ring. */
-button::after{content:"";position:absolute;inset:-3px;padding:1.5px;pointer-events:none;
-  border-radius:calc(var(--mb-radius,calc(var(--mb-h)*.36)) + 3px);
+button::after{content:"";position:absolute;inset:-4px;padding:2px;pointer-events:none;
+  border-radius:calc(var(--mb-radius,calc(var(--mb-h)*.36)) + 4px);
   background:conic-gradient(from var(--mb-ring-angle),var(--mb-ring) 0deg,var(--mb-ring-hi) 45deg,var(--mb-ring) 95deg,var(--mb-ring) 360deg);
   mask:conic-gradient(from -45deg,#000 var(--mb-ring-progress),transparent 0),
     linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);

@@ -40,8 +40,11 @@ function ProjectCard({ project, cloudEntry, disabled, busy, onOpen, onRename, on
   return (
     <article
       className={cn(
-        'group/card relative overflow-hidden rounded-[14px] border border-white/[0.08] bg-gradient-to-b from-[#0e0f13] to-[#0a0b0e]',
-        'shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_1px_2px_rgb(0_0_0/0.4)] will-change-transform',
+        // No overflow-hidden / will-change here: clipping a composited, lifting
+        // card made Chrome drop the rounded corners mid-hover. The thumbnail
+        // clips itself instead, which also leaves room for the hover ring.
+        'lp-ring group/card relative rounded-[14px] border border-white/[0.08] bg-gradient-to-b from-[#0e0f13] to-[#0a0b0e]',
+        'shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_1px_2px_rgb(0_0_0/0.4)]',
         // Tailwind v4 lifts with the `translate` property, so it must be in the transition list.
         'transition-[translate,border-color,box-shadow] duration-[400ms] ease-[cubic-bezier(.22,1,.36,1)]',
         'hover:-translate-y-[3px] hover:border-white/[0.16] hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.06),0_18px_40px_-18px_rgb(0_0_0/0.9)]',
@@ -52,9 +55,9 @@ function ProjectCard({ project, cloudEntry, disabled, busy, onOpen, onRename, on
         type="button"
         onClick={() => onOpen(project)}
         disabled={disabled}
-        className="flex w-full flex-col text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset disabled:opacity-60"
+        className="flex w-full flex-col rounded-[13px] text-left outline-none disabled:opacity-60"
       >
-        <span className="relative block aspect-[16/10] w-full overflow-hidden border-b border-white/[0.06] bg-[radial-gradient(120%_100%_at_50%_0%,#1a1b21_0%,#0f1014_70%)]">
+        <span className="relative block aspect-[16/10] w-full overflow-hidden rounded-t-[13px] [clip-path:inset(0_round_13px_13px_0_0)] border-b border-white/[0.06] bg-[radial-gradient(120%_100%_at_50%_0%,#1a1b21_0%,#0f1014_70%)]">
           {thumbnail
             ? <img src={thumbnail} alt="" className="size-full object-cover transition-[scale] duration-[600ms] ease-[cubic-bezier(.22,1,.36,1)] group-hover/card:scale-[1.035]" />
             : <span className="grid size-full place-items-center text-muted-foreground"><LayoutTemplate className="size-5" /></span>}

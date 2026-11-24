@@ -1795,7 +1795,10 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
 .project-library-card {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Not overflow:hidden — clipping a lifting, composited card made Chrome
+     drop its rounded corners mid-hover, and it would cut off the hover ring.
+     The thumbnail clips itself instead (below). */
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: linear-gradient(180deg, #0e0f13 0%, #0a0b0e 100%);
@@ -1805,7 +1808,6 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
     border-color .3s ease,
     box-shadow .4s cubic-bezier(.22, 1, .36, 1),
     background-color .3s ease;
-  will-change: transform;
 }
 .lp-card:hover,
 .lp-card.menu-open,
@@ -1815,22 +1817,24 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.03);
   transform: translate3d(0, -3px, 0);
 }
-.project-library-card { overflow: visible; }
 .lp-card.selected {
   border-color: rgba(255, 255, 255, 0.3);
   background: linear-gradient(180deg, #14151a 0%, #0d0e12 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 3px rgba(255, 255, 255, 0.05);
 }
 .lp-card-main,
-.project-library-main { flex: 1; align-content: start; padding: 0; }
+.project-library-main { flex: 1; align-content: start; padding: 0; border-radius: 13px 13px 0 0; }
+.lp-card-main { border-radius: 13px; }
 .lp-card-thumb,
 .project-library-thumb {
-  border-radius: 0;
+  border-radius: 13px 13px 0 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: radial-gradient(120% 100% at 50% 0%, #1a1b21 0%, #0f1014 70%);
   color: #a1a1aa;
+  /* clip-path (unlike overflow+radius alone) keeps the zooming image inside
+     the rounded corners even while it runs on its own compositor layer. */
+  clip-path: inset(0 round 13px 13px 0 0);
 }
-.project-library-thumb { border-radius: 13px 13px 0 0; }
 /* Icon-only thumbnails (templates without a preview): a quiet glass tile. */
 .lp-card-thumb > svg {
   box-sizing: content-box;
@@ -2067,4 +2071,120 @@ body:has(.landing-overlay.boot-holding) #app.landing-mode .viewport-area {
   .project-library-card:hover, .project-library-card.menu-open { transform: none; }
   .lp-card:hover .lp-card-thumb img,
   .project-library-card:hover .project-library-thumb img { transform: none; }
+}
+
+/* Template cards: shipped render previews (src/assets/template-thumbs). */
+.lp-template-card .lp-card-thumb { position: relative; }
+.lp-template-card .lp-card-thumb.has-image { background: #11131a; }
+.lp-template-card .lp-card-thumb.has-image img {
+  opacity: 0;
+  transition: opacity .35s ease, transform .6s cubic-bezier(.22, 1, .36, 1);
+}
+.lp-template-card .lp-card-thumb.has-image.loaded img { opacity: 1; }
+/* Seat the bright sky renders into the dark card instead of a hard edge. */
+.lp-template-card .lp-card-thumb.has-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(10, 11, 14, 0) 62%, rgba(10, 11, 14, 0.38) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+.lp-template-card .lp-card-info small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: calc(2 * 1.45em);
+}
+.lp-template-card.selected { border-color: rgba(96, 165, 250, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 28px -10px rgba(59, 130, 246, 0.45); }
+.lp-template-selected-mark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(10, 11, 14, 0.55);
+}
+.lp-template-card .lp-card-main:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-template-card .lp-card-thumb.has-image img { transition: none; }
+}
+
+/* ---- Hover ring ----------------------------------------------------------
+   The MatrixButton outline, for cards: a blue stroke that draws itself around
+   the card (clockwise from the top-left via an animated conic mask), then
+   keeps a lighter highlight travelling along it; leaving un-draws it.
+   Opt in with .lp-ring (HomeView cards) or via the card classes below.
+   The stroke is a whole 2px so its edges land on device pixels and the ring
+   reads as one continuous line at 1x DPR (1.5px left a faint top edge). */
+@property --lp-ring-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@property --lp-ring-progress { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes lp-ring-spin { to { --lp-ring-angle: 360deg; } }
+.lp-ring,
+.lp-card,
+.project-library-card { --lp-ring-radius: 14px; }
+.lp-ring::after,
+.lp-card::after,
+.project-library-card::after {
+  content: "";
+  position: absolute;
+  /* inset is measured from the padding box: 1px border + 2px gap. */
+  inset: -5px;
+  z-index: 3;
+  padding: 2px;
+  border-radius: calc(var(--lp-ring-radius) + 4px);
+  pointer-events: none;
+  background: conic-gradient(from var(--lp-ring-angle), #3b82f6 0deg, #bfdbfe 45deg, #3b82f6 95deg, #3b82f6 360deg);
+  -webkit-mask:
+    conic-gradient(from -45deg, #000 var(--lp-ring-progress), transparent 0),
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: source-in, xor;
+  mask:
+    conic-gradient(from -45deg, #000 var(--lp-ring-progress), transparent 0),
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: intersect, exclude;
+  --lp-ring-progress: 0deg;
+  /* Fully hidden at rest (a 0deg conic still leaves an anti-aliased seam);
+     only fade out once the un-draw has finished. */
+  opacity: 0;
+  transition: --lp-ring-progress .45s cubic-bezier(.65, 0, .35, 1), opacity 0s linear .45s;
+  animation: lp-ring-spin 2.6s linear infinite paused;
+}
+.lp-ring:hover::after,
+.lp-ring:active::after,
+.lp-ring:has(:focus-visible)::after,
+.lp-ring:has([data-state="open"])::after,
+.lp-card:hover::after,
+.lp-card:active::after,
+.lp-card.selected::after,
+.lp-card.menu-open::after,
+.lp-card:has(:focus-visible)::after,
+.project-library-card:hover::after,
+.project-library-card:active::after,
+.project-library-card.menu-open::after,
+.project-library-card:has(:focus-visible)::after {
+  --lp-ring-progress: 360deg;
+  opacity: 1;
+  transition: --lp-ring-progress .45s cubic-bezier(.65, 0, .35, 1), opacity 0s;
+  animation-play-state: running;
+}
+/* The ring carries the emphasis now; keep the border quiet under it. */
+.lp-ring:hover,
+.lp-ring:has([data-state="open"]),
+.lp-card:hover,
+.lp-card.menu-open,
+.project-library-card:hover,
+.project-library-card.menu-open { border-color: rgba(96, 165, 250, 0.35) !important; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-ring::after,
+  .lp-card::after,
+  .project-library-card::after { transition: none; animation: none; }
 }

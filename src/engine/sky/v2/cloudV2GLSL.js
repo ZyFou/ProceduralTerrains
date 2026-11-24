@@ -1,3 +1,4 @@
+import { CLOUD_FOOTPRINT_GLSL } from '../cloudFootprintGLSL.js';
 // ============================================================================
 // Realistic V2 cloud mode — GLSL. Billowy cumulus from two baked, mip-mapped
 // textures (see render/NoiseVolumeV2.js): a tileable weather map places the
@@ -56,6 +57,7 @@ uniform float uCloudRefDepth;         // natural depth of one cloud (world units
 uniform vec2  uCloudCenter;           // XZ centre of the cloud disc
 uniform float uCloudRadius;
 uniform float uCloudFar;
+${CLOUD_FOOTPRINT_GLSL}
 
 float cv2Sat(float x) { return clamp(x, 0.0, 1.0); }
 float cv2Remap(float v, float a, float b, float c, float d) {
@@ -64,7 +66,7 @@ float cv2Remap(float v, float a, float b, float c, float d) {
 
 // the clouds fade out toward the edge of the disc over the board
 float cv2EdgeFade(vec2 xz) {
-  float d = length(xz - uCloudCenter) / max(uCloudRadius, 1.0);
+  float d = cloudFootprintDist(xz - uCloudCenter) / max(uCloudRadius, 1.0);
   return 1.0 - smoothstep(0.72, 1.0, d);
 }
 
@@ -206,22 +208,8 @@ void main() {
     t0 = max(min(ta, tb), 0.0);
     t1 = min(max(ta, tb), uCloudFar);
   }
-  // clamp to the cloud disc (zero cover past it)
-  {
-    vec2 oc = ro.xz - uCloudCenter;
-    float A = dot(rd.xz, rd.xz);
-    if (A > 1e-8) {
-      float B = dot(oc, rd.xz);
-      float C = dot(oc, oc) - uCloudRadius * uCloudRadius;
-      float disc = B * B - A * C;
-      if (disc < 0.0) discard;
-      float sq = sqrt(disc);
-      t0 = max(t0, (-B - sq) / A);
-      t1 = min(t1, (-B + sq) / A);
-    } else if (dot(oc, oc) > uCloudRadius * uCloudRadius) {
-      discard;
-    }
-  }
+  // clamp to the cloud footprint (zero cover past it)
+  if (!cloudFootprintClip(ro.xz - uCloudCenter, rd.xz, t0, t1)) discard;
   if (t1 <= t0) discard;
 
   // The unclipped segment sets the sample spacing; the opaque scene only

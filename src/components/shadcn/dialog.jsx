@@ -26,7 +26,7 @@ const DialogOverlay = React.forwardRef(function DialogOverlay({ className, ...pr
       ref={ref}
       data-slot="dialog-overlay"
       className={cn(
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[10040] bg-black/60 backdrop-blur-[2px] duration-200',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fill-mode-forwards data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[10040] bg-black/60 backdrop-blur-[2px] duration-200',
         className,
       )}
       {...props}
@@ -42,7 +42,7 @@ const DialogContent = React.forwardRef(function DialogContent({ className, child
         ref={ref}
         data-slot="dialog-content"
         className={cn(
-          'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-[.97] data-[state=open]:zoom-in-[.97] fixed top-[50%] left-[50%] z-[10050] grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-xl border p-6 shadow-2xl shadow-black/50 duration-200 ease-[cubic-bezier(.22,1,.36,1)] sm:max-w-lg',
+          'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fill-mode-forwards data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-[.97] data-[state=open]:zoom-in-[.97] fixed top-[50%] left-[50%] z-[10050] grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-xl border p-6 shadow-2xl shadow-black/50 duration-200 ease-[cubic-bezier(.22,1,.36,1)] sm:max-w-lg',
           className,
         )}
         {...props}

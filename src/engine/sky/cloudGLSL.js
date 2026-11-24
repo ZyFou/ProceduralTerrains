@@ -1,3 +1,4 @@
+import { CLOUD_FOOTPRINT_GLSL } from './cloudFootprintGLSL.js';
 // ============================================================================
 // Cloud-mode GLSL: self-contained 3D procedural noise + a spherical volumetric
 // density field. Deliberately INDEPENDENT of the terrain noise stack — clouds
@@ -350,13 +351,14 @@ uniform float uCloudTop;          // slab top world Y
 uniform float uCloudRadius;       // horizontal fade radius
 uniform float uCloudFar;          // clamp marched distance (horizon bound)
 uniform vec3  uCloudCenter;       // board center (xz used)
+${CLOUD_FOOTPRINT_GLSL}
 
 vec2 cloudSample(vec3 P) {
   float hf = (P.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1e-3);
   if (hf <= 0.0 || hf >= 1.0) return vec2(0.0, clamp(hf, 0.0, 1.0));
   float fall = smoothstep(0.0, 0.18, hf) * (1.0 - smoothstep(0.78, 1.0, hf));
   if (uCloudNoiseType > 1.5) fall = smoothstep(0.0, 0.12, hf) * (1.0 - smoothstep(0.30, 0.62, hf));
-  float rad = length(P.xz - uCloudCenter.xz);
+  float rad = cloudFootprintDist(P.xz - uCloudCenter.xz);
   float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
   if (edge <= 0.0) return vec2(0.0, hf);
   return vec2(cloudShape(cl_domain(P - uCloudDomainOrigin)) * fall * edge, hf);
@@ -372,7 +374,7 @@ float cloudDensityForLight(vec3 P) {
   if (hf <= 0.0 || hf >= 1.0) return 0.0;
   float fall = smoothstep(0.0, 0.18, hf) * (1.0 - smoothstep(0.78, 1.0, hf));
   if (uCloudNoiseType > 1.5) fall = smoothstep(0.0, 0.12, hf) * (1.0 - smoothstep(0.30, 0.62, hf));
-  float rad = length(P.xz - uCloudCenter.xz);
+  float rad = cloudFootprintDist(P.xz - uCloudCenter.xz);
   float edge = 1.0 - smoothstep(uCloudRadius * 0.65, uCloudRadius, rad);
   return cloudShapeForLight(cl_domain(P - uCloudDomainOrigin)) * fall * max(edge, 0.0);
 }

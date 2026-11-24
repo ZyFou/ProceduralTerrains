@@ -36,6 +36,7 @@ const QUALITY_OPTIONS = Object.values(MINI_QUALITY_PROFILES).map((q) => ({
   value: q.id,
   label: `${q.label} · ${q.segments}×${q.segments}`,
 }));
+const CLOUD_SHAPE_OPTIONS = [{ value: 'circle', label: 'Circle' }, { value: 'square', label: 'Square' }];
 const SHAPE_OPTIONS = [{ value: 'square', label: 'Square' }, { value: 'circle', label: 'Circle' }, { value: 'hexagon', label: 'Hexagon' }];
 const CUT_OPTIONS =Object.values(MINI_CUT_STYLES).map((c) => ({ value: c.id, label: c.label }));
 const BASE_OPTIONS = MINI_PROCEDURAL_PRESETS.map((p) => ({ value: p.id, label: p.label }));
@@ -113,6 +114,8 @@ export default function MiniTerrainPanel({ ctx }) {
       <SliderCtl def={PROP_SIZE} value={mini.propScale ?? 1} onChange={(propScale) => set({ propScale })} settingId="mini.propScale" />
       <SliderCtl def={CLOUDS} value={mini.clouds} onChange={(clouds) => set({ clouds })} settingId="mini.clouds" />
       <SliderCtl def={CLOUD_SPREAD} value={mini.cloudSpread ?? 142.6} onChange={(cloudSpread) => set({ cloudSpread })} settingId="mini.cloudSpread" />
+      <SelectRow label="Clouds shape" value={mini.cloudShape ?? 'circle'} options={CLOUD_SHAPE_OPTIONS} onChange={(cloudShape) => set({ cloudShape })} settingId="mini.cloudShape"
+        info="Outline of the cloud generation zone: a circle, or a square aligned with the terrain edges." />
       <div className="mini-actions">
         <button type="button" className="action-btn" onClick={() => set({ cloudSpread: 100 })} data-setting-id="mini.matchCloudsToTerrain">
           <Focus size={14} aria-hidden /> {translateText('Match to terrain')}

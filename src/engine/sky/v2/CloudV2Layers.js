@@ -75,6 +75,7 @@ export function createCloudV2Material() {
     uCloudMinStep:     { value: 25 },
     uCloudCenter:      { value: new THREE.Vector2() },
     uCloudRadius:      { value: 1500 },
+    uCloudSquare:      { value: 0 },
     uCloudFar:         { value: 9000 },
     uCloudSigma:       { value: 0.05 },
     uCloudSteps:       { value: 64 },
@@ -163,6 +164,7 @@ export class CloudV2SlabLayer extends CloudSlabLayer {
 
     const radius = Math.max(1, layout.radius ?? extent * 0.62);
     u.uCloudRadius.value = radius;
+    u.uCloudSquare.value = layout.shape === 'square' ? 1 : 0;
     u.uCloudFar.value = extent * 4.0;
     u.uCloudCenter.value.set(cx, cz);
     const horiz = radius * 2.1;

@@ -5,7 +5,7 @@
   "author": "ZyFou",
   "main": "electron/main.cjs",
   "private": true,
-  "version": "2.0.6",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -35,7 +35,8 @@
     "test:lib:effects": "node tools/check-effects-playgrounds.mjs",
     "plugins:build": "python tools/build_blender_extension.py && python tools/build_unity_plugin.py",
     "plugins:verify": "python tools/verify_plugin_releases.py",
-    "test:desktop": "node tools/check-desktop-browser.mjs"
+    "test:desktop": "node tools/check-desktop-browser.mjs",
+    "templates:thumbs": "node tools/template-thumbs.mjs"
   },
   "config": {
     "forge": "./forge.config.cjs"

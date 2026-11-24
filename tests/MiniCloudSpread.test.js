@@ -42,6 +42,29 @@ describe('Mini cloud spread', () => {
     expect(layer.mesh.scale.x).toBeCloseTo(256 * 2.1);
     layer.dispose();
   });
+  it('switches the cloud footprint between circle (default) and square', () => {
+    const state = createMiniTerrainState();
+    expect(state.cloudShape).toBe('circle');
+    expect(normalizeMiniTerrainState({ recipe: 'procedural' }).cloudShape).toBe('circle');
+    expect(normalizeMiniTerrainState({ ...state, cloudShape: 'hexagon' }).cloudShape).toBe('circle');
+    expect(resolveMiniCloudLayout(state).shape).toBe('circle');
+
+    const controller = new MiniTerrainController({ worldMode: 'studio' });
+    controller.state = state;
+    const plan = controller.planChange({ cloudShape: 'square' });
+    expect(plan.composition).toBe(false);
+    expect(plan.params).toEqual({});
+    const layer = new CloudSlabLayer(new THREE.Scene());
+    const params = { ...CLOUD_DEFAULT_PARAMS, cloudsEnabled: true };
+    layer.applyParams(params, 100, 1024, {}, controller.cloudLayout());
+    expect(layer.material.uniforms.uCloudSquare.value).toBe(0);
+    controller.state = plan.state;
+    layer.applyParams(params, 100, 1024, {}, controller.cloudLayout());
+    expect(layer.material.uniforms.uCloudSquare.value).toBe(1);
+    expect(layer.material.fragmentShader).toContain('cloudFootprintClip');
+    layer.dispose();
+  });
+
   it.each(['procedural', 'cove', 'islet', 'lake'])('enables clouds in a newly created %s Mini', (recipe) => {
     const state = createMiniTerrainState({ recipe });
     expect(state.clouds).toBeGreaterThan(0.04);

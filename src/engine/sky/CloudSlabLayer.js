@@ -211,6 +211,8 @@ export class CloudSlabLayer {
 
     const radius = Math.max(1, layout.radius ?? extent * 0.62);
     u.uCloudRadius.value = radius;
+    // footprint: 'circle' (disc, default) or 'square' (axis-aligned, same half-size)
+    u.uCloudSquare.value = layout.shape === 'square' ? 1 : 0;
     u.uCloudFar.value = extent * 4.0;   // bound horizon marching
     u.uCloudCenter.value.set(cx, 0, cz);
 

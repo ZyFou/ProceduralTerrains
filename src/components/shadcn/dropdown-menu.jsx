@@ -23,7 +23,7 @@ const DropdownMenuContent = React.forwardRef(function DropdownMenuContent({ clas
         className={cn(
           // Above the landing overlay (z-index 10000).
           'bg-popover text-popover-foreground z-[10050] min-w-[9rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-xl border border-white/10 p-1 shadow-[0_18px_44px_-12px_rgb(0_0_0/0.75)]',
-          'duration-200 ease-[cubic-bezier(.22,1,.36,1)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+          'duration-200 ease-[cubic-bezier(.22,1,.36,1)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fill-mode-forwards data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
           className,
         )}
         {...props}
