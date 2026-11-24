@@ -1,6 +1,6 @@
 {
   "name": "procedural-terrains",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Procedural terrain worlds, water and clouds for caller-owned Three.js scenes.",
   "type": "module",
   "license": "MIT",
