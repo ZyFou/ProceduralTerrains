@@ -13,6 +13,7 @@ export interface MiniState {
   propScale: number;
   clouds: number;
   cloudSpread: number;
+  cloudShape: 'circle' | 'square';
   cutStyle: 'strata' | 'soil' | 'dark';
   shape: 'square' | 'circle' | 'hexagon';
   socle: boolean;

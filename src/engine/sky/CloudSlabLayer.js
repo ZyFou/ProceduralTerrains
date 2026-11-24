@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createCloudSlabMaterial } from './CloudSlabShader.js';
-import { resolveCloudQuality, cloudNoiseOffset, resolveCloudNoiseType } from './CloudSettings.js';
+import { resolveCloudQuality, cloudFormationDepth, cloudNoiseOffset, resolveCloudNoiseType } from './CloudSettings.js';
 import { renderTerrainCloudShadow, cloudShadowPreparationPass } from './CloudShadowPass.js';
 import { buildOccupancyPlanar } from './cloudFieldCPU.js';
 import { CloudLowResPass } from './CloudLowResPass.js';
@@ -211,6 +211,8 @@ export class CloudSlabLayer {
 
     const radius = Math.max(1, layout.radius ?? extent * 0.62);
     u.uCloudRadius.value = radius;
+    // footprint: 'circle' (disc, default) or 'square' (axis-aligned, same half-size)
+    u.uCloudSquare.value = layout.shape === 'square' ? 1 : 0;
     u.uCloudFar.value = extent * 4.0;   // bound horizon marching
     u.uCloudCenter.value.set(cx, 0, cz);
 
@@ -241,7 +243,10 @@ export class CloudSlabLayer {
     u.uCloudCoverage.value = params.cloudCoverage ?? 0.5;
     u.uCloudSoftness.value = Math.max(0.01, params.cloudSoftness ?? 0.16);
 
-    u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0 / thickness;
+    // normalized by the natural cloud depth, not the raw thickness: a thicker
+    // layer holds more cloud instead of a fainter one (see cloudFormationDepth)
+    u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0
+      / cloudFormationDepth(thickness);
     u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 3.0;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;

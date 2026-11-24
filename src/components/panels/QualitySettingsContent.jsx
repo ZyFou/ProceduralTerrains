@@ -5,6 +5,7 @@ import { matchesTranslatedSearch } from '../../i18n/language.js';
 // controls live in one place.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ControlSection from '../ui/ControlSection.jsx';
+import SlidingIndicator from '../ui/SlidingIndicator.jsx';
 import { SliderCtl, ToggleRow, SelectRow } from '../controls.jsx';
 import {
   PERF_PRESETS, PERF_LIMITS, getPerfPresetKeys,
@@ -388,7 +389,8 @@ export default function PerfSettings({ perf, rendererInfo, onPerfPreset, onPerfS
       </div>
 
       {!isSearching && (
-        <div className="panel-tabs" role="tablist">
+        <div className="panel-tabs has-slider" role="tablist">
+          <SlidingIndicator />
           {TABS.map((tab) => (
             <button
               key={tab.id}

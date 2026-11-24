@@ -36,6 +36,7 @@ import { CloudAdaptiveQualityController } from './sky/CloudAdaptiveQualityContro
 import {
   CLOUD_QUALITY_PRESETS,
   CLOUD_LEGACY_PERF_KEYS,
+  cloudRenderModeDefaultsPatch,
   normalizeCloudFormation,
   resolveCloudQuality,
   resolveCloudRenderMode,
@@ -135,6 +136,7 @@ import {
   normalizeSurfaceTextureSource,
   sourceUsesTextureAtlas,
 } from './terrain/surface/SurfaceTextureSources.js';
+import { graphSurfaceTextureParams } from './terrain/surface/graphSurfaceParams.js';
 import { getNoiseVolumeV2, retainNoiseVolumeV2 } from './render/NoiseVolumeV2.js';
 import {
   detectRendererCapabilities,
@@ -2816,7 +2818,17 @@ export class Engine {
       this.params.surfaceTextureMode = sourceUsesTextureAtlas(surfaceTextureSource);
     } else {
       if (Object.is(this.params[key], value)) return;
+      const previous = this.params[key];
       this.params[key] = value;
+      // Each cloud renderer has its own starting values (Realistic V2 starts
+      // with no towering and no wind shear); settings the user tuned are kept.
+      if (key === 'cloudRenderMode') {
+        Object.assign(this.params, cloudRenderModeDefaultsPatch(
+          this.params,
+          resolveCloudRenderMode({ cloudRenderMode: previous }),
+          resolveCloudRenderMode({ cloudRenderMode: value }),
+        ));
+      }
     }
     this.cb.onParams(this._paramsSnapshot());
     this._needsRender = true;   // any param change → redraw (on-demand studio)
@@ -3091,6 +3103,11 @@ export class Engine {
     const compiled = this.terrainGraph ? compileTerrainGraph(this.terrainGraph) : null;
     this._graphProgram = compiled?.ok ? compiled.program : null;
     this._graphDiagnostics = compiled?.diagnostics || [];
+    // A template whose graph outputs PBR materials must open textured: select
+    // the PBR atlas source (the client builds the atlas when it sees it) and
+    // undo the Nodes reset of the texture amount above.
+    const graphSurfaceParams = graphSurfaceTextureParams(this._graphProgram, { fresh: true });
+    if (graphSurfaceParams) Object.assign(this.params, graphSurfaceParams);
     const canyonTemplate = this.projectMode === 'nodes' && nodeTemplateId === 'nodes-dry-canyon';
     if (canyonTemplate) Object.assign(this.params, PRESETS.dryCanyon.params);
     this.cb.onProjectMode?.(this.projectMode);
@@ -3845,10 +3862,9 @@ export class Engine {
       this._applySurfaceSettings();
       this.cb.onParams?.(this._paramsSnapshot());
     }
-    if (compiled.program.surface && !compiled.program.surface.procedural) {
-      this.params.surfaceTextureSource = SURFACE_TEXTURE_SOURCE.PBR;
-      this.params.surfaceTextureMode = true;
-      if (!previousProgram?.surface || previousProgram.surface.procedural) this.params.surfaceTextureAmount = 1;
+    const surfaceParams = graphSurfaceTextureParams(compiled.program, { previousProgram });
+    if (surfaceParams) {
+      Object.assign(this.params, surfaceParams);
       if(this._surfaceAtlas?.backend==='array' && compiled.program.surface.assets.every(id=>this._surfaceAtlas.slots[id]!=null)) {
         const surface=compileSurfaceGraph(nextGraph,this.params.surfaceDocument,this._surfaceAtlas.slots);
         this._surfaceAtlas.graph=surface;

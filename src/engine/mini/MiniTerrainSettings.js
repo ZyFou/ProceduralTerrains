@@ -84,6 +84,8 @@ export const MINI_CUT_STYLE_IDS = Object.freeze(Object.keys(MINI_CUT_STYLES));
 // the existing bevel path; only the socle and its ground shadow change shape.
 // Hexagons use six regular sides, with half-width as the circumradius.
 export const MINI_SHAPES = Object.freeze(['square', 'circle', 'hexagon']);
+/** Footprint of the cloud generation zone (independent of the diorama shape). */
+export const MINI_CLOUD_SHAPES = Object.freeze(['circle', 'square']);
 
 // Composition recipes. `shape` is the shader discriminant (uMiniShape).
 // Geometry is in normalized footprint coordinates (half-width = 1); heights in
@@ -247,6 +249,7 @@ export function createMiniTerrainState({ recipe = DEFAULT_MINI_RECIPE, seed = 13
     propScale: 1,
     clouds: r.clouds,
     cloudSpread: 100,
+    cloudShape: 'circle',
     cutStyle: r.cutStyle,
     shape: 'square',
     socle: true,
@@ -290,6 +293,7 @@ export function normalizeMiniTerrainState(input) {
     clouds: clamp(finite(input.clouds, r.clouds), 0, 1),
     // Older projects used a radius of width * 1.15 * 0.62.
     cloudSpread: clamp(finite(input.cloudSpread, 142.6), 10, 200),
+    cloudShape: MINI_CLOUD_SHAPES.includes(input.cloudShape) ? input.cloudShape : 'circle',
     cutStyle,
     waterEdges: clamp(finite(input.waterEdges, 1), 0, 2),
     waterBevel: clamp(finite(input.waterBevel, 0), 0, 10),
@@ -661,8 +665,9 @@ export function miniParamsPatch(state, scope = 'all') {
 
 /**
  * Cloud slab placement centred on the diorama. Spread is the cloud diameter
- * as a percentage of terrain width; 100% fits inside the circular footprint.
- * Coverage extent stays fixed so narrowing clouds does not change cull distance.
+ * (circle) or side (square) as a percentage of terrain width; 100% fits the
+ * terrain footprint. Coverage extent stays fixed so narrowing clouds does not
+ * change cull distance.
  */
 export function resolveMiniCloudLayout(state) {
   const s = normalizeMiniTerrainState(state) ?? createMiniTerrainState();
@@ -670,6 +675,7 @@ export function resolveMiniCloudLayout(state) {
   return {
     extent: L.width * 1.15,
     radius: L.width * s.cloudSpread / 200,
+    shape: s.cloudShape,
     center: { x: 0, z: 0 },
   };
 }

@@ -3,12 +3,16 @@ import * as THREE from 'three';
 import {
   CLOUD_DEFAULT_PARAMS,
   CLOUD_RENDER_MODES,
+  cloudFormationDepth,
+  cloudRenderModeDefaultsPatch,
   resolveCloudLayerMode,
   resolveCloudRenderMode,
 } from '../src/engine/sky/CloudSettings.js';
 import { CloudV2SlabLayer, CloudV2InfiniteLayer } from '../src/engine/sky/v2/CloudV2Layers.js';
 import { CLOUD_V2_FRAGMENT, CLOUD_V2_FIELD_GLSL } from '../src/engine/sky/v2/cloudV2GLSL.js';
 import { CloudShadowPass } from '../src/engine/sky/CloudShadowPass.js';
+import { CloudSlabLayer } from '../src/engine/sky/CloudSlabLayer.js';
+import { RealisticCloudSlabLayer } from '../src/engine/sky/realistic/RealisticCloudLayers.js';
 import {
   NOISE_VOLUME_V2_FRAGMENT,
   CLOUD_WEATHER_V2_FRAGMENT,
@@ -80,6 +84,77 @@ describe('Realistic V2 clouds', () => {
       expect(u.uCloudVariationOffset.value.equals(seed)).toBe(false);
       apply();
       expect(u.uCloudVariationOffset.value.equals(seed)).toBe(true);
+
+      // Thickness only gives the same clouds more room: no formation moves
+      // or rescales, the cloud does not thin out, and the march gets finer.
+      const sigma = u.uCloudSigma.value;
+      const minStep = u.uCloudMinStep.value;
+      const steps = layer._baseSteps;
+      apply({ cloudThickness: 1860 });
+      expect(u.uCloudTop.value - u.uCloudBottom.value).toBe(1860);
+      expect(u.uCloudWeatherFreq.value).toBe(weather);
+      expect(u.uCloudNoiseFreq.value).toBe(noise);
+      expect(u.uCloudRefDepth.value).toBe(CLOUD_DEFAULT_PARAMS.cloudThickness);
+      expect(u.uCloudSigma.value).toBe(sigma);
+      expect(u.uCloudMinStep.value).toBe(minStep);
+      expect(layer._baseSteps).toBe(steps * 2);
+      // a thinner layer squeezes the clouds and keeps them opaque
+      apply({ cloudThickness: 310 });
+      expect(u.uCloudWeatherFreq.value).toBe(weather);
+      expect(u.uCloudSigma.value * 310).toBeCloseTo(48.6, 3);
+    } finally { layer.dispose(); }
+  });
+
+  it('starts calm: no towering or wind shear unless the user tuned them', () => {
+    const fresh = { ...CLOUD_DEFAULT_PARAMS };
+    expect(cloudRenderModeDefaultsPatch(fresh, 'legacy', 'realisticV2'))
+      .toEqual({ cloudTowering: 0, cloudShear: 0 });
+    // back to Realistic restores its own defaults
+    expect(cloudRenderModeDefaultsPatch({ ...fresh, cloudTowering: 0, cloudShear: 0 }, 'realisticV2', 'realistic'))
+      .toEqual({ cloudTowering: CLOUD_DEFAULT_PARAMS.cloudTowering, cloudShear: CLOUD_DEFAULT_PARAMS.cloudShear });
+    // tuned values survive a switch in both directions
+    expect(cloudRenderModeDefaultsPatch({ ...fresh, cloudTowering: 0.8 }, 'realistic', 'realisticV2'))
+      .toEqual({ cloudShear: 0 });
+    expect(cloudRenderModeDefaultsPatch({ ...fresh, cloudTowering: 0.3, cloudShear: 0.1 }, 'realisticV2', 'legacy'))
+      .toEqual({});
+    expect(cloudRenderModeDefaultsPatch(fresh, 'legacy', 'realistic')).toEqual({});
+  });
+
+  it('keeps near clouds: the noise level has a floor and exposure is restrained', () => {
+    expect(CLOUD_V2_FRAGMENT).toContain('float lod = clamp(log2(max(stride * lodScale, lodFloor)), 0.0, 4.0);');
+    expect(CLOUD_V2_FRAGMENT).toContain('uExposure * 0.54');
+    // thicker layers taper their towers instead of extruding pillars
+    expect(CLOUD_V2_FIELD_GLSL).toContain('sig -= 0.14 * over * over;');
+  });
+});
+
+describe('cloud Thickness adds cloud in every renderer', () => {
+  it('caps the normalizing depth at the natural cloud depth', () => {
+    expect(cloudFormationDepth(620)).toBe(620);
+    expect(cloudFormationDepth(2400)).toBe(620);
+    expect(cloudFormationDepth(160)).toBe(160);
+    expect(cloudFormationDepth(2400, 2)).toBe(1240);
+  });
+
+  it.each([
+    ['legacy slab', CloudSlabLayer, (layer) => layer.material.uniforms.uCloudExtinction.value],
+    ['realistic slab', RealisticCloudSlabLayer, (layer) => 14 * layer.material.uniforms.uCloudDensity.value
+      / (layer.material.uniforms.uCloudTop.value - layer.material.uniforms.uCloudBottom.value)],
+  ])('%s: extinction per unit does not drop past the default thickness', (_name, Layer, extinction) => {
+    const layer = new Layer(new THREE.Scene());
+    const apply = (cloudThickness) => layer.applyParams(
+      { ...CLOUD_DEFAULT_PARAMS, cloudsEnabled: true, cloudThickness }, 100, 2048, {},
+    );
+    try {
+      apply(620);
+      const base = extinction(layer);
+      const shape = layer.material.uniforms.uCloudShapeFreq?.value;
+      apply(1860);
+      expect(extinction(layer)).toBeCloseTo(base, 10);
+      // Realistic: the formations no longer rescale with the layer
+      if (shape != null) expect(layer.material.uniforms.uCloudShapeFreq.value).toBe(shape);
+      apply(310);
+      expect(extinction(layer)).toBeCloseTo(base * 2, 10);
     } finally { layer.dispose(); }
   });
 

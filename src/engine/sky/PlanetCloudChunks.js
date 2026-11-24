@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createCloudMaterial } from './CloudVolumeShader.js';
-import { resolveCloudQuality, cloudNoiseOffset, resolveCloudNoiseType } from './CloudSettings.js';
+import { resolveCloudQuality, cloudFormationDepth, cloudNoiseOffset, resolveCloudNoiseType } from './CloudSettings.js';
 import { cloudCoverageAt } from './cloudFieldCPU.js';
 import { CloudShadowPass } from './CloudShadowPass.js';
 import { applyCloudLightingState } from './CloudLightingState.js';
@@ -259,7 +259,8 @@ export class PlanetCloudChunks {
     u.uCloudSoftness.value = Math.max(0.01, params.cloudSoftness ?? 0.16);
 
     const thickness = outer - inner;
-    u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0 / Math.max(thickness, 1);
+    u.uCloudExtinction.value = (params.cloudDensity ?? 1.0) * 8.0
+      / cloudFormationDepth(thickness, radiusScale);
     u.uCloudLightAbsorption.value = params.cloudLightAbsorption ?? 3.0;
     u.uCloudShadowStrength.value = params.cloudShadowStrength ?? 0.6;
     u.uCloudScattering.value = params.cloudScatteringStrength ?? 1.0;

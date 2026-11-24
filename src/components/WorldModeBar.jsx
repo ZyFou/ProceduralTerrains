@@ -1,5 +1,6 @@
 import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { Box, Globe2, Grid2x2, Map } from 'lucide-react';
+import SlidingIndicator from './ui/SlidingIndicator.jsx';
 
 const MODES = [
   { id: 'studio', label: 'Tile', Icon: Grid2x2 },
@@ -27,10 +28,11 @@ export default function WorldModeBar({
 
   return (
     <div
-      className="viewport-mode-bar"
+      className="viewport-mode-bar has-slider"
       role="group"
       aria-label={translateText("World mode")}
     >
+      <SlidingIndicator selector=".mode-bar-btn.active" />
       {miniActive && (
         <button
           type="button"

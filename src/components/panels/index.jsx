@@ -10,6 +10,7 @@ import MarkersPanel from './MarkersPanel.jsx';
 import MiniTerrainPanel from './MiniTerrainPanel.jsx';
 import ImportMapsContent, { ReferenceImageSection } from '../ui/ImportMapsContent.jsx';
 import CollapsibleGroup from '../ui/CollapsibleGroup.jsx';
+import MatrixButton from '../matrix/MatrixButton.jsx';
 import ControlSection from '../ui/ControlSection.jsx';
 import TileMapDebugSection from '../ui/TileMapDebugSection.jsx';
 import { TERRAIN_SLIDERS, NOISE_SLIDERS, BIOME_SLIDERS, InfoDot } from './defs.jsx';
@@ -977,9 +978,16 @@ export function ExportPanel({ ctx }) {
     <SidePanel title={translateText("Export")} description={translateText("Export meshes and textures.")}
       onClose={ctx.onClose}
       footer={(
-        <button type="button" className="action-btn primary" onClick={doExport} disabled={busy || exportBlocked}>
-          {translateText(busy ? 'Exporting…' : `Export ${ctx.worldMode === 'planet' ? 'Planet' : 'Terrain'}`)}
-        </button>
+        <MatrixButton
+          block
+          className="export-matrix-btn"
+          loading={busy}
+          loadingLabel={translateText('Exporting…')}
+          disabled={exportBlocked && !busy}
+          onClick={doExport}
+        >
+          {translateText(`Export ${ctx.worldMode === 'planet' ? 'Planet' : 'Terrain'}`)}
+        </MatrixButton>
       )}>
       <div className="side-panel-quick">
         <button type="button" className="action-btn" onClick={ctx.onExportScreenshot} disabled={busy}>{translateText("Screenshot")}</button>

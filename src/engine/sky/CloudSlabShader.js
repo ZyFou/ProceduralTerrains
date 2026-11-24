@@ -113,24 +113,9 @@ void main() {
   // clamp the segment to the cloud disc (radius uCloudRadius around the board
   // center): beyond it the radial fade is zero, so this both skips wasted
   // marching AND keeps the step fine on grazing rays (much less stipple).
-  {
-    vec2 oc = ro.xz - uCloudCenter.xz;
-    vec2 dc = rd.xz;
-    float A = dot(dc, dc);
-    if (A > 1e-8) {
-      float B = dot(oc, dc);
-      float C = dot(oc, oc) - uCloudRadius * uCloudRadius;
-      float disc = B * B - A * C;
-      if (disc < 0.0) discard;                 // ray never crosses the disc
-      float sq = sqrt(disc);
-      t0 = max(t0, (-B - sq) / A);
-      t1 = min(t1, (-B + sq) / A);
-      if (t1 <= t0) discard;
-    } else {
-      // vertical ray: only inside the disc if the camera column is within it
-      if (dot(oc, oc) > uCloudRadius * uCloudRadius) discard;
-    }
-  }
+  // (disc or square, see cloudFootprintGLSL.js)
+  if (!cloudFootprintClip(ro.xz - uCloudCenter.xz, rd.xz, t0, t1)) discard;
+  if (t1 <= t0) discard;
 
   // Preserve the unclipped slab interval as the global sampling domain.
   // Terrain depth may shorten the visible part of the ray, but must not
@@ -218,6 +203,7 @@ export function createCloudSlabMaterial(steps = 24, lightSteps = 6, octaves = 5,
       uCloudBottom:          { value: 900 },
       uCloudTop:             { value: 1520 },
       uCloudRadius:          { value: 1500 },
+      uCloudSquare:          { value: 0 },
       uCloudFar:             { value: 9000 },
       uCloudCenter:          { value: new THREE.Vector3() },
       uCloudCoverage:        { value: 0.5 },

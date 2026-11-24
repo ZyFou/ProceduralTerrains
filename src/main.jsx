@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import Root from './Root.jsx';
 import { LoadingProvider } from './state/loading.jsx';
 import { LanguageProvider } from './i18n/LanguageContext.jsx';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
+import './ui.css';
 import './cursors.css';
 import './styles.css';
 

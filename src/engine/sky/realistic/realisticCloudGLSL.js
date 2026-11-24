@@ -1,3 +1,4 @@
+import { CLOUD_FOOTPRINT_GLSL } from '../cloudFootprintGLSL.js';
 // ============================================================================
 // Realistic cloud mode — GLSL. A port of the Procedural Planets cloud pass
 // (PlanetPipeline CLOUD_FRAGMENT + surfaceGLSL CLOUD_FIELD_GLSL): a baked
@@ -301,6 +302,7 @@ uniform vec2 uShearDir;         // downwind direction (XZ)
 uniform vec2 uCloudCenter;      // XZ centre of the cloud disc
 uniform float uCloudRadius;
 uniform float uCloudFar;
+${CLOUD_FOOTPRINT_GLSL}
 #endif
 
 // 0..1 cloud cover from the weather field and the coverage slider
@@ -437,7 +439,7 @@ vec4 weatherAt2D(vec2 F) {
 
 // the clouds fade out toward the edge of the disc over the board
 float edgeFade(vec3 p) {
-  float d = length(p.xz - uCloudCenter) / max(uCloudRadius, 1.0);
+  float d = cloudFootprintDist(p.xz - uCloudCenter) / max(uCloudRadius, 1.0);
   return 1.0 - smoothstep(0.72, 1.0, d);
 }
 
@@ -561,22 +563,8 @@ void main() {
     t0 = max(min(ta, tb), 0.0);
     t1 = min(max(ta, tb), uCloudFar);
   }
-  // clamp to the cloud disc (zero cover past it)
-  {
-    vec2 oc = ro.xz - uCloudCenter;
-    float A = dot(rd.xz, rd.xz);
-    if (A > 1e-8) {
-      float B = dot(oc, rd.xz);
-      float C = dot(oc, oc) - uCloudRadius * uCloudRadius;
-      float disc = B * B - A * C;
-      if (disc < 0.0) discard;
-      float sq = sqrt(disc);
-      t0 = max(t0, (-B - sq) / A);
-      t1 = min(t1, (-B + sq) / A);
-    } else if (dot(oc, oc) > uCloudRadius * uCloudRadius) {
-      discard;
-    }
-  }
+  // clamp to the cloud footprint (zero cover past it)
+  if (!cloudFootprintClip(ro.xz - uCloudCenter, rd.xz, t0, t1)) discard;
 #endif
   if (t1 <= t0) discard;
 

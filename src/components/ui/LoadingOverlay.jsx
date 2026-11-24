@@ -1,4 +1,5 @@
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
+import MatrixSpinner from '../matrix/MatrixSpinner.jsx';
 // Blocking loading overlay shown above the viewport for heavy actions
 // (mode switch, export, heavy generation). The app stays visually alive —
 // the viewport remains behind a light scrim.
@@ -51,8 +52,10 @@ export default function LoadingOverlay({ task }) {
             <path className="landing-boot-terrain-line" d="m3 40 17-21 9 11L43 8l26 32" />
             <path className="landing-boot-terrain-fill" clipPath="url(#loading-terrain-progress-clip)" d="M3 40 20 19l9 11L43 8l26 32H3Z" />
           </svg>
-          <span className="landing-boot-progress-step">{translateText(stepLabel)}</span>
-          <span className="loading-activity-spinner" aria-hidden="true" />
+          <span className="loading-step">
+            <MatrixSpinner size={14} className="loading-activity-spinner" />
+            <span className="landing-boot-progress-step">{translateText(stepLabel)}</span>
+          </span>
         </div>
         {task.id === 'export' && <div className="export-loading-detail">
           <strong>{translateText(task.label)}</strong>

@@ -2,6 +2,7 @@ import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useContext } from 'react';
 import { X } from 'lucide-react';
 import { DrawerChromeContext } from './PanelContext.js';
+import SlidingIndicator from '../ui/SlidingIndicator.jsx';
 
 // Shared chrome for every drawer panel: header (title + description + close),
 // scrollable content, optional footer.
@@ -38,7 +39,8 @@ export default function SidePanel({ title, description, onClose, footer, childre
 export function PanelTabs({ tabs, active, onChange }) {
   useLanguage();
   return (
-    <div className="panel-tabs" role="tablist">
+    <div className="panel-tabs has-slider" role="tablist">
+      <SlidingIndicator />
       {tabs.map((t) => (
         <button
           key={t.id}

@@ -2,6 +2,7 @@ import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronUp, Compass } from 'lucide-react';
+import SlidingIndicator from './ui/SlidingIndicator.jsx';
 
 export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCamera, exploreMode, onExploreMode, exploreAvailable = true }) {
   useLanguage();
@@ -45,7 +46,8 @@ export default function BottomToolbar({ camMode, onTopDown, onAngled, onResetCam
   };
 
   return (
-    <div className="viewport-camera-bar" role="toolbar" aria-label={translateText("Camera views")}>
+    <div className="viewport-camera-bar has-slider" role="toolbar" aria-label={translateText("Camera views")}>
+      <SlidingIndicator selector=".camera-bar-btn.active:not(.explore-menu-trigger)" />
       <button
         type="button"
         className={`camera-bar-btn${camMode === 'topdown' ? ' active' : ''}`}

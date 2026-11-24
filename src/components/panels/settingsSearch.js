@@ -16,6 +16,7 @@ const SETTINGS_INDEX = [
   { panelId: 'mini', sectionLabel: 'Mini Terrain', settingId: 'mini.propScale', label: 'Mini Props Size', keywords: 'mini diorama props size scale trees rocks grass bigger smaller', aliases: 'taille objets arbres' },
   { panelId: 'mini', sectionLabel: 'Mini Terrain', settingId: 'mini.clouds', label: 'Mini Clouds', keywords: 'mini diorama clouds sky' },
   { panelId: 'mini', sectionLabel: 'Mini Terrain', settingId: 'mini.cloudSpread', label: 'Clouds spread', keywords: 'mini diorama clouds spread width radius zone footprint circle narrow', aliases: 'etendue nuages largeur' },
+  { panelId: 'mini', sectionLabel: 'Mini Terrain', settingId: 'mini.cloudShape', label: 'Clouds shape', keywords: 'mini diorama clouds shape square circle zone footprint outline', aliases: 'forme nuages carre cercle' },
   { panelId: 'mini', sectionLabel: 'Mini Terrain', settingId: 'mini.matchCloudsToTerrain', label: 'Match to terrain', keywords: 'mini diorama clouds match terrain width circle footprint fit', aliases: 'adapter terrain nuages' },
   { panelId: 'mini', sectionLabel: 'Base & presentation', settingId: 'mini.cutStyle', label: 'Cut Style', keywords: 'mini diorama cut section strata layers walls base socle' },
   { panelId: 'mini', sectionLabel: 'Quality', settingId: 'mini.quality', label: 'Terrain Resolution', keywords: 'mini diorama quality resolution segments triangles capture' },

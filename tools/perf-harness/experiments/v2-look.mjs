@@ -124,6 +124,89 @@ export default async function ({ page, h, shot, ROOT }) {
     }
   }
 
+  // Cloud close-ups (camera approaching and entering the layer) and the
+  // Thickness slider, per renderer.  env: CLOUD_MODES=realisticV2,realistic,legacy
+  if (steps.includes('cloudclose') || steps.includes('thickness')) {
+    const modes = (process.env.CLOUD_MODES || 'realisticV2').split(',');
+    const cloudState = () => page.evaluate(() => {
+      const e = window.__engine;
+      const c = e.studioCloud;
+      return { active: c.active, visible: c.mesh.visible, inRange: c._inRange, lowRes: c.usesLowRes,
+        scale: c.effectiveRenderScale, near: +e.camera.near.toFixed(2), far: Math.round(e.camera.far),
+        cam: e.camera.position.toArray().map(Math.round) };
+    });
+    for (const mode of modes) {
+      await h.setParams({ cloudsEnabled: true, cloudRenderMode: mode, cloudCoverage: 0.55, cloudThickness: 620, waterMode: 'legacy' });
+      await ready((s) => s.cloud?.mode === (mode === 'legacy' ? 'legacy' : mode) && s.cloud.active, `cloud ${mode}`);
+      if (steps.includes('cloudclose')) {
+        for (const [id, pose] of [
+          ['r060', { radiusFactor: 0.60, phi: 70, theta: 40, target: [0.10, 420, 0.10] }],
+          ['r025', { radiusFactor: 0.25, phi: 70, theta: 40, target: [0.10, 420, 0.10] }],
+          ['r010', { radiusFactor: 0.10, phi: 70, theta: 40, target: [0.10, 420, 0.10] }],
+          ['r004', { radiusFactor: 0.04, phi: 70, theta: 40, target: [0.10, 420, 0.10] }],
+          ['above', { radiusFactor: 0.30, phi: 30, theta: 40, target: [0.10, 700, 0.10] }],
+        ]) {
+          await h.setPose(pose);
+          await h.settle({ timeoutMs: 60000, minFrames: 20, idleFrames: 10 });
+          await shot(path.join(dir, `close-${mode}-${id}.png`));
+          console.log('CLOSE', mode, id, JSON.stringify(await cloudState()));
+        }
+      }
+      if (steps.includes('thickness')) {
+        for (const thickness of [300, 620, 1300, 2400]) {
+          await h.setParams({ cloudThickness: thickness });
+          await h.setPose({ radiusFactor: 1.35, phi: 72, theta: 40, target: [0, 500, 0] });
+          await h.settle({ timeoutMs: 60000, minFrames: 20, idleFrames: 10 });
+          await shot(path.join(dir, `thick-${mode}-${thickness}.png`));
+          if (thickness === 620 || thickness === 2400) await gpu(`thick-${mode}-${thickness}`);
+        }
+        await h.setParams({ cloudThickness: 620 });
+      }
+    }
+  }
+
+  // Why near clouds vanish: same close pose, one factor changed at a time.
+  if (steps.includes('closeprobe')) {
+    const { default: sharp } = await import('sharp');
+    const pose = { radiusFactor: 0.25, phi: 70, theta: 40, target: [0.10, 420, 0.10] };
+    await h.setParams({ cloudsEnabled: false, waterMode: 'legacy' });
+    await h.setPose(pose);
+    await h.settle({ timeoutMs: 60000, minFrames: 20, idleFrames: 10 });
+    await shot(path.join(dir, 'probe-off.png'));
+    await h.setParams({ cloudsEnabled: true, cloudRenderMode: 'realisticV2', cloudCoverage: 0.55, cloudThickness: 620 });
+    await ready((s) => s.cloud?.mode === 'realisticV2' && s.cloud.active, 'probe');
+    const raw = (name) => sharp(path.join(dir, name)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const off = await raw('probe-off.png');
+    const measure = async (id) => {
+      await h.setPose(pose);
+      await h.settle({ timeoutMs: 60000, minFrames: 20, idleFrames: 10 });
+      await shot(path.join(dir, `probe-${id}.png`));
+      const on = await raw(`probe-${id}.png`);
+      const { width, height, channels } = on.info;
+      let sum = 0; let n = 0;
+      for (let y = Math.round(height * 0.55); y < height; y++) {
+        for (let x = 0; x < Math.round(width * 0.5); x++) {
+          const i = (y * width + x) * channels;
+          sum += Math.abs(on.data[i] - off.data[i]) + Math.abs(on.data[i + 1] - off.data[i + 1]) + Math.abs(on.data[i + 2] - off.data[i + 2]);
+          n += 3;
+        }
+      }
+      console.log('PROBE', id, 'bottom-left cloud signal', +(sum / n).toFixed(2));
+    };
+    await measure('base');
+    await page.evaluate(() => { const c = window.__engine.studioCloud; c.__useSceneDepth = c.useSceneDepth; c.useSceneDepth = function () { this.material.uniforms.uUseDepth.value = 0; return false; }; });
+    await measure('no-depth');
+    await page.evaluate(() => { const c = window.__engine.studioCloud; c.useSceneDepth = c.__useSceneDepth; });
+    await h.setPerf({ cloudRenderScale: 1 });
+    await measure('full-res');
+    await h.setPerf({ cloudRenderScale: 0.67, cloudRealisticSteps: 128 });
+    await measure('steps-128');
+    await h.setPerf({ cloudRealisticSteps: 64 });
+    await h.setParams({ cloudErosion: 0 });
+    await measure('no-erosion');
+    await h.setParams({ cloudErosion: 0.7 });
+  }
+
   // Clouds mirrored on realistic water (low views: Fresnel needs a grazing eye).
   if (steps.includes('mirror')) {
     await h.setParams({

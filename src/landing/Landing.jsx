@@ -3,7 +3,7 @@ import { translateText, useLanguage } from '../i18n/LanguageContext.jsx';
 import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import SurfacePackCredits from '../components/ui/SurfacePackCredits.jsx';
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Box, Boxes, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Menu, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
+import { ArrowRight, Box, Boxes, Check, CircleHelp, Clock, CloudCheck, CloudOff, Copy, Earth, EllipsisVertical, Eye, EyeOff, FilePlus2, FolderOpen, Globe2, Layers3, LayoutTemplate, Lock, LogIn, LogOut, Mail, Menu, Mountain, Orbit, Palette, Pencil, Plus, RefreshCw, Route, Search, ShieldCheck, SlidersHorizontal, SquareArrowOutUpRight, Trash2, Upload, UserPlus, UserRound, Waves, X } from 'lucide-react';
 import { FaDiscord, FaGithub, FaXTwitter } from 'react-icons/fa6';
 import { SiKofi } from 'react-icons/si';
 import { APP_NAME, APP_VERSION, AUTHOR_PORTFOLIO_URL, AUTHOR_X_URL, CURSOR_PACK_AUTHOR, CURSOR_PACK_URL, GITHUB_REPO_URL } from '../constants/app.js';
@@ -11,8 +11,9 @@ import { projectStore, projectSyncStore } from '../project/ProjectStore.js';
 import { projectApi } from '../project/projectApi.js';
 import { decodePortableProject } from '../project/PortableProject.js';
 import { buildUnifiedProjectIndex } from '../project/projectSync.js';
-import { PROJECT_TEMPLATES, projectTemplatePreviewCacheKey } from '../project/ProjectTemplates.js';
-import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate, nodeTemplatePreviewCacheKey } from '../project/NodeProjectTemplates.js';
+import { PROJECT_TEMPLATES } from '../project/ProjectTemplates.js';
+import { NODE_PROJECT_TEMPLATES, getNodeProjectTemplate } from '../project/NodeProjectTemplates.js';
+import { templateThumbnailUrl } from '../project/templateThumbnails.js';
 import { MINI_COMPOSITION_IDS, MINI_RECIPES } from '../engine/mini/MiniTerrainSettings.js';
 import { TERRAIN_GRADIENT_OPTIONS, terrainGradientCss } from '../engine/terrain/graph/TerrainGradientPresets.js';
 import { BUILDING_SOURCE, BUILDING_SOURCE_URL } from '../engine/terrain/RealWorldBuildings.js';
@@ -28,7 +29,10 @@ import AdminDashboard from '../admin/AdminDashboard.jsx';
 import ConfidentialityPage from '../legal/ConfidentialityPage.jsx';
 import PluginsPage from './plugins/PluginsPage.jsx';
 import LanguageSwitch from '../i18n/LanguageSwitch.jsx';
-import { formatRelativeTime } from '../i18n/language.js';
+import HomeView from './home/HomeView.jsx';
+import { CreateProjectDialog, DeleteProjectDialog } from './home/CreateProjectDialog.jsx';
+import MatrixButton from '../components/matrix/MatrixButton.jsx';
+import SlidingIndicator from '../components/ui/SlidingIndicator.jsx';
 
 const DocsPage = lazy(() => import('../docs/DocsPage.jsx'));
 
@@ -47,7 +51,6 @@ const MINI_TEMPLATES = [
   })),
 ];
 const templateCatalog = (kind) => kind === 'mini' ? MINI_TEMPLATES : kind === 'nodes' ? NODE_PROJECT_TEMPLATES : PROJECT_TEMPLATES;
-const VISIBILITY_ICONS = { private: Lock, unlisted: Eye, public: Globe2 };
 const AUTH_VIEWS = new Set(['login', 'register']);
 const HASH_VIEWS = new Set(['login', 'register', 'profile', 'community', 'plugins', 'unity', 'blender', 'admin', 'confidentiality', 'docs']);
 const PLUGIN_VIEWS = new Set(['plugins', 'unity', 'blender']);
@@ -102,20 +105,20 @@ function viewFromHash() {
   return HASH_VIEWS.has(value) ? value : null;
 }
 
-function initialTemplateThumbs() {
-  const entries = [];
-  for (const template of PROJECT_TEMPLATES) {
-    const image = sessionStorage.getItem(projectTemplatePreviewCacheKey(template.id));
-    if (image) entries.push([template.id, image]);
+function TemplateThumb({ kind, item }) {
+  const src = templateThumbnailUrl(kind, item.id);
+  const [loaded, setLoaded] = useState(false);
+  if (!src) {
+    const Icon = NODE_TEMPLATE_ICONS[item.icon] || (kind === 'mini' ? Box : LayoutTemplate);
+    return <span className={`lp-card-thumb ${kind}`}><Icon size={22} /></span>;
   }
-  for (const template of NODE_PROJECT_TEMPLATES) {
-    const image = sessionStorage.getItem(nodeTemplatePreviewCacheKey(template.id));
-    if (image) entries.push([template.id, image]);
-  }
-  return Object.fromEntries(entries);
+  return (
+    <span className={`lp-card-thumb ${kind} has-image${loaded ? ' loaded' : ''}`}>
+      <img src={src} alt="" width="448" height="280" loading="lazy" decoding="async" draggable="false" onLoad={() => setLoaded(true)} />
+    </span>
+  );
 }
 
-const relTime = formatRelativeTime;
 
 export default function Landing({ exiting, bootReady, bootError, bootProgress, onRetryBoot, onLaunch, onRequestEditor }) {
   useLanguage();
@@ -148,8 +151,6 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
-  const [templateThumbs, setTemplateThumbs] = useState(initialTemplateThumbs);
-  const [menuFor, setMenuFor] = useState(null);
   const [query, setQuery] = useState('');
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
@@ -218,22 +219,6 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
       .catch(() => { if (!cancelled) setCloudProjects([]); });
     return () => { cancelled = true; };
   }, [cloudRefreshToken, user, view]);
-  useEffect(() => {
-    if (!bootReady) return undefined;
-    const onThumbnail = (event) => {
-      const { templateId, image } = event.detail ?? {};
-      if (templateId && image) setTemplateThumbs((current) => ({ ...current, [templateId]: image }));
-    };
-    window.addEventListener('terrain-template:thumbnail', onThumbnail);
-    return () => window.removeEventListener('terrain-template:thumbnail', onThumbnail);
-  }, [bootReady]);
-  useEffect(() => {
-    if (!menuFor) return undefined;
-    const close = () => setMenuFor(null);
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
-  }, [menuFor]);
-
   useEffect(() => { setQuery(''); }, [view]);
   useEffect(() => { setMobileMenuOpen(false); }, [view]);
 
@@ -427,59 +412,6 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
     finally { setProjectActionBusy(false); setDeleteTarget(null); }
   };
 
-  const renderProjectCard = (project) => {
-    const cloudEntry = recentProjectCloudEntries.get(project.id);
-    const cloudProject = cloudEntry?.cloudProject;
-    const isSynced = cloudEntry?.state === 'synced';
-    const VisibilityIcon = VISIBILITY_ICONS[cloudProject?.visibility] || Lock;
-    const syncLabel = isSynced ? 'Synced to cloud' : 'Not synced to cloud';
-    const visibilityLabel = cloudProject?.visibility ? `Cloud visibility: ${cloudProject.visibility}` : '';
-    const SyncIcon = isSynced ? CloudCheck : CloudOff;
-    return (
-    <article className={`lp-card${menuFor === project.id ? ' menu-open' : ''}`} key={project.id}>
-      <button type="button" className="lp-card-main" onClick={() => open(project)} disabled={!menuReady || exiting}>
-        <span className="lp-card-thumb">{project.metadata.thumbnail ? <img src={project.metadata.thumbnail} alt="" /> : <LayoutTemplate size={22} />}</span>
-        <span role="img" className={`lp-card-cloud-badge${isSynced ? ' synced' : ' unsynced'}`} title={translateText(visibilityLabel ? `${syncLabel} · ${visibilityLabel}` : syncLabel)} aria-label={translateText(visibilityLabel ? `${syncLabel}. ${visibilityLabel}.` : syncLabel)}>
-          <SyncIcon size={13} aria-hidden />
-          {cloudProject && <span className={`lp-card-visibility-icon ${cloudProject.visibility}`}><VisibilityIcon size={12} aria-hidden /></span>}
-        </span>
-        <span className={`lp-template-kind-badge ${project.terrain.miniTerrain ? 'mini' : project.terrain.workspacePreset === 'real-terrain' ? 'real' : project.terrain.editorMode}`}>
-          {translateText(project.terrain.miniTerrain ? 'Mini terrain' : project.terrain.workspacePreset === 'real-terrain' ? 'Real terrain' : project.terrain.editorMode === 'nodes' ? 'Nodes' : project.terrain.editorMode === 'manual' ? 'Manual' : 'Procedural')}
-        </span>
-        <span className="lp-card-info">
-          <strong>{project.metadata.name}</strong>
-          <small><Clock size={11} aria-hidden /> {translateText(relTime(project.metadata.modified))}</small>
-        </span>
-      </button>
-      <button
-        type="button"
-        className="lp-card-menu-btn"
-        aria-label={translateText(`Actions for ${project.metadata.name}`)}
-        aria-expanded={menuFor === project.id}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => setMenuFor((current) => current === project.id ? null : project.id)}
-      ><EllipsisVertical size={15} /></button>
-      {menuFor === project.id && (
-        <div className="lp-card-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); open(project); }} disabled={!menuReady || exiting}><FolderOpen size={13} />{translateText(" Open")}</button>
-          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); renameProject(project); }} disabled={projectActionBusy}><Pencil size={13} />{translateText(" Rename")}</button>
-          <button type="button" role="menuitem" onClick={() => { setMenuFor(null); duplicateProject(project); }} disabled={projectActionBusy}><Copy size={13} />{translateText(" Duplicate")}</button>
-          <button type="button" role="menuitem" className="danger" onClick={() => { setMenuFor(null); setDeleteTarget(project); }} disabled={projectActionBusy}><Trash2 size={13} />{translateText(" Delete")}</button>
-        </div>
-      )}
-    </article>
-    );
-  };
-
-  const emptyProjects = (
-    <div className="lp-empty">
-      <FolderOpen size={24} />
-      <strong>{translateText("No projects yet")}</strong>
-      <span>{translateText("Create a terrain from a template or drop a project file anywhere on this page.")}</span>
-      <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!menuReady || exiting}><Plus size={15} />{translateText(" Create terrain")}</button>
-    </div>
-  );
-
   return (
     <div
       className={`landing landing-overlay lp boot-${visualBootStage}${AUTH_VIEWS.has(view) ? ' lp--auth' : ''}${view === 'profile' ? ' lp--profile' : ''}${view === 'community' ? ' lp--community' : ''}${PLUGIN_VIEWS.has(view) ? ' lp--unity' : ''}${view === 'admin' ? ' lp--admin' : ''}${view === 'confidentiality' ? ' lp--legal' : ''}${view === 'docs' ? ' lp--docs' : ''}${exiting ? ' exiting' : ''}`}
@@ -563,68 +495,23 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
           )}
           {view === 'admin' && user?.role === 'admin' && <AdminDashboard user={user} onBack={goHome} />}
           {view === 'confidentiality' && <ConfidentialityPage onBack={goHome} />}
-          {view === 'home' && <>
-            <section className="lp-hero">
-              <div className="lp-version-pill">{translateText("v")}{translateText(APP_VERSION)}</div>
-              <h1>{translateText("Craft ")}<em>{translateText("stunning worlds")}</em>{translateText(" with procedural power")}</h1>
-              <p>{translateText(APP_NAME)}{translateText(" helps you generate, shape, and texture terrain for your projects.")}</p>
-              <div className="lp-hero-actions">
-                <button type="button" className="lp-primary" onClick={() => setCreateOpen(true)} disabled={!menuReady || exiting}><Plus size={15} />{translateText(" Create terrain")}</button>
-                <button type="button" className="lp-secondary" onClick={() => openTemplates()}><LayoutTemplate size={14} />{translateText(" Browse templates")}</button>
-              </div>
-            </section>
-
-            <section className="lp-section">
-              <div className="lp-section-head">
-                <h2>{translateText("Recent projects")}</h2>
-                {projects.length > 0 && <button type="button" className="lp-link" onClick={() => showView('projects')}>{translateText("View all projects ")}<ArrowRight size={12} aria-hidden /></button>}
-              </div>
-              {projects.length ? <div className="lp-card-grid">{projects.slice(0, 8).map(renderProjectCard)}</div> : emptyProjects}
-            </section>
-
-          </>}
-
-          {false && (() => {
-            const filtered = projects.filter((project) => project.metadata.name.toLowerCase().includes(query.trim().toLowerCase()));
-            return (
-              <section className="lp-section lp-view">
-                <div className="lp-section-head">
-                  <h2>{translateText("Projects")}</h2>
-                  {projectsTab === 'local' && (
-                    <div className="lp-head-actions">
-                      <button type="button" className="lp-secondary sm" onClick={() => fileRef.current?.click()} disabled={!bootReady || exiting}><Upload size={13} />{translateText(" Import")}</button>
-                      <button type="button" className="lp-primary sm" onClick={() => setCreateOpen(true)} disabled={!bootReady || exiting}><Plus size={14} />{translateText(" New terrain")}</button>
-                    </div>
-                  )}
-                  {projectsTab === 'cloud' && user && (
-                    <div className="lp-head-actions">
-                      <button type="button" className="lp-secondary sm" onClick={() => setCloudRefreshToken((current) => current + 1)}><RefreshCw size={13} />{translateText(" Refresh")}</button>
-                    </div>
-                  )}
-                </div>
-                <div className="lp-project-tabs" role="tablist" aria-label={translateText("Project storage")}>
-                  <button type="button" role="tab" aria-selected={projectsTab === 'local'} aria-controls="local-projects-panel" className={projectsTab === 'local' ? 'active' : ''} onClick={() => setProjectsTab('local')}>{translateText("Local Projects")}</button>
-                  <button type="button" role="tab" aria-selected={projectsTab === 'cloud'} aria-controls="cloud-projects-panel" className={projectsTab === 'cloud' ? 'active' : ''} onClick={() => setProjectsTab('cloud')}>{translateText("Cloud Projects")}</button>
-                </div>
-                {projectsTab === 'local' ? (
-                  <div key="local-projects" id="local-projects-panel" className="lp-project-tab-panel" role="tabpanel">
-                    <div className="lp-search">
-                      <Search size={14} aria-hidden />
-
-                      <input type="search" placeholder={translateText("Search projects…")} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={translateText("Search local projects")} />
-                    </div>
-                    {projects.length === 0 ? emptyProjects
-                      : filtered.length === 0 ? <p className="lp-no-results">{translateText("No project matches “")}{query.trim()}&rdquo;.</p>
-                      : <div className="lp-card-grid">{filtered.slice(0, 8).map(renderProjectCard)}</div>}
-                  </div>
-                ) : (
-                  <div key="cloud-projects" id="cloud-projects-panel" className="lp-project-tab-panel" role="tabpanel">
-                    <CloudProjectsPanel localProjects={projects} onOpen={open} refreshToken={cloudRefreshToken} />
-                  </div>
-                )}
-              </section>
-            );
-          })()}
+          {view === 'home' && (
+            <HomeView
+              projects={projects}
+              cloudEntries={recentProjectCloudEntries}
+              ready={menuReady}
+              booting={!menuReady}
+              exiting={exiting}
+              busy={projectActionBusy}
+              onCreate={() => setCreateOpen(true)}
+              onBrowseTemplates={() => openTemplates()}
+              onViewAll={() => showView('projects')}
+              onOpen={open}
+              onRename={renameProject}
+              onDuplicate={duplicateProject}
+              onDelete={setDeleteTarget}
+            />
+          )}
 
           {view === 'projects' && (
             <section className="lp-section lp-view">
@@ -653,7 +540,8 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
             <section className="lp-section lp-view">
               <div className="lp-section-head lp-template-section-head">
                 <div><h2>{translateText(templateKind === 'mini' ? 'Mini Terrain templates' : 'Terrain templates')}</h2><p>{translateText(templateKind === 'mini' ? 'Choose a procedural base or a composed scene for your diorama.' : 'Choose one authoring workflow. Procedural selections preview live; Nodes opens straight into the editor.')}</p></div>
-                <div className="lp-template-kind-switch" role="tablist" aria-label={translateText("Template type")}>
+                <div className="lp-template-kind-switch has-slider" role="tablist" aria-label={translateText("Template type")}>
+                  <SlidingIndicator />
                   <button type="button" role="tab" aria-selected={templateKind === 'procedural'} className={templateKind === 'procedural' ? 'active' : ''} onClick={() => openTemplates('procedural')}><SlidersHorizontal size={13} />{translateText(" Procedural")}</button>
                   <button type="button" role="tab" aria-selected={templateKind === 'nodes'} className={templateKind === 'nodes' ? 'active' : ''} onClick={() => openTemplates('nodes')}><Boxes size={13} />{translateText(" Nodes")}</button>
                   <button type="button" role="tab" aria-selected={templateKind === 'mini'} className={templateKind === 'mini' ? 'active' : ''} onClick={() => openTemplates('mini')}><Box size={13} />{translateText("Mini Terrain")}</button>
@@ -666,14 +554,14 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
               {filtered.length === 0 && <p className="lp-no-results">{translateText("No template matches “")}{query.trim()}&rdquo;.</p>}
               <div className="lp-card-grid">
                 {filtered.map((item) => (
-                  <article className={`lp-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={item.id}>
-                    <button type="button" className="lp-card-main" onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
-                      <span className={`lp-card-thumb ${templateKind}`}>{templateKind !== 'mini' && templateThumbs[item.id] ? <img src={templateThumbs[item.id]} alt="" /> : (() => { const Icon = NODE_TEMPLATE_ICONS[item.icon] || (templateKind === 'mini' ? Box : LayoutTemplate); return <Icon size={22} />; })()}</span>
+                  <article className={`lp-card lp-template-card${item.id === selectedTemplateId ? ' selected' : ''}`} key={`${templateKind}:${item.id}`}>
+                    <button type="button" className="lp-card-main" aria-pressed={item.id === selectedTemplateId} title={translateText(item.description)} onClick={() => selectTemplate(item.id, templateKind)} onDoubleClick={() => create(item.id, templateKind)}>
+                      <TemplateThumb kind={templateKind} item={item} />
                       <span className="lp-card-info">
                         <strong>{translateText(item.name)}</strong>
                         <small>{translateText(item.description)}</small>
                       </span>
-                      <span className={`lp-template-kind-badge ${templateKind}`}>{translateText(templateKind === 'mini' ? 'Mini Terrain' : templateKind === 'nodes' ? 'Nodes' : 'Procedural')}</span>
+                      {item.id === selectedTemplateId ? <span className="lp-template-selected-mark" aria-hidden><Check size={12} strokeWidth={3} /></span> : null}
                     </button>
                   </article>
                 ))}
@@ -706,7 +594,17 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
                 </section>
               ) : null}
               <p className="lp-template-hint">{translateText(templateKind === 'mini' ? 'Select a template, then create your Mini Terrain diorama.' : templateKind === 'nodes' ? 'Node templates load instantly; open the 2D preview when you need it.' : 'Selecting a template previews it live in the background.')}</p>
-              <button type="button" className="lp-primary lp-template-create" onClick={() => create(template.id, templateKind)} disabled={!menuReady || exiting}><FilePlus2 size={15} />{translateText(" Create ")}{translateText(template.name)}</button>
+              <MatrixButton
+                theme="light"
+                size="sm"
+                className="lp-template-create"
+                style={{ '--mb-radius': '10px' }}
+                loading={!menuReady || exiting}
+                loadingLabel={translateText(exiting ? 'Opening editor' : 'Loading shaders')}
+                onClick={() => create(template.id, templateKind)}
+              >
+                {translateText('Create ')}{translateText(template.name)}
+              </MatrixButton>
             </section>
             );
           })()}
@@ -756,57 +654,23 @@ export default function Landing({ exiting, bootReady, bootError, bootProgress, o
           </div>
         </div>
       )}
-      {createOpen && <div className="landing-credits-backdrop landing-create-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
-        <section className="landing-create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-terrain-title" onMouseDown={(event) => event.stopPropagation()}>
-          <header>
-            <div><span>{translateText("New project")}</span><h2 id="create-terrain-title">{translateText("Choose how to build your terrain")}</h2><p>{translateText("Each project uses one authoring workflow. All modes can be saved and exported.")}</p></div>
-            <button type="button" onClick={() => setCreateOpen(false)} aria-label={translateText("Close")}><X size={16} /></button>
-          </header>
-          <div className="landing-create-options">
-            <button type="button" onClick={() => chooseTemplateWorkflow('procedural')} disabled={!menuReady || exiting}>
-              <span className="landing-create-icon"><SlidersHorizontal size={22} /></span>
-              <strong>{translateText("Procedural")}</strong>
-              <small>{translateText("The current Tile, Infinite World, and Planet workflow with direct controls and Noise Layers.")}</small>
-              <span className="landing-create-action">{translateText("Choose a procedural template ")}<ArrowRight size={13} /></span>
-            </button>
-            <button type="button" onClick={() => chooseTemplateWorkflow('nodes')} disabled={!menuReady || exiting}>
-              <span className="landing-create-icon nodes"><Boxes size={22} /></span>
-              <strong>{translateText("Nodes")}</strong>
-              <small>{translateText("A dedicated analytical graph workspace starting from a clean, flat slab. Desktop first.")}</small>
-              <span className="landing-create-action">{translateText("Choose a Nodes recipe ")}<ArrowRight size={13} /></span>
-            </button>
-            <button type="button" onClick={() => create('manual-blank', 'manual')} disabled={!menuReady || exiting}>
-              <span className="landing-create-icon manual"><Mountain size={22} /></span>
-              <strong>{translateText("Manual Terrain")}</strong>
-              <small>{translateText("Drag mountains, valleys, ridges, plateaus, and craters onto a clean terrain and transform them directly.")}</small>
-              <span className="landing-create-action">{translateText("Create Manual Terrain ")}<ArrowRight size={13} /></span>
-            </button>
-            <button type="button" onClick={() => create('blank', 'real')} disabled={!menuReady || exiting}>
-              <span className="landing-create-icon real"><Earth size={22} /></span>
-              <strong>{translateText("Real Terrain")}</strong>
-              <small>{translateText("Choose any real-world location and work in a focused import workspace with geographic elevation, imagery, and buildings.")}</small>
-              <span className="landing-create-action">{translateText("Select a location ")}<ArrowRight size={13} /></span>
-            </button>
-            <button type="button" onClick={() => chooseTemplateWorkflow('mini')} disabled={!menuReady || exiting}>
-              <span className="landing-create-icon mini"><Box size={22} /></span>
-              <strong>{translateText("Mini Terrain")}</strong>
-              <small>{translateText("A composed procedural diorama on a cut-away base, with water that stops at its edges. Opens already composed.")}</small>
-              <span className="landing-create-action">{translateText("Choose a Mini Terrain template ")}<ArrowRight size={13} /></span>
-            </button>
-          </div>
-        </section>
-      </div>}
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        disabled={!menuReady || exiting}
+        onChoose={(workflow) => {
+          if (workflow === 'manual') create('manual-blank', 'manual');
+          else if (workflow === 'real') create('blank', 'real');
+          else chooseTemplateWorkflow(workflow);
+        }}
+      />
       {creditsOpen && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => setCreditsOpen(false)}><section ref={creditsRef} tabIndex={-1} className="landing-credits-dialog" role="dialog" aria-modal="true" aria-labelledby="credits-title" onMouseDown={(event) => event.stopPropagation()}><div><span>{translateText("Credits")}</span><h2 id="credits-title">{translateText("Sources & credits")}</h2></div><p>{translateText("The editor cursor set is based on the Windows 11 Light Theme cursor pack by ")}<strong>{translateText(CURSOR_PACK_AUTHOR)}</strong>.</p><a href={CURSOR_PACK_URL} target="_blank" rel="noopener noreferrer">{translateText("View cursor pack")}</a><p>{translateText("Real-world 3D building data: ")}<a href={BUILDING_SOURCE_URL} target="_blank" rel="noopener noreferrer">{translateText(BUILDING_SOURCE)}</a>.</p><SurfacePackCredits /><div className="landing-credits-socials"><a href={AUTHOR_X_URL} target="_blank" rel="noopener noreferrer"><FaXTwitter size={14} />{translateText(" X / Twitter")}</a><a href={AUTHOR_PORTFOLIO_URL} target="_blank" rel="noopener noreferrer"><Globe2 size={14} />{translateText(" Portfolio")}</a></div><button type="button" data-dialog-close onClick={() => setCreditsOpen(false)}>{translateText("Close")}</button></section></div>}
-      {deleteTarget && <div className="landing-credits-backdrop" role="presentation" onMouseDown={() => !projectActionBusy && setDeleteTarget(null)}>
-        <section className="landing-credits-dialog landing-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title" onMouseDown={(event) => event.stopPropagation()}>
-          <div><span>{translateText("Delete project")}</span><h2 id="delete-project-title">{translateText("Delete “")}{deleteTarget.metadata.name}&rdquo;?</h2></div>
-          <p>{translateText("This cannot be undone.")}</p>
-          <div className="landing-confirm-actions">
-            <button type="button" onClick={() => setDeleteTarget(null)} disabled={projectActionBusy}>{translateText("Cancel")}</button>
-            <button type="button" className="danger" onClick={confirmDeleteProject} disabled={projectActionBusy}><Trash2 size={14} />{translateText(" Delete")}</button>
-          </div>
-        </section>
-      </div>}
+      <DeleteProjectDialog
+        project={deleteTarget}
+        busy={projectActionBusy}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmDeleteProject}
+      />
     </div>
   );
 }

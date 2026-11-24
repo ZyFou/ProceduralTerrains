@@ -1,16 +1,17 @@
 .language-switch {
   flex-shrink: 0;
   min-width: 36px;
-  min-height: 30px;
-  padding: 4px 8px;
-  border: 1px solid var(--border-subtle, #354052);
-  border-radius: 6px;
-  color: var(--text-primary, #edf2fa);
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #1f2026);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-muted, #a1a1aa);
   background: transparent;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
+  font: 500 11px var(--mono, monospace);
+  letter-spacing: 0.08em;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.language-switch:hover { background: var(--bg-hover, #263247); }
-.language-switch:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 3px; }
+.language-switch:hover { background: var(--bg-hover, #1c1d22); border-color: var(--border-strong, #2d2e35); color: var(--text-bright, #fff); }
+.language-switch:focus-visible { outline: 2px solid rgba(59, 130, 246, 0.6); outline-offset: 2px; }

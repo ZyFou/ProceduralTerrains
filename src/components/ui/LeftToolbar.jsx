@@ -1,6 +1,7 @@
 import { translateText, useLanguage } from '../../i18n/LanguageContext.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PANEL_META, PANEL_ORDER, panelAvailable, getPanelDisplay } from '../panels/panelMeta.js';
+import SlidingIndicator from './SlidingIndicator.jsx';
 import {
   isToolsRailDesktopLayout,
   resolveNearestEdge,
@@ -158,6 +159,7 @@ export default function LeftToolbar({
 
   const classNames = [
     'left-toolbar',
+    'has-slider',
     desktop && `left-toolbar--${edge}`,
     desktop && 'left-toolbar--overlay',
     dragging && 'is-dragging',
@@ -187,6 +189,7 @@ export default function LeftToolbar({
         onPointerDown={startDrag}
         onContextMenu={onContextMenu}
       >
+        <SlidingIndicator selector=".toolbar-btn.active" />
         {visiblePanelIds.map((id, index) => {
           const meta = PANEL_META[id];
           const display = realTerrainMode && id === 'terrain'

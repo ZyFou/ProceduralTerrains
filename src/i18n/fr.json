@@ -3679,6 +3679,8 @@
   "Outline of the diorama: square, circle or hexagon. Terrain, walls, water and socle follow.": "Contour du diorama : carré, cercle ou hexagone. Le terrain, les parois, l’eau et le socle suivent.",
   "Mini Shape": "Forme du mini terrain",
   "Clouds spread": "Étendue des nuages",
+  "Clouds shape": "Forme des nuages",
+  "Outline of the cloud generation zone: a circle, or a square aligned with the terrain edges.": "Contour de la zone de génération des nuages : un cercle, ou un carré aligné sur les bords du terrain.",
   "Match to terrain": "Adapter au terrain",
   "Width of the cloud generation zone relative to the terrain. 100% matches the terrain width; lower values keep clouds closer to the center.": "Largeur de la zone de génération des nuages par rapport au terrain. 100 % correspond à la largeur du terrain ; une valeur plus faible concentre les nuages vers le centre.",
   "Package features and limits": "Fonctionnalités et limites du package",
